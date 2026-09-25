@@ -16,11 +16,27 @@ Build RT Test as a standalone tool providing fast, queryable Vitest results, fre
 - Never mutate a consumer's live working files.
 - Treat performance numbers as targets until benchmarked.
 
+## Direction agreed with the owner, not yet in the plan docs
+
+Rewrite `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md` to carry these before starting M1:
+
+- Fleet Cooling (sibling checkout `C:\source\fleetcooling`) is the proving ground; RT Test stays generic. About 10,000 tests across five Vitest workspaces (jsdom and edge-runtime); the full sequential chain takes about 7 minutes, `packages/convex` about 3. Do not edit that checkout from RT Test work unless asked; it carries other sessions' uncommitted changes.
+- Support Vitest 4.1.x, the consumer's version, as well as 5.x. Support multiple Vitest workspaces from M1.
+- The daemon is the sole test executor. Agents never start runs; they query, or call `wait` scoped to their own files. A run whose inputs change mid-run is invalidated and rerun, which replaces Fleet Cooling's run lock for tests and falsification. Lint and typecheck stay with agents.
+- Move the Convex adapter earlier by porting `scripts/test-blast-radius.mjs` (`vitest related` is useless there, since every Convex test globs the whole package). Porting any Fleet Cooling code is authorized.
+- Port `scripts/falsify.mjs` into the product. Replace its message-text classifier, whose growth is the owner's main pain, with facts recorded during the run: failure phase, error kind, whether the mutated code was reached, and the baseline result. Apply mutations as transforms in a separate Vitest instance, never as file writes. Keep canary fixtures, aimed at the fact collector.
+- Commit defect definitions in the consumer repo at a configurable location; keep evidence local under `.rt-test/`. Attribute by stable test ID, including `it.each` arms. Report tests with no defect as a gap.
+- A missing mutation anchor is a per-defect `anchor-missing` state that names the gap in the denominator and blocks "verified"; the other defects still run.
+- RT Test chooses no mutations and diagnoses no survivors; the author does.
+- Interface: a CLI with versioned `--json` output in front of the daemon, plus a small programmatic API. No MCP server. Support `status <path>` for files and folders with non-binary states, for a later VS Code folder-view extension.
+
 ## Starter contents
 
 The repository includes documentation, strict TypeScript tooling, an eight-test result-freshness core, explicit mutation records, a disposable-copy defect-check script, and Windows/Linux CI configuration. There is no daemon, watcher, dependency graph, persistence layer, consumer CLI, or general falsification engine yet.
 
-`src/evidence.ts` trusts caller-supplied fingerprints. Completeness, hashing, project identity, revision ordering, and run ingestion remain M1/M2 work. `scripts/verify-defects.mjs` validates only the known hook-free bootstrap fixture; its classifier must not be presented as a general solution.
+`src/evidence.ts` trusts caller-supplied fingerprints. Completeness, hashing, project identity, revision ordering, and run ingestion remain M1/M2 work. `scripts/verify-defects.mjs` validates only the known hook-free fixtures in `test/defects.json`; its classifier must not be presented as a general solution.
+
+Linting uses oxlint 1.85 (`.oxlintrc.json`, custom rules in `lint/`), because typescript-eslint cannot load TypeScript 7. Ported from Fleet Cooling: 500-line cap on production files, cognitive complexity warn 15 and error 40, the generic half of `no-nonlocal-comment` (D009 to D020), the test-file focus, skip, and snapshot bans, and the `bunfig.toml` three-day release-age gate. `lint/plugin.mjs` deep-imports SonarJS's `S3776` rule, since the package index resolves the hoisted TypeScript 7; recheck that path when upgrading `eslint-plugin-sonarjs`. Not ported: `naming-convention` (oxlint lacks it), the real-time-sleep test ban, and every Convex, Next, or product-specific rule.
 
 ## Validation
 
@@ -28,15 +44,16 @@ Run `bun install --frozen-lockfile` and `bun run check`. Inspect the committed s
 
 ## Next action
 
-Implement M1 as a vertical slice: a synthetic Vitest project produces structured events, a local store persists them, and a read-only JSON query returns honest counts and freshness. First spike the installed Vitest API, test identity, SQLite driver, and IPC transport. Establish baseline timings before optimizing selection.
+Rewrite the plan docs per the agreed direction above, then implement M1 as a vertical slice: a synthetic Vitest project produces structured events, a local store persists them, and a read-only JSON query returns honest counts and freshness. First spike the installed Vitest API, test identity, SQLite driver, and IPC transport. Establish baseline timings before optimizing selection.
 
-Use a feature branch. No agent claims or persistent processes need to be resumed. No npm publication is authorized.
+Work on `main`. No agent claims or persistent processes need to be resumed. No npm publication is authorized.
 
 ## Setup record
 
 - Public repository: https://github.com/sandscooling/rt-test
-- Bootstrap branch: `dev-work`. Continue on a feature branch from it.
+- Working branch: `main`, created locally from `dev-work`. The remote still has only `dev-work` as its default branch until the owner approves publishing `main`.
 - Local `bun run check` passed on Windows with Node 24.19.0 and Bun 1.3.14: formatting, strict typecheck, 8/8 Vitest tests, 8/8 named-defect checks, restored baseline, and build.
 - Dependency versions are pinned and `bun.lock` is committed. The package remains private to prevent npm publication.
 - CI runs the same gates on Windows and Linux with Node 22 and 24. Inspect the latest Actions run for remote validation status.
 - Disposable mutation copies were removed. No background watcher or daemon was started.
+- Lint port, validated locally on Windows with Node 24.19.0 and Bun 1.3.14: oxlint clean, typecheck clean, 20/20 Vitest tests, 20/20 named defects detected with the restored baseline green. Temporary probe files confirmed each root rule fires on its intended paths.

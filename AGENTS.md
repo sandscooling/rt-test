@@ -20,6 +20,9 @@ Use this file as the shared agent entry point. Do not create a separate Claude i
 - Keep production files focused, normally below 500 lines. Extract by responsibility; do not split tests merely to satisfy a line count.
 - Use strict TypeScript. Avoid explicit `any`, unused exports, suppressions, and silent error handling.
 - Check installed dependency source or official documentation before relying on third-party behavior. Declare and test supported versions.
+- Lint with oxlint through `bun run lint`. Configure rules in `.oxlintrc.json` and write custom rules in `lint/`, each with named-defect tests. Do not add ESLint or typescript-eslint: they need the classic TypeScript compiler API, which TypeScript 7 does not ship.
+- Fix a lint finding at its cause. Extract a function to reduce complexity; never raise a threshold or disable a rule to pass.
+- Add dependencies at exact versions published at least three days earlier. `bunfig.toml` enforces the age gate; keep `minimumReleaseAgeExcludes` empty except for an urgent security patch.
 
 ## Product guarantees
 
@@ -50,7 +53,7 @@ Use this file as the shared agent entry point. Do not create a separate Claude i
 
 ## Git and public repository
 
-- Work on `dev-work` or a feature branch. Do not commit directly to `main`.
+- Work and commit on `main` until the owner introduces a branch workflow.
 - Stage only files created or edited for the current task. Inspect the staged diff before committing.
 - Use concise conventional commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, and `chore:`. Explain meaningful behavior and validation in the body.
 - When asked to publish work, push its branch and report the repository URL and commit.

@@ -67,7 +67,7 @@ Run defects against an immutable snapshot or an isolated transform with a comple
 
 Verify the baseline before mutation. Attribute detection to the intended test and relevant assertion. Treat setup, collection, compile, timeout, and unrelated failures as invalid or unclear experiments. Changing the test, mutation, input closure, or verifier invalidates its evidence.
 
-The bootstrap `scripts/verify-defects.mjs` only validates the known hook-free core fixture. Its assertion-message check is not a general attribution algorithm and must not become one by copying it unchanged.
+The bootstrap `scripts/verify-defects.mjs` only validates the known hook-free fixtures listed in `test/defects.json`. Its assertion-message check is not a general attribution algorithm and must not become one by copying it unchanged.
 
 ## Query surface
 

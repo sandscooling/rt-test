@@ -9,6 +9,7 @@ Delivered in the starter:
 - Result-freshness assessment with eight named-defect tests.
 - Isolated bootstrap verification for those eight defects.
 - Formatting, typechecking, build, and CI configuration.
+- oxlint standards ported from Fleet Cooling: file size, two-tier cognitive complexity, the comment rule with named-defect tests, test-file bans, and a dependency release-age gate.
 
 ## M1: Queryable results from one Vitest project
 

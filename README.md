@@ -31,13 +31,14 @@ Useful individual commands:
 ```sh
 bun run test:run
 bun run test:defects
+bun run lint
 bun run typecheck
 bun run build
 ```
 
 Use `bun run test` to opt into Vitest watch mode. `bun test` invokes a different runner; use the scripts above.
 
-The bootstrap core compares caller-supplied input fingerprints. It does not compute fingerprints or establish dependency completeness. The defect-check script verifies eight explicit mutations of that core in disposable copies. It is a development check, not the planned general-purpose falsification engine.
+The bootstrap core compares caller-supplied input fingerprints. It does not compute fingerprints or establish dependency completeness. The defect-check script verifies explicit mutations of that core and of the custom lint rule in disposable copies. It is a development check, not the planned general-purpose falsification engine.
 
 ## Start here
 

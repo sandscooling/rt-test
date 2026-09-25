@@ -2,49 +2,141 @@
   {
     "id": "D001",
     "defect": "An unexecuted test is reported as having passed.",
+    "file": "src/evidence.ts",
     "old": "const outcome = evidence?.outcome ?? \"never-run\";",
     "new": "const outcome = evidence?.outcome ?? \"passed\";"
   },
   {
     "id": "D002",
     "defect": "A historical pass remains current after a relevant edit.",
+    "file": "src/evidence.ts",
     "old": "evidence.fingerprint === currentFingerprint ? \"current\" : \"stale\"",
     "new": "evidence.fingerprint === currentFingerprint ? \"current\" : \"current\""
   },
   {
     "id": "D003",
     "defect": "A historical pass is certified when current inputs are unknown.",
+    "file": "src/evidence.ts",
     "old": "if (!evidence || !currentFingerprint || !evidence.fingerprint)",
     "new": "if (evidence && currentFingerprint === undefined) return \"current\"; if (!evidence || !currentFingerprint || !evidence.fingerprint)"
   },
   {
     "id": "D004",
     "defect": "A skipped test is treated as a current pass.",
+    "file": "src/evidence.ts",
     "old": "outcome === \"passed\"",
     "new": "(outcome === \"passed\" || outcome === \"skipped\")"
   },
   {
     "id": "D005",
     "defect": "A runner error is treated as a current pass.",
+    "file": "src/evidence.ts",
     "old": "outcome === \"passed\"",
     "new": "(outcome === \"passed\" || outcome === \"error\")"
   },
   {
     "id": "D006",
     "defect": "Editing the source erases the recorded failure outcome.",
+    "file": "src/evidence.ts",
     "old": "const outcome = evidence?.outcome ?? \"never-run\";",
     "new": "const outcome = evidence?.fingerprint !== currentFingerprint ? \"never-run\" : (evidence?.outcome ?? \"never-run\");"
   },
   {
     "id": "D007",
     "defect": "A current passing result is rejected despite matching inputs.",
+    "file": "src/evidence.ts",
     "old": "evidence.fingerprint === currentFingerprint ? \"current\" : \"stale\"",
     "new": "evidence.fingerprint === currentFingerprint ? \"stale\" : \"stale\""
   },
   {
     "id": "D008",
     "defect": "Empty fingerprints are accepted as evidence of matching inputs.",
+    "file": "src/evidence.ts",
     "old": "if (!evidence || !currentFingerprint || !evidence.fingerprint)",
     "new": "if (evidence && currentFingerprint === \"\") return \"current\"; if (!evidence || !currentFingerprint || !evidence.fingerprint)"
+  },
+  {
+    "id": "D009",
+    "defect": "A tool directive carrying a reference is reported as a comment.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "if (isDirective(comment.value)) continue;",
+    "new": "if (isDirective(comment.value) && false) continue;"
+  },
+  {
+    "id": "D010",
+    "defect": "A comment quoting a directive in backticks escapes every check.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "DIRECTIVE_ANYWHERE.test(unquoted)",
+    "new": "DIRECTIVE_ANYWHERE.test(text)"
+  },
+  {
+    "id": "D011",
+    "defect": "An issue reference in a comment is not reported.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "#\\d{2,}(?:",
+    "new": "#\\d{4,}(?:"
+  },
+  {
+    "id": "D012",
+    "defect": "An ADR reference in a comment is not reported.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "ADR-\\d{3,4}",
+    "new": "ADR-\\d{5}"
+  },
+  {
+    "id": "D013",
+    "defect": "A sprint reference in a comment is not reported.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "Ticket|Sprint|Issue|PR",
+    "new": "Ticket|Issue|PR"
+  },
+  {
+    "id": "D014",
+    "defect": "A date in a comment is not reported.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "\\b20\\d{2}-",
+    "new": "\\b19\\d{2}-"
+  },
+  {
+    "id": "D015",
+    "defect": "A file:line citation in a comment is not reported.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "[jt]sx?:\\d+",
+    "new": "[jt]sx?:\\d{3,}"
+  },
+  {
+    "id": "D016",
+    "defect": "A block comment exactly at the cap is reported as too long.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "if (lines > maxBlockLines)",
+    "new": "if (lines >= maxBlockLines)"
+  },
+  {
+    "id": "D017",
+    "defect": "A block comment one line past the cap is accepted.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "const MAX_BLOCK_LINES = 12;",
+    "new": "const MAX_BLOCK_LINES = 13;"
+  },
+  {
+    "id": "D018",
+    "defect": "Only the first banned pattern in a comment is reported.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "context.report({ node: comment, messageId: id });",
+    "new": "return context.report({ node: comment, messageId: id });"
+  },
+  {
+    "id": "D019",
+    "defect": "Bare numbers and version strings are reported as references.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "[\\s(])#\\d",
+    "new": "[\\s(])#?\\d"
+  },
+  {
+    "id": "D020",
+    "defect": "A zero block cap reports every block comment as too long.",
+    "file": "lint/no-nonlocal-comment.mjs",
+    "old": "comment.type !== \"Block\" || maxBlockLines === 0",
+    "new": "comment.type !== \"Block\""
   }
 ]

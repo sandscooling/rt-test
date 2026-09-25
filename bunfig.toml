@@ -1,0 +1,8 @@
+[install]
+# Install only versions published at least this many SECONDS ago (3 days), so a malicious release
+# has time to be detected and yanked before it can enter the dependency tree. Bun's unit is
+# seconds; npm's equivalent setting uses minutes.
+minimumReleaseAge = 259200
+
+# Packages allowed to bypass the age gate, for an urgent security patch. Keep it empty otherwise.
+minimumReleaseAgeExcludes = []

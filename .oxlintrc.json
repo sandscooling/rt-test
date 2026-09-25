@@ -1,0 +1,74 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "vitest"],
+  "jsPlugins": ["./lint/plugin.mjs"],
+  "categories": { "correctness": "error" },
+  "rules": {
+    "max-lines": [
+      "error",
+      { "max": 500, "skipBlankLines": true, "skipComments": true }
+    ],
+    "rt-test/cognitive-complexity": ["error", 40],
+    "rt-test/cognitive-warn": ["warn", 15],
+    "rt-test/no-nonlocal-comment": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "ts-ignore": true,
+        "ts-nocheck": true,
+        "ts-expect-error": "allow-with-description",
+        "minimumDescriptionLength": 3
+      }
+    ],
+    "no-warning-comments": [
+      "error",
+      {
+        "terms": ["todo", "fixme", "hack", "xxx", "workaround"],
+        "location": "anywhere"
+      }
+    ],
+    "no-empty": ["error", { "allowEmptyCatch": false }],
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "after-used",
+        "caughtErrors": "all",
+        "ignoreRestSiblings": true
+      }
+    ],
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "isNaN",
+        "message": "Use Number.isNaN(); the global coerces its argument."
+      }
+    ],
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }]
+  },
+  "overrides": [
+    {
+      "files": ["test/**", "**/*.test.ts"],
+      "rules": {
+        "max-lines": "off",
+        "rt-test/cognitive-complexity": "off",
+        "rt-test/cognitive-warn": "off",
+        "vitest/no-focused-tests": "error",
+        "vitest/no-disabled-tests": "error",
+        "vitest/no-restricted-matchers": [
+          "error",
+          {
+            "toMatchSnapshot": "Use explicit assertions, not snapshots.",
+            "toMatchInlineSnapshot": "Use explicit assertions, not snapshots."
+          }
+        ]
+      }
+    },
+    {
+      "files": ["scripts/**"],
+      "rules": {
+        "rt-test/no-nonlocal-comment": ["error", { "maxBlockLines": 0 }]
+      }
+    }
+  ]
+}

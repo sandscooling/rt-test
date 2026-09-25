@@ -2,21 +2,21 @@
 
 ## Commands
 
-Use `bun run test:run` for Vitest, `bun run test:defects` for the bootstrap defect checks, and `bun run check` for all current gates. Use `bun run test` only when you intend to leave a watcher running. The project does not use Bun's built-in test runner.
+Use `bun run test:run` for Vitest, `bun run test:defects` for the bootstrap defect checks, `bun run lint` for oxlint, and `bun run check` for all current gates. Use `bun run test` only when you intend to leave a watcher running. The project does not use Bun's built-in test runner.
 
 ## Name the defect
 
 Give every behavior test a concrete wrong behavior to reject. Record expected behavior independently from the implementation. Prefer examples that distinguish the intended behavior from a plausible mistake.
 
-The starter's `test/defects.json` associates D001 through D008 with explicit source mutations. `test/evidence.test.ts` contains the corresponding cases. Each test currently has one assertion, so a targeted assertion failure has a clear scope.
+`test/defects.json` associates each named test with one explicit mutation and the file it mutates. D001 through D008 cover the freshness core in `test/evidence.test.ts`. D009 through D020 cover the `no-nonlocal-comment` lint rule in `test/lint/no-nonlocal-comment.test.ts`, which runs the real oxlint binary over temporary fixtures. Each test has one assertion, so a targeted assertion failure has a clear scope.
 
 ## Bootstrap falsification
 
-`scripts/verify-defects.mjs` copies the core and test fixture into a task-owned directory under `_agent-docs/.scratch/`. It resolves Vitest through its package manifest and executes its Node entry point with argument arrays.
+`scripts/verify-defects.mjs` copies `src/`, `lint/`, and `test/` into a task-owned directory under `_agent-docs/.scratch/`. It resolves Vitest through its package manifest and executes its Node entry point with argument arrays.
 
-The check requires a passing baseline, applies one exact mutation at a time, selects its named test, requires that test to fail with an assertion failure, restores the copied source, and verifies the complete baseline again. It checks that every bootstrap test has exactly one defect and removes the disposable copy on exit.
+The check requires a passing baseline, applies one exact mutation at a time to the file its record names, selects its named test, requires that test to fail with an assertion failure, restores the copied file, and verifies the complete baseline again. It requires every `D###` test under `test/` to have exactly one defect record and removes the disposable copy on exit.
 
-This is deliberately limited to the core's known hook-free tests. It does not classify arbitrary project failures or implement the product's general mutation engine. It does not establish that a mutation kills only one test in the whole suite. Preserve that distinction in claims and reports.
+Keep bootstrap tests hook-free: do shared setup lazily inside the test body, so a setup failure fails the test with a non-assertion error rather than passing as a detection. This check is deliberately limited to those known hook-free tests. It does not classify arbitrary project failures or implement the product's general mutation engine. It does not establish that a mutation kills only one test in the whole suite. Preserve that distinction in claims and reports.
 
 Changing source formatting may invalidate an exact mutation anchor. Update it deliberately; do not silently skip or fuzzy-match missing anchors. A changed test or mutation requires fresh evidence.
 

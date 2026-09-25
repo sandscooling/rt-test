@@ -21,10 +21,13 @@
     "test:defects": "node scripts/verify-defects.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "bun run format:check && bun run typecheck && bun run test:run && bun run test:defects && bun run build"
+    "lint": "oxlint",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run test:run && bun run test:defects && bun run build"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
+    "eslint-plugin-sonarjs": "4.2.1",
+    "oxlint": "1.85.0",
     "prettier": "3.9.9",
     "typescript": "7.0.2",
     "vitest": "5.0.1"

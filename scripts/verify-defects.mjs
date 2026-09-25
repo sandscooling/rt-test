@@ -2,9 +2,10 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import {
-  copyFileSync,
+  cpSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -13,33 +14,65 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const SANDBOX_DIRS = ["src", "lint", "test"];
 const require = createRequire(import.meta.url);
 const manifestPath = require.resolve("vitest/package.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const entry = resolve(dirname(manifestPath), manifest.bin.vitest);
-const sourcePath = join(root, "src/evidence.ts");
-const testPath = join(root, "test/evidence.test.ts");
-const source = readFileSync(sourcePath, "utf8");
-const testSource = readFileSync(testPath, "utf8");
 const defects = JSON.parse(
   readFileSync(join(root, "test/defects.json"), "utf8"),
 );
-const testIds = [...testSource.matchAll(/it\("(D\d+):/g)].map(
-  (match) => match[1],
+
+const testFiles = readdirSync(join(root, "test"), { recursive: true })
+  .map((file) => join("test", String(file)))
+  .filter((file) => file.endsWith(".test.ts"));
+const watched = new Map(
+  [...testFiles, ...new Set(defects.map((defect) => defect.file))].map(
+    (file) => [file, readFileSync(join(root, file), "utf8")],
+  ),
 );
-const defectIds = defects.map((defect) => defect.id);
-if (
-  new Set(defectIds).size !== defectIds.length ||
-  new Set(testIds).size !== testIds.length ||
-  [...testIds].sort().join() !== [...defectIds].sort().join()
-) {
-  throw new Error("Every bootstrap test must have exactly one named defect.");
-}
+assertOneDefectPerTest();
+assertAnchorsUnique();
+
 const scratch = join(root, "_agent-docs/.scratch");
 mkdirSync(scratch, { recursive: true });
 const sandbox = mkdtempSync(join(scratch, "core-defects-"));
-const sandboxSource = join(sandbox, "src/evidence.ts");
+assertInside(scratch, sandbox);
 const reportPath = join(sandbox, "result.json");
+
+function assertOneDefectPerTest() {
+  const testIds = testFiles.flatMap((file) =>
+    [...watched.get(file).matchAll(/\bit\("(D\d+):/g)].map((m) => m[1]),
+  );
+  const defectIds = defects.map((defect) => defect.id);
+  if (
+    new Set(defectIds).size !== defectIds.length ||
+    new Set(testIds).size !== testIds.length ||
+    [...testIds].sort().join() !== [...defectIds].sort().join()
+  ) {
+    throw new Error("Every bootstrap test must have exactly one named defect.");
+  }
+}
+
+function assertAnchorsUnique() {
+  for (const defect of defects) {
+    if (watched.get(defect.file).split(defect.old).length !== 2) {
+      throw new Error(`${defect.id}: mutation anchor must match exactly once.`);
+    }
+  }
+}
+
+function assertInside(parent, child) {
+  const path = relative(parent, child);
+  if (
+    !path ||
+    path.startsWith(`..${sep}`) ||
+    path === ".." ||
+    isAbsolute(path)
+  ) {
+    throw new Error("Refusing a sandbox outside the task scratch directory.");
+  }
+}
 
 function runTests(pattern) {
   rmSync(reportPath, { force: true });
@@ -58,7 +91,7 @@ function runTests(pattern) {
   const result = spawnSync(process.execPath, args, {
     cwd: root,
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: 120_000,
     windowsHide: true,
   });
   if (result.error || result.signal) {
@@ -66,15 +99,17 @@ function runTests(pattern) {
       `Bootstrap runner interrupted: ${result.error ?? result.signal}`,
     );
   }
-  let report;
   try {
-    report = JSON.parse(readFileSync(reportPath, "utf8"));
-  } catch {
+    return {
+      status: result.status,
+      report: JSON.parse(readFileSync(reportPath, "utf8")),
+    };
+  } catch (error) {
     throw new Error(
       `Bootstrap runner produced no valid report: ${result.stderr}`,
+      { cause: error },
     );
   }
-  return { status: result.status, report };
 }
 
 function assertBaseline() {
@@ -90,63 +125,55 @@ function assertBaseline() {
   }
 }
 
+function assertDetected(defect) {
+  const { status, report } = runTests(defect.id);
+  const failures = report.testResults.flatMap((file) =>
+    file.assertionResults.filter((test) => test.status === "failed"),
+  );
+  const target = failures[0];
+  if (
+    status !== 1 ||
+    report.numFailedTests !== 1 ||
+    report.numPassedTests !== 0 ||
+    failures.length !== 1 ||
+    !target?.title.startsWith(`${defect.id}:`) ||
+    !target.failureMessages.some((message) =>
+      message.includes("AssertionError"),
+    )
+  ) {
+    throw new Error(
+      `${defect.id}: expected one named assertion failure; inspect the mutation.`,
+    );
+  }
+}
+
 try {
-  mkdirSync(join(sandbox, "src"));
-  mkdirSync(join(sandbox, "test"));
-  copyFileSync(testPath, join(sandbox, "test/evidence.test.ts"));
-  writeFileSync(sandboxSource, source);
+  for (const dir of SANDBOX_DIRS) {
+    cpSync(join(root, dir), join(sandbox, dir), { recursive: true });
+  }
   assertBaseline();
   for (const defect of defects) {
-    if (source.split(defect.old).length !== 2) {
-      throw new Error(`${defect.id}: mutation anchor must match exactly once.`);
-    }
-    writeFileSync(sandboxSource, source.replace(defect.old, defect.new));
-    const { status, report } = runTests(defect.id);
-    const failures = report.testResults.flatMap((file) =>
-      file.assertionResults.filter((test) => test.status === "failed"),
-    );
-    const target = failures[0];
-    if (
-      status !== 1 ||
-      report.numFailedTests !== 1 ||
-      report.numPassedTests !== 0 ||
-      failures.length !== 1 ||
-      !target?.title.startsWith(`${defect.id}:`) ||
-      !target.failureMessages.some((message) =>
-        message.includes("AssertionError"),
-      )
-    ) {
-      throw new Error(
-        `${defect.id}: expected one named assertion failure; inspect the mutation.`,
-      );
-    }
+    const original = watched.get(defect.file);
+    const target = join(sandbox, defect.file);
+    writeFileSync(target, original.replace(defect.old, defect.new));
+    assertDetected(defect);
+    writeFileSync(target, original);
     console.log(`${defect.id}: detected (${defect.defect})`);
   }
-  writeFileSync(sandboxSource, source);
   assertBaseline();
   console.log(
     `${defects.length}/${defects.length} bootstrap defects detected; restored baseline green.`,
   );
-  console.log(
-    `Source SHA-256: ${createHash("sha256").update(source).digest("hex")}`,
-  );
 } finally {
-  const child = relative(scratch, sandbox);
-  if (
-    !child ||
-    child === ".." ||
-    child.startsWith(`..${sep}`) ||
-    isAbsolute(child)
-  ) {
-    throw new Error("Refusing cleanup outside the task scratch directory.");
-  }
   rmSync(sandbox, { recursive: true, force: true });
-  if (
-    readFileSync(sourcePath, "utf8") !== source ||
-    readFileSync(testPath, "utf8") !== testSource
-  ) {
+}
+
+for (const [file, content] of watched) {
+  if (readFileSync(join(root, file), "utf8") !== content) {
     throw new Error(
       "Working files changed during verification; rerun on a stable revision.",
     );
   }
+  const digest = createHash("sha256").update(content).digest("hex");
+  console.log(`${file} SHA-256: ${digest}`);
 }
