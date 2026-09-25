@@ -28,6 +28,9 @@ Rewrite `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md` to carry t
 - Commit defect definitions in the consumer repo at a configurable location; keep evidence local under `.rt-test/`. Attribute by stable test ID, including `it.each` arms. Report tests with no defect as a gap.
 - A missing mutation anchor is a per-defect `anchor-missing` state that names the gap in the denominator and blocks "verified"; the other defects still run.
 - RT Test chooses no mutations and diagnoses no survivors; the author does.
+- Port Fleet Cooling's workflow pipeline (change-request, create-ticket, dev-ticket, create-tests, review-changes, the full orchestrator), keeping only what fits RT Test. Adopt sprints mapped to milestones, tickets, a requirements doc with FR and NFR ids and lifecycle markers, ADRs, a glossary, doc verification in review, the ADR index and line-citation checks, the doc-integrity hook, rule maintenance, and lint-harden. Skip the UX spec and component catalog until an app exists; defer drift-sweep.
+- Keep one home per concern. Use ADRs only, not Fleet Cooling's older CADs, and leave behind any gate that exists only to keep two copies of one fact aligned.
+- Port the scale machinery (context fan-out agents, sharded checklist, sprint-context bundles) switched off, behind a configuration switch with a measurable trigger for enabling it, and keep the dormant path tested so it does not rot.
 - Interface: a CLI with versioned `--json` output in front of the daemon, plus a small programmatic API. No MCP server. Support `status <path>` for files and folders with non-binary states, for a later VS Code folder-view extension.
 
 ## Starter contents
