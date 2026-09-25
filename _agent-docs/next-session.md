@@ -46,7 +46,7 @@ Run `bun install --frozen-lockfile` and `bun run check`. Inspect the committed s
 
 Rewrite the plan docs per the agreed direction above, then implement M1 as a vertical slice: a synthetic Vitest project produces structured events, a local store persists them, and a read-only JSON query returns honest counts and freshness. First spike the installed Vitest API, test identity, SQLite driver, and IPC transport. Establish baseline timings before optimizing selection.
 
-Work on `main`. No agent claims or persistent processes need to be resumed. No npm publication is authorized.
+Work on `main`. Hand off to a successor instead of compacting, per `_agent-docs/handoff.md`. No agent claims or persistent processes need to be resumed. No npm publication is authorized.
 
 ## Setup record
 

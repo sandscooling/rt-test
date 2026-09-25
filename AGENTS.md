@@ -73,3 +73,4 @@ The repository is a Bun workspace. Put product libraries, the daemon, and the CL
 - Use argument arrays for child processes. Do not assemble shell commands from project paths or test names.
 - Preserve stdout/stderr and exit codes for failed runs. Do not let a trailing output filter mask the runner's exit status.
 - Before ending a multi-step session, update `_agent-docs/next-session.md` with completed work, validation, open decisions, and the next concrete step.
+- Never let the context compact. When the user asks, or the context passes about 60% of its window, hand off to a successor session by following `_agent-docs/handoff.md` (the `/handoff` skill in Claude Code).
