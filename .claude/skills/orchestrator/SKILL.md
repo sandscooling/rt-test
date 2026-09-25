@@ -94,7 +94,7 @@ A lane's own record (a spike's findings, a dev's notes) belongs to that lane. **
 - the named defects the owner cares about, and what done looks like
 - addresses it needs (for a review: the dev's threadId and path list)
 
-**End every message with your reply address**: `Report to the orchestrator at threadId <your threadId>. If SendMessage cannot find it, session_wake that threadId with your report as the message.` A one-line question needs this most, since "answer" otherwise reads as writing the answer in its own thread.
+**End every message with your reply address**: `Report to the orchestrator with session_wake on threadId <your threadId>, never by name.` Sessions in other projects share names such as "Orchestrator", and a name-addressed `SendMessage` can reach one of them. A one-line question needs the address most, since "answer" otherwise reads as writing the answer in its own thread.
 
 **Verify a member's claim before you relay it or act on it**, by running something. You are the only reader who sees every lane, so a claim that passes through you carries your authority.
 

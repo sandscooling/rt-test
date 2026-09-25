@@ -34,7 +34,7 @@ Do not start watchers, daemons, or dev servers. Run anything long in the backgro
 
 ## Your report
 
-When your role's work is done, send the orchestrator one message (`SendMessage`, or `session_wake` on its threadId if that fails) with:
+When your role's work is done, send the orchestrator one message with `session_wake` on the threadId from your dispatch, never by name: sessions in other projects share names such as "Orchestrator", and a name-addressed `SendMessage` can reach one of them. Include:
 
 - every path you created and every path you modified, as separate lists
 - each targeted gate you ran, its exit code, test counts, and the time
