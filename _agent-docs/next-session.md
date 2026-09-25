@@ -51,7 +51,7 @@ Work on `main`. Hand off to a successor instead of compacting, per `_agent-docs/
 ## Setup record
 
 - Public repository: https://github.com/sandscooling/rt-test
-- Working branch: `main`, created locally from `dev-work`. The remote still has only `dev-work` as its default branch until the owner approves publishing `main`.
+- Working branch: `main`, which is the GitHub default. The remote `dev-work` branch is fully merged into `main` and awaits deletion by the owner.
 - Local `bun run check` passed on Windows with Node 24.19.0 and Bun 1.3.14: formatting, strict typecheck, 8/8 Vitest tests, 8/8 named-defect checks, restored baseline, and build.
 - Dependency versions are pinned and `bun.lock` is committed. The package remains private to prevent npm publication.
 - CI runs the same gates on Windows and Linux with Node 22 and 24. Inspect the latest Actions run for remote validation status.
