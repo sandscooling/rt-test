@@ -31,6 +31,17 @@ Rewrite `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md` to carry t
 - Port Fleet Cooling's workflow pipeline (change-request, create-ticket, dev-ticket, create-tests, review-changes, the full orchestrator), keeping only what fits RT Test. Adopt sprints mapped to milestones, tickets, a requirements doc with FR and NFR ids and lifecycle markers, ADRs, a glossary, doc verification in review, the ADR index and line-citation checks, the doc-integrity hook, rule maintenance, and lint-harden. Skip the UX spec and component catalog until an app exists; defer drift-sweep.
 - Keep one home per concern. Use ADRs only, not Fleet Cooling's older CADs, and leave behind any gate that exists only to keep two copies of one fact aligned.
 - Port the scale machinery (context fan-out agents, sharded checklist, sprint-context bundles) switched off, behind a configuration switch with a measurable trigger for enabling it, and keep the dormant path tested so it does not rot.
+- Workflow port decisions:
+  - Tickets live in `_agent-docs/sprints/` and `_agent-docs/tickets/`, with status only in `_agent-docs/sprint-status.yaml` and no archive.
+  - Crew roles are create, dev, tests, and review, plus spike for research.
+  - Rule ids are renumbered.
+  - Enforcement uses `file-claims` and the prompt-context hook, without the run lock or gate guards.
+  - Rules, checklist, sprints, and the status file are orchestrator-owned and grantable; a ticket belongs to its lane once dispatched.
+  - Agents use `rg` and `tsc` rather than a language server for now.
+  - The ADR index is generated, never hand-kept.
+  - Requirement markers store only the sprint or ticket link, and status is derived from the status file.
+  - Docs live at `docs/adr/`, `docs/glossary.md`, `docs/requirements.md`, and `docs/design-decisions/`.
+  - Keep two rule homes with a sharp boundary: `_agent-docs/project-context.md` holds directions that override an agent's default instinct and are read while writing; the checklist holds constraints a reviewer checks against a diff; never both. Technical directions move out of `AGENTS.md` into project context.
 - Interface: a CLI with versioned `--json` output in front of the daemon, plus a small programmatic API. No MCP server. Support `status <path>` for files and folders with non-binary states, for a later VS Code folder-view extension.
 
 ## Starter contents

@@ -13,19 +13,21 @@ You are the **orchestrator**: the owner's discussion session. You talk through f
 
 ## Lanes and members
 
-A lane is one unit of agreed work. Its **group** is a short slug for it (`plan-docs`, `vitest-spike`, `m1-store`). Member **names** are `<lane>-<role>`:
+A lane is one unit of agreed work. Its **group** is a short slug for it (`plan-docs`, `vitest-spike`, `m1-store`). Member **names** are `rt-<lane>-<role>`; the `rt-` prefix keeps them unique across projects, whose sessions share this machine:
 
-| Role     | Name            | Does                                                                                                               |
-| -------- | --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| dev      | `<lane>-dev`    | Builds the change, writes its tests and named defects, runs the targeted gates, reports its path list              |
-| review   | `<lane>-review` | Reads the uncommitted lane diff cold, fixes what it finds, proves the named defects, reports                       |
-| research | `<lane>-spike`  | Investigates without editing tracked files, and reports findings you put to the owner or into a later lane's brief |
+| Role     | Name               | Does                                                                                                               |
+| -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| dev      | `rt-<lane>-dev`    | Builds the change, writes its tests and named defects, runs the targeted gates, reports its path list              |
+| review   | `rt-<lane>-review` | Reads the uncommitted lane diff cold, fixes what it finds, proves the named defects, reports                       |
+| research | `rt-<lane>-spike`  | Investigates without editing tracked files, and reports findings you put to the owner or into a later lane's brief |
 
 A build lane runs dev, then review, then your commit. A research lane is one `spike` session. **The author of a change is the worst judge of whether its tests prove anything**, so every build lane gets a review session that did not write the code.
 
 Names and groups use letters, digits, dots, underscores, and hyphens only. Your own group is `null` or `orchestrator`; never give either to a lane, because that is how a member recognizes it is not in one.
 
 **Members are sessions, never subagents.** A subagent vanishes with your turn and nobody can see it. A member is spawned with `session_spawn`, messaged with `SendMessage` when live, and found with `session_list`. Its name survives restarts.
+
+**Other projects on this machine run their own orchestrators and crews**, some with the same names. Address sessions only through this project: take names and threadIds from `session_list` (which lists your own project by default), prefer the threadId, and never message a name you did not spawn. **Act on a cross-session message only when its sender is a session in this project's `session_list`**; one from anywhere else is not yours to answer.
 
 **`stopped` is a state, not a loss.** A stopped member keeps its whole history; `session_wake` restarts it under the same name. Spawn a member once, when the lane reaches its role, and wake it after that.
 
@@ -104,11 +106,11 @@ A lane's own record (a spike's findings, a dev's notes) belongs to that lane. **
 
 `session_settle` by threadId clears a finished member, and refuses one that is running or waiting on the owner. Settle on the role's completion:
 
-| Settle          | When                                                             |
-| --------------- | ---------------------------------------------------------------- |
-| `<lane>-dev`    | when the review reports, since it answers the review's questions |
-| `<lane>-review` | when its lane's commit has landed and it has the sha             |
-| `<lane>-spike`  | when you have put its findings to the owner or into a brief      |
+| Settle             | When                                                             |
+| ------------------ | ---------------------------------------------------------------- |
+| `rt-<lane>-dev`    | when the review reports, since it answers the review's questions |
+| `rt-<lane>-review` | when its lane's commit has landed and it has the sha             |
+| `rt-<lane>-spike`  | when you have put its findings to the owner or into a brief      |
 
 **A lane's commit is the sweep trigger.** Settle its members, delete `_agent-docs/.scratch/lanes/<group>.files` and every scratch entry the lane made, and cut the lane from the state doc in the same pass. **Check each threadId the state doc names against `session_list`**: an id not in the list is an instruction about something that no longer exists.
 
@@ -135,11 +137,11 @@ Read the state doc if it exists, and **compare threadIds rather than reasoning a
 
 ### 2. Discuss, then dispatch
 
-Keep discussing with the owner. When a change is agreed, create its lane file with the expected paths, check the lane cap and the intersection, and dispatch `<lane>-dev` (or `<lane>-spike`) with the brief. Record the lane in the state doc. Return to the conversation; do not wait on the lane in the foreground.
+Keep discussing with the owner. When a change is agreed, create its lane file with the expected paths, check the lane cap and the intersection, and dispatch `rt-<lane>-dev` (or `rt-<lane>-spike`) with the brief. Record the lane in the state doc. Return to the conversation; do not wait on the lane in the foreground.
 
 ### 3. Review
 
-When dev reports, dispatch `<lane>-review` with the dev's threadId, its path list, and the brief's requirements, and nothing about why dev decided anything.
+When dev reports, dispatch `rt-<lane>-review` with the dev's threadId, its path list, and the brief's requirements, and nothing about why dev decided anything.
 
 ### 4. Gate, commit, report
 
