@@ -6,6 +6,8 @@ Build RT Test as a standalone, local-first developer tool for Vitest projects. R
 
 Use this file as the shared agent entry point. Do not create a separate Claude instructions file.
 
+The repository is a Bun workspace. Put product libraries, the daemon, and the CLI in `packages/*`, and editor integrations such as a VS Code extension in `apps/*`. Keep repository tooling (`lint/`, `scripts/`, root `test/`) at the root. Give each workspace `build` and `typecheck` scripts and extend `tsconfig.base.json`; root scripts fan out to every workspace. Reserve the package name `rt-test` for the published CLI.
+
 ## Working conventions
 
 - Inspect the working tree before editing. Preserve changes made by users and other sessions.

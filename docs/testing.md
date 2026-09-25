@@ -8,11 +8,11 @@ Use `bun run test:run` for Vitest, `bun run test:defects` for the bootstrap defe
 
 Give every behavior test a concrete wrong behavior to reject. Record expected behavior independently from the implementation. Prefer examples that distinguish the intended behavior from a plausible mistake.
 
-`test/defects.json` associates each named test with one explicit mutation and the file it mutates. D001 through D008 cover the freshness core in `test/evidence.test.ts`. D009 through D020 cover the `no-nonlocal-comment` lint rule in `test/lint/no-nonlocal-comment.test.ts`, which runs the real oxlint binary over temporary fixtures. Each test has one assertion, so a targeted assertion failure has a clear scope.
+`test/defects.json` associates each named test with one explicit mutation and the file it mutates. D001 through D008 cover the freshness core in `packages/core/test/evidence.test.ts`. D009 through D020 cover the `no-nonlocal-comment` lint rule in `test/lint/no-nonlocal-comment.test.ts`, which runs the real oxlint binary over temporary fixtures. Each test has one assertion, so a targeted assertion failure has a clear scope.
 
 ## Bootstrap falsification
 
-`scripts/verify-defects.mjs` copies `src/`, `lint/`, and `test/` into a task-owned directory under `_agent-docs/.scratch/`. It resolves Vitest through its package manifest and executes its Node entry point with argument arrays.
+`scripts/verify-defects.mjs` copies `packages/`, `lint/`, `test/`, and the root tsconfigs into a task-owned directory under `_agent-docs/.scratch/`, skipping `node_modules` and `dist`. It resolves Vitest through its package manifest and executes its Node entry point with argument arrays.
 
 The check requires a passing baseline, applies one exact mutation at a time to the file its record names, selects its named test, requires that test to fail with an assertion failure, restores the copied file, and verifies the complete baseline again. It requires every `D###` test under `test/` to have exactly one defect record and removes the disposable copy on exit.
 

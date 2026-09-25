@@ -36,6 +36,16 @@ bun run typecheck
 bun run build
 ```
 
+The repository is a Bun workspace. Root scripts run across every workspace, and the root Vitest config runs each workspace as a project.
+
+| Path                | Contents                                                      |
+| ------------------- | ------------------------------------------------------------- |
+| `packages/core`     | `@rt-test/core`: the result-freshness and evidence model      |
+| `packages/*`        | Future libraries, the daemon, and the `rt-test` CLI           |
+| `apps/*`            | Future editor integrations, such as a VS Code extension       |
+| `lint/`, `scripts/` | Repository tooling: custom oxlint rules and development gates |
+| `test/`             | Tests for repository tooling, and `defects.json`              |
+
 Use `bun run test` to opt into Vitest watch mode. `bun test` invokes a different runner; use the scripts above.
 
 The bootstrap core compares caller-supplied input fingerprints. It does not compute fingerprints or establish dependency completeness. The defect-check script verifies explicit mutations of that core and of the custom lint rule in disposable copies. It is a development check, not the planned general-purpose falsification engine.

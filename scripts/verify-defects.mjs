@@ -14,7 +14,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const SANDBOX_DIRS = ["src", "lint", "test"];
+const SANDBOX_DIRS = ["packages", "lint", "test"];
+const SANDBOX_FILES = ["tsconfig.base.json", "tsconfig.json"];
+const SKIPPED_DIRS = new Set(["node_modules", "dist"]);
 const require = createRequire(import.meta.url);
 const manifestPath = require.resolve("vitest/package.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -23,9 +25,11 @@ const defects = JSON.parse(
   readFileSync(join(root, "test/defects.json"), "utf8"),
 );
 
-const testFiles = readdirSync(join(root, "test"), { recursive: true })
-  .map((file) => join("test", String(file)))
-  .filter((file) => file.endsWith(".test.ts"));
+const testFiles = SANDBOX_DIRS.flatMap((dir) =>
+  readdirSync(join(root, dir), { recursive: true })
+    .map((file) => join(dir, String(file)))
+    .filter((file) => file.endsWith(".test.ts") && !isSkipped(file)),
+);
 const watched = new Map(
   [...testFiles, ...new Set(defects.map((defect) => defect.file))].map(
     (file) => [file, readFileSync(join(root, file), "utf8")],
@@ -39,6 +43,10 @@ mkdirSync(scratch, { recursive: true });
 const sandbox = mkdtempSync(join(scratch, "core-defects-"));
 assertInside(scratch, sandbox);
 const reportPath = join(sandbox, "result.json");
+
+function isSkipped(path) {
+  return path.split(/[\\/]/).some((part) => SKIPPED_DIRS.has(part));
+}
 
 function assertOneDefectPerTest() {
   const testIds = testFiles.flatMap((file) =>
@@ -149,7 +157,13 @@ function assertDetected(defect) {
 
 try {
   for (const dir of SANDBOX_DIRS) {
-    cpSync(join(root, dir), join(sandbox, dir), { recursive: true });
+    cpSync(join(root, dir), join(sandbox, dir), {
+      recursive: true,
+      filter: (path) => !isSkipped(relative(root, path)),
+    });
+  }
+  for (const file of SANDBOX_FILES) {
+    cpSync(join(root, file), join(sandbox, file));
   }
   assertBaseline();
   for (const defect of defects) {

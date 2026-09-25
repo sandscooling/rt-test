@@ -2,7 +2,7 @@
 
 ## Current implementation
 
-`src/evidence.ts` assesses a historical result against a caller-supplied fingerprint. It preserves the outcome and returns freshness plus an explicit current-pass predicate. Missing or empty fingerprints produce unknown freshness.
+`packages/core/src/evidence.ts` assesses a historical result against a caller-supplied fingerprint. It preserves the outcome and returns freshness plus an explicit current-pass predicate. Missing or empty fingerprints produce unknown freshness.
 
 This function does not build fingerprints, select tests, ingest runner events, or store history. The sections below describe the intended architecture.
 

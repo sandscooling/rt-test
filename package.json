@@ -1,7 +1,11 @@
 {
-  "name": "rt-test",
+  "name": "rt-test-workspace",
   "version": "0.0.0",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "description": "Queryable test state and named-defect evidence for Vitest projects.",
   "type": "module",
   "license": "MIT",
@@ -14,8 +18,8 @@
   },
   "packageManager": "bun@1.3.14",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "build": "bun run --filter '*' build",
+    "typecheck": "tsc --noEmit && bun run --filter '*' typecheck",
     "test": "vitest",
     "test:run": "vitest run",
     "test:defects": "node scripts/verify-defects.mjs",
