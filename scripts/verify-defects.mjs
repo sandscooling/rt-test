@@ -14,8 +14,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const SANDBOX_DIRS = ["packages", "lint", "test"];
-const SANDBOX_FILES = ["tsconfig.base.json", "tsconfig.json"];
+const SANDBOX_DIRS = ["packages", "lint", "scripts", "test"];
+const SANDBOX_FILES = [
+  "tsconfig.base.json",
+  "tsconfig.json",
+  "_agent-docs/_flow-config.yaml",
+];
 const SKIPPED_DIRS = new Set(["node_modules", "dist"]);
 const require = createRequire(import.meta.url);
 const manifestPath = require.resolve("vitest/package.json");

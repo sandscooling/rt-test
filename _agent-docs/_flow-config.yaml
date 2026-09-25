@@ -1,0 +1,44 @@
+# Workflow path config. Skills read this file directly; scripts read it
+# through scripts/lib/flow-config.mjs. Paths are relative to the repo root.
+
+# Read by ticket skills and scripts: one file per ticket.
+ticket_dir: _agent-docs/tickets
+# Read by sprint planning skills and scripts: one file per sprint plan.
+sprints_dir: _agent-docs/sprints
+# Read by sprint and ticket skills and scripts: the only record of ticket and sprint status.
+sprint_status: _agent-docs/sprint-status.yaml
+
+# Read by planning skills: the product requirements.
+requirements: docs/requirements.md
+# Read by planning and review skills: architecture decision records.
+adr_dir: docs/adr
+# Read by planning and review skills: project terminology.
+glossary: docs/glossary.md
+# Read by design skills: decisions below ADR weight.
+design_decisions_dir: docs/design-decisions
+
+# Read by code review skills and rule scripts: the rule corpus.
+checklist_dir: _agent-docs/code-review-checklist
+# Read by every workflow skill: the project summary loaded as context.
+project_context: _agent-docs/project-context.md
+# Read by rule maintenance skills: how to add, change, and retire rules.
+rule_maintenance_guide: _agent-docs/rule-maintenance-guide.md
+# Read by implementation skills: standards every code change meets.
+code_change_standards: _agent-docs/code-change-standards.md
+# Read by adversarial review skills: the reviewer prompt.
+adversarial_review_prompt: _agent-docs/adversarial-review-prompt.md
+
+# Switches for ported machinery that stays off until the project grows.
+scale:
+  # Read by code review skills and rule scripts: load every rule (whole) or pick from a rule menu (menu).
+  rule_selection: whole
+  # Read by code review skills: review with 1 checklist agent or fan out to 4.
+  checklist_fanout: 1
+  # Read by implementation skills: load sprint context before a ticket (off | on).
+  sprint_context: off
+  # Read by planning skills: spawn context-gathering agents (off | on).
+  ctx_agents: off
+  # Read by planning skills and doc scripts: load docs by section rather than whole (off | on).
+  doc_sections: off
+  # Read by design skills: build a UI prototype before implementation (off | on).
+  prototype_ui: off

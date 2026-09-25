@@ -1,0 +1,205 @@
+[
+  {
+    "id": "D021",
+    "defect": "A missing config file loads as an empty config instead of failing on the file.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "throw new Error(`Cannot read flow config",
+    "new": "return \"\"; throw new Error(`Cannot read flow config"
+  },
+  {
+    "id": "D022",
+    "defect": "A config missing a required path key loads with that key undefined.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "throw new Error(`${file}: missing required key ${key}.`);",
+    "new": "return undefined;"
+  },
+  {
+    "id": "D023",
+    "defect": "A scale block missing a switch loads with that switch undefined.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "throw new Error(`${file}: missing required key scale.${key}.`);",
+    "new": "continue;"
+  },
+  {
+    "id": "D024",
+    "defect": "A misspelled scale key is ignored.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (!SCALE_CHOICES.has(key)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D025",
+    "defect": "A scale value outside its allowed set is accepted.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (!choices.has(value)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D026",
+    "defect": "An off switch is returned as the truthy string off.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "result[key] = choices.get(value);",
+    "new": "result[key] = value;"
+  },
+  {
+    "id": "D027",
+    "defect": "A checklist fanout of 4 is returned as a string.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "[\"4\", 4]",
+    "new": "[\"4\", \"4\"]"
+  },
+  {
+    "id": "D028",
+    "defect": "An on switch is not returned as true.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "[\"on\", true]",
+    "new": "[\"on\", \"on\"]"
+  },
+  {
+    "id": "D029",
+    "defect": "Rule selection menu is read as whole.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "[\"menu\", \"menu\"]",
+    "new": "[\"menu\", \"whole\"]"
+  },
+  {
+    "id": "D030",
+    "defect": "Paths resolve against the working directory instead of the given root.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "const path = resolve(base, value);",
+    "new": "const path = resolve(value);"
+  },
+  {
+    "id": "D031",
+    "defect": "The returned config object can be mutated.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "return Object.freeze(config);",
+    "new": "return config;"
+  },
+  {
+    "id": "D032",
+    "defect": "The returned scale block can be mutated.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "return Object.freeze(result);",
+    "new": "return result;"
+  },
+  {
+    "id": "D033",
+    "defect": "A path that climbs out of the repository is accepted.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "const escapes = inside === \"..\" || inside.startsWith(`..${sep}`);",
+    "new": "const escapes = false;"
+  },
+  {
+    "id": "D034",
+    "defect": "A trailing comment becomes part of the path.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "const value = text.replace(/(?:^|\\s+)#.*$/, \"\");",
+    "new": "const value = text;"
+  },
+  {
+    "id": "D035",
+    "defect": "A hash inside a path truncates it as a comment.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "(?:^|\\s+)#.*$",
+    "new": "(?:^|\\s*)#.*$"
+  },
+  {
+    "id": "D036",
+    "defect": "Quotes around a value are kept in the path.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (quoted) return quoted[1];",
+    "new": "if (quoted) return text;"
+  },
+  {
+    "id": "D037",
+    "defect": "A YAML flow sequence is accepted as a plain path.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "|| INDICATOR.test(value)) {",
+    "new": "|| false) {"
+  },
+  {
+    "id": "D038",
+    "defect": "A line that is not a key is silently skipped.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (!match) throw new Error(`${where}: unsupported syntax: ${line}`);",
+    "new": "if (!match) return;"
+  },
+  {
+    "id": "D039",
+    "defect": "A duplicated key silently overrides the first.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (map.has(key)) throw",
+    "new": "if (false) throw"
+  },
+  {
+    "id": "D040",
+    "defect": "An unknown top-level key is ignored.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (unknown.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D041",
+    "defect": "An indented key under a scalar key is not reported as outside a map.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (!block) throw",
+    "new": "if (false) throw"
+  },
+  {
+    "id": "D042",
+    "defect": "A second level of nesting is not reported as unsupported.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (indent !== block.indent || value === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D043",
+    "defect": "A scalar scale value is not reported as a missing map.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (!(scale instanceof Map)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D044",
+    "defect": "A map given for a path key is not reported as a non-path.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (typeof value !== \"string\" || value === \"\") {",
+    "new": "if (value === \"\") {"
+  },
+  {
+    "id": "D045",
+    "defect": "An empty quoted path resolves to the repository root.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "typeof value !== \"string\" || value === \"\"",
+    "new": "typeof value !== \"string\""
+  },
+  {
+    "id": "D046",
+    "defect": "A double-quoted escape sequence is read literally.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "/^\"([^\"\\\\]*)\"",
+    "new": "/^\"([^\"]*)\""
+  },
+  {
+    "id": "D047",
+    "defect": "A key with no space after its colon is read as a key and value.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "if (rest !== \"\" && !/^\\s/.test(rest)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D048",
+    "defect": "The committed config ships a scale switch other than the agreed default.",
+    "file": "_agent-docs/_flow-config.yaml",
+    "old": "checklist_fanout: 1",
+    "new": "checklist_fanout: 4"
+  },
+  {
+    "id": "D049",
+    "defect": "A YAML null given for a path resolves to a directory named ~.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "YAML_NULL.test(value) || ",
+    "new": ""
+  }
+]
