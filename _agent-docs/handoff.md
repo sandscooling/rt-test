@@ -17,7 +17,7 @@ A safe point has no edit half-applied, no process you started still running, and
 1. **Settle the tree.** Commit finished, verified work under the normal commit rules. For anything uncommitted, note each file and whether it is complete, verified, or partial.
 2. **Update `_agent-docs/next-session.md`**: completed work, validation with actual results, open decisions, and the next concrete step. Commit it with the work it describes.
 3. **Collect the roster.** Call `session_list` for every project the work touches, and note each open session's name, threadId, group, status, and what it is waiting on.
-4. **Choose the successor's name.** If your own title is a valid session name (letters, digits, `.`, `_`, `-`), use a temporary name such as `<your name>-2`; the successor takes your name back at the end. Otherwise use `rt-test`, or `rt-test-<n>` if that is taken.
+4. **Choose the successor's name.** A lane member names it `<your name>-<n>` with the next unused `n`, in the same group, and it keeps that name. Otherwise, if your own title is a valid session name (letters, digits, `.`, `_`, `-`), use a temporary name such as `<your name>-2`; the successor takes your name back at the end. Otherwise use `rt-test`, or `rt-test-<n>` if that is taken. An orchestrator also writes `HANDED OFF to <successor name>` at the top of `_agent-docs/.scratch/orchestrator-state.md`.
 5. **Write the opening message.** It is the successor's only record of this conversation. Include:
    - the instruction to read `AGENTS.md`, `_agent-docs/next-session.md`, and this file first
    - the user's current request, in their words where the wording matters, and any preferences they stated in this conversation that no file records yet

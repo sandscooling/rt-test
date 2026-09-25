@@ -21,15 +21,15 @@ const require = createRequire(import.meta.url);
 const manifestPath = require.resolve("vitest/package.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const entry = resolve(dirname(manifestPath), manifest.bin.vitest);
-const defects = JSON.parse(
-  readFileSync(join(root, "test/defects.json"), "utf8"),
-);
-
-const testFiles = SANDBOX_DIRS.flatMap((dir) =>
+const sandboxPaths = SANDBOX_DIRS.flatMap((dir) =>
   readdirSync(join(root, dir), { recursive: true })
     .map((file) => join(dir, String(file)))
-    .filter((file) => file.endsWith(".test.ts") && !isSkipped(file)),
+    .filter((file) => !isSkipped(file)),
 );
+const defects = sandboxPaths
+  .filter((file) => /(^|[\\/])defects\.json$/.test(file))
+  .flatMap((file) => JSON.parse(readFileSync(join(root, file), "utf8")));
+const testFiles = sandboxPaths.filter((file) => file.endsWith(".test.ts"));
 const watched = new Map(
   [...testFiles, ...new Set(defects.map((defect) => defect.file))].map(
     (file) => [file, readFileSync(join(root, file), "utf8")],

@@ -8,7 +8,7 @@ Use `bun run test:run` for Vitest, `bun run test:defects` for the bootstrap defe
 
 Give every behavior test a concrete wrong behavior to reject. Record expected behavior independently from the implementation. Prefer examples that distinguish the intended behavior from a plausible mistake.
 
-`test/defects.json` associates each named test with one explicit mutation and the file it mutates. D001 through D008 cover the freshness core in `packages/core/test/evidence.test.ts`. D009 through D020 cover the `no-nonlocal-comment` lint rule in `test/lint/no-nonlocal-comment.test.ts`, which runs the real oxlint binary over temporary fixtures. Each test has one assertion, so a targeted assertion failure has a clear scope.
+Each workspace keeps a `defects.json` beside its tests, associating each named test with one explicit mutation and the file it mutates; separate files let lanes in different workspaces add defects without sharing a file. Defect ids are unique across the repository. D001 through D008, in `packages/core/test/defects.json`, cover the freshness core in `packages/core/test/evidence.test.ts`. D009 through D020, in `test/defects.json`, cover the `no-nonlocal-comment` lint rule in `test/lint/no-nonlocal-comment.test.ts`, which runs the real oxlint binary over temporary fixtures. Each test has one assertion, so a targeted assertion failure has a clear scope.
 
 ## Bootstrap falsification
 

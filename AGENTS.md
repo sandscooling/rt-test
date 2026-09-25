@@ -8,12 +8,16 @@ Use this file as the shared agent entry point. Do not create a separate Claude i
 
 The repository is a Bun workspace. Put product libraries, the daemon, and the CLI in `packages/*`, and editor integrations such as a VS Code extension in `apps/*`. Keep repository tooling (`lint/`, `scripts/`, root `test/`) at the root. Give each workspace `build` and `typecheck` scripts and extend `tsconfig.base.json`; root scripts fan out to every workspace. Reserve the package name `rt-test` for the published CLI.
 
+## Sessions and lanes
+
+Run `session_list` at the start of a session and read your own row. If your `group` is set and is not `orchestrator`, you are a lane member: follow `_agent-docs/crew.md`. Otherwise you are the owner's discussion session: follow `.claude/skills/orchestrator/SKILL.md`, and delegate each agreed change to a lane of child sessions rather than building it in the discussion thread.
+
 ## Working conventions
 
 - Inspect the working tree before editing. Preserve changes made by users and other sessions.
 - Read all existing target files before the first edit of a multi-file change.
 - Use `rg` for content searches. Include untracked files when checking references. Enumerate tracked files with `git ls-files`; avoid recursive scans through dependency directories.
-- Make direct changes for explicitly requested work. Do not introduce a ticket or multi-agent workflow unless requested.
+- Make direct changes for explicitly requested work within your role. Do not introduce a ticket workflow or subagent fan-out unless requested; lanes of sessions are the delegation mechanism.
 - When asked for thoughts or an audit, give findings before implementing changes.
 - If a rule blocks the requested outcome, check its factual basis and intended scope. Surface a real product tradeoff rather than silently working around it.
 - Write durable instructions as actions. Keep historical justification in commits or decision records.

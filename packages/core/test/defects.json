@@ -1,0 +1,58 @@
+[
+  {
+    "id": "D001",
+    "defect": "An unexecuted test is reported as having passed.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "const outcome = evidence?.outcome ?? \"never-run\";",
+    "new": "const outcome = evidence?.outcome ?? \"passed\";"
+  },
+  {
+    "id": "D002",
+    "defect": "A historical pass remains current after a relevant edit.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "evidence.fingerprint === currentFingerprint ? \"current\" : \"stale\"",
+    "new": "evidence.fingerprint === currentFingerprint ? \"current\" : \"current\""
+  },
+  {
+    "id": "D003",
+    "defect": "A historical pass is certified when current inputs are unknown.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "if (!evidence || !currentFingerprint || !evidence.fingerprint)",
+    "new": "if (evidence && currentFingerprint === undefined) return \"current\"; if (!evidence || !currentFingerprint || !evidence.fingerprint)"
+  },
+  {
+    "id": "D004",
+    "defect": "A skipped test is treated as a current pass.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "outcome === \"passed\"",
+    "new": "(outcome === \"passed\" || outcome === \"skipped\")"
+  },
+  {
+    "id": "D005",
+    "defect": "A runner error is treated as a current pass.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "outcome === \"passed\"",
+    "new": "(outcome === \"passed\" || outcome === \"error\")"
+  },
+  {
+    "id": "D006",
+    "defect": "Editing the source erases the recorded failure outcome.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "const outcome = evidence?.outcome ?? \"never-run\";",
+    "new": "const outcome = evidence?.fingerprint !== currentFingerprint ? \"never-run\" : (evidence?.outcome ?? \"never-run\");"
+  },
+  {
+    "id": "D007",
+    "defect": "A current passing result is rejected despite matching inputs.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "evidence.fingerprint === currentFingerprint ? \"current\" : \"stale\"",
+    "new": "evidence.fingerprint === currentFingerprint ? \"stale\" : \"stale\""
+  },
+  {
+    "id": "D008",
+    "defect": "Empty fingerprints are accepted as evidence of matching inputs.",
+    "file": "packages/core/src/evidence.ts",
+    "old": "if (!evidence || !currentFingerprint || !evidence.fingerprint)",
+    "new": "if (evidence && currentFingerprint === \"\") return \"current\"; if (!evidence || !currentFingerprint || !evidence.fingerprint)"
+  }
+]
