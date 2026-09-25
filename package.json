@@ -1,0 +1,32 @@
+{
+  "name": "rt-test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Queryable test state and named-defect evidence for Vitest projects.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sandscooling/rt-test.git"
+  },
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:defects": "node scripts/verify-defects.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "bun run format:check && bun run typecheck && bun run test:run && bun run test:defects && bun run build"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "prettier": "3.9.9",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}

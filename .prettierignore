@@ -1,0 +1,6 @@
+bun.lock
+dist/
+coverage/
+node_modules/
+.rt-test/
+_agent-docs/.scratch/
