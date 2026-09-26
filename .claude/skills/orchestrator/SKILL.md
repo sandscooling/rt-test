@@ -159,7 +159,7 @@ It stages every file the lane claims. Add `--also <path>` for each path in the m
 
 A lane can run in its own git worktree, so its edits and gates never touch a sibling's tree. T3 Code attaches sessions to a worktree but never creates, recreates, or deletes one; you do.
 
-**A build lane that starts while another build lane is live runs in a worktree.** A ticket lane moves there at its dev dispatch, since `create-ticket` writes only planning files; a `change-request` lane spawns its `-cr` member there, because an inline fix is built by that same session and a session never changes tree. In one shared tree, each lane's half-built state reds the other's gates and defect runs.
+**Two live build lanes never share a tree**: the second one to start runs in a worktree, or in the main checkout when the first already runs in one. In one shared tree, each lane's half-built state reds the other's gates and defect runs. A ticket lane moves into its tree at its dev dispatch, since `create-ticket` writes only planning files; a `change-request` lane spawns its `-cr` member in its tree, because an inline fix is built by that same session and a session never changes tree. An author left in the main checkout writes its ticket edits to the worktree's copy of the ticket, the one its dev reads: tell it the path at the dev dispatch.
 
 - **Create** from the main checkout: `git worktree add C:\source\rt-test-wt\wt-<n> -b wt/<n> main`, then `bun install --frozen-lockfile` in the new tree. It branches from `main`'s last commit, so commit what the lane needs first. Reuse a tree for the next lane rather than removing it.
 - **Attach**: spawn the lane's first member with `worktree: { path, branch }`, and every later member with `worktree: { sameAs: <first member's threadId> }`.
@@ -186,9 +186,9 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 
 **Before you tell a member to act, check whether you are what blocks it**: a sha you have not sent, a grant you have not made, a claim you have not released. Both sides believing they wait on the other is a stall nothing reports.
 
-**A member asks the owner in its own thread, never through you.** Your part is one line telling the owner which thread to open. **A judgement question stays the owner's even when a standing ruling seems to settle it.** The member records the question, the owner's answer, and the time in its lane's record. **Before you recommend anything to the owner about a live lane's subject, read that record for a ruling the owner already made there**: the owner answers there without you, and your recommendation can reverse it with neither of you noticing. **When you pass a ruling down, name yourself as its source and give the time.**
+**Every member question comes to you, never to the owner**, and you answer it. Settle a design, technical, sizing, or mechanism question yourself from the code, the docs, and the standing rulings, and record why. **Choose the correct fix over the smaller one**: a few more files is never on its own a reason to defer or narrow a fix, and no work goes in that the correct result does not need. **Take to the owner only a decision the owner must make**: what gets built or when, behavior a user of RT Test would notice, cost or risk the owner carries, or a change to a product guarantee. The owner does not work in Vitest internals, so **put each such question in plain language**: what happens to the product either way, the options in everyday words, and your recommendation, with no Vitest or code terms left for the owner to decode. **Before you answer or recommend on a live lane's subject, read that lane's record for a ruling already made there**, so you never reverse one unnoticed. **When you pass an answer down, name its decider (you or the owner) and the time.**
 
-**Put every fork to the owner the moment you hold it, with your recommendation**, even while the lane keeps working. Whether an answer could reopen a finished stage decides only whether the next dispatch waits for it, never whether the owner hears it now.
+**Put every owner fork to the owner the moment you hold it, with your recommendation**, even while the lane keeps working. Whether an answer could reopen a finished stage decides only whether the next dispatch waits for it, never whether the owner hears it now.
 
 ## Settle and sweep
 
@@ -229,7 +229,9 @@ Keep discussing with the owner. When a change is agreed, route it: new work with
 1. `rt-<lane>-create`: `Run /create-ticket for <ticket>. Report when the ticket is ready for dev.` For new work, `rt-<lane>-cr`: `Run /change-request on <subject and evidence>. Report its disposition and sizing.`
 2. `rt-<lane>-dev`: `Run /dev-ticket for <ticket>. The ticket's author is threadId <create threadId>. Report the transition to review, then stay available: the tests member sends you code bugs.`
 3. `rt-<lane>-tests`: `Run /create-tests for <ticket or record>. The dev session is threadId <dev threadId>; your defect ids are <range>. Report when every test is green, then stay available: the review sends you test gaps.`
-4. `rt-<lane>-review`: `Run /review-changes for <ticket or record>. The tests session is threadId <tests threadId>. Leave these sibling paths out of your scope: <paths, or none>.`
+4. `rt-<lane>-review`: `Run /review-changes for <ticket or record>. The tests session is threadId <tests threadId>. Also review the doc changes of its authoring commit <sha>. Leave these sibling paths out of your scope: <paths, or none>.`
+
+**Land a ticket's authoring in its own commit** once `create-ticket` reports ready (the ticket, and the planning docs it changed), before dev starts: a worktree lane's branch must hold its ticket, and shared planning files must not sit dirty through a build. Since that commit leaves the lane's diff, name its sha in the review dispatch, so the glossary, requirement and sprint text it wrote still gets a reviewer.
 
 Keep every member's threadId as you spawn it, since a later stage needs it as an address. **Stage 3 always runs**, because dev writes no test and runs no suite; an inline `change-request` gets its own tests and review members the same way.
 

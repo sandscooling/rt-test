@@ -274,7 +274,7 @@ When validation fails after 3 attempts, investigate before escalating:
 3. For a third-party symbol, read its installed `.d.ts` and `.js` (P10).
 4. Read the full source of every other function the error names.
 
-If that finds the root cause, fix it and retry with the attempt count reset. Otherwise ask the owner: **retry** with a fresh approach, **investigate** (report the failure details and wait), or **halt**.
+If that finds the root cause, fix it and retry with the attempt count reset. Otherwise ask the orchestrator under a lane, or the owner outside one: **retry** with a fresh approach, **investigate** (report the failure details and wait), or **halt**.
 
 ## Writing Tests Outside create-tests
 

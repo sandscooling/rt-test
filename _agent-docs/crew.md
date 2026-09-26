@@ -37,9 +37,9 @@ Do not start watchers, daemons, or dev servers. Run anything long in the backgro
 
 ## Questions
 
-**Ask the orchestrator, never the owner, for what the orchestrator allocates or owns**: an ADR, requirement, rule, sprint, or ticket id, a defect-id range or more ids, a grant, a status transition, or a change to a project-wide file. The owner decides; the orchestrator hands out ids and grants and writes its own files. A skill step that says to ask for one of these means the orchestrator.
+**Ask the orchestrator, never the owner, for what the orchestrator allocates or owns**: an ADR, requirement, rule, sprint, or ticket id, a defect-id range or more ids, a grant, a status transition, or a change to a project-wide file. The owner decides; the orchestrator hands out ids and grants and writes its own files. A skill step that says to ask for one of these means the orchestrator. **An id your lane has reported unused is no longer yours**, since the orchestrator hands it to the next lane at once: ask for more rather than reuse it.
 
-**Ask the owner a decision in your own thread**, never through the orchestrator, and tell the orchestrator only that a question is waiting and whether it moves scope. **Record the question, the owner's answer, and the time in your lane's record** (the ticket or change record), since the orchestrator reads it before advising the owner on your lane's subject. A ruling the orchestrator passes down names its source and time; record it the same way.
+**Send every other question to the orchestrator too, never to the owner**: design, technical, sizing, and scope questions alike, including each one a skill step tells you to ask the owner or to put through `AskUserQuestion`. Send it by `session_wake` with the evidence and your recommendation, then keep working what the answer cannot change. The orchestrator answers it, or takes a decision the owner must make to the owner and relays the ruling. **Record the question, the answer, who decided it, and the time in your lane's record** (the ticket or change record).
 
 ## Your report
 
