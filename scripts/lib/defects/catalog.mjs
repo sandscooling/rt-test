@@ -5,7 +5,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 export const SANDBOX_DIRS = [
   "packages",
@@ -20,10 +20,26 @@ export const SANDBOX_FILES = [
   "_agent-docs/_flow-config.yaml",
   ".claude/settings.json",
 ];
-const SKIPPED_DIRS = new Set(["node_modules", "dist"]);
+const ROOT_PACKAGES = "node_modules";
+const SKIPPED_DIRS = new Set([ROOT_PACKAGES, "dist"]);
+const SCOPE_MARK = "@";
+const TOOL_ENTRY_MARK = ".";
 const DEFECT_TEST = /\bit\(\s*"(D\d+):/g;
 
 export const toPosix = (path) => path.split("\\").join("/");
+
+export function isInside(parent, child) {
+  const path = relative(parent, child);
+  return (
+    path !== "" &&
+    path !== ".." &&
+    !path.startsWith(`..${sep}`) &&
+    !isAbsolute(path)
+  );
+}
+
+export const isAtOrInside = (parent, child) =>
+  relative(parent, child) === "" || isInside(parent, child);
 
 function isSkipped(path) {
   return toPosix(path)
@@ -69,19 +85,76 @@ export const isInSandboxDir = (path) =>
 
 const isSnapshotted = (path) => isInSandboxDir(path) && !isSkipped(path);
 
-// Bun links each workspace dependency inside the workspace that uses it, so a
-// sandbox recreates every link that resolves to a directory it copies.
-function snapshotLinks(root) {
-  const real = realpathSync(root);
+const realPath = (path) => realpathSync.native(path);
+
+const isDirectoryAt = (path) =>
+  existsSync(path) && statSync(path).isDirectory();
+
+function realPaths(root) {
+  const modules = join(root, ROOT_PACKAGES);
+  return {
+    root: realPath(root),
+    modules: existsSync(modules) ? realPath(modules) : null,
+  };
+}
+
+// Bun links each workspace dependency inside the workspace that uses it: a
+// workspace package is recreated against the sandbox's own copy, and a
+// third-party package keeps its absolute target in the root package store.
+function workspaceLink(root, real, path) {
+  const target = realPath(join(root, path));
+  const inRepo = toPosix(relative(real.root, target));
+  if (isSnapshotted(inRepo)) return { path, target: inRepo };
+  if (real.modules && isInside(real.modules, target)) return { path, target };
+  return null;
+}
+
+function workspaceLinks(root, real) {
   return SANDBOX_DIRS.flatMap((dir) => walkTree(root, dir).links)
-    .filter((path) => existsSync(join(root, path)))
-    .filter((path) => statSync(join(root, path)).isDirectory())
-    .map((path) => ({
-      path,
-      target: toPosix(relative(real, realpathSync(join(root, path)))),
-    }))
-    .filter((link) => isSnapshotted(link.target))
-    .sort((a, b) => a.path.localeCompare(b.path));
+    .filter((path) => isDirectoryAt(join(root, path)))
+    .map((path) => workspaceLink(root, real, path))
+    .filter((link) => link !== null);
+}
+
+// Dot entries are never linked: they hold the package manager's store and bin
+// shims, and tool caches such as Vitest's, which stays inside each sandbox.
+function packageNames(modules) {
+  return readdirSync(modules)
+    .filter((name) => !name.startsWith(TOOL_ENTRY_MARK))
+    .flatMap((name) =>
+      name.startsWith(SCOPE_MARK)
+        ? readdirSync(join(modules, name)).map((inner) => `${name}/${inner}`)
+        : [name],
+    );
+}
+
+function assertOutsideSource(real, name, target) {
+  if (isAtOrInside(real.root, target) && !isInside(real.modules, target)) {
+    throw new Error(
+      `${ROOT_PACKAGES}/${name} resolves to ${toPosix(relative(real.root, target)) || "."}, live source no sandbox can isolate; install with Bun's isolated linker, which links workspace packages inside each workspace.`,
+    );
+  }
+}
+
+function packageLinks(root, real) {
+  if (!real.modules) return [];
+  const modules = join(root, ROOT_PACKAGES);
+  return packageNames(modules)
+    .filter((name) => isDirectoryAt(join(modules, name)))
+    .map((name) => {
+      const target = realPath(join(modules, name));
+      assertOutsideSource(real, name, target);
+      return { path: `${ROOT_PACKAGES}/${name}`, target };
+    });
+}
+
+// A sandbox lives outside the repository, so it reaches third-party code only
+// through these links, and an import none of them answers fails to resolve.
+export function recordLinks(root) {
+  const real = realPaths(root);
+  return [...workspaceLinks(root, real), ...packageLinks(root, real)].sort(
+    (a, b) => a.path.localeCompare(b.path),
+  );
 }
 
 const text = (files, path) => files.get(path).toString("utf8");
@@ -141,4 +214,4 @@ export function buildCatalog(files, links = []) {
 }
 
 export const loadCatalog = (root) =>
-  buildCatalog(snapshotFiles(root), snapshotLinks(root));
+  buildCatalog(snapshotFiles(root), recordLinks(root));

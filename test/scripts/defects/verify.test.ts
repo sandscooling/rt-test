@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Git } from "../../../scripts/lib/git.mjs";
@@ -36,6 +36,45 @@ function headWithChangedD1(): Git {
     show: JSON.stringify(head),
   };
   return (args) => ({ ok: true, out: answers[args[0]!] ?? "" });
+}
+
+const TEMP_VARIABLES = ["TEMP", "TMP", "TMPDIR"] as const;
+
+async function withTemp<T>(dir: string, run: () => Promise<T>): Promise<T> {
+  const saved = TEMP_VARIABLES.map((name) => ({
+    name,
+    value: process.env[name],
+  }));
+  for (const name of TEMP_VARIABLES) process.env[name] = dir;
+  try {
+    return await run();
+  } finally {
+    for (const { name, value } of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
+const outcomeOf = (run: Promise<number>) =>
+  run.then(
+    (code) => `exited ${code}`,
+    (error: Error) => error.message,
+  );
+
+function verifyWithTemp(root: string, temp: string): Promise<string> {
+  writeRoot(root);
+  mkdirSync(temp, { recursive: true });
+  return withTemp(temp, () =>
+    outcomeOf(
+      runVerification({
+        root,
+        log: quiet,
+        runTests: fakeVitest(catalogOf()),
+        cores: 2,
+      }),
+    ),
+  );
 }
 
 describe("the verification entry point", () => {
@@ -146,5 +185,56 @@ describe("the verification entry point", () => {
       return runVerification({ root, log: quiet, runTests: probing, cores: 2 });
     });
     expect([...linked]).toEqual([true]);
+  });
+
+  it("D1112: refuses a temp directory inside the repository", async () => {
+    const outcome = await withScratch((root) =>
+      verifyWithTemp(root, join(root, "tmp")),
+    );
+    expect(outcome).toMatch(/temp directory .* lies inside/);
+  });
+
+  it("D1113: refuses a temp directory that is the repository itself", async () => {
+    const outcome = await withScratch((root) => verifyWithTemp(root, root));
+    expect(outcome).toMatch(/temp directory .* lies inside/);
+  });
+
+  it("D1129: fails when a dependency link appears during verification", async () => {
+    const outcome = await withScratch(async (root) => {
+      writeRoot(root, { ...TREE, "node_modules/dep/index.js": "" });
+      const installing = fakeVitest(catalogOf(), {
+        before: () =>
+          mkdirSync(join(root, "node_modules/late"), { recursive: true }),
+      });
+      return outcomeOf(
+        runVerification({ root, log: quiet, runTests: installing, cores: 2 }),
+      );
+    });
+    expect(outcome).toMatch(/Dependency links changed.*node_modules\/late/);
+  });
+
+  it("D1150: fails when a dependency link disappears during verification", async () => {
+    const outcome = await withScratch(async (root) => {
+      writeRoot(root, { ...TREE, "node_modules/dep/index.js": "" });
+      const uninstalling = fakeVitest(catalogOf(), {
+        before: () =>
+          rmSync(join(root, "node_modules/dep"), {
+            recursive: true,
+            force: true,
+          }),
+      });
+      return outcomeOf(
+        runVerification({ root, log: quiet, runTests: uninstalling, cores: 2 }),
+      );
+    });
+    expect(outcome).toMatch(/Dependency links changed.*node_modules\/dep/);
+  });
+
+  it("D1151: refuses a temp directory below a node_modules directory", async () => {
+    const outcome = await withScratch(async (scratch) => {
+      mkdirSync(join(scratch, "outer/node_modules"), { recursive: true });
+      return verifyWithTemp(join(scratch, "repo"), join(scratch, "outer/tmp"));
+    });
+    expect(outcome).toMatch(/outer[\\/]node_modules would answer any import/);
   });
 });

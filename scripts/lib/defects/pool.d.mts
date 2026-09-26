@@ -23,6 +23,7 @@ export declare function verifyInSandboxes(options: {
   readonly selected: readonly Defect[];
   readonly jobs: number;
   readonly runTests: RunTests;
-  readonly scratch: string;
+  /** The directory each run's sandboxes are created in, outside the repository. */
+  readonly parent: string;
   readonly log: (line: string) => void;
 }): Promise<PoolResult>;

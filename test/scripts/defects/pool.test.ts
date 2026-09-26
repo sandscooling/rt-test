@@ -1,13 +1,21 @@
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   realpathSync,
+  rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  buildCatalog,
+  type Catalog,
+} from "../../../scripts/lib/defects/catalog.mjs";
 import { treeDifference } from "../../../scripts/lib/defects/pool.mjs";
+import { openRun } from "../../../scripts/lib/defects/runs.mjs";
 import type { RunTests } from "../../../scripts/lib/defects/vitest.mjs";
 import {
   catalogOf,
@@ -22,8 +30,32 @@ import {
   withScratch,
 } from "./harness.js";
 
+const PACKAGE = "node_modules/dep";
+const LEFTOVER = "rt-test-verify-defects-999999-planted";
+
+const quiet = () => {};
+
 const isSandbox = (sandbox: string, index: number) =>
   sandbox.endsWith(`sandbox-${index}`);
+
+function storeIn(parent: string, name: string): string {
+  mkdirSync(join(parent, "store", name), { recursive: true });
+  return realpathSync.native(join(parent, "store", name));
+}
+
+const packageCatalog = (target: string): Catalog =>
+  buildCatalog(filesOf(TREE), [{ path: PACKAGE, target }]);
+
+function sweepWith(
+  parent: string,
+  planted: string,
+  running: (pid: number) => boolean,
+): string[] {
+  const lines: string[] = [];
+  mkdirSync(join(parent, planted));
+  openRun(parent, (line) => lines.push(line), running);
+  return lines;
+}
 
 function writeIn(sandbox: string, path: string): void {
   mkdirSync(dirname(join(sandbox, path)), { recursive: true });
@@ -225,5 +257,130 @@ describe("the sandbox pool", () => {
       inSandboxes(scratch, relinking, 1, catalog),
     );
     expect(result.ok).toBe(false);
+  });
+
+  it("D1117: resolves each sandbox's package link to its absolute target", async () => {
+    const resolved = new Set<boolean>();
+    await withScratch((parent) => {
+      const store = storeIn(parent, "dep");
+      const catalog = packageCatalog(store);
+      const probing = fakeVitest(catalog, {
+        before: ({ sandbox }) =>
+          resolved.add(realpathSync.native(join(sandbox, PACKAGE)) === store),
+      });
+      return inSandboxes(parent, probing, 2, catalog);
+    });
+    expect([...resolved]).toEqual([true]);
+  });
+
+  it("D1118: fails a sandbox whose package link a run pointed elsewhere", async () => {
+    const result = await withScratch((parent) => {
+      const catalog = packageCatalog(storeIn(parent, "dep"));
+      const elsewhere = storeIn(parent, "other");
+      const relinking = fakeVitest(catalog, {
+        before: ({ sandbox, pattern }) => {
+          if (pattern !== "D2") return;
+          unlinkSync(join(sandbox, PACKAGE));
+          symlinkSync(elsewhere, join(sandbox, PACKAGE), "junction");
+        },
+      });
+      return inSandboxes(parent, relinking, 1, catalog);
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("D1119: fails a sandbox whose package link a run removed", async () => {
+    const result = await withScratch((parent) => {
+      const catalog = packageCatalog(storeIn(parent, "dep"));
+      const unlinking = fakeVitest(catalog, {
+        before: ({ sandbox, pattern }) => {
+          if (pattern === "D2") unlinkSync(join(sandbox, PACKAGE));
+        },
+      });
+      return inSandboxes(parent, unlinking, 1, catalog);
+    });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("a defect run's directory", () => {
+  it("D1110: names the run after its owning process", async () => {
+    const name = await withScratch(async (parent) =>
+      basename(openRun(parent, quiet)),
+    );
+    expect(name).toMatch(
+      new RegExp(`^rt-test-verify-defects-${process.pid}-.`),
+    );
+  });
+
+  it("D1111: creates the run under the parent's real path, never the path it was given", async () => {
+    const [home, real] = await withScratch(async (scratch) => {
+      mkdirSync(join(scratch, "real"));
+      linkIn(scratch, "alias", "real");
+      const run = openRun(join(scratch, "alias"), quiet);
+      return [dirname(run), realpathSync.native(join(scratch, "real"))];
+    });
+    expect(home).toBe(real);
+  });
+
+  it("D1122: removes a leftover run whose process has exited", async () => {
+    const left = await withScratch(async (parent) => {
+      sweepWith(parent, LEFTOVER, () => false);
+      return existsSync(join(parent, LEFTOVER));
+    });
+    expect(left).toBe(false);
+  });
+
+  it("D1123: names each leftover run it removes by its path", async () => {
+    const { lines, path } = await withScratch(async (parent) => ({
+      lines: sweepWith(parent, LEFTOVER, () => false),
+      path: join(realpathSync.native(parent), LEFTOVER),
+    }));
+    expect(lines).toEqual([expect.stringContaining(path)]);
+  });
+
+  it("D1124: keeps a leftover run whose process is still alive", async () => {
+    const kept = await withScratch(async (parent) => {
+      sweepWith(parent, LEFTOVER, () => true);
+      return existsSync(join(parent, LEFTOVER));
+    });
+    expect(kept).toBe(true);
+  });
+
+  it("D1125: leaves an entry not named like a run untouched", async () => {
+    const kept = await withScratch(async (parent) => {
+      sweepWith(parent, "rt-test-defects-abc123", () => false);
+      return existsSync(join(parent, "rt-test-defects-abc123"));
+    });
+    expect(kept).toBe(true);
+  });
+
+  it("D1126: logs nothing for a leftover another run removed first", async () => {
+    const lines = await withScratch(async (parent) =>
+      sweepWith(parent, LEFTOVER, () => {
+        rmSync(join(parent, LEFTOVER), { recursive: true });
+        return false;
+      }),
+    );
+    expect(lines).toEqual([]);
+  });
+
+  it("D1152: keeps a leftover run whose process id cannot be probed", async () => {
+    const planted = "rt-test-verify-defects-99999999999-planted";
+    const kept = await withScratch(async (parent) => {
+      mkdirSync(join(parent, planted));
+      openRun(parent, quiet);
+      return existsSync(join(parent, planted));
+    });
+    expect(kept).toBe(true);
+  });
+
+  it("D1156: names a removed leftover's process id apart from its path", async () => {
+    const rest = await withScratch(async (parent) => {
+      const path = join(realpathSync.native(parent), LEFTOVER);
+      const lines = sweepWith(parent, LEFTOVER, () => false);
+      return lines.map((line) => line.replace(path, ""));
+    });
+    expect(rest).toEqual([expect.stringContaining("999999")]);
   });
 });

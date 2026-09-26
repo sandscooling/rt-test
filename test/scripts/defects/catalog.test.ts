@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { rmSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildCatalog,
   loadCatalog,
   snapshotFiles,
+  type Link,
 } from "../../../scripts/lib/defects/catalog.mjs";
 import {
   CALC_TEST,
@@ -20,6 +21,20 @@ import {
   withScratch,
   writeRoot,
 } from "./harness.js";
+
+const STORE = "node_modules/.bun/dep@1.0.0/node_modules/dep";
+const STORE_TREE = { ...TREE, [`${STORE}/index.js`]: "export {};\n" };
+
+function linksOf(root: string): readonly Link[] | string {
+  try {
+    return loadCatalog(root).links;
+  } catch (error) {
+    return String(error);
+  }
+}
+
+const pathsOf = (links: readonly Link[] | string) =>
+  typeof links === "string" ? links : links.map((link) => link.path);
 
 describe("the defect catalog", () => {
   it("D900: rejects a named test that has no defect record", () => {
@@ -83,13 +98,85 @@ describe("the defect catalog", () => {
     ]);
   });
 
-  it("D985: leaves out a link to a directory the sandbox does not copy", async () => {
+  it("D985: leaves out a link to a repository directory the sandbox does not copy", async () => {
     const links = await withScratch(async (root) => {
-      writeRoot(root, { ...TREE, "node_modules/dep/index.js": "export {};\n" });
-      linkIn(root, "packages/daemon/node_modules/dep", "node_modules/dep");
+      writeRoot(root, { ...TREE, "vendor/dep/index.js": "export {};\n" });
+      linkIn(root, "packages/daemon/node_modules/dep", "vendor/dep");
       return loadCatalog(root).links;
     });
     expect(links).toEqual([]);
+  });
+
+  it("D1116: records a workspace link into the root package store by its absolute target", async () => {
+    const [links, store] = await withScratch(async (root) => {
+      writeRoot(root, STORE_TREE);
+      linkIn(root, "packages/daemon/node_modules/dep", STORE);
+      return [linksOf(root), realpathSync.native(join(root, STORE))];
+    });
+    expect(links).toEqual([
+      { path: "packages/daemon/node_modules/dep", target: store },
+    ]);
+  });
+
+  it("D1114: records each package of a scope in the root package store", async () => {
+    const paths = await withScratch(async (root) => {
+      writeRoot(root, { ...TREE, "node_modules/@scope/pkg/index.js": "" });
+      return pathsOf(linksOf(root));
+    });
+    expect(paths).toEqual(["node_modules/@scope/pkg"]);
+  });
+
+  it("D1115: records no root package entry whose name starts with a dot", async () => {
+    const paths = await withScratch(async (root) => {
+      writeRoot(root, {
+        ...TREE,
+        "node_modules/.vite/vitest/results.json": "{}\n",
+        "node_modules/pkg/index.js": "",
+      });
+      return pathsOf(linksOf(root));
+    });
+    expect(paths).toEqual(["node_modules/pkg"]);
+  });
+
+  it("D1120: refuses a root package entry that resolves into repository source", async () => {
+    const outcome = await withScratch(async (root) => {
+      writeRoot(root, LINKED_TREE);
+      linkIn(root, "node_modules/@rt-test/core", LINKED);
+      const links = linksOf(root);
+      return typeof links === "string" ? links : "recorded";
+    });
+    expect(outcome).toMatch(
+      /node_modules\/@rt-test\/core resolves to packages\/core.*isolated linker/,
+    );
+  });
+
+  it("D1154: refuses a root package entry that resolves to the repository root itself", async () => {
+    const outcome = await withScratch(async (root) => {
+      writeRoot(root);
+      linkIn(root, "node_modules/self", ".");
+      const links = linksOf(root);
+      return typeof links === "string" ? links : "recorded";
+    });
+    expect(outcome).toMatch(/node_modules\/self resolves to \., live source/);
+  });
+
+  it("D1155: skips a root package entry whose target is gone", async () => {
+    const outcome = await withScratch(async (root) => {
+      writeRoot(root, { ...TREE, "vendor/gone/index.js": "" });
+      linkIn(root, "node_modules/gone", "vendor/gone");
+      rmSync(join(root, "vendor/gone"), { recursive: true });
+      return pathsOf(linksOf(root));
+    });
+    expect(outcome).toEqual([]);
+  });
+
+  it("D1121: accepts a root package entry that resolves into the root package store", async () => {
+    const outcome = await withScratch(async (root) => {
+      writeRoot(root, STORE_TREE);
+      linkIn(root, "node_modules/dep", STORE);
+      return linksOf(root);
+    });
+    expect(pathsOf(outcome)).toEqual(["node_modules/dep"]);
   });
 
   it("D996: leaves out a link to a build output the sandbox does not copy", async () => {

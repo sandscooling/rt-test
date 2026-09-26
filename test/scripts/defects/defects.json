@@ -134,10 +134,10 @@
   },
   {
     "id": "D919",
-    "defect": "The sandboxes are left in the scratch directory when the run ends.",
+    "defect": "The sandboxes are left in the run directory when the run ends.",
     "file": "scripts/lib/defects/pool.mjs",
-    "old": "rmSync(run, { recursive: true, force: true });",
-    "new": "void run;"
+    "old": "rmSync(ctx.run, { recursive: true, force: true });",
+    "new": "void ctx.run;"
   },
   {
     "id": "D920",
@@ -388,21 +388,21 @@
     "id": "D984",
     "defect": "The snapshot drops every workspace link, so a sandboxed workspace cannot resolve its workspace dependencies.",
     "file": "scripts/lib/defects/catalog.mjs",
-    "old": ".filter((link) => isSnapshotted(link.target))",
-    "new": ".filter(() => false)"
+    "old": "if (isSnapshotted(inRepo)) return { path, target: inRepo };",
+    "new": "if (isSnapshotted(inRepo)) return null;"
   },
   {
     "id": "D985",
-    "defect": "A link to a directory the sandbox does not copy is recreated, and in the sandbox it dangles.",
+    "defect": "A link to a repository directory the sandbox neither copies nor reaches through the package store is recreated, and in the sandbox it dangles.",
     "file": "scripts/lib/defects/catalog.mjs",
-    "old": ".filter((link) => isSnapshotted(link.target))",
-    "new": ".filter(() => true)"
+    "old": "return { path, target };\n  return null;",
+    "new": "return { path, target };\n  return { path, target };"
   },
   {
     "id": "D986",
     "defect": "A dangling link in a workspace's node_modules crashes the snapshot.",
     "file": "scripts/lib/defects/catalog.mjs",
-    "old": ".filter((path) => existsSync(join(root, path)))",
+    "old": ".filter((path) => isDirectoryAt(join(root, path)))",
     "new": ".filter(Boolean)"
   },
   {
@@ -423,7 +423,7 @@
     "id": "D989",
     "defect": "A sandbox link takes the root-relative target verbatim, so it resolves beside the link instead of to the sandbox's copy.",
     "file": "scripts/lib/defects/pool.mjs",
-    "old": "relative(dirname(path), join(dir, link.target)),",
+    "old": "relative(dirname(path), recordedTarget(dir, link)),",
     "new": "link.target,"
   },
   {
@@ -444,7 +444,7 @@
     "id": "D992",
     "defect": "A run that points a sandbox's workspace link elsewhere passes the snapshot check.",
     "file": "scripts/lib/defects/pool.mjs",
-    "old": "targetIn(dir, link.path) !== link.target",
+    "old": "actualTarget(dir, link.path) !== recordedTarget(dir, link)",
     "new": "false"
   },
   {
@@ -467,5 +467,194 @@
     "file": "scripts/lib/defects/catalog.mjs",
     "old": " && !isSkipped(path);",
     "new": ";"
+  },
+  {
+    "id": "D1114",
+    "defect": "A scope directory in the root package store is recorded as one link, so the sandbox holds no link for the packages inside it.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "name.startsWith(SCOPE_MARK)",
+    "new": "false"
+  },
+  {
+    "id": "D1115",
+    "defect": "A root package entry whose name starts with a dot (the package store, bin shims, a tool cache) is linked into every sandbox.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".filter((name) => !name.startsWith(TOOL_ENTRY_MARK))",
+    "new": ".filter(Boolean)"
+  },
+  {
+    "id": "D1116",
+    "defect": "A workspace link into the root package store is dropped, so a sandboxed workspace cannot resolve its third-party dependency.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "if (real.modules && isInside(real.modules, target)) return { path, target };",
+    "new": "if (false) return { path, target };"
+  },
+  {
+    "id": "D1120",
+    "defect": "A root package entry resolving into repository source is recorded, so a sandbox reads live source instead of stopping the run.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "if (isAtOrInside(real.root, target) && !isInside(real.modules, target)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1121",
+    "defect": "A root package entry resolving into the root package store is refused as live source, so no install under the isolated linker can run the check.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "if (isAtOrInside(real.root, target) && !isInside(real.modules, target)) {",
+    "new": "if (isAtOrInside(real.root, target)) {"
+  },
+  {
+    "id": "D1117",
+    "defect": "A sandbox's package link joins its absolute target onto the sandbox path, so it points inside the sandbox instead of at the installed package.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "const recordedTarget = (dir, link) => resolve(dir, link.target);",
+    "new": "const recordedTarget = (dir, link) => join(dir, link.target);"
+  },
+  {
+    "id": "D1118",
+    "defect": "The snapshot check compares targets only for links into the sandbox's own copy, so a run that points a package link elsewhere passes.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "actualTarget(dir, link.path) !== recordedTarget(dir, link)",
+    "new": "recordedTarget(dir, link).startsWith(dir) &&\n      actualTarget(dir, link.path) !== recordedTarget(dir, link)"
+  },
+  {
+    "id": "D1119",
+    "defect": "The snapshot check walks only the links into the sandbox's own copy, so a run that removes a package link passes.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "for (const link of expected) {",
+    "new": "for (const link of expected.filter((each) => recordedTarget(dir, each).startsWith(dir))) {"
+  },
+  {
+    "id": "D1110",
+    "defect": "A run's directory name leaves out its owning process id, so a leftover run cannot be told apart from a live one.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "`${RUN_PREFIX}${process.pid}-`",
+    "new": "RUN_PREFIX"
+  },
+  {
+    "id": "D1111",
+    "defect": "A run is created under the parent path as given (on Windows the 8.3 short form of the temp directory) rather than its real path.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "const fullPath = (dir) => realpathSync.native(dir);",
+    "new": "const fullPath = (dir) => dir;"
+  },
+  {
+    "id": "D1124",
+    "defect": "The sweep removes every run-named entry without asking whether its process is alive, deleting a concurrent run's sandboxes.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "if (pid !== undefined && !running(Number(pid))) {",
+    "new": "if (pid !== undefined) {"
+  },
+  {
+    "id": "D1125",
+    "defect": "The sweep treats an entry not named like a run as a leftover of process 0 and removes it.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "const pid = RUN_NAME.exec(name)?.[1];",
+    "new": "const pid = RUN_NAME.exec(name)?.[1] ?? \"0\";"
+  },
+  {
+    "id": "D1122",
+    "defect": "The sweep logs a leftover run as removed but leaves it on disk.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "rmSync(run, { recursive: true });",
+    "new": "void run;"
+  },
+  {
+    "id": "D1123",
+    "defect": "The sweep removes a leftover run without naming it.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "log(`Removed leftover defect run ${run}: process ${pid} has exited.`);",
+    "new": "void pid;"
+  },
+  {
+    "id": "D1126",
+    "defect": "The removal ignores a leftover that is already gone, so the sweep claims to have removed a run another run removed first.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "rmSync(run, { recursive: true });",
+    "new": "rmSync(run, { recursive: true, force: true });"
+  },
+  {
+    "id": "D1127",
+    "defect": "A run whose own directory could not be removed reports success.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "ctx.failures.push(`could not remove ${ctx.run}: ${error.message}`);",
+    "new": "void error;"
+  },
+  {
+    "id": "D1128",
+    "defect": "A failure to remove the run's directory throws out of the pool, discarding the detected, undetected and failure lists.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "ctx.failures.push(`could not remove ${ctx.run}: ${error.message}`);",
+    "new": "throw error;"
+  },
+  {
+    "id": "D1112",
+    "defect": "A temp directory inside the repository is accepted, so each sandbox resolves an unlinked import upward into the live tree.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (isAtOrInside(repo, parent)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1113",
+    "defect": "A temp directory that is the repository root itself is accepted, since the guard refuses only a directory strictly inside it.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (isAtOrInside(repo, parent)) {",
+    "new": "if (repo !== parent && isAtOrInside(repo, parent)) {"
+  },
+  {
+    "id": "D1129",
+    "defect": "A dependency link installed during the run goes unnoticed, so results measured against changed dependencies pass.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "const relinked = linkDifference(catalog.links, recordLinks(root));",
+    "new": "const relinked = null;"
+  },
+  {
+    "id": "D1150",
+    "defect": "A dependency link removed during the run goes unnoticed, so results measured without it pass.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "before.find((link) => !after.includes(link)) ??",
+    "new": ""
+  },
+  {
+    "id": "D1151",
+    "defect": "A temp directory below a node_modules directory is accepted, so an import no recorded link answers resolves there instead of failing.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (stray) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1152",
+    "defect": "A probe error other than ESRCH (an out-of-range pid) reads as an exited process, so its run is removed.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "return error.code !== NO_SUCH_PROCESS;",
+    "new": "return false;"
+  },
+  {
+    "id": "D1153",
+    "defect": "A leftover whose removal fails with ENOENT while another run is still removing it is logged as a failed removal.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "if (error.code !== NOT_FOUND && existsSync(run)) {",
+    "new": "if (existsSync(run)) {"
+  },
+  {
+    "id": "D1154",
+    "defect": "A root package entry resolving to the repository root itself is recorded, so every sandbox links the whole live tree.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "if (isAtOrInside(real.root, target) && !isInside(real.modules, target)) {",
+    "new": "if (isInside(real.root, target) && !isInside(real.modules, target)) {"
+  },
+  {
+    "id": "D1155",
+    "defect": "A dangling root node_modules link (mid-install) crashes the catalog instead of being skipped.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".filter((name) => isDirectoryAt(join(modules, name)))",
+    "new": ".filter(Boolean)"
+  },
+  {
+    "id": "D1156",
+    "defect": "The sweep names a removed leftover without its process id.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "log(`Removed leftover defect run ${run}: process ${pid} has exited.`);",
+    "new": "log(`Removed leftover defect run ${run}.`);"
   }
 ]

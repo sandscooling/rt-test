@@ -1,29 +1,17 @@
 import {
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { toPosix, walkTree } from "./catalog.mjs";
+import { dirname, join, relative, resolve } from "node:path";
+import { walkTree } from "./catalog.mjs";
+import { openRun } from "./runs.mjs";
 import { baselineProblem, detectionProblem } from "./vitest.mjs";
 
 const VITEST_RESULTS_CACHE = /(^|\/)node_modules\/\.vite\/vitest(\/|$)/;
-
-function assertInside(parent, child) {
-  const path = relative(parent, child);
-  if (
-    !path ||
-    path.startsWith(`..${sep}`) ||
-    path === ".." ||
-    isAbsolute(path)
-  ) {
-    throw new Error("Refusing a sandbox outside the task scratch directory.");
-  }
-}
 
 export function writeTree(dir, files) {
   for (const [path, content] of files) {
@@ -33,6 +21,10 @@ export function writeTree(dir, files) {
   }
 }
 
+// A copied directory's target is repository-relative, so it resolves to this
+// sandbox's own copy; a root package's target is absolute and shared.
+const recordedTarget = (dir, link) => resolve(dir, link.target);
+
 // Node resolves a junction's relative target against the link's directory,
 // so one relative target serves a Windows junction and a POSIX symlink.
 function writeLinks(dir, links) {
@@ -40,7 +32,7 @@ function writeLinks(dir, links) {
     const path = join(dir, link.path);
     mkdirSync(dirname(path), { recursive: true });
     symlinkSync(
-      relative(dirname(path), join(dir, link.target)),
+      relative(dirname(path), recordedTarget(dir, link)),
       path,
       "junction",
     );
@@ -55,18 +47,16 @@ function readTree(dir) {
   );
 }
 
-const targetIn = (dir, path) =>
-  toPosix(
-    relative(
-      dir,
-      resolve(dirname(join(dir, path)), readlinkSync(join(dir, path))),
-    ),
-  );
+const actualTarget = (dir, path) =>
+  resolve(dirname(join(dir, path)), readlinkSync(join(dir, path)));
 
 function linkDifference(dir, expected) {
   const actual = walkTree(dir).links;
   for (const link of expected) {
-    if (!actual.includes(link.path) || targetIn(dir, link.path) !== link.target)
+    if (
+      !actual.includes(link.path) ||
+      actualTarget(dir, link.path) !== recordedTarget(dir, link)
+    )
       return link.path;
   }
   return (
@@ -160,6 +150,14 @@ async function verifyAll(ctx, slots) {
   if (after) throw new Error(`after every mutation: ${after}.`);
 }
 
+function removeRun(ctx) {
+  try {
+    rmSync(ctx.run, { recursive: true, force: true });
+  } catch (error) {
+    ctx.failures.push(`could not remove ${ctx.run}: ${error.message}`);
+  }
+}
+
 export async function verifyInSandboxes({
   files,
   links = [],
@@ -168,12 +166,10 @@ export async function verifyInSandboxes({
   selected,
   jobs,
   runTests,
-  scratch,
+  parent,
   log,
 }) {
-  mkdirSync(scratch, { recursive: true });
-  const run = mkdtempSync(join(scratch, "defects-"));
-  assertInside(scratch, run);
+  const run = openRun(parent, log);
   const ctx = {
     files,
     links,
@@ -198,7 +194,7 @@ export async function verifyInSandboxes({
   } catch (error) {
     ctx.failures.push(error.message);
   } finally {
-    rmSync(run, { recursive: true, force: true });
+    removeRun(ctx);
   }
   const detected = new Set(ctx.detected);
   const undetected = selected

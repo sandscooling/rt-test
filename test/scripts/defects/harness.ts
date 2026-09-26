@@ -181,7 +181,7 @@ export async function withScratch<T>(
 }
 
 export function inSandboxes(
-  scratch: string,
+  parent: string,
   runTests: RunTests,
   jobs: number,
   catalog: Catalog = catalogOf(),
@@ -193,7 +193,7 @@ export function inSandboxes(
     selected: catalog.defects,
     jobs,
     runTests,
-    scratch,
+    parent,
     log: () => {},
   });
 }

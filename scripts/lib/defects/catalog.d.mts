@@ -12,6 +12,7 @@ export interface Defect {
 
 export interface Link {
   readonly path: string;
+  /** Repository-relative for a copied directory, absolute into the package store. */
   readonly target: string;
 }
 
@@ -25,6 +26,8 @@ export declare const SANDBOX_DIRS: readonly string[];
 export declare const SANDBOX_FILES: readonly string[];
 
 export declare function toPosix(path: string): string;
+export declare function isInside(parent: string, child: string): boolean;
+export declare function isAtOrInside(parent: string, child: string): boolean;
 export declare function walkTree(
   root: string,
   dir?: string,
@@ -34,4 +37,5 @@ export declare function buildCatalog(
   files: Files,
   links?: readonly Link[],
 ): Catalog;
+export declare function recordLinks(root: string): Link[];
 export declare function loadCatalog(root: string): Catalog;

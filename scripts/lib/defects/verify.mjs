@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
-import { availableParallelism } from "node:os";
-import { join } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { gitIn } from "../git.mjs";
-import { loadCatalog, snapshotFiles } from "./catalog.mjs";
+import {
+  isAtOrInside,
+  loadCatalog,
+  recordLinks,
+  snapshotFiles,
+} from "./catalog.mjs";
 import { headRecordsIn, requireChangeset, selectChanged } from "./changed.mjs";
 import { treeDifference, verifyInSandboxes } from "./pool.mjs";
 import { createVitestRunner, testFilesOf } from "./vitest.mjs";
@@ -11,7 +17,7 @@ import { createVitestRunner, testFilesOf } from "./vitest.mjs";
 const MIN_JOBS = 1;
 const SHARE_OF_CORES = 3 / 4;
 const DECIMAL_DIGITS = /^\d+$/;
-const SCRATCH_DIR = "_agent-docs/.scratch";
+const PACKAGES_DIR = "node_modules";
 
 export const defaultJobs = (cores) =>
   Math.max(MIN_JOBS, Math.floor(cores * SHARE_OF_CORES));
@@ -58,11 +64,56 @@ function pickChanged(catalog, git, log) {
   return picks.map((pick) => pick.defect);
 }
 
+function packagesAbove(dir) {
+  for (let at = dir; ; at = dirname(at)) {
+    const packages = join(at, PACKAGES_DIR);
+    if (existsSync(packages)) return packages;
+    if (dirname(at) === at) return null;
+  }
+}
+
+// A sandbox inside the repository, or below any node_modules, would resolve an
+// unlinked import upward instead of failing.
+function sandboxParent(root) {
+  const parent = realpathSync.native(tmpdir());
+  const repo = realpathSync.native(root);
+  if (isAtOrInside(repo, parent)) {
+    throw new Error(
+      `The temp directory ${parent} lies inside ${repo}; point it outside the repository.`,
+    );
+  }
+  const stray = packagesAbove(parent);
+  if (stray) {
+    throw new Error(
+      `${stray} would answer any import a sandbox under ${parent} leaves unlinked; remove it or point the temp directory elsewhere.`,
+    );
+  }
+  return parent;
+}
+
+const linkText = (link) => `${link.path} -> ${link.target}`;
+
+function linkDifference(expected, actual) {
+  const before = expected.map(linkText);
+  const after = actual.map(linkText);
+  return (
+    after.find((link) => !before.includes(link)) ??
+    before.find((link) => !after.includes(link)) ??
+    null
+  );
+}
+
 function assertLiveUnchanged(root, catalog, log) {
   const changed = treeDifference(catalog.files, snapshotFiles(root));
   if (changed) {
     throw new Error(
       `Working files changed during verification (${changed}); rerun on a stable revision.`,
+    );
+  }
+  const relinked = linkDifference(catalog.links, recordLinks(root));
+  if (relinked) {
+    throw new Error(
+      `Dependency links changed during verification (${relinked}); rerun once no install is running.`,
     );
   }
   const watched = new Set([
@@ -124,7 +175,7 @@ export async function runVerification({
     selected,
     jobs: options.jobs,
     runTests,
-    scratch: join(root, SCRATCH_DIR),
+    parent: sandboxParent(root),
     log,
   });
   assertLiveUnchanged(root, catalog, log);
