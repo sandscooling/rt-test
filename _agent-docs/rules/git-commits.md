@@ -27,4 +27,4 @@ and the time window it measured.>
 
 ## After the commit
 
-Push only when the owner asks to publish, and report the repository URL and the commit.
+The orchestrator pushes `main` after each landed lane; otherwise push only when the owner asks to publish, and report the repository URL and the commit.

@@ -122,20 +122,20 @@ Add a dependency only as P9 directs. After any `bun install` or `bun add`, run `
 
 ### Orchestrated Gate Delegation
 
-`_agent-docs/crew.md` decides whether you are a lane member and owns your file set, your report and where questions go. This section maps this document's gates onto a lane, and it is inert when you are not in one.
+`_agent-docs/crew.md` decides whether you are a lane member and owns your role, your report and where questions go. This section maps this document's gates onto a lane and owns the claims that make up your lane's file set, and it is inert when you are not in one.
 
 A lane shares one checkout with its siblings, so a repo-wide gate reads every lane's code at once. The gates split by scope:
 
-| Gate                                                                                                                                                                   | Owner            |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| § Targeted Typecheck, § Targeted Test Validation, targeted lint over the files you touched, `bun run test:defects` to prove your named defects, § Citation Shift Check | the member       |
-| `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file                         | the orchestrator |
+| Gate                                                                                                                                                                                                                                                   | Owner            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| § Targeted Typecheck, § Targeted Test Validation, targeted lint over the files you touched, `bun run test:defects` to prove your named defects, § Citation Shift Check                                                                                 | the member       |
+| `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file; a worktree lane's review runs `bun run check` in its own tree (`_agent-docs/crew.md` § Worktree lanes) | the orchestrator |
 
-`bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your file set.
+`bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your lane's claims.
 
 #### Claim a file before you touch it
 
-- **Claim every file before your first edit to it**: `node scripts/file-claims.mjs claim --lane <your group> --thread <your threadId> <paths>`. `CLAIMED` or `HELD` means the path is your lane's. Claim a file a tool writes for you the same way.
+- **Claim every file before your first edit to it**: `node scripts/file-claims.mjs claim --lane <your group> --thread <your threadId> <paths>`. `CLAIMED` or `HELD` means the path is your lane's. Claim a file a tool writes for you the same way. A claim made in any worktree lands in the main checkout's store, so it conflicts across trees.
 - **`CONFLICT` means another lane holds the path: edit nothing in the set.** Send the orchestrator the `CONFLICT` lines and wait. Never merge, edit around, revert or check out the other lane's file.
 - **`REFUSED` means the path is orchestrator-owned and no grant covers it for your lane.** Report the exact text you need, and the orchestrator writes it or grants the path to your lane (`grant --lane <lane> --thread <threadId> <path>...`, one lane per path).
 - **A claim cannot see an edit nobody claimed.** Before your first edit to a `CLAIMED` path, run `git status --porcelain -- <path>`; a path already dirty is another session's unclaimed edit, so report it as a conflict.

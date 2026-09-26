@@ -474,5 +474,40 @@
     "file": "scripts/lib/orchestration/doc-integrity.mjs",
     "old": "export const GATE_TIMEOUT_MS = 30_000;",
     "new": "export const GATE_TIMEOUT_MS = 40_000;"
+  },
+  {
+    "id": "D700",
+    "defect": "A worktree keeps its claims in its own tree, so a lane there and a lane in the main checkout both claim one file.",
+    "file": "scripts/lib/orchestration/claims-cli.mjs",
+    "old": "return basename(commonDir) === \".git\" ? dirname(commonDir) : root;",
+    "new": "return root;"
+  },
+  {
+    "id": "D701",
+    "defect": "The FILE_CLAIMS_DIR override is ignored, so a caller cannot point the store elsewhere.",
+    "file": "scripts/lib/orchestration/claims-cli.mjs",
+    "old": "env.FILE_CLAIMS_DIR ?? join(",
+    "new": "join("
+  },
+  {
+    "id": "D702",
+    "defect": "A root outside any git checkout crashes the claims command instead of using its own store.",
+    "file": "scripts/lib/orchestration/claims-cli.mjs",
+    "old": "  } catch {\n    return root;\n  }",
+    "new": "  } catch {\n    throw new Error(\"not a git checkout\");\n  }"
+  },
+  {
+    "id": "D703",
+    "defect": "A grant naming a claimable path still grants the request's other paths.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "  if (refused.length > 0) return { ok: false, ...EMPTY, refused };\n  const others = listGrants(dir)",
+    "new": "  if (refused.length === unique.length) return { ok: false, ...EMPTY, refused };\n  unique.splice(0, unique.length, ...unique.filter((p) => !refused.some((r) => r.path === p)));\n  const others = listGrants(dir)"
+  },
+  {
+    "id": "D704",
+    "defect": "Whole files are staged before the hunk patches are checked, so a refused hunk leaves the lane half staged.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "const check = [\"apply\", \"--cached\", \"--check\", \"--unidiff-zero\", \"-\"];",
+    "new": "const check = [\"apply\", \"--cached\", \"--check\", \"--unidiff-zero\", \"-\"];\n  if (plan.whole.length > 0) gitOk(root, [\"add\", \"-A\", \"--\", ...plan.whole.map((w) => w.path)]);"
   }
 ]

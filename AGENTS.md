@@ -10,14 +10,20 @@ Read `_agent-docs/project-context.md` before writing code: it holds this project
 
 ## Sessions and lanes
 
-Run `session_list` at the start of a session and read your own row. If your `group` is set and is not `orchestrator`, you are a lane member: follow `_agent-docs/crew.md`. Otherwise you are the owner's discussion session: follow `.claude/skills/orchestrator/SKILL.md`, and delegate each agreed change to a lane of child sessions rather than building it in the discussion thread.
+Run `session_list` at the start of a session and read your own row. If your `group` is set and is not `orchestrator`, you are a lane member: follow `_agent-docs/crew.md` and the skill your dispatch names. Otherwise you are the owner's discussion session: follow `.claude/skills/orchestrator/SKILL.md`, and delegate each agreed change to a lane of child sessions rather than building it in the discussion thread.
+
+## Workflow entry points
+
+- New work, a change of course, or a defect found outside a ticket goes to `change-request`, which sizes it into an inline fix or a planning proposal.
+- Planned work runs as a ticket, each step in its own session: `create-ticket` drafts it, `dev-ticket` builds it, `create-tests` writes and proves its tests, and `review-changes` reviews it cold.
+- Write or edit a skill, agent or rule doc by `.claude/skills/writing-great-skills/`, and keep `node scripts/check-skill-wiring.mjs` green.
 
 ## Working conventions
 
 - Inspect the working tree before editing. Preserve changes made by users and other sessions.
 - Read all existing target files before the first edit of a multi-file change.
 - Use `rg` for content searches. Include untracked files when checking references. Enumerate tracked files with `git ls-files`; avoid recursive scans through dependency directories.
-- Make direct changes for explicitly requested work within your role. Do not introduce a ticket workflow or subagent fan-out unless requested; lanes of sessions are the delegation mechanism.
+- Make direct changes for explicitly requested work within your role. Use subagents only where a skill directs them or the owner asks; lanes of sessions are the delegation mechanism.
 - When asked for thoughts or an audit, give findings before implementing changes.
 - If a rule blocks the requested outcome, check its factual basis and intended scope. Surface a real product tradeoff rather than silently working around it.
 - Write durable instructions as actions that state only current facts. Keep history, provenance, and retired or superseded entries out of rules, docs, and comments; git and decision records hold them, and a stale line reads as an instruction.
@@ -54,7 +60,7 @@ Run `session_list` at the start of a session and read your own row. If your `gro
 - Work and commit on `main`. A worktree lane commits on its `wt/<n>` branch, which the orchestrator merges into `main` with a merge commit.
 - Stage only files created or edited for the current task. Inspect the staged diff before committing.
 - Use concise conventional commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, and `chore:`. Explain meaningful behavior and validation in the body.
-- When asked to publish work, push its branch and report the repository URL and commit.
+- The orchestrator pushes `main` after each landed lane. Otherwise, when asked to publish work, push its branch and report the repository URL and commit.
 - Keep credentials, local environment files, generated reports, private customer data, and code copied from unrelated private repositories out of commits.
 - Keep `private: true` until an npm release is explicitly authorized. Public GitHub hosting does not authorize a package release.
 

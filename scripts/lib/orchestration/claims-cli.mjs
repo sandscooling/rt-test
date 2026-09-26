@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   CLAIMS_DIR,
   claimFailureAdvice,
@@ -27,8 +28,24 @@ const USAGE = [
 
 class UsageError extends Error {}
 
+// Every worktree shares the main checkout's store, so a claim in one tree conflicts with the
+// same path claimed in another.
+export function mainCheckoutRoot(root) {
+  let commonDir;
+  try {
+    commonDir = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    return root;
+  }
+  return basename(commonDir) === ".git" ? dirname(commonDir) : root;
+}
+
 export const claimsDirFor = (root, env = process.env) =>
-  env.FILE_CLAIMS_DIR ?? join(root, CLAIMS_DIR);
+  env.FILE_CLAIMS_DIR ?? join(mainCheckoutRoot(root), CLAIMS_DIR);
 
 function parseArgs(argv) {
   const flags = { any: false };
