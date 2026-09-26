@@ -159,6 +159,8 @@ It stages every file the lane claims. Add `--also <path>` for each path in the m
 
 A lane can run in its own git worktree, so its edits and gates never touch a sibling's tree. T3 Code attaches sessions to a worktree but never creates, recreates, or deletes one; you do.
 
+**A build lane that starts while another build lane is live runs in a worktree.** A ticket lane moves there at its dev dispatch, since `create-ticket` writes only planning files; a `change-request` lane spawns its `-cr` member there, because an inline fix is built by that same session and a session never changes tree. In one shared tree, each lane's half-built state reds the other's gates and defect runs.
+
 - **Create** from the main checkout: `git worktree add C:\source\rt-test-wt\wt-<n> -b wt/<n> main`, then `bun install --frozen-lockfile` in the new tree. It branches from `main`'s last commit, so commit what the lane needs first. Reuse a tree for the next lane rather than removing it.
 - **Attach**: spawn the lane's first member with `worktree: { path, branch }`, and every later member with `worktree: { sameAs: <first member's threadId> }`.
 - **The cap counts lanes, not trees**, and the intersection still applies: two trees turn a shared file from a silent overwrite into a merge conflict, which is better but not free. Serialize overlapping lanes. Claims already span both trees (§ Claims and grants).
