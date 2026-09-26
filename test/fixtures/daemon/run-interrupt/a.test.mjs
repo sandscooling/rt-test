@@ -15,7 +15,7 @@ describe("blocked", () => {
 
 it("passes first", () => {});
 
-it("running at abort", () =>
-  new Promise((resolve) => setTimeout(resolve, 2000)));
+// Settles only when a cancel aborts it or its timeout fails it, so a slow host cannot let it pass first.
+it("running at abort", () => new Promise(() => {}), 10_000);
 
 it("never finishes", () => {});
