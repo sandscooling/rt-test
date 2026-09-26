@@ -56,7 +56,7 @@ P21. **Follow the documented design, and fix the doc when it blocks you**: Use t
 
 ## Tests and defect evidence
 
-P22. **Title a defect-backed test with its id**: Write `it("D123: <behavior>", ...)`; `scripts/verify-defects.mjs` finds defect tests by that exact `it("D<digits>:` prefix, and any other form is invisible to it.
+P22. **Title a defect-backed test with its id**: Write `it("D123: <behavior>", ...)`; `scripts/verify-defects.mjs` finds defect tests by `it(` followed by the double-quoted `D<digits>:` title, on the same line or the next, and any other form (`it.each`, `test(`, another quote) is invisible to it.
 
 P23. **Keep a defect-backed test hook-free**: Do setup inside the test body, with no `beforeEach`, `afterEach` or shared fixture hook, so a setup failure fails the test instead of passing as a detection.
 

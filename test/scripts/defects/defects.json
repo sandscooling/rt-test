@@ -383,5 +383,89 @@
     "file": "scripts/lib/defects/verify.mjs",
     "old": "DECIMAL_DIGITS.test(text) ? Number(text) : Number.NaN",
     "new": "Number(text)"
+  },
+  {
+    "id": "D984",
+    "defect": "The snapshot drops every workspace link, so a sandboxed workspace cannot resolve its workspace dependencies.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".filter((link) => isSnapshotted(link.target))",
+    "new": ".filter(() => false)"
+  },
+  {
+    "id": "D985",
+    "defect": "A link to a directory the sandbox does not copy is recreated, and in the sandbox it dangles.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".filter((link) => isSnapshotted(link.target))",
+    "new": ".filter(() => true)"
+  },
+  {
+    "id": "D986",
+    "defect": "A dangling link in a workspace's node_modules crashes the snapshot.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".filter((path) => existsSync(join(root, path)))",
+    "new": ".filter(Boolean)"
+  },
+  {
+    "id": "D987",
+    "defect": "The walk follows a link into the package behind it, so the linked content is copied as if it were the workspace's own.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "if (entry.isSymbolicLink()) links.push(path);",
+    "new": "if (entry.isSymbolicLink()) visit(path);"
+  },
+  {
+    "id": "D988",
+    "defect": "Sandboxes are written without their workspace links, so a daemon test importing @rt-test/core fails its baseline.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "    writeLinks(slot.sandbox, ctx.links);\n",
+    "new": ""
+  },
+  {
+    "id": "D989",
+    "defect": "A sandbox link takes the root-relative target verbatim, so it resolves beside the link instead of to the sandbox's copy.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "relative(dirname(path), join(dir, link.target)),",
+    "new": "link.target,"
+  },
+  {
+    "id": "D990",
+    "defect": "A run that removes a sandbox's workspace link passes the snapshot check.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "const relinked = linkDifference(slot.sandbox, ctx.links);",
+    "new": "const relinked = null;"
+  },
+  {
+    "id": "D991",
+    "defect": "A link a run adds to a sandbox passes the snapshot check.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "actual.find((path) => !expected.some((link) => link.path === path)) ?? null",
+    "new": "null"
+  },
+  {
+    "id": "D992",
+    "defect": "A run that points a sandbox's workspace link elsewhere passes the snapshot check.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "targetIn(dir, link.path) !== link.target",
+    "new": "false"
+  },
+  {
+    "id": "D993",
+    "defect": "A named test whose title the formatter wrapped onto the line after it( is not indexed, so its record reads as orphaned.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "/\\bit\\(\\s*\"(D\\d+):/g",
+    "new": "/\\bit\\(\"(D\\d+):/g"
+  },
+  {
+    "id": "D994",
+    "defect": "The entry point never hands the working tree's workspace links to the pool, so no sandbox has them.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "links: catalog.links,",
+    "new": ""
+  },
+  {
+    "id": "D996",
+    "defect": "A link to a skipped directory such as a package dist is recreated, and in the sandbox, which never copies dist, it dangles.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": " && !isSkipped(path);",
+    "new": ";"
   }
 ]

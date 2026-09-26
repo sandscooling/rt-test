@@ -1,4 +1,10 @@
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { treeDifference } from "../../../scripts/lib/defects/pool.mjs";
@@ -8,6 +14,10 @@ import {
   fakeVitest,
   filesOf,
   inSandboxes,
+  LINK,
+  linkedCatalog,
+  linkIn,
+  LINKED,
   TREE,
   withScratch,
 } from "./harness.js";
@@ -152,5 +162,68 @@ describe("the sandbox pool", () => {
       inSandboxes(scratch, interrupted, 1),
     );
     expect(result.detected).toEqual([]);
+  });
+
+  it("D988: passes a clean run over a sandbox with a workspace link", async () => {
+    const catalog = linkedCatalog();
+    const result = await withScratch((scratch) =>
+      inSandboxes(scratch, fakeVitest(catalog), 2, catalog),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("D989: resolves each sandbox's workspace link to that sandbox's own copy", async () => {
+    const catalog = linkedCatalog();
+    const resolved = new Set<boolean>();
+    const probing = fakeVitest(catalog, {
+      before: ({ sandbox }) =>
+        resolved.add(
+          realpathSync(join(sandbox, LINK)) ===
+            realpathSync(join(sandbox, LINKED)),
+        ),
+    });
+    await withScratch((scratch) => inSandboxes(scratch, probing, 2, catalog));
+    expect([...resolved]).toEqual([true]);
+  });
+
+  it("D990: fails a sandbox whose workspace link a run removed", async () => {
+    const catalog = linkedCatalog();
+    const unlinking = fakeVitest(catalog, {
+      before: ({ sandbox, pattern }) => {
+        if (pattern === "D2") unlinkSync(join(sandbox, LINK));
+      },
+    });
+    const result = await withScratch((scratch) =>
+      inSandboxes(scratch, unlinking, 1, catalog),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("D991: fails a sandbox that a run added a link to", async () => {
+    const catalog = linkedCatalog();
+    const linking = fakeVitest(catalog, {
+      before: ({ sandbox, pattern }) => {
+        if (pattern === "D2") linkIn(sandbox, "test/extra", "scripts");
+      },
+    });
+    const result = await withScratch((scratch) =>
+      inSandboxes(scratch, linking, 1, catalog),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("D992: fails a sandbox whose workspace link a run pointed elsewhere", async () => {
+    const catalog = linkedCatalog();
+    const relinking = fakeVitest(catalog, {
+      before: ({ sandbox, pattern }) => {
+        if (pattern !== "D2") return;
+        unlinkSync(join(sandbox, LINK));
+        linkIn(sandbox, LINK, "scripts");
+      },
+    });
+    const result = await withScratch((scratch) =>
+      inSandboxes(scratch, relinking, 1, catalog),
+    );
+    expect(result.ok).toBe(false);
   });
 });

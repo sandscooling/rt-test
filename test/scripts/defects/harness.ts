@@ -1,6 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   buildCatalog,
@@ -53,6 +59,33 @@ export const TREE: Tree = {
   ]),
 };
 
+export const LINKED = "packages/core";
+export const LINK = "packages/daemon/node_modules/@rt-test/core";
+export const CLI_LINK = "packages/cli/node_modules/@rt-test/core";
+export const LINKED_TREE: Tree = {
+  ...TREE,
+  [`${LINKED}/src/index.ts`]: "export {};\n",
+};
+
+export function linkIn(
+  root: string,
+  path: string,
+  target: string,
+  type: "dir" | "junction" = "junction",
+): void {
+  const at = join(root, path);
+  const to = relative(dirname(at), join(root, target));
+  mkdirSync(dirname(at), { recursive: true });
+  try {
+    symlinkSync(to, at, type);
+  } catch (error) {
+    // A directory symlink needs Developer Mode or admin rights on Windows,
+    // where Bun links with a junction instead.
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    symlinkSync(to, at, "junction");
+  }
+}
+
 export const filesOf = (tree: Tree): Map<string, Buffer> =>
   new Map(
     Object.entries(tree).map(([path, text]) => [path, Buffer.from(text)]),
@@ -60,6 +93,9 @@ export const filesOf = (tree: Tree): Map<string, Buffer> =>
 
 export const catalogOf = (tree: Tree = TREE): Catalog =>
   buildCatalog(filesOf(tree));
+
+export const linkedCatalog = (): Catalog =>
+  buildCatalog(filesOf(LINKED_TREE), [{ path: LINK, target: LINKED }]);
 
 export interface FakeHooks {
   readonly wait?: (request: RunRequest) => number | Promise<void>;
@@ -152,6 +188,7 @@ export function inSandboxes(
 ): Promise<PoolResult> {
   return verifyInSandboxes({
     files: catalog.files,
+    links: catalog.links,
     baseline: catalog.defects,
     selected: catalog.defects,
     jobs,

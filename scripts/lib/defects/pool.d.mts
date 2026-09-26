@@ -1,4 +1,4 @@
-import type { Defect, Files } from "./catalog.mjs";
+import type { Defect, Files, Link } from "./catalog.mjs";
 import type { RunTests } from "./vitest.mjs";
 
 export interface PoolResult {
@@ -17,6 +17,7 @@ export declare function treeDifference(
 
 export declare function verifyInSandboxes(options: {
   readonly files: Files;
+  readonly links?: readonly Link[];
   readonly baseline: readonly Defect[];
   readonly baselineFiles?: readonly string[];
   readonly selected: readonly Defect[];

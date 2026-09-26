@@ -118,6 +118,7 @@ export async function runVerification({
   const files = new Set(testFilesOf(selected));
   const result = await verifyInSandboxes({
     files: catalog.files,
+    links: catalog.links,
     baseline: catalog.defects.filter((defect) => files.has(defect.test)),
     baselineFiles: options.changed ? [...files] : undefined,
     selected,

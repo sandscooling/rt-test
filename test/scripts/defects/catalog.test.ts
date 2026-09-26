@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildCatalog,
+  loadCatalog,
   snapshotFiles,
 } from "../../../scripts/lib/defects/catalog.mjs";
 import {
   CALC_TEST,
+  CLI_LINK,
   filesOf,
+  LINK,
+  linkIn,
+  LINKED,
+  LINKED_TREE,
   OTHER,
   OTHER_TEST,
   TREE,
@@ -60,5 +68,77 @@ describe("the defect catalog", () => {
       return [...snapshotFiles(root).keys()];
     });
     expect(paths.filter((path) => path.includes("node_modules"))).toEqual([]);
+  });
+
+  it("D984: records a workspace link to a copied package, as a junction and as a symlink", async () => {
+    const links = await withScratch(async (root) => {
+      writeRoot(root, LINKED_TREE);
+      linkIn(root, LINK, LINKED, "junction");
+      linkIn(root, CLI_LINK, LINKED, "dir");
+      return loadCatalog(root).links;
+    });
+    expect(links).toEqual([
+      { path: CLI_LINK, target: LINKED },
+      { path: LINK, target: LINKED },
+    ]);
+  });
+
+  it("D985: leaves out a link to a directory the sandbox does not copy", async () => {
+    const links = await withScratch(async (root) => {
+      writeRoot(root, { ...TREE, "node_modules/dep/index.js": "export {};\n" });
+      linkIn(root, "packages/daemon/node_modules/dep", "node_modules/dep");
+      return loadCatalog(root).links;
+    });
+    expect(links).toEqual([]);
+  });
+
+  it("D996: leaves out a link to a build output the sandbox does not copy", async () => {
+    const links = await withScratch(async (root) => {
+      writeRoot(root, {
+        ...LINKED_TREE,
+        [`${LINKED}/dist/index.js`]: "export {};\n",
+      });
+      linkIn(root, LINK, `${LINKED}/dist`);
+      return loadCatalog(root).links;
+    });
+    expect(links).toEqual([]);
+  });
+
+  it("D986: skips a link whose target is gone", async () => {
+    const links = await withScratch(async (root) => {
+      writeRoot(root, LINKED_TREE);
+      linkIn(root, LINK, LINKED);
+      rmSync(join(root, LINKED), { recursive: true });
+      try {
+        return loadCatalog(root).links;
+      } catch (error) {
+        return String(error);
+      }
+    });
+    expect(links).toEqual([]);
+  });
+
+  it("D987: never snapshots the content behind a link", async () => {
+    const paths = await withScratch(async (root) => {
+      writeRoot(root, LINKED_TREE);
+      linkIn(root, "packages/daemon/src/core", LINKED);
+      return [...snapshotFiles(root).keys()];
+    });
+    expect(paths.filter((path) => path.startsWith("packages/daemon"))).toEqual(
+      [],
+    );
+  });
+
+  it("D993: indexes a named test whose title is wrapped onto its own line", () => {
+    const wrapped = 'it(\n  "D3: three",\n  () => {},\n);\n';
+    const files = filesOf({ ...TREE, [OTHER_TEST]: wrapped });
+    const indexed = (() => {
+      try {
+        return buildCatalog(files).defects.find(({ id }) => id === "D3")?.test;
+      } catch (error) {
+        return String(error);
+      }
+    })();
+    expect(indexed).toBe(OTHER_TEST);
   });
 });

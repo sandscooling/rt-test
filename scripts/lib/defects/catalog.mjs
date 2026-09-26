@@ -1,5 +1,11 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { join, relative } from "node:path";
 
 export const SANDBOX_DIRS = [
   "packages",
@@ -15,7 +21,7 @@ export const SANDBOX_FILES = [
   ".claude/settings.json",
 ];
 const SKIPPED_DIRS = new Set(["node_modules", "dist"]);
-const DEFECT_TEST = /\bit\("(D\d+):/g;
+const DEFECT_TEST = /\bit\(\s*"(D\d+):/g;
 
 export const toPosix = (path) => path.split("\\").join("/");
 
@@ -25,12 +31,26 @@ function isSkipped(path) {
     .some((part) => SKIPPED_DIRS.has(part));
 }
 
+// Node's recursive readdir enters junctions and directory symlinks, so walk
+// by hand and report each link as a link, never as the content behind it.
+export function walkTree(root, dir = "") {
+  const files = [];
+  const links = [];
+  const visit = (at) => {
+    for (const entry of readdirSync(join(root, at), { withFileTypes: true })) {
+      const path = at ? `${at}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) links.push(path);
+      else if (entry.isDirectory()) visit(path);
+      else if (entry.isFile()) files.push(path);
+    }
+  };
+  visit(dir);
+  return { files, links };
+}
+
 function listSandboxPaths(root) {
   const nested = SANDBOX_DIRS.flatMap((dir) =>
-    readdirSync(join(root, dir), { recursive: true })
-      .map((file) => `${dir}/${toPosix(String(file))}`)
-      .filter((file) => !isSkipped(file))
-      .filter((file) => statSync(join(root, file)).isFile()),
+    walkTree(root, dir).files.filter((file) => !isSkipped(file)),
   );
   return [...nested, ...SANDBOX_FILES].sort();
 }
@@ -42,6 +62,24 @@ export function snapshotFiles(root) {
       readFileSync(join(root, path)),
     ]),
   );
+}
+
+const isSnapshotted = (path) =>
+  SANDBOX_DIRS.some((dir) => path.startsWith(`${dir}/`)) && !isSkipped(path);
+
+// Bun links each workspace dependency inside the workspace that uses it, so a
+// sandbox recreates every link that resolves to a directory it copies.
+function snapshotLinks(root) {
+  const real = realpathSync(root);
+  return SANDBOX_DIRS.flatMap((dir) => walkTree(root, dir).links)
+    .filter((path) => existsSync(join(root, path)))
+    .filter((path) => statSync(join(root, path)).isDirectory())
+    .map((path) => ({
+      path,
+      target: toPosix(relative(real, realpathSync(join(root, path)))),
+    }))
+    .filter((link) => isSnapshotted(link.target))
+    .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 const text = (files, path) => files.get(path).toString("utf8");
@@ -87,7 +125,7 @@ function assertAnchorsUnique(records, files) {
   }
 }
 
-export function buildCatalog(files) {
+export function buildCatalog(files, links = []) {
   const records = readRecords(files);
   const tests = indexTests(files);
   assertOneDefectPerTest(records, tests);
@@ -97,7 +135,8 @@ export function buildCatalog(files) {
     ...record,
     test: testOf.get(record.id),
   }));
-  return { files, defects };
+  return { files, links, defects };
 }
 
-export const loadCatalog = (root) => buildCatalog(snapshotFiles(root));
+export const loadCatalog = (root) =>
+  buildCatalog(snapshotFiles(root), snapshotLinks(root));

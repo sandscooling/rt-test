@@ -1,14 +1,14 @@
 import {
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
-  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
-import { toPosix } from "./catalog.mjs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { toPosix, walkTree } from "./catalog.mjs";
 import { baselineProblem, detectionProblem } from "./vitest.mjs";
 
 const VITEST_RESULTS_CACHE = /(^|\/)node_modules\/\.vite\/vitest(\/|$)/;
@@ -33,13 +33,44 @@ export function writeTree(dir, files) {
   }
 }
 
+// Node resolves a junction's relative target against the link's directory,
+// so one relative target serves a Windows junction and a POSIX symlink.
+function writeLinks(dir, links) {
+  for (const link of links) {
+    const path = join(dir, link.path);
+    mkdirSync(dirname(path), { recursive: true });
+    symlinkSync(
+      relative(dirname(path), join(dir, link.target)),
+      path,
+      "junction",
+    );
+  }
+}
+
 function readTree(dir) {
   return new Map(
-    readdirSync(dir, { recursive: true })
-      .map((file) => toPosix(String(file)))
-      .filter((file) => !VITEST_RESULTS_CACHE.test(file))
-      .filter((file) => statSync(join(dir, file)).isFile())
+    walkTree(dir)
+      .files.filter((file) => !VITEST_RESULTS_CACHE.test(file))
       .map((file) => [file, readFileSync(join(dir, file))]),
+  );
+}
+
+const targetIn = (dir, path) =>
+  toPosix(
+    relative(
+      dir,
+      resolve(dirname(join(dir, path)), readlinkSync(join(dir, path))),
+    ),
+  );
+
+function linkDifference(dir, expected) {
+  const actual = walkTree(dir).links;
+  for (const link of expected) {
+    if (!actual.includes(link.path) || targetIn(dir, link.path) !== link.target)
+      return link.path;
+  }
+  return (
+    actual.find((path) => !expected.some((link) => link.path === path)) ?? null
   );
 }
 
@@ -93,9 +124,10 @@ async function verifyOne(ctx, slot, defect) {
 
 function assertSnapshot(ctx, slot) {
   const changed = treeDifference(ctx.files, readTree(slot.sandbox));
-  if (changed) {
+  const relinked = linkDifference(slot.sandbox, ctx.links);
+  if (changed || relinked) {
     throw new Error(
-      `sandbox ${slot.index}: ${changed} differs from the snapshot.`,
+      `sandbox ${slot.index}: ${changed ?? relinked} differs from the snapshot.`,
     );
   }
 }
@@ -117,6 +149,7 @@ async function worker(ctx, slot) {
 async function verifyAll(ctx, slots) {
   for (const slot of slots) {
     writeTree(slot.sandbox, ctx.files);
+    writeLinks(slot.sandbox, ctx.links);
     assertSnapshot(ctx, slot);
   }
   const before = await checkBaseline(ctx, slots[0]);
@@ -129,6 +162,7 @@ async function verifyAll(ctx, slots) {
 
 export async function verifyInSandboxes({
   files,
+  links = [],
   baseline,
   baselineFiles,
   selected,
@@ -142,6 +176,7 @@ export async function verifyInSandboxes({
   assertInside(scratch, run);
   const ctx = {
     files,
+    links,
     baseline,
     baselineFiles,
     queue: [...selected],

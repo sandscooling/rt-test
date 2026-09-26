@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Git } from "../../../scripts/lib/git.mjs";
@@ -11,6 +11,10 @@ import {
   CALC_TEST,
   catalogOf,
   fakeVitest,
+  LINK,
+  linkIn,
+  LINKED,
+  LINKED_TREE,
   OTHER,
   TREE,
   withScratch,
@@ -128,5 +132,19 @@ describe("the verification entry point", () => {
       );
     });
     expect(outcome).toMatch(/No named defect/);
+  });
+
+  it("D994: carries the working tree's workspace links into the sandboxes", async () => {
+    const linked = new Set<boolean>();
+    await withScratch(async (root) => {
+      writeRoot(root, LINKED_TREE);
+      linkIn(root, LINK, LINKED);
+      const probing = fakeVitest(catalogOf(LINKED_TREE), {
+        before: ({ sandbox }) =>
+          linked.add(existsSync(join(sandbox, LINK, "src/index.ts"))),
+      });
+      return runVerification({ root, log: quiet, runTests: probing, cores: 2 });
+    });
+    expect([...linked]).toEqual([true]);
   });
 });
