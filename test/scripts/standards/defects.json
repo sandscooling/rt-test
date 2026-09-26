@@ -334,5 +334,110 @@
     "file": "scripts/lib/fences.mjs",
     "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
     "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
+  },
+  {
+    "id": "D1130",
+    "defect": "A negated pattern beside a glob is read as a missing literal directory, so the excluded workspace is examined and the exclusion goes unmentioned.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (pattern.startsWith(NEGATION)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1131",
+    "defect": "A lone negated glob reports that no workspaces were found instead of naming the unsupported exclusion.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (pattern.startsWith(NEGATION)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1132",
+    "defect": "A null workspaces field crashes the check with an uncaught TypeError.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (!isObject(workspaces)) throw new WorkspaceError(FIELD_SHAPE);",
+    "new": ""
+  },
+  {
+    "id": "D1133",
+    "defect": "A string workspaces field is accepted as a single pattern instead of failing on the field's shape.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (Array.isArray(workspaces)) return workspaces;",
+    "new": "if (typeof workspaces === \"string\") return [workspaces];\n  if (Array.isArray(workspaces)) return workspaces;"
+  },
+  {
+    "id": "D1134",
+    "defect": "An object workspaces field whose packages is not an array is read as listing no patterns.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "return workspaces.packages;\n  throw new WorkspaceError(FIELD_SHAPE);",
+    "new": "return workspaces.packages;\n  return [];"
+  },
+  {
+    "id": "D1135",
+    "defect": "A non-string workspaces entry crashes the check with an uncaught TypeError.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "typeof pattern !== \"string\" || ",
+    "new": ""
+  },
+  {
+    "id": "D1136",
+    "defect": "An empty workspaces entry is read as the root directory, which is examined as a workspace.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": " || pattern.trim() === \"\"",
+    "new": ""
+  },
+  {
+    "id": "D1137",
+    "defect": "A whitespace-only workspaces entry is read as a literal directory and silently matches nothing.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "pattern.trim() === \"\"",
+    "new": "pattern === \"\""
+  },
+  {
+    "id": "D1138",
+    "defect": "A member package.json holding null crashes the check with an uncaught TypeError.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "value !== null && ",
+    "new": ""
+  },
+  {
+    "id": "D1139",
+    "defect": "A member package.json holding an array is examined as a manifest with no scripts.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": " && !Array.isArray(value)",
+    "new": ""
+  },
+  {
+    "id": "D1140",
+    "defect": "A member package.json holding a string is examined as a manifest with no scripts.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (!isObject(manifest)) {\n    throw new WorkspaceError(`${dir}",
+    "new": "if (manifest === null || Array.isArray(manifest)) {\n    throw new WorkspaceError(`${dir}"
+  },
+  {
+    "id": "D1141",
+    "defect": "A member whose scripts is null crashes the check with an uncaught TypeError.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "isObject(scripts) ? scripts : {}",
+    "new": "scripts"
+  },
+  {
+    "id": "D1142",
+    "defect": "A member whose name is not a string is labeled with its stringified value instead of its directory.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "typeof name === \"string\" ? name : dir",
+    "new": "name ?? dir"
+  },
+  {
+    "id": "D1143",
+    "defect": "A workspace matched by two patterns is examined and counted twice.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "...new Set(",
+    "new": "...Array.from("
+  },
+  {
+    "id": "D1144",
+    "defect": "A root package.json that is not a JSON object is reported as finding no workspaces instead of naming the file.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (!isObject(manifest)) {\n    throw new WorkspaceError(\"package.json is not a JSON object.\");\n  }",
+    "new": "if (!isObject(manifest)) return [];"
   }
 ]

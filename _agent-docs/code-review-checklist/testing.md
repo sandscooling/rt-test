@@ -14,7 +14,7 @@ C66. **Prove a control by mutating its subject**: A control or guard assertion i
 
 C67. **Treat a detection as proof of the test, not the line**: A detected defect is not offered as evidence the production line is correct. Where the line hands control to code outside the file (a library callback, a child process, a framework hook), check what else that line decides in the installed source.
 
-C68. **Name the defect narrowly enough to be wrong**: A guard with several operands is driven bad through every operand, and a resolver that exists for inheritance, order or precedence is tested on the case that needs it. "The check exists" is not a named defect.
+C68. **Name the defect narrowly enough to be wrong**: A guard with several operands is driven bad through every operand, and a resolver that exists for inheritance, order or precedence is tested on the case that needs it. "The check exists" is not a named defect. A recorded mutation produces the behavior its defect sentence names; one the test catches only through a crash or another failure the sentence does not describe proves a different defect.
 
 C69. **Verify a logged coverage gap against the code**: A recorded coverage gap names a defect traced to the branch that would exhibit it. An unverified gap is not recorded.
 

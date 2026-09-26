@@ -6,6 +6,7 @@ import { checkLineCitations } from "../../../scripts/lib/standards/line-citation
 import {
   citations,
   ENGINE,
+  GIT_SCENARIO_TIMEOUT_MS,
   inTree,
   REPO,
   USE_FETCH,
@@ -24,7 +25,7 @@ function architecture(...lines: string[]): Scenario {
   };
 }
 
-describe("check-line-citations", () => {
+describe("check-line-citations", { timeout: GIT_SCENARIO_TIMEOUT_MS }, () => {
   it("D430: reports a citation below an insertion with its shifted line", () => {
     const outcome = check(architecture("See `src/engine.mjs:20`."));
     expect(outcome.out).toContain(

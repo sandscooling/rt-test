@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  appendFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -86,8 +87,26 @@ function applyEdit(root: string, edit: SourceEdit): void {
   writeFileSync(path, lines.join("\n"));
 }
 
+// About four times the slowest git scenario seen under a loaded full run (7971 ms).
+export const GIT_SCENARIO_TIMEOUT_MS = 30_000;
+
 function git(root: string, args: readonly string[]): void {
   execFileSync("git", args, { cwd: root, stdio: "ignore", windowsHide: true });
+}
+
+const REPOSITORY_CONFIG = [
+  "[user]",
+  "\tname = RT Test fixture",
+  "\temail = fixture@example.invalid",
+  "[core]",
+  "\tautocrlf = false",
+  "",
+].join("\n");
+
+// Writing the config saves three git spawns per scenario; git reads a repeated [core] section as one.
+function initRepository(root: string): void {
+  git(root, ["init", "-q"]);
+  appendFileSync(join(root, ".git/config"), REPOSITORY_CONFIG);
 }
 
 function commitAll(root: string, message: string): void {
@@ -114,10 +133,7 @@ export function citations(command: Command, scenario: Scenario = {}): Result {
   return inTree(
     files,
     (config, root) => {
-      git(root, ["init", "-q"]);
-      git(root, ["config", "user.name", "RT Test fixture"]);
-      git(root, ["config", "user.email", "fixture@example.invalid"]);
-      git(root, ["config", "core.autocrlf", "false"]);
+      initRepository(root);
       commitAll(root, "base");
       applyEdit(root, scenario.edit ?? INSERT_TWO_AT_10);
       if (scenario.commitEdit === true) commitAll(root, "edit");

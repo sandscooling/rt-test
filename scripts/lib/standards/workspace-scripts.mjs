@@ -4,8 +4,14 @@ import { result } from "./result.mjs";
 
 const REQUIRED_SCRIPTS = Object.freeze(["build", "typecheck"]);
 const CHILDREN = "/*";
+const NEGATION = "!";
+const FIELD_SHAPE =
+  'package.json workspaces must be an array or { "packages": [...] }.';
 
 class WorkspaceError extends Error {}
+
+const isObject = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 function readJson(path) {
   try {
@@ -17,17 +23,39 @@ function readJson(path) {
   }
 }
 
+function listedPatterns(workspaces) {
+  if (Array.isArray(workspaces)) return workspaces;
+  if (!isObject(workspaces)) throw new WorkspaceError(FIELD_SHAPE);
+  if (Array.isArray(workspaces.packages)) return workspaces.packages;
+  throw new WorkspaceError(FIELD_SHAPE);
+}
+
 function patternsOf(manifest) {
+  if (!isObject(manifest)) {
+    throw new WorkspaceError("package.json is not a JSON object.");
+  }
   const { workspaces } = manifest;
   if (workspaces === undefined) return [];
-  if (Array.isArray(workspaces)) return workspaces;
-  if (Array.isArray(workspaces.packages)) return workspaces.packages;
-  throw new WorkspaceError("package.json workspaces must be an array.");
+  const patterns = listedPatterns(workspaces);
+  const unreadable = patterns.find(
+    (pattern) => typeof pattern !== "string" || pattern.trim() === "",
+  );
+  if (unreadable !== undefined) {
+    throw new WorkspaceError(
+      `workspaces pattern ${JSON.stringify(unreadable)} names no directory.`,
+    );
+  }
+  return patterns;
 }
 
 const isWorkspace = (root, dir) => existsSync(join(root, dir, "package.json"));
 
 function expand(root, pattern) {
+  if (pattern.startsWith(NEGATION)) {
+    throw new WorkspaceError(
+      `unsupported workspaces pattern ${JSON.stringify(pattern)}; this check does not apply exclusions, so it cannot tell which workspaces to examine.`,
+    );
+  }
   const parent = pattern.endsWith(CHILDREN)
     ? pattern.slice(0, -CHILDREN.length)
     : undefined;
@@ -36,7 +64,7 @@ function expand(root, pattern) {
   }
   if (parent === undefined || parent.includes("*")) {
     throw new WorkspaceError(
-      `unsupported workspaces pattern "${pattern}"; teach this check to expand it.`,
+      `unsupported workspaces pattern ${JSON.stringify(pattern)}; teach this check to expand it.`,
     );
   }
   if (!existsSync(join(root, parent))) return [];
@@ -54,9 +82,13 @@ function missingScripts(scripts) {
 }
 
 function examine(root, dir) {
-  const { name, scripts = {} } = readJson(join(root, dir, "package.json"));
-  const label = `${name ?? dir} (${dir})`;
-  const absent = missingScripts(scripts);
+  const manifest = readJson(join(root, dir, "package.json"));
+  if (!isObject(manifest)) {
+    throw new WorkspaceError(`${dir}/package.json is not a JSON object.`);
+  }
+  const { name, scripts } = manifest;
+  const label = `${typeof name === "string" ? name : dir} (${dir})`;
+  const absent = missingScripts(isObject(scripts) ? scripts : {});
   return absent.length === 0
     ? { ok: true, line: `ok       ${label}` }
     : { ok: false, line: `MISSING  ${label}: no ${absent.join(", ")} script` };
@@ -65,9 +97,11 @@ function examine(root, dir) {
 export function checkWorkspaceScripts(config) {
   try {
     const manifest = readJson(join(config.root, "package.json"));
-    const workspaces = patternsOf(manifest).flatMap((pattern) =>
-      expand(config.root, pattern),
-    );
+    const workspaces = [
+      ...new Set(
+        patternsOf(manifest).flatMap((pattern) => expand(config.root, pattern)),
+      ),
+    ];
     if (workspaces.length === 0) {
       return result(
         1,
