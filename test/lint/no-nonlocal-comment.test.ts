@@ -48,19 +48,31 @@ interface Diagnostic {
   readonly message: string;
 }
 
-let findings: Map<string, Kind[]> | undefined;
+let findings: Map<string, Kind[]> | Error | undefined;
 
+// A failed run is kept too, so one oxlint failure costs one child process, not one per test.
 function lintFixtures(): Map<string, Kind[]> {
-  if (findings) return findings;
+  findings ??= lintOnce();
+  if (findings instanceof Error) throw findings;
+  return findings;
+}
+
+function lintOnce(): Map<string, Kind[]> | Error {
   const dir = mkdtempSync(join(tmpdir(), "rt-test-lint-"));
   try {
     for (const [name, code] of Object.entries(FIXTURES)) {
       writeFileSync(join(dir, name), code);
     }
     writeFileSync(join(dir, "config.json"), JSON.stringify(fixtureConfig()));
-    const report = runOxlint(dir);
-    findings = groupByFile(report.diagnostics.filter((d) => d.code === RULE));
-    return findings;
+    const ruled = runOxlint(dir).diagnostics.filter((d) => d.code === RULE);
+    if (ruled.length === 0) {
+      return new Error(
+        `oxlint reported no ${RULE} diagnostic; the plugin did not run`,
+      );
+    }
+    return groupByFile(ruled);
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

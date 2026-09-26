@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { requirementsIndex } from "../../../scripts/lib/planning/requirements-index.mjs";
 import { authorOf, FIXTURE_GIT_FLAGS, outcomeOf } from "../git-fixture.js";
 import { withTemp } from "../orchestration/harness.js";
-import { PROCESS_SCENARIO } from "../timeouts.js";
+import { PROCESS_SCENARIO, PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 import {
   apply,
   failsWith,
@@ -32,9 +32,13 @@ function git(root: string, ...args: string[]): string {
   const result = spawnSync("git", [...FIXTURE_GIT_FLAGS, ...args], {
     cwd: root,
     encoding: "utf8",
+    timeout: PROCESS_SCENARIO_TIMEOUT_MS,
+    windowsHide: true,
   });
   if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+    throw new Error(
+      `git ${args.join(" ")}: ${result.error ?? result.signal ?? result.stderr}`,
+    );
   }
   return result.stdout;
 }

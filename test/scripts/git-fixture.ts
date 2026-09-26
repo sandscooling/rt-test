@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { PROCESS_SCENARIO_TIMEOUT_MS } from "./timeouts.js";
 
 // A hooks path that does not exist runs no hook, so a developer's global hooks
 // and signing settings cannot fail or stall a fixture repository.
@@ -28,6 +29,7 @@ export function authorOf(root: string): string {
   return execFileSync("git", ["log", "-1", "--format=%an <%ae>"], {
     cwd: root,
     encoding: "utf8",
+    timeout: PROCESS_SCENARIO_TIMEOUT_MS,
     windowsHide: true,
   }).trim();
 }

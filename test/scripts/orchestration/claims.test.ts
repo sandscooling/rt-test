@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { loadFlowConfig } from "../../../scripts/lib/flow-config.mjs";
 import {
   CLAIMS_DIR,
@@ -30,6 +30,9 @@ const Y = "scripts/y.mjs";
 const SPRINTS = "_agent-docs/sprints";
 const SPRINT = `${SPRINTS}/sprint-1.md`;
 const ADR = "docs/adr/0002-next.md";
+// git stops its checkout search at these directories, so a temp directory
+// inside some other checkout still reads as outside any repository.
+const GIT_CEILING = "GIT_CEILING_DIRECTORIES";
 
 const rules = () => pathRules(loadFlowConfig(REPO));
 const claim = (dir: string, owner: typeof A, paths: string[]) =>
@@ -270,10 +273,13 @@ describe("file claims", PROCESS_SCENARIO, () => {
 
   it("D702: keeps claims under the root itself when the root is not a git checkout", () => {
     const found = withTemp((root) => {
+      vi.stubEnv(GIT_CEILING, dirname(root));
       try {
         return claimsDirFor(root, {}) === join(root, CLAIMS_DIR);
       } catch (error) {
         return String(error);
+      } finally {
+        vi.unstubAllEnvs();
       }
     });
     expect(found).toBe(true);

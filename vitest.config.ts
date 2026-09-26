@@ -5,7 +5,13 @@ export default defineConfig({
     passWithNoTests: false,
     projects: [
       "packages/*",
-      { test: { name: "tooling", include: ["test/**/*.test.ts"] } },
+      {
+        test: {
+          name: "tooling",
+          include: ["test/**/*.test.ts"],
+          setupFiles: ["test/scripts/git-environment.ts"],
+        },
+      },
     ],
   },
 });

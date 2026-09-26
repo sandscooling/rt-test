@@ -9,6 +9,7 @@ import {
   type FlowConfig,
 } from "../../../scripts/lib/flow-config.mjs";
 import { writeFixtureGitConfig } from "../git-fixture.js";
+import { PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 export const FIXTURES = join(REPO, "test/fixtures/orchestration");
@@ -28,7 +29,12 @@ export function writeIn(root: string, path: string, text: string): void {
 }
 
 export function git(root: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    timeout: PROCESS_SCENARIO_TIMEOUT_MS,
+    windowsHide: true,
+  });
 }
 
 export function initRepo(root: string, files: Record<string, string>): void {

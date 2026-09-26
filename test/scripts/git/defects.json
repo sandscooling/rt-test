@@ -61,5 +61,12 @@
     "file": "test/scripts/orchestration/harness.ts",
     "old": "  writeFixtureGitConfig(root);\n",
     "new": ""
+  },
+  {
+    "id": "D1275",
+    "defect": "The suite's git environment is left intact, so a fixture or production git command run from inside an outer git hook inherits GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE and acts on the outer repository.",
+    "file": "test/scripts/git-environment.ts",
+    "old": "startsWith(GIT_VARIABLE_PREFIX)) delete env[name];",
+    "new": "startsWith(GIT_VARIABLE_PREFIX)) continue;"
   }
 ]

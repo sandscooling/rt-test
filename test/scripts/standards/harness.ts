@@ -17,6 +17,7 @@ import {
 } from "../../../scripts/lib/flow-config.mjs";
 import type { Result } from "../../../scripts/lib/standards/result.mjs";
 import { writeFixtureGitConfig } from "../git-fixture.js";
+import { PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const FIXTURES = join(REPO, "test/fixtures/standards");
@@ -88,7 +89,12 @@ function applyEdit(root: string, edit: SourceEdit): void {
 }
 
 function git(root: string, args: readonly string[]): void {
-  execFileSync("git", args, { cwd: root, stdio: "ignore", windowsHide: true });
+  execFileSync("git", args, {
+    cwd: root,
+    stdio: "ignore",
+    timeout: PROCESS_SCENARIO_TIMEOUT_MS,
+    windowsHide: true,
+  });
 }
 
 function initRepository(root: string): void {

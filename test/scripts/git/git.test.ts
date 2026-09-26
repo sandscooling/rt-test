@@ -7,6 +7,7 @@ import {
   gitIn,
   trackedPaths,
 } from "../../../scripts/lib/git.mjs";
+import { clearGitEnvironment } from "../git-environment.js";
 import { authorOf, outcomeOf, writeFixtureGitConfig } from "../git-fixture.js";
 import { git, initRepo, withTemp, writeIn } from "../orchestration/harness.js";
 import { PROCESS_SCENARIO } from "../timeouts.js";
@@ -135,5 +136,17 @@ describe("the fixture git config", PROCESS_SCENARIO, () => {
       }),
     );
     expect(author).toBe("RT Test fixture <fixture@example.invalid>");
+  });
+});
+
+describe("the suite's git environment", () => {
+  it("D1275: clears every git variable in either case and keeps the rest", () => {
+    const env: NodeJS.ProcessEnv = {
+      GIT_DIR: "outer/.git",
+      git_work_tree: "outer",
+      RT_TEST_KEPT: "kept",
+    };
+    clearGitEnvironment(env);
+    expect(env).toEqual({ RT_TEST_KEPT: "kept" });
   });
 });

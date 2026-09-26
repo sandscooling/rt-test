@@ -116,6 +116,11 @@ function hookOutput(entry: string, tokens: number, args: string[] = []) {
       args,
     );
   });
+  if (run.error || run.signal || run.status !== 0) {
+    throw new Error(
+      `${entry} failed: ${run.error ?? run.signal ?? `exit ${run.status}: ${run.stderr}`}`,
+    );
+  }
   return JSON.parse(run.stdout || "{}") as {
     hookSpecificOutput?: { hookEventName?: string };
   };
