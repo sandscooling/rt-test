@@ -98,7 +98,7 @@ Record hardware, OS, runtime, graph size, baseline runner timing, and warm/cold 
 - Persistent state, explicit start/stop, a CLI with versioned `--json` output including `status <path>` and `wait`, and a small programmatic API. No MCP server.
 - Workspace-level selection, then file-level selection with the Convex adapter, then validated function-level refinements.
 - Named-defect definitions and isolated, incremental falsification, then the two suggestion add-ons.
-- Cross-platform development with Windows and Linux CI.
+- Cross-platform development, gated on Windows and Linux before every push.
 
 ## Deferred scope
 

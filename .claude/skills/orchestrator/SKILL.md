@@ -106,13 +106,13 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 
 **Read the result from the log's `CHECK_EXIT` line**, never from the background task's status, which is the trailing `date`'s. Never pipe a gate through `tail` or `head`: a killed run leaves an empty file, and `$?` becomes the filter's status.
 
-**Gate on Linux before every push**, since CI runs Ubuntu and a path, link, or process behavior can pass on Windows and fail there. WSL Ubuntu holds a clone at `~/rt-test` whose `origin` is this checkout, so it can check out a commit not yet pushed. Commit the lane locally after the Windows gate passes, then run in the background:
+**Gate on Linux before every push, under Node 24 and Node 22**: a path, link, or process behavior can pass on Windows and fail on Linux, and Node 22 is the oldest line the project supports. These local gates are the project's only pre-push validation; it runs no hosted CI. WSL Ubuntu holds a clone at `~/rt-test` whose `origin` is this checkout, so it can check out a commit not yet pushed, and Node 24 at `~/.local/node` and the latest Node 22 at `~/.local/node22`, each an official tarball. Commit the lane locally after the Windows gate passes, then run in the background:
 
 ```
-wsl.exe -e bash -lc 'export PATH="$HOME/.local/node/bin:$HOME/.bun/bin:$PATH"; cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && { date; bun install --frozen-lockfile; bun run check; echo "CHECK_EXIT:$?"; date; }' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
+wsl.exe -e bash -lc 'cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; date; node --version; bun install --frozen-lockfile; bun run check; echo "CHECK_EXIT_$v:$? $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
 ```
 
-Push only when both logs read `CHECK_EXIT:0`. A Linux-only red goes to the lane like any other red, and its fix lands as a further commit before the push.
+Push only when the Windows log reads `CHECK_EXIT:0` and the Linux log reads both `CHECK_EXIT_node:0 v24.…` and `CHECK_EXIT_node22:0 v22.…`; the version on each marker proves which Node ran it. A Linux-only red goes to the lane like any other red, and its fix lands as a further commit before the push.
 
 **A gate result expires the moment any lane edits again.** Quote results with the window they measured ("check exit 0 at 22:51-22:53"). When a member's figure disagrees with yours, read your own log before disputing it: both are usually right about different trees, and that is what to record. **Cite a `_agent-docs/.scratch/` path only in live messages, never in a committed file**: the folder is gitignored, so the citation dangles for every later reader. For a scratch file a later lane needs, write what it did and how to rebuild it.
 

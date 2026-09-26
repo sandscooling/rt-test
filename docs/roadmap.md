@@ -10,7 +10,7 @@ Delivered in the starter:
 - Strict TypeScript and Vitest development configuration.
 - Result-freshness assessment with eight named-defect tests.
 - Isolated bootstrap verification for those eight defects.
-- Formatting, typechecking, build, and CI configuration.
+- Formatting, typechecking, build, and the pre-push Windows and Linux gates.
 - oxlint standards ported from Fleet Cooling: file size, two-tier cognitive complexity, the comment rule with named-defect tests, test-file bans, and a dependency release-age gate.
 - Fleet Cooling's workflow pipeline: tickets, sprints, requirements, ADRs, rule homes, file claims, and the orchestrator.
 

@@ -22,7 +22,7 @@ The product direction agreed with the owner is carried by `docs/plan.md`, `docs/
 
 ## Starter contents
 
-The repository includes documentation, strict TypeScript tooling, the result-freshness core and test identity in `packages/core`, Vitest test discovery across workspaces in `packages/daemon`, per-workspace defect records checked in disposable copies, and Windows/Linux CI configuration. There is no running daemon, watcher, dependency graph, persistence layer, consumer CLI, or general falsification engine yet.
+The repository includes documentation, strict TypeScript tooling, the result-freshness core and test identity in `packages/core`, Vitest test discovery across workspaces in `packages/daemon`, and per-workspace defect records checked in disposable copies. There is no running daemon, watcher, dependency graph, persistence layer, consumer CLI, or general falsification engine yet.
 
 The repository is a Bun workspace: the core lives in `packages/core` (`@rt-test/core`), `apps/*` is reserved for editor integrations, and repository tooling stays at the root. `packages/core/src/evidence.ts` trusts caller-supplied fingerprints. Completeness, hashing, project identity, revision ordering, and run ingestion remain M1/M2 work. `scripts/verify-defects.mjs` verifies this repository's own named defects, recorded in the `defects.json` beside each workspace's tests (`docs/testing.md`); it is not the product's falsification engine.
 
@@ -44,6 +44,6 @@ Work on `main`. Hand off to a successor instead of compacting, per `_agent-docs/
 - Working branch: `main`, which is the GitHub default. The remote `dev-work` branch is fully merged into `main` and awaits deletion by the owner.
 - Local `bun run check` passed on Windows with Node 24.19.0 and Bun 1.3.14: formatting, strict typecheck, 8/8 Vitest tests, 8/8 named-defect checks, restored baseline, and build.
 - Dependency versions are pinned and `bun.lock` is committed. The package remains private to prevent npm publication.
-- CI runs the same gates on Windows and Linux with Node 22 and 24. Inspect the latest Actions run for remote validation status.
+- There is no hosted CI: `bun run check` runs locally before every push, on Windows under Node 24 and on Linux in WSL under Node 22 and 24.
 - Disposable mutation copies were removed. No background watcher or daemon was started.
 - Lint port, validated locally on Windows with Node 24.19.0 and Bun 1.3.14: oxlint clean, typecheck clean, 20/20 Vitest tests, 20/20 named defects detected with the restored baseline green. Temporary probe files confirmed each root rule fires on its intended paths.

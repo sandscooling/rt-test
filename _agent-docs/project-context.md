@@ -34,7 +34,7 @@ P11. **Write repository scripts as dependency-free Node ESM**: Scripts under `sc
 
 P12. **Read workflow paths through the flow config**: A script reads every workflow path (tickets, sprints, rule docs, requirements, ADRs) through `scripts/lib/flow-config.mjs`, never a hardcoded string. A new path is a new `_agent-docs/_flow-config.yaml` key.
 
-P13. **Support Windows and Linux alike**: Build paths with `node:path`, normalize separators to `/` before comparing or storing them, and never assume a POSIX shell in product code. CI runs both on Node 22 and 24.
+P13. **Support Windows and Linux alike**: Build paths with `node:path`, normalize separators to `/` before comparing or storing them, and never assume a POSIX shell in product code. The pre-push gate runs on Windows under Node 24 and on Linux under Node 22 and 24.
 
 P14. **Let the typecheck find call sites**: No language server is configured. After changing a shared symbol's name or shape, run `bun run typecheck` to report the call sites a text search missed.
 

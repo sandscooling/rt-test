@@ -85,7 +85,7 @@ The removal is the safe part; the sweep is the work.
 
 **A move breaks references inside the file the symbol left.** Grep the whole source file for each moved name, and classify each hit by the symbol it names, not the function it sits in: a reference breaks only when it and its target land on opposite sides of the move.
 
-**Scope the search by where a claim can live.** `rg` searches tracked and untracked files and skips ignored ones, which is the scope `AGENTS.md` asks for. Beyond `packages/`, `apps/`, `scripts/`, `lint/` and `test/`, include the setup files a fresh clone follows: `package.json` files, `*.config.*`, `.github/workflows/`, `_agent-docs/_flow-config.yaml`, and each workspace's `README`. Record the command beside any hit count you report. A closure check enumerates and classifies its hits (C50).
+**Scope the search by where a claim can live.** `rg` searches tracked and untracked files and skips ignored ones, which is the scope `AGENTS.md` asks for. Beyond `packages/`, `apps/`, `scripts/`, `lint/` and `test/`, include the setup files a fresh clone follows: `package.json` files, `*.config.*`, `_agent-docs/_flow-config.yaml`, and each workspace's `README`. Record the command beside any hit count you report. A closure check enumerates and classifies its hits (C50).
 
 **Trim test files by `describe` subject, never by line range**, and delete a block only when the thing it tests is the thing you deleted.
 

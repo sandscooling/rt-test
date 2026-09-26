@@ -110,4 +110,4 @@ C111. **Re-key a negative test whose marker moved**: A negative test whose looke
 
 C112. **Sweep test titles separately**: A migration's `describe` and `it` strings and their docblocks name no retired store, helper or mechanism.
 
-C156. **Make every named mutation observable on each CI platform**: A named defect's mutation shows on Windows and Linux alike. One whose effect depends on the host (path separator, line endings, case sensitivity) is proven through an injected platform module or input, never the host's own.
+C156. **Make every named mutation observable on each gated platform**: A named defect's mutation shows on Windows and Linux alike. One whose effect depends on the host (path separator, line endings, case sensitivity) is proven through an injected platform module or input, never the host's own.
