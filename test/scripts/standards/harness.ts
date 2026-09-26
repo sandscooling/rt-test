@@ -100,10 +100,13 @@ const REPOSITORY_CONFIG = [
   "\temail = fixture@example.invalid",
   "[core]",
   "\tautocrlf = false",
+  "\thooksPath = .git/no-hooks",
+  "[commit]",
+  "\tgpgsign = false",
   "",
 ].join("\n");
 
-// Writing the config saves three git spawns per scenario; git reads a repeated [core] section as one.
+// Writing the config saves a git spawn per value; git reads a repeated [core] section as one.
 function initRepository(root: string): void {
   git(root, ["init", "-q"]);
   appendFileSync(join(root, ".git/config"), REPOSITORY_CONFIG);

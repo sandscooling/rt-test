@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { result } from "./result.mjs";
 
 const REQUIRED_SCRIPTS = Object.freeze(["build", "typecheck"]);
@@ -50,6 +50,9 @@ function patternsOf(manifest) {
 
 const isWorkspace = (root, dir) => existsSync(join(root, dir, "package.json"));
 
+const canonical = (root, dir) =>
+  relative(root, join(root, dir)).split(sep).join("/") || ".";
+
 function expand(root, pattern) {
   if (pattern.startsWith(NEGATION)) {
     throw new WorkspaceError(
@@ -99,7 +102,9 @@ export function checkWorkspaceScripts(config) {
     const manifest = readJson(join(config.root, "package.json"));
     const workspaces = [
       ...new Set(
-        patternsOf(manifest).flatMap((pattern) => expand(config.root, pattern)),
+        patternsOf(manifest)
+          .flatMap((pattern) => expand(config.root, pattern))
+          .map((dir) => canonical(config.root, dir)),
       ),
     ];
     if (workspaces.length === 0) {

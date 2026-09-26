@@ -301,6 +301,30 @@ describe("check-workspace-scripts", () => {
     });
   });
 
+  it("D1145: counts a workspace listed again with a leading ./ once", () => {
+    const outcome = settle({
+      "package.json": manifest(["packages/*", "./packages/a"]),
+      ...TWO_VALID,
+    });
+    expect(outcome).toEqual({
+      code: 0,
+      out: "ok       @x/a (packages/a)\nok       @x/b (packages/b)\nPASS: all 2 workspaces define build and typecheck.\n",
+      err: "",
+    });
+  });
+
+  it("D1146: counts a workspace listed again with a trailing slash once", () => {
+    const outcome = settle({
+      "package.json": manifest(["packages/*", "packages/a/"]),
+      ...TWO_VALID,
+    });
+    expect(outcome).toEqual({
+      code: 0,
+      out: "ok       @x/a (packages/a)\nok       @x/b (packages/b)\nPASS: all 2 workspaces define build and typecheck.\n",
+      err: "",
+    });
+  });
+
   it("D1144: names a root package.json holding null as not a JSON object", () => {
     const outcome = settle({ "package.json": "null", ...TWO_VALID });
     expect(outcome).toEqual({

@@ -439,5 +439,19 @@
     "file": "scripts/lib/standards/workspace-scripts.mjs",
     "old": "if (!isObject(manifest)) {\n    throw new WorkspaceError(\"package.json is not a JSON object.\");\n  }",
     "new": "if (!isObject(manifest)) return [];"
+  },
+  {
+    "id": "D1145",
+    "defect": "A workspace listed again with a leading ./ beside a glob that matches it is examined and counted twice.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "\n          .map((dir) => canonical(config.root, dir))",
+    "new": ""
+  },
+  {
+    "id": "D1146",
+    "defect": "A workspace listed again with a trailing slash beside a glob that matches it is examined and counted twice.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "\n          .map((dir) => canonical(config.root, dir))",
+    "new": ""
   }
 ]
