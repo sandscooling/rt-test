@@ -31,6 +31,8 @@ export type ResolvedVitest =
   | {
       readonly supported: true;
       readonly version: string;
+      /** The major of `version`. */
+      readonly major: number;
       readonly nodeEntry: string;
     }
   | {
@@ -61,7 +63,8 @@ export function resolveWorkspaceVitest(directory: string): ResolvedVitest {
   if (version === undefined) {
     return unsupported(undefined, `${manifestPath} has no version`);
   }
-  if (!isSupported(version)) {
+  const major = supportedMajor(version);
+  if (major === undefined) {
     return unsupported(
       version,
       `Vitest ${version} is outside the supported range`,
@@ -69,7 +72,7 @@ export function resolveWorkspaceVitest(directory: string): ResolvedVitest {
   }
   try {
     const nodeEntry = pathToFileURL(require.resolve(VITEST_NODE_ENTRY)).href;
-    return { supported: true, version, nodeEntry };
+    return { supported: true, version, major, nodeEntry };
   } catch (error) {
     return unsupported(
       version,
@@ -91,16 +94,18 @@ function readVersion(manifestPath: string): string | undefined {
   return typeof version === "string" ? version : undefined;
 }
 
-function isSupported(version: string): boolean {
+/** Undefined when the version is outside every supported line. */
+function supportedMajor(version: string): number | undefined {
   const match = RELEASE_VERSION.exec(version);
-  if (!match) return false;
+  if (!match) return undefined;
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  return SUPPORTED_VITEST_LINES.some(
+  const supported = SUPPORTED_VITEST_LINES.some(
     (line) =>
       line.major === major &&
       (line.minor === undefined || line.minor === minor),
   );
+  return supported ? major : undefined;
 }
 
 function unsupported(

@@ -103,7 +103,7 @@ export async function inWorkspaceSession<T>(
       reporters: [...reporters],
       api: false,
       ui: false,
-      ...noWriteOptions(vitest.version),
+      ...noWriteOptions(vitest.major),
       ...configOptions(workspace),
     });
     const session = await openSession(instance, workspace);
@@ -124,12 +124,12 @@ export async function inWorkspaceSession<T>(
   return closeError === undefined ? result : { ...result, closeError };
 }
 
-function noWriteOptions(vitestVersion: string): CliOptions {
+function noWriteOptions(vitestMajor: number): CliOptions {
   return {
     coverage: COVERAGE_OFF,
     update: SNAPSHOT_UPDATE_NONE,
     cache: RESULTS_CACHE_OFF,
-    ...(Number.parseInt(vitestVersion, 10) >= TOP_LEVEL_MODULE_CACHE_MAJOR
+    ...(vitestMajor >= TOP_LEVEL_MODULE_CACHE_MAJOR
       ? { fsModuleCache: MODULE_CACHE_OFF }
       : {
           experimental: {
