@@ -20,6 +20,12 @@ Build RT Test as a standalone tool providing fast, queryable Vitest results, fre
 
 Rewrite `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md` to carry these before starting M1:
 
+- The product's purpose is to take test execution and falsification off coding agents. Today agents write, run, and falsify every test themselves, which costs most of their time; RT Test runs them instead and answers queries. The Convex adapter and falsification are therefore core value, not late additions: order the milestones by what offloads agent work on Fleet Cooling soonest, while keeping every correctness guarantee.
+- Test suggestions come as two add-ons after falsification works, in this order:
+  1. **Mechanical suggestions, no LLM, right after falsification.** From its own data RT Test reports gaps (code no named defect covers, branches reached but never proven, tests with no defect) and proposes candidate mutations for uncovered code, verifying each against the current tests before suggesting it: one an existing test catches is attribution to name, one that survives is a test owed.
+  2. **LLM-suggested defects, after that.** RT Test emits the gap report through its JSON CLI and the coding agent proposes defects and tests, which RT Test verifies; RT Test calls no model and sends no source anywhere. A built-in, opt-in model call needs explicit product approval.
+- For both suggestion add-ons, a suggestion becomes a defect only when the author accepts it into the defect definitions, expected behavior still comes from requirements, and no suggestion weakens an existing test.
+
 - Fleet Cooling (sibling checkout `C:\source\fleetcooling`) is the proving ground; RT Test stays generic. About 10,000 tests across five Vitest workspaces (jsdom and edge-runtime); the full sequential chain takes about 7 minutes, `packages/convex` about 3. Do not edit that checkout from RT Test work unless asked; it carries other sessions' uncommitted changes.
 - Support Vitest 4.1.x, the consumer's version, as well as 5.x. Support multiple Vitest workspaces from M1.
 - The daemon is the sole test executor. Agents never start runs; they query, or call `wait` scoped to their own files. A run whose inputs change mid-run is invalidated and rerun, which replaces Fleet Cooling's run lock for tests and falsification. Lint and typecheck stay with agents.
