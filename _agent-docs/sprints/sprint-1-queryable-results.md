@@ -4,7 +4,7 @@
 
 Capture Vitest runs from every workspace of a consumer, persist them, and answer queries about them from a daemon the user starts explicitly. Nothing runs on edits yet and no input is fingerprinted, so every result's freshness is honestly unknown; Sprint 2 makes results current. The sprint comes first because every later milestone, falsification included, reads the test identities, states, and store it builds, and those must hold on Fleet Cooling's Vitest 4.1 as well as 5.x.
 
-Ticket 1.3 opens with a spike on the local IPC transport on Windows and Linux, since its design rests on facts nobody has observed. The observed Vitest 4.1 and 5 API facts that tickets 1.1 and 1.1b rest on are recorded in ticket 1.1's Dev Notes. Ticket 1.2 raises the Node floor to `^22.13.0`, where `node:sqlite` needs no flag (observed on Node 22.13.0 in ticket 1.2's Dev Notes), and updates the README's Develop line with it.
+The local IPC transport spike on Windows and Linux, a named pipe and a Unix socket in a user-only runtime directory, is recorded in ticket 1.3's Dev Notes. The observed Vitest 4.1 and 5 API facts that tickets 1.1 and 1.1b rest on are recorded in ticket 1.1's Dev Notes. Ticket 1.2 raises the Node floor to `^22.13.0`, where `node:sqlite` needs no flag (observed on Node 22.13.0 in ticket 1.2's Dev Notes), and updates the README's Develop line with it.
 
 ## Ticket 1.1: Discover tests across Vitest workspaces
 
@@ -22,15 +22,21 @@ Scope: store runs and discoveries in `node:sqlite` bound to project, worktree, r
 
 ## Ticket 1.3: Daemon lifecycle and local protocol
 
-Scope: start and stop the daemon explicitly for one trusted project, executing no project code before that start, and serve a versioned, framed local protocol bound to loopback or a local socket. Requirements: FR4, NFR4.
+Scope: start one background daemon per worktree through `@rt-test/daemon`'s client. The daemon discovers, runs and stores every workspace once, hosts Vitest in an executor child process, serves a versioned, line-framed protocol only to the user who started it, and stops cleanly. Requirements: FR4, NFR4. Ticket file: [1-3-daemon-lifecycle](../tickets/1-3-daemon-lifecycle.md)
 
-Ticket 1.1's test discovery executes project code, so this ticket's start is its only production caller: the daemon discovers tests only after the explicit start of a trusted project. Discovery runs each workspace's Vitest `globalSetup`, as `vitest list` does, so the start's trust prompt covers that setup code as well as config loading (owner ruling 2026-09-26). Ticket 1.1b's run executes project code the same way, with no trust check of its own, so this start is its only production caller too, and its shutdown interrupts a running run.
+## Ticket 1.3b: Run safety
 
-While a discovery holds a Vitest instance open, Vitest's logger holds `SIGINT`, `SIGTERM`, `exit` and `unhandledRejection` handlers that exit the process, and discovery rewrites the host's `process.env` until it restores it; the start runs discovery where neither reaches other daemon work. On Vitest 5, a browser-mode project makes `createVitest` listen on a port and call the provider's prewarm before discovery rejects the project.
+Scope: daemon runs and discovery write nothing into the consumer's tree, with coverage off, snapshot update set to none and Vitest's results cache off whatever the consumer's config says. A named-defect test proves this on Vitest 4.1 and 5 over a consumer fixture, `node_modules` included. Discovery can be interrupted, and 10 s after an interrupt (a named constant) Vitest is force-stopped, which the run records and the store keeps. Requirements: FR2, NFR4.
 
-A test stuck in a synchronous loop keeps an interrupted run from ending, and discovery and runs share one queue, so it would block every later run and discovery: after an interrupt, the start waits a named grace period and then force-stops Vitest. The daemon's runs never write into the consumer's tree: they run with coverage off, snapshot update set to none, and Vitest's results cache off, whatever the consumer's config says, and the start verifies what else a run writes and names any file under `node_modules` it cannot avoid, such as Vitest 5's API token file (owner rulings 2026-09-26). A run aborted while it waits in the session queue resolves only when the job ahead of it finishes, so shutdown does not await it alone.
+A test stuck in a synchronous loop keeps an interrupted run from ending, since Vitest's graceful cancel waits for the running test, and discovery and runs share one queue. A second cancel ends such a run, or a discovery stuck at module load, within about 10 ms on both Vitest versions and both pools (ticket 1.3's Dev Notes § Spike facts). The force-stop skips the consumer's `afterAll` and teardown, so the run records that it happened (orchestrator, 2026-09-26 13:45). The overrides were observed to write nothing on both versions, and without them a run writes Vitest's results cache under `node_modules`, writes snapshot files, and rewrites a test file for an inline snapshot (same spike). The spike found no API token file with the API off; the named-defect test keeps checking (orchestrator, 13:45).
 
-Ticket 1.2's store lets the daemons of different worktrees share one state directory, so this ticket keeps one daemon per worktree, and decides how a user configures the state directory (default `.rt-test` under the consumer root).
+## Ticket 1.3c: Start and stop CLI
+
+Scope: `packages/cli` with `rt-test start [root]` and `rt-test stop [root]` through ticket 1.3's client, with `--state-dir` (default `.rt-test` under the root) and versioned `--json` output. On a TTY, the start names the root and every Vitest config it will load, says that each workspace's config, `globalSetup`, setup files and test modules will execute, and asks y/N every time. Without a TTY it refuses unless `--trust` is passed. Trust is never persisted and never read from the consumer tree (owner ruling 2026-09-26 13:44). Requirements: FR4.
+
+Ticket 1.3 was estimated at about 36 raw files, 47 estimated, against the 20-file limit. It was split by outcome (orchestrator, 2026-09-26 13:45): 1.3 is a daemon that starts, serves, runs and stops; 1.3b is runs that never write into the consumer and never hang a stop; 1.3c is the user's explicit, trusted start. 1.3b and 1.3 follow ticket 1.2, whose store both use, and 1.3b adds its force-stop field to that store. 1.3b lands before 1.3, so the daemon's first runs already keep the consumer's tree unwritten (orchestrator, 13:55). 1.3's executor bound derives from 1.3b's grace constant. 1.3c follows 1.3, whose client it calls. Ticket 1.4 adds `summary` and `status` to 1.3c's CLI.
+
+Ticket 1.3 (unbuilt) names `packages/daemon/src/index.ts` and `packages/daemon/package.json`, which 1.2 also writes: 1.2 landing first makes 1.3 safer. 1.3b writes `packages/daemon/src/vitest/workspace-session.ts`, `run-workspace.ts` and `discover-tests.ts`, which no other unbuilt ticket writes, and 1.2's store files after 1.2 lands.
 
 ## Ticket 1.4: Query CLI
 
