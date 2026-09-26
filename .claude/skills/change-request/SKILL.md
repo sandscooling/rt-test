@@ -9,7 +9,7 @@ Gather context, optionally grill the change, then choose a path on measured evid
 
 - **[Inline fix](INLINE-FIX.md)**: the change fits one ticket. Implement it now with `dev-ticket`'s rigor, and
   apply every documentation update it implies in the same session. It writes a change record carrying the
-  test handoff, then hands off to `create-tests` and `review-changes`, which commits it.
+  test handoff, then hands off to `create-tests` and `review-changes`, which commits it (under a lane, the orchestrator commits from its report).
 - **[Proposal](PROPOSAL.md)**: the change spans several tickets and needs planning. It edits the planning docs
   (requirements, design docs, ADRs, sprints, status) and defers the code to `create-ticket`.
 
@@ -132,8 +132,9 @@ touched files as `{{blast_radius_files}}`; bind the doc findings as `{{doc_conte
 change touches, since contradicting an ADR needs explicit reconciliation.
 
 **Then bind `{{pending_siblings}}`**: every ticket not `done` whose sprint section or ticket file names a file
-in `{{blast_radius_files}}` (`rg -n "<file name>" {cfg.sprints_dir} {cfg.ticket_dir}`, state from
-`{cfg.sprint_status}`). Read each hit's criteria, not its title. `(none)` is the common answer; say it.
+in `{{blast_radius_files}}`: `node scripts/list-unbuilt-work.mjs <each file in {{blast_radius_files}}>`, which
+prints each hit with its state from `{cfg.sprint_status}`. Read each hit's criteria, not its title. `(none)` is
+the common answer; say it.
 
 ## 2. Grill the change?
 

@@ -77,10 +77,11 @@ scope line and any acceptance criteria still under it → `{{ticket_requirements
 as `{{sprint_context}}`.
 
 **Bind `{{pending_siblings}}`**: every ticket not `done` in this sprint, plus every ticket not `done` in any
-sprint whose section or ticket file names one of this ticket's target files. Search both homes, since a
-drafted ticket file names paths its one-line sprint scope does not: `rg -n "<file name>" {cfg.sprints_dir}
-{cfg.ticket_dir}`, attributing each hit to the ticket heading or ticket file that holds it, and reading its
-state from `{cfg.sprint_status}`. Re-run it whenever the file list widens.
+sprint whose section or ticket file names one of this ticket's target files:
+`node scripts/list-unbuilt-work.mjs <each file in {{files_to_modify}} and {{files_to_create}}>`. It searches both
+homes, since a drafted ticket file names paths its one-line sprint scope does not, and prints each hit under the
+ticket heading or ticket file that holds it, with its state from `{cfg.sprint_status}`. Re-run it whenever the
+file list widens.
 
 **Mid-sprint, the code is not the design**: it lacks what pending siblings add and still carries what they
 delete. Route every finding that rests on something a sibling owns:

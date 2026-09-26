@@ -108,7 +108,7 @@ Add a dependency only as P9 directs. After any `bun install` or `bun add`, run `
 
 ## Post-Change Validation
 
-**These are gates, not a running order; your workflow owns the sequence.** Per-unit gates fire inside the implementation loop: § Targeted Typecheck and § Targeted Test Validation. Completion gates fire once the change is done, in this order: § Lint, § Full Typecheck, the acceptance-evidence pass (what would be observed if each criterion were false), § Full-Suite Validation, named defects (§ Writing Tests Outside create-tests), § Pre-Done Literal Check, § Citation Shift Check, § Test Coverage Recommendation.
+**These are gates, not a running order; your workflow owns the sequence.** Per-unit gates fire inside the implementation loop: § Targeted Typecheck and § Targeted Test Validation. Completion gates fire once the change is done, in this order: § Lint, § Full Typecheck, the acceptance-evidence pass (what would be observed if each criterion were false; `dev-ticket` Step 7), § Full-Suite Validation, named defects (§ Writing Tests Outside create-tests), § Pre-Done Literal Check, § Citation Shift Check, § Test Coverage Recommendation.
 
 **In a workflow the list splits by session.** The implementer (`dev-ticket`, `change-request`'s inline fix) runs every gate except the test gates, and writes no test. `create-tests` runs next and owns § Targeted Test Validation, § Full-Suite Validation, the named defects and § Test Coverage Recommendation. `review-changes` runs § Post-Fix Re-Validation after its own fixes.
 

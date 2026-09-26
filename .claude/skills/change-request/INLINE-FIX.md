@@ -3,7 +3,7 @@
 Reached from `SKILL.md` Step 3 when the change fits one ticket. **Inline means no ticket file and no approval
 gate ahead of the work; it does not mean code only, and it does not mean skipping gates.** This path runs
 `dev-ticket`'s rigor: gates, an adversarial review, and every documentation update the change implies. It
-writes and edits no test and runs no test: `create-tests` runs next, then `review-changes`, which commits.
+writes and edits no test and runs no test: `create-tests` runs next, then `review-changes`, which commits (under a lane, the orchestrator commits from its report).
 Everything the preamble bound is in hand.
 
 Read `{cfg.code_change_standards}` whole, whatever `scale.doc_sections` says: this path implements, so it needs
@@ -161,7 +161,7 @@ Lead with the outstanding actions:
 ```text
 TESTS OWED: run `create-tests` on <change record path> in a new session, and keep this session open for
 the code bugs it sends back.
-REVIEW OWED after the tests: run `review-changes` on the change record in its own session. It commits.
+REVIEW OWED after the tests: run `review-changes` on the change record in its own session. It commits, or under a lane the orchestrator commits from its report.
 ```
 
 Then list `{{files_changed}}`, the gates and their results, the adversarial review's outcome, and any

@@ -1,0 +1,198 @@
+[
+  {
+    "id": "D600",
+    "defect": "The settled state is misnamed, so done tickets are reported as unbuilt.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const SETTLED_STATES = new Set([\"done\"]);",
+    "new": "const SETTLED_STATES = new Set([\"closed\"]);"
+  },
+  {
+    "id": "D601",
+    "defect": "Deferred tickets are treated as settled, though their criteria are still future instructions.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const SETTLED_STATES = new Set([\"done\"]);",
+    "new": "const SETTLED_STATES = new Set([\"done\", \"deferred\"]);"
+  },
+  {
+    "id": "D602",
+    "defect": "A ticket with no status key is read as done and silently skipped.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "entries.get(id)?.state ?? NO_STATUS;",
+    "new": "entries.get(id)?.state ?? \"done\";"
+  },
+  {
+    "id": "D603",
+    "defect": "The sprint preamble above the first ticket heading is never searched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "return sections(readText(path)).map(",
+    "new": "return sections(readText(path)).slice(1).map("
+  },
+  {
+    "id": "D604",
+    "defect": "A sprint-file hit reports its line within the section instead of within the file.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "found.push(unit.offset + index + 1);",
+    "new": "found.push(index + 1);"
+  },
+  {
+    "id": "D605",
+    "defect": "Ticket headings are matched at the wrong level, so every section folds into the preamble.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const TICKET_HEADING = /^## Ticket",
+    "new": "const TICKET_HEADING = /^### Ticket"
+  },
+  {
+    "id": "D606",
+    "defect": "A ticket heading inside a code fence starts a section.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const id = fenced[index] ? undefined : TICKET_HEADING.exec(line)?.[1];",
+    "new": "const id = TICKET_HEADING.exec(line)?.[1];"
+  },
+  {
+    "id": "D607",
+    "defect": "The start boundary checks punctuation only, so a bare name matches inside a longer name.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const CHAR_BEFORE_NAME = /[A-Za-z0-9_$.-]/;",
+    "new": "const CHAR_BEFORE_NAME = /[.-]/;"
+  },
+  {
+    "id": "D608",
+    "defect": "The end boundary always passes, so a path matches the start of a longer file name.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "  if (end === line.length) return true;",
+    "new": "  if (end <= line.length) return true;"
+  },
+  {
+    "id": "D609",
+    "defect": "A file name two tracked files share still matches bare.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "(counts.get(name) ?? 0) <= 1)",
+    "new": "(counts.get(name) ?? 0) <= 2)"
+  },
+  {
+    "id": "D610",
+    "defect": "The unique bare file name is never added as a token.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "tokens.push(name);",
+    "new": "tokens.push(path);"
+  },
+  {
+    "id": "D611",
+    "defect": "Only the full path is a token, so prose citing a shorter directory suffix is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "tokens.push(parts.slice(index).join(\"/\"));",
+    "new": "tokens.push(parts.join(\"/\"));"
+  },
+  {
+    "id": "D612",
+    "defect": "A path given with Windows separators is not normalized and matches nothing.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const slashed = path.trim().replaceAll(\"\\\\\", \"/\");",
+    "new": "const slashed = path.trim();"
+  },
+  {
+    "id": "D613",
+    "defect": "Changed planning files are searched for, so the plan reports itself.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": ".filter((path) => path !== \"\" && !isPlanningPath(config, path));",
+    "new": ".filter((path) => path !== \"\");"
+  },
+  {
+    "id": "D614",
+    "defect": "A single path that could not be searched is not reported as unsearched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "if (unsearchable.length > 0) {",
+    "new": "if (unsearchable.length > 1) {"
+  },
+  {
+    "id": "D615",
+    "defect": "Untracked files are left out of the changeset read from git.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "  [\"ls-files\", \"--others\", \"--exclude-standard\"],\n",
+    "new": ""
+  },
+  {
+    "id": "D616",
+    "defect": "A failed git command while reading the changeset is ignored and its error text is searched as paths.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "    if (!run.ok) {",
+    "new": "    if (run.ok === undefined) {"
+  },
+  {
+    "id": "D617",
+    "defect": "Hits exit 1, so a caller reads the review input as a failed gate.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "  return result(0, [\n    ...hitLines(hits, searchable.length),",
+    "new": "  return result(hits.size > 0 ? 1 : 0, [\n    ...hitLines(hits, searchable.length),"
+  },
+  {
+    "id": "D618",
+    "defect": "A missing ticket directory throws instead of reading as no ticket files.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "planningFiles(config.ticket_dir, { optional: true })",
+    "new": "planningFiles(config.ticket_dir)"
+  },
+  {
+    "id": "D619",
+    "defect": "An unknown flag is taken as a path and searched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "arg.startsWith(\"--\"))",
+    "new": "arg.startsWith(\"---\"))"
+  },
+  {
+    "id": "D620",
+    "defect": "A failed tracked-file listing drops bare-name matching without saying so.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "if (counts === undefined) {",
+    "new": "if (counts === null) {"
+  },
+  {
+    "id": "D621",
+    "defect": "An absolute path is not made repo-relative, so hits name the absolute path.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const rooted = isAbsolute(slashed)",
+    "new": "const rooted = false"
+  },
+  {
+    "id": "D622",
+    "defect": "A trailing slash is kept, so a directory path never matches a file cited beneath it.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": ".replace(/^\\.\\//, \"\").replace(/\\/+$/, \"\");",
+    "new": ".replace(/^\\.\\//, \"\");"
+  },
+  {
+    "id": "D623",
+    "defect": "Staged renames are detected, so git names only the new path and the old path a ticket cites is never searched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "[\"diff\", \"--cached\", \"--name-only\", \"--no-renames\"],",
+    "new": "[\"diff\", \"--cached\", \"--name-only\"],"
+  },
+  {
+    "id": "D624",
+    "defect": "An unclosed fence runs to the end of the file, hiding every ticket heading after it.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
+    "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
+  },
+  {
+    "id": "D625",
+    "defect": "Any marker of the fence's character closes it, so a shorter marker inside a longer fence exposes the fenced example headings.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length >= 3"
+  },
+  {
+    "id": "D626",
+    "defect": "A ticket file whose name matches no ticket key is skipped, so its work is never searched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "if (!match) return [unkeyedUnit(file, lines)];",
+    "new": "if (!match) return [];"
+  },
+  {
+    "id": "D627",
+    "defect": "A sprint file whose name matches no sprint key is skipped, so its work is never searched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "[unkeyedUnit(file, readText(path).split(/\\r?\\n/))]",
+    "new": "[]"
+  }
+]
