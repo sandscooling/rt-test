@@ -51,6 +51,8 @@ C129. **Explain every selection and fallback**: Each selected test carries its r
 
 C130. **A zero-test selection is not a pass**: A selection or run that executed no tests reports that nothing ran and why, never success.
 
+C154. **Never run a current test again**: A path that queues a test skips it while it holds a current result for the same input fingerprint; only a changed input, an invalidated run or a falsification experiment executes it again.
+
 ## Distinct states
 
 C131. **Keep failure kinds distinct**: Collection errors, crashes, timeouts, interruptions, skips and unknown tests each keep their own state; none is coerced to passed or folded into a generic failed.
@@ -89,7 +91,7 @@ C144. **Let adapters widen, never silently narrow**: An adapter may add dependen
 
 ## Local state and privacy
 
-C146. **No network egress without approval**: No code sends source, results, environment values or telemetry off the machine.
+C146. **No network egress without approval**: No code sends source, results, environment values or telemetry off the machine. → lint-hardening candidate (config-expressible: `no-restricted-globals` on `fetch` and `no-restricted-imports` on outbound network modules in product packages, once the M1 transport is chosen)
 
 C147. **Persist digests, not secrets**: Environment inputs are fingerprinted as digests; state, logs and summaries never contain raw environment values or source text.
 

@@ -78,7 +78,7 @@ P30. **Keep every switched-off path tested**: A mode kept off by a `scale` switc
 
 P31. **Keep RT Test generic**: Fleet Cooling is the proving ground, not a dependency. Nothing application- or backend-specific enters the core; Convex support lives in an adapter.
 
-P32. **Let only the daemon execute tests**: The daemon is the sole test executor. The CLI and programmatic API query results or wait for a revision scoped to given files, and never spawn Vitest; lint and typecheck stay with agents.
+P32. **Let only the daemon execute tests**: The daemon is the sole test executor. The CLI and programmatic API query results or wait for a revision scoped to given files, and never spawn Vitest; lint and typecheck stay with agents. → lint-hardening candidate (config-expressible and custom-plugin: `no-restricted-imports` on `vitest/node` outside the daemon package, and a custom rule banning a Vitest child process there, once that package exists)
 
 P33. **Give agent-facing tooling a JSON CLI, never an MCP server**: Expose the product as a CLI with `--json` output in front of the daemon, plus a small programmatic API.
 

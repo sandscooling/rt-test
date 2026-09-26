@@ -1,19 +1,19 @@
 # RT Test
 
-Queryable test state and named-defect evidence for Vitest projects.
+Test execution and falsification for Vitest projects, taken off coding agents.
 
-RT Test is an early project exploring three questions: does the code pass, are the results still current, and have the tests demonstrated that they detect their intended defects?
+Coding agents spend most of their time running and falsifying the tests they write. RT Test is meant to do that work for them: a local daemon runs each edit's tests and proves them against their named defects, and agents query the answers instead of running anything. It answers three questions: does the code pass, are the results still current, and have the tests shown that they detect their intended defects?
 
-**Status: foundation only.** This repository contains the product plan, architecture, contributor conventions, and a small tested result-freshness core. It does not yet watch projects, run a daemon, build a dependency graph, persist results, or expose a product CLI. It is not published to npm.
+**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, and a small tested result-freshness core. It does not yet run a daemon, execute or watch a project's tests, build a dependency graph, persist results, falsify defects, or expose a product CLI. It is not published to npm.
 
 ## Intended experience
 
-- Query results immediately, without starting another run.
-- Mark affected evidence stale as soon as saved inputs change.
-- Schedule the smallest defensible set of tests and explain broader fallbacks.
-- Track dependency, execution, and named-defect evidence separately.
-- Verify named defects in isolation, without mutating a developer's working files.
-- Support ordinary Vitest projects first, with adapters for frameworks such as Convex.
+- Start RT Test explicitly for a trusted project; from then on its daemon is the only thing that runs tests, and agents never start a run.
+- Ask through a CLI with versioned `--json` output: `status <path>` gives counts per state for a file or folder, and `wait <files>` returns once the results covering your files are current.
+- Mark affected results stale as soon as saved inputs change, and never run a test again while its result is current.
+- Select the tests each edit needs, widening when a dependency is uncertain and explaining every broad fallback, with a Convex adapter for function-reference edges.
+- Falsify each test against its named defect as an in-memory transform, without touching a developer's working files, and report tests with no defect as gaps.
+- Later, suggest defects for uncovered code: mechanically first, then through the coding agent. RT Test calls no model itself.
 
 These are planned capabilities. See the [plan](docs/plan.md) and [milestones](docs/roadmap.md).
 
@@ -55,6 +55,7 @@ The bootstrap core compares caller-supplied input fingerprints. It does not comp
 - [Product plan](docs/plan.md)
 - [Architecture and evidence model](docs/architecture.md)
 - [Implementation roadmap](docs/roadmap.md)
+- [Requirements](docs/requirements.md) and [glossary](docs/glossary.md)
 - [Named-defect testing](docs/testing.md)
 - [Next-session handoff](_agent-docs/next-session.md)
 - [Agent conventions](AGENTS.md)

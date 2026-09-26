@@ -16,40 +16,9 @@ Build RT Test as a standalone tool providing fast, queryable Vitest results, fre
 - Never mutate a consumer's live working files.
 - Treat performance numbers as targets until benchmarked.
 
-## Direction agreed with the owner, not yet in the plan docs
+## Where the direction lives
 
-Rewrite `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md` to carry these before starting M1:
-
-- The product's purpose is to take test execution and falsification off coding agents. Today agents write, run, and falsify every test themselves, which costs most of their time; RT Test runs them instead and answers queries. The Convex adapter and falsification are therefore core value, not late additions: order the milestones by what offloads agent work on Fleet Cooling soonest, while keeping every correctness guarantee.
-- Test suggestions come as two add-ons after falsification works, in this order:
-  1. **Mechanical suggestions, no LLM, right after falsification.** From its own data RT Test reports gaps (code no named defect covers, branches reached but never proven, tests with no defect) and proposes candidate mutations for uncovered code, verifying each against the current tests before suggesting it: one an existing test catches is attribution to name, one that survives is a test owed.
-  2. **LLM-suggested defects, after that.** RT Test emits the gap report through its JSON CLI and the coding agent proposes defects and tests, which RT Test verifies; RT Test calls no model and sends no source anywhere. A built-in, opt-in model call needs explicit product approval.
-- For both suggestion add-ons, a suggestion becomes a defect only when the author accepts it into the defect definitions, expected behavior still comes from requirements, and no suggestion weakens an existing test.
-
-- Fleet Cooling (sibling checkout `C:\source\fleetcooling`) is the proving ground; RT Test stays generic. About 10,000 tests across five Vitest workspaces (jsdom and edge-runtime); the full sequential chain takes about 7 minutes, `packages/convex` about 3. Do not edit that checkout from RT Test work unless asked; it carries other sessions' uncommitted changes.
-- Support Vitest 4.1.x, the consumer's version, as well as 5.x. Support multiple Vitest workspaces from M1.
-- The daemon is the sole test executor. Agents never start runs; they query, or call `wait` scoped to their own files. A run whose inputs change mid-run is invalidated and rerun, which replaces Fleet Cooling's run lock for tests and falsification. Lint and typecheck stay with agents.
-- Move the Convex adapter earlier by porting `scripts/test-blast-radius.mjs` (`vitest related` is useless there, since every Convex test globs the whole package). Porting any Fleet Cooling code is authorized.
-- Port `scripts/falsify.mjs` into the product. Replace its message-text classifier, whose growth is the owner's main pain, with facts recorded during the run: failure phase, error kind, whether the mutated code was reached, and the baseline result. Apply mutations as transforms in a separate Vitest instance, never as file writes. Keep canary fixtures, aimed at the fact collector.
-- Commit defect definitions in the consumer repo at a configurable location; keep evidence local under `.rt-test/`. Attribute by stable test ID, including `it.each` arms. Report tests with no defect as a gap.
-- A missing mutation anchor is a per-defect `anchor-missing` state that names the gap in the denominator and blocks "verified"; the other defects still run.
-- RT Test chooses no mutations and diagnoses no survivors; the author does.
-- Port Fleet Cooling's workflow pipeline (change-request, create-ticket, dev-ticket, create-tests, review-changes, the full orchestrator), keeping only what fits RT Test. Adopt sprints mapped to milestones, tickets, a requirements doc with FR and NFR ids and lifecycle markers, ADRs, a glossary, doc verification in review, the ADR index and line-citation checks, the doc-integrity hook, rule maintenance, and lint-harden. Skip the UX spec and component catalog until an app exists; defer drift-sweep. Do not port the retrospective skill, which is unused even in Fleet Cooling.
-- Keep one home per concern. Use ADRs only, not Fleet Cooling's older CADs, and leave behind any gate that exists only to keep two copies of one fact aligned.
-- Port the scale machinery (context fan-out agents, sharded checklist, sprint-context bundles) switched off, behind a configuration switch with a measurable trigger for enabling it, and keep the dormant path tested so it does not rot.
-- Workflow port decisions:
-  - Tickets live in `_agent-docs/sprints/` and `_agent-docs/tickets/`, with status only in `_agent-docs/sprint-status.yaml` and no archive.
-  - Crew roles are create, dev, tests, and review, plus spike for research.
-  - Rule ids are renumbered.
-  - Enforcement uses `file-claims` and the prompt-context hook, without the run lock or gate guards.
-  - Rules, checklist, sprints, and the status file are orchestrator-owned and grantable; a ticket belongs to its lane once dispatched.
-  - Agents use `rg` and `tsc` rather than a language server for now.
-  - The ADR index is generated, never hand-kept.
-  - Requirement markers store only the sprint or ticket link, and status is derived from the status file.
-  - Docs live at `docs/adr/`, `docs/glossary.md`, `docs/requirements.md`, and `docs/design-decisions/`.
-  - Keep two rule homes with a sharp boundary: `_agent-docs/project-context.md` holds directions that override an agent's default instinct and are read while writing; the checklist holds constraints a reviewer checks against a diff; never both. Technical directions move out of `AGENTS.md` into project context.
-- Language: TypeScript on Node for every product component (ADR-0001). Inputs for the plan's `change-request`: add a separate end-to-end CLI call target (proposed p95 under 100 ms), since a Node CLI spends about 40 ms starting; the summary target applies inside the daemon. First M1 spike: confirm `node:sqlite` works unflagged on the Node 22 floor, else raise the floor or use `better-sqlite3`.
-- Interface: a CLI with versioned `--json` output in front of the daemon, plus a small programmatic API. No MCP server. Support `status <path>` for files and folders with non-binary states, for a later VS Code folder-view extension.
+The product direction agreed with the owner is carried by `docs/plan.md`, `docs/architecture.md`, `docs/roadmap.md`, `docs/requirements.md`, `docs/glossary.md`, and the ADRs in `docs/adr/`. The agent workflow decisions are carried by `AGENTS.md`, `_agent-docs/`, and the skills in `.claude/skills/`. Change either through `change-request`.
 
 ## Starter contents
 
@@ -65,7 +34,7 @@ Run `bun install --frozen-lockfile` and `bun run check`. Inspect the committed s
 
 ## Next action
 
-Port Fleet Cooling's workflow pipeline through lanes, following the inventory's lane plan (lanes A and B next, then C and D, E and F, and G). Landed so far: `wf-config` (the flow config and its shared reader), `wf-planning` (lane B: sprints, status, requirements, ADR formats and checks), `wf-rules` (lane A: the checklist and project-context rule homes, `expand-rules`, and the rule hygiene check), `wf-hooks-orchestration` (lane D: file claims with per-path grants, lane staging, and the doc-integrity, prompt-context, and compact-reminder hooks), and `wf-standards` (lane C: code-change standards, the adversarial review prompt, the shared rule docs in `_agent-docs/rules/`, and the workspace-script, open-issue, doc-section, and line-citation scripts). `req-ids` has landed too: `requirements-index --next` never reissues an id any committed version of the requirements file held, and rule hygiene fails on a duplicate rule id. `wf-skills-author` (lane E: create-ticket, change-request, grill-me, prototype, sprint-context, writing-great-skills, the ctx agents, fill-ticket, check-sprint-context, and check-skill-wiring) has landed as the first worktree lane, and `wf-skills-build` (lane F: dev-ticket, create-tests, review-changes, lint-harden, ctx-testinfra, and list-unbuilt-work) after it. `wf-orchestrator-merge` (lane G: the full orchestrator, file claims as the lane file set, and worktree lanes) completes the port; the orchestrator's working state is in `_agent-docs/.scratch/orchestrator-state.md`. Once the pipeline works, hand the agreed direction above to `change-request` as its first real job: it creates the tickets and updates the plan docs. Then implement M1 as a vertical slice: a synthetic Vitest project produces structured events, a local store persists them, and a read-only JSON query returns honest counts and freshness. First spike the installed Vitest API, test identity, SQLite driver, and IPC transport. Establish baseline timings before optimizing selection.
+The agent workflow is ported, and the plan `change-request` has written the M1 plan: sprints 1 and 2 in `_agent-docs/sprints/`, with every ticket in `backlog` in `_agent-docs/sprint-status.yaml`. Next, run `create-ticket` for ticket 1.1 (capture Vitest runs across workspaces), whose first task is the Vitest 4.1 and 5 API and test-identity spike, then take each ticket through `dev-ticket`, `create-tests`, and `review-changes`. The orchestrator's working state is in `_agent-docs/.scratch/orchestrator-state.md`.
 
 Work on `main`. Hand off to a successor instead of compacting, per `_agent-docs/handoff.md`. The owner's discussion session orchestrates: agreed changes go to lanes of child sessions (`.claude/skills/orchestrator/SKILL.md`, member half in `_agent-docs/crew.md` and `_agent-docs/code-change-standards.md` § Orchestrated Gate Delegation). No agent claims or persistent processes need to be resumed. No npm publication is authorized.
 
