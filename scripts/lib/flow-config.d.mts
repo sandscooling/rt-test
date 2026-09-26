@@ -21,6 +21,7 @@ export interface FlowConfig {
   readonly checklist_dir: string;
   readonly project_context: string;
   readonly rule_maintenance_guide: string;
+  readonly rules_dir: string;
   readonly code_change_standards: string;
   readonly adversarial_review_prompt: string;
   readonly scale: FlowScale;

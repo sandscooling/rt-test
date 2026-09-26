@@ -201,5 +201,12 @@
     "file": "scripts/lib/flow-config.mjs",
     "old": "YAML_NULL.test(value) || ",
     "new": ""
+  },
+  {
+    "id": "D151",
+    "defect": "The rules_dir key is not a known path key, so the committed config fails to load and no script can find the rules folder.",
+    "file": "scripts/lib/flow-config.mjs",
+    "old": "  \"rules_dir\",\n",
+    "new": ""
   }
 ]

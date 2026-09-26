@@ -20,6 +20,7 @@ design_decisions_dir: docs/design-decisions
 checklist_dir: _agent-docs/code-review-checklist
 project_context: _agent-docs/project-context.md
 rule_maintenance_guide: _agent-docs/rule-maintenance-guide.md
+rules_dir: _agent-docs/rules
 code_change_standards: _agent-docs/code-change-standards.md
 adversarial_review_prompt: _agent-docs/adversarial-review-prompt.md
 
@@ -168,6 +169,11 @@ describe("flow config values", () => {
     expect(actual).toMatchObject(expected);
   });
 
+  it("D151: the rules folder is read from rules_dir", () => {
+    const { actual, expected } = path(VALID, "rules_dir", "_agent-docs/rules");
+    expect(actual).toMatchObject(expected);
+  });
+
   it("D031: the config object is frozen", () => {
     const { result } = load(VALID);
     expect(typeof result === "object" && Object.isFrozen(result)).toBe(true);
@@ -285,6 +291,7 @@ describe("committed flow config", () => {
       checklist_dir: at("_agent-docs/code-review-checklist"),
       project_context: at("_agent-docs/project-context.md"),
       rule_maintenance_guide: at("_agent-docs/rule-maintenance-guide.md"),
+      rules_dir: at("_agent-docs/rules"),
       code_change_standards: at("_agent-docs/code-change-standards.md"),
       adversarial_review_prompt: at("_agent-docs/adversarial-review-prompt.md"),
       scale: {

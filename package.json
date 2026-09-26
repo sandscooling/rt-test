@@ -27,7 +27,8 @@
     "format:check": "prettier --check .",
     "lint": "oxlint",
     "check:planning": "node scripts/check-sprint-keys.mjs && node scripts/check-requirement-markers.mjs && node scripts/adr-index.mjs > /dev/null",
-    "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:planning && bun run test:run && bun run test:defects && bun run build"
+    "rules:check": "node scripts/expand-rules.mjs --doc checklist --list --quiet && node scripts/expand-rules.mjs --doc project-context --list --quiet && node scripts/check-rule-hygiene.mjs",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:planning && bun run rules:check && bun run test:run && bun run test:defects && bun run build"
   },
   "devDependencies": {
     "@types/node": "22.20.4",

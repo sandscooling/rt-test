@@ -16,6 +16,7 @@ const PATH_KEYS = [
   "checklist_dir",
   "project_context",
   "rule_maintenance_guide",
+  "rules_dir",
   "code_change_standards",
   "adversarial_review_prompt",
 ];

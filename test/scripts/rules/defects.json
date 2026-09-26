@@ -1,0 +1,387 @@
+[
+  {
+    "id": "D100",
+    "defect": "An explicit expansion with an unresolved id emits the rules it found and exits 0.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "throw new RuleError(\n      `unresolved id(s), refusing",
+    "new": "String(\n      `unresolved id(s), refusing"
+  },
+  {
+    "id": "D101",
+    "defect": "A rule's continuation lines are dropped, so only its first line expands.",
+    "file": "scripts/lib/rules/blocks.mjs",
+    "old": "      current.lines.push(entry.line);",
+    "new": "      void entry;"
+  },
+  {
+    "id": "D102",
+    "defect": "A heading does not close a rule block, so a rule absorbs the next section's heading.",
+    "file": "scripts/lib/rules/blocks.mjs",
+    "old": "const CLOSERS = new Set([\"heading\", \"divider\", \"comment\"]);",
+    "new": "const CLOSERS = new Set([\"divider\", \"comment\"]);"
+  },
+  {
+    "id": "D103",
+    "defect": "Expanded rules keep their source heading levels and collide with the ticket's own headings.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": "const demote = (heading) => `#${heading}`;",
+    "new": "const demote = (heading) => heading;"
+  },
+  {
+    "id": "D104",
+    "defect": "Ids piped on stdin are ignored when no ids are passed as arguments.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": ": io.stdin();",
+    "new": ": \"\";"
+  },
+  {
+    "id": "D105",
+    "defect": "The trailing count line is never printed.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "io.out(`\\nRULE_COUNT: ${count}`);",
+    "new": "void count;"
+  },
+  {
+    "id": "D106",
+    "defect": "An unknown flag is silently ignored.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "throw new RuleError(`Unknown flag: ${arg}\\n${USAGE}`);",
+    "new": "continue;"
+  },
+  {
+    "id": "D107",
+    "defect": "The checklist folder is hardcoded instead of read from the flow config.",
+    "file": "scripts/lib/rules/docs.mjs",
+    "old": "dir: config.checklist_dir,",
+    "new": "dir: join(config.root, \"_agent-docs/code-review-checklist\"),"
+  },
+  {
+    "id": "D108",
+    "defect": "Shards are read alphabetically, ignoring the order _index.md sets.",
+    "file": "scripts/lib/rules/docs.mjs",
+    "old": "return [...ranked, ...rest];",
+    "new": "return [...files].sort();"
+  },
+  {
+    "id": "D109",
+    "defect": "A multi-line HTML comment ends after its first line, so its body reads as stray prose.",
+    "file": "scripts/lib/rules/docs.mjs",
+    "old": "inComment = !line.includes(\"-->\");",
+    "new": "inComment = false;"
+  },
+  {
+    "id": "D110",
+    "defect": "Duplicate ids are not reported, so --list passes a corpus where one id names two rules.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "const duplicates = duplicateAnchors(loadBlocks(spec)).map(",
+    "new": "const duplicates = [].map("
+  },
+  {
+    "id": "D111",
+    "defect": "An id-shaped line that parses to no anchor is not reported, so an unselectable rule passes --list.",
+    "file": "scripts/lib/rules/docs.mjs",
+    "old": "probe: probe ? probe[1] : undefined",
+    "new": "probe: undefined"
+  },
+  {
+    "id": "D112",
+    "defect": "Prose outside every rule block is not reported, so unselectable guidance passes --list.",
+    "file": "scripts/lib/rules/blocks.mjs",
+    "old": "else if (entry.kind === \"text\" && !inRule) {",
+    "new": "else if (false) {"
+  },
+  {
+    "id": "D113",
+    "defect": "A menu line shows only the rule's title, with no excerpt to judge relevance by.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": "return `${anchor}. ${title}${rest ? `: ${rest}` : \"\"}`;",
+    "new": "return `${anchor}. ${title}`;"
+  },
+  {
+    "id": "D114",
+    "defect": "A menu line keeps the lint-hardening annotation in its excerpt.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": ".replace(/→\\s*lint-hardening candidate.*$/i, \"\")",
+    "new": ".replace(/$^/, \"\")"
+  },
+  {
+    "id": "D115",
+    "defect": "A menu excerpt is not cut, so one long rule floods the menu.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": ".slice(0, MENU_BODY_CHARS);",
+    "new": ".slice(0);"
+  },
+  {
+    "id": "D116",
+    "defect": "A menu narrowed to ids still lists every rule.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": "if (!pending || (wanted && !wanted.has(pending.anchor))) {",
+    "new": "if (!pending) {"
+  },
+  {
+    "id": "D117",
+    "defect": "A narrowed menu hides requested ids that resolve to nothing.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "if (unresolved.length > 0) io.out(",
+    "new": "if (false) io.out("
+  },
+  {
+    "id": "D118",
+    "defect": "A narrowed menu replays sibling headings that are not the kept rule's ancestors.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": "const kept = stack.filter((heading) => heading.level < level);",
+    "new": "const kept = stack;"
+  },
+  {
+    "id": "D119",
+    "defect": "--shard is ignored and the menu covers every shard.",
+    "file": "scripts/lib/rules/docs.mjs",
+    "old": "return all.filter((source) => source.name === shardFileName(shard));",
+    "new": "return all;"
+  },
+  {
+    "id": "D120",
+    "defect": "A --shard naming no shard renders an empty menu and exits 0.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "if (sources(spec, args.shard).length === 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D121",
+    "defect": "--shard on the single-file project context is accepted and ignored.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "  if (spec.file) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D122",
+    "defect": "--ids emits a partial set when an id does not resolve.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "throw new RuleError(\n      `${spec.name}: unresolved id(s):",
+    "new": "String(\n      `${spec.name}: unresolved id(s):"
+  },
+  {
+    "id": "D123",
+    "defect": "A ticket's project-context marker is never expanded.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "const sections = DOC_NAMES.map((name) =>",
+    "new": "const sections = [\"checklist\"].map((name) =>"
+  },
+  {
+    "id": "D124",
+    "defect": "A PENDING marker is treated as an id list rather than as an unfinalized ticket.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "if (value === \"PENDING\") {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D125",
+    "defect": "A marker that resolves to zero rules expands to nothing and exits 0.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "if (count === 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D126",
+    "defect": "Retired ids in a ticket marker are skipped without a warning naming them.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "io.err(\n      `expand-rules: WARNING,",
+    "new": "String(\n      `expand-rules: WARNING,"
+  },
+  {
+    "id": "D127",
+    "defect": "A ticket citing one retired id fails outright, so a done ticket becomes unreadable.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "io.err(\n      `expand-rules: WARNING,",
+    "new": "throw new RuleError(\n      `expand-rules: WARNING,"
+  },
+  {
+    "id": "D128",
+    "defect": "A none marker is read as an id and fails as malformed.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "const isNone = (value) => value === \"\" || value.toLowerCase() === \"none\";",
+    "new": "const isNone = (value) => value === \"\";"
+  },
+  {
+    "id": "D129",
+    "defect": "A bare numeric id is not given its doc's prefix and resolves to nothing.",
+    "file": "scripts/lib/rules/render.mjs",
+    "old": "return `${spec.prefix}${id}`;",
+    "new": "return id;"
+  },
+  {
+    "id": "D130",
+    "defect": "Normalizing a bare id happens silently, so the source that wrote it is never fixed.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "if (repaired.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D131",
+    "defect": "A ticket with no rule markers expands to nothing and exits 0.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "if (sections.every((section) => section.text === undefined)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D132",
+    "defect": "A date in a rule is not reported as provenance.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "[/\\b20\\d{2}-\\d{2}-\\d{2}\\b/, \"a date\"],",
+    "new": "[/$^/, \"a date\"],"
+  },
+  {
+    "id": "D133",
+    "defect": "Rule-only provenance patterns such as an origin note are never applied to rules.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": ": [...SHARED_PROVENANCE, ...RULE_PROVENANCE];",
+    "new": ": SHARED_PROVENANCE;"
+  },
+  {
+    "id": "D134",
+    "defect": "AGENTS.md is not scanned for provenance.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "...HARNESS_GUIDANCE_FILES.map((file) => join(root, file)),",
+    "new": ""
+  },
+  {
+    "id": "D135",
+    "defect": "Fenced code in guidance is scanned, so a command holding a date fails the check.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "if (fenced || text === \"\" || text.startsWith(\"```\")) return [];",
+    "new": "if (text === \"\") return [];"
+  },
+  {
+    "id": "D136",
+    "defect": "The rule maintenance guide named in the flow config is not scanned.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "...CONFIG_GUIDANCE_KEYS.map((key) => config[key]),",
+    "new": ""
+  },
+  {
+    "id": "D137",
+    "defect": "Skill files under .claude/skills are not scanned.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "...HARNESS_GUIDANCE_DIRS.flatMap((dir) => walkMarkdown(join(root, dir))),",
+    "new": ""
+  },
+  {
+    "id": "D138",
+    "defect": "A rule citing an id that does not exist passes the check.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": ".filter((id) => id !== entry.id && !ids.has(id))",
+    "new": ".filter(() => false)"
+  },
+  {
+    "id": "D139",
+    "defect": "Every cited id is reported as unresolved, even one that exists.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "const ids = new Set(entries.filter((e) => !e.guidance).map((e) => e.id));",
+    "new": "const ids = new Set();"
+  },
+  {
+    "id": "D140",
+    "defect": "A baselined violation still fails the check.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "const fresh = all.filter((found) => !accepted.has(found.key));",
+    "new": "const fresh = all;"
+  },
+  {
+    "id": "D141",
+    "defect": "--update-baseline writes an empty baseline.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "const now = [...new Set(all.map((found) => found.key))].sort();",
+    "new": "const now = [];"
+  },
+  {
+    "id": "D142",
+    "defect": "A baselined violation that was fixed is never reported, so the baseline never shrinks.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "if (fixed.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D143",
+    "defect": "An unknown argument to the hygiene check is silently ignored.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "else throw new RuleError(`Unknown argument: ${arg}\\n${USAGE}`);",
+    "new": "else continue;"
+  },
+  {
+    "id": "D144",
+    "defect": "The rule count omits the project-context rules.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "rules: checklistRules + contextRules,",
+    "new": "rules: checklistRules,"
+  },
+  {
+    "id": "D145",
+    "defect": "Rule docs past the size threshold give no warning while rule_selection is whole.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "if (signals.ruleDocChars > SCALE_THRESHOLDS.ruleDocChars) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D146",
+    "defect": "A scale warning fails the check instead of only warning.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "    return status;\n  } catch",
+    "new": "    return status || scaleWarnings(scaleSignals(docs), config.scale).length;\n  } catch"
+  },
+  {
+    "id": "D147",
+    "defect": "A corpus past the rule-count threshold gives no warning while rule_selection is whole.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "if (signals.rules > SCALE_THRESHOLDS.rules) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D148",
+    "defect": "Selection warnings keep firing after rule_selection is switched to menu.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "if (scale.rule_selection === \"whole\") return selectionWarnings(signals);",
+    "new": "return selectionWarnings(signals);"
+  },
+  {
+    "id": "D149",
+    "defect": "A checklist of four shards gives no fan-out warning while menu is on and checklist_fanout is 1.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "signals.shards >= SCALE_THRESHOLDS.fanoutShards ||",
+    "new": "false ||"
+  },
+  {
+    "id": "D150",
+    "defect": "--list --quiet still prints every anchor.",
+    "file": "scripts/lib/rules/expand-cli.mjs",
+    "old": "for (const block of args.quiet ? [] : loadBlocks(spec, args.shard)) {",
+    "new": "for (const block of loadBlocks(spec, args.shard)) {"
+  },
+  {
+    "id": "D152",
+    "defect": "Markdown under the configured rules folder is not scanned for provenance.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "    ...walkMarkdown(config.rules_dir),\n",
+    "new": ""
+  },
+  {
+    "id": "D153",
+    "defect": "The fan-out warning ignores the checklist rule count, so an oversized checklist in few shards gives no warning while checklist_fanout is 1.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "    signals.checklistRules > SCALE_THRESHOLDS.fanoutRules;",
+    "new": "    false;"
+  },
+  {
+    "id": "D154",
+    "defect": "The fan-out warning keeps firing after checklist_fanout is switched on.",
+    "file": "scripts/lib/rules/scale.mjs",
+    "old": "  if (scale.checklist_fanout === 1) return fanoutWarnings(signals);",
+    "new": "  return fanoutWarnings(signals);"
+  },
+  {
+    "id": "D155",
+    "defect": "A rule doc that yields no rules passes the hygiene check, so a wrong path or an emptied doc reads as clean.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "    assertRulesRead(docs);\n",
+    "new": ""
+  }
+]
