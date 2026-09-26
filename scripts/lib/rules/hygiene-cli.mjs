@@ -2,7 +2,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadBlocks } from "./blocks.mjs";
 import { DOC_NAMES, RuleError, docLabel, loadRuleDocs } from "./docs.mjs";
-import { collectGuidance, collectRules, findViolations } from "./hygiene.mjs";
+import {
+  collectGuidance,
+  collectRules,
+  duplicateRules,
+  findViolations,
+} from "./hygiene.mjs";
 import { scaleSignals, scaleWarnings } from "./scale.mjs";
 
 export const BASELINE_FILE = "scripts/rule-hygiene-baseline.json";
@@ -107,6 +112,14 @@ function check(args, all, entries, baselinePath, io) {
   return 1;
 }
 
+// A collision is never baselined: a ticket citing the id would resolve to two rules.
+function reportDuplicates(duplicates, io) {
+  io.err(
+    `check-rule-hygiene: ${duplicates.length} rule id(s) defined more than once across the rule docs; give the newer rule a fresh id:\n  ${duplicates.join("\n  ")}`,
+  );
+  return 1;
+}
+
 export function runRuleHygiene(argv, io) {
   try {
     const args = parseArgs(argv);
@@ -116,6 +129,8 @@ export function runRuleHygiene(argv, io) {
       ...collectRules(docs, config.root),
       ...collectGuidance(config.root, config),
     ];
+    const duplicates = duplicateRules(entries);
+    if (duplicates.length > 0) return reportDuplicates(duplicates, io);
     const all = findViolations(entries);
     const baselinePath = join(config.root, BASELINE_FILE);
     if (args.update) return updateBaseline(baselinePath, all, io);

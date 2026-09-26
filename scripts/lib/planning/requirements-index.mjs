@@ -1,5 +1,6 @@
 import { failed, passed } from "./files.mjs";
 import { deriveState } from "./markers.mjs";
+import { historicIds } from "./requirement-history.mjs";
 import { analyzeRequirements } from "./requirements.mjs";
 
 const USAGE = "usage: requirements-index.mjs [--ids FR1,NFR2 | --next]";
@@ -13,7 +14,16 @@ export function requirementsIndex(config, args) {
   if (!options) return failed([USAGE]);
   const { status, requirements, problems } = analyzeRequirements(config);
   if (problems.length > 0) return failed(problems);
-  if (options.next) return passed(nextIds(requirements));
+  if (options.next) {
+    const history = historicIds(config);
+    if (history.problem) return failed([history.problem]);
+    return passed(
+      nextIds([
+        ...requirements.map((requirement) => requirement.id),
+        ...history.ids,
+      ]),
+    );
+  }
   if (!options.ids) return passed(render(requirements, status));
   const found = new Set(requirements.map((requirement) => requirement.id));
   const missing = options.ids.filter((id) => !found.has(id));
@@ -45,11 +55,11 @@ function family(id) {
   return id.startsWith("NFR") ? "NFR" : "FR";
 }
 
-function nextIds(requirements) {
+function nextIds(ids) {
   return FAMILIES.map(([prefix]) => {
-    const numbers = requirements
-      .filter((requirement) => family(requirement.id) === prefix)
-      .map((requirement) => Number(requirement.id.slice(prefix.length)));
+    const numbers = ids
+      .filter((id) => family(id) === prefix)
+      .map((id) => Number(id.slice(prefix.length)));
     return `NEXT_${prefix}: ${prefix}${Math.max(0, ...numbers) + 1}`;
   });
 }

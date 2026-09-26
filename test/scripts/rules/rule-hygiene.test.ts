@@ -223,6 +223,33 @@ describe("rule hygiene scale signal", () => {
   });
 });
 
+function duplicateC1(root: string): void {
+  append(root, `${CHECKLIST}/gamma.md`, "\nC1. **Again**: A second C1.\n");
+}
+
+describe("rule hygiene duplicate ids", () => {
+  it("D805: a rule id defined twice fails the check", () => {
+    expect(checkAfter(duplicateC1).code).toBe(1);
+  });
+
+  it("D806: a duplicate rule id names both of its locations", () => {
+    expect(checkAfter(duplicateC1).err).toMatch(
+      /C1 .*alpha\.md:11.*gamma\.md:\d+/,
+    );
+  });
+
+  it("D807: --update-baseline refuses to accept a duplicate rule id", () => {
+    const run = checkAfter(
+      (root) => {
+        duplicateC1(root);
+        write(root, BASELINE, JSON.stringify({ accepted: [] }));
+      },
+      ["--update-baseline"],
+    );
+    expect(run.code).toBe(1);
+  });
+});
+
 describe("rule hygiene positive control", () => {
   it("D155: a rule doc holding no rules fails the check instead of passing unread", () => {
     const run = checkAfter((root) =>

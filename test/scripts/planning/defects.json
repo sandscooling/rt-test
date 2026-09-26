@@ -320,5 +320,68 @@
     "file": "scripts/lib/planning/sprints.mjs",
     "old": "if (sprint.tickets.has(id)) {",
     "new": "if (false) {"
+  },
+  {
+    "id": "D800",
+    "defect": "--next offers an id that exists only in the requirements file's history.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "return { ids: texts.flatMap(usedIds) };",
+    "new": "return { ids: [] };"
+  },
+  {
+    "id": "D801",
+    "defect": "--next silently ignores unreadable history and counts only the current file.",
+    "file": "scripts/lib/planning/requirements-index.mjs",
+    "old": "if (history.problem) return failed([history.problem]);",
+    "new": ""
+  },
+  {
+    "id": "D802",
+    "defect": "--next reads a shallow clone's truncated history as complete.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "if (shallow.stdout.toString().trim() !== \"false\") {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D803",
+    "defect": "--next loses the ids the file held under an earlier name.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "[\"--follow\", \"-M30%\"]",
+    "new": "[\"-M30%\"]"
+  },
+  {
+    "id": "D804",
+    "defect": "--next misses an id that only a merge commit ever held.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "    \"-m\",\n",
+    "new": ""
+  },
+  {
+    "id": "D808",
+    "defect": "--next loses the ids of an earlier name when the rename also rewrote most of the file.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "[\"--follow\", \"-M30%\"]",
+    "new": "[\"--follow\"]"
+  },
+  {
+    "id": "D809",
+    "defect": "--next loses the path's own history when --follow jumps to a file renamed onto it.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "[[\"--full-history\"], ",
+    "new": "["
+  },
+  {
+    "id": "D810",
+    "defect": "--next fails on an earlier name holding non-ASCII characters because git log quotes it.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "      \"-c\",\n      \"core.quotePath=false\",\n",
+    "new": ""
+  },
+  {
+    "id": "D811",
+    "defect": "--next counts a partial history as complete when cat-file returns fewer versions than were listed.",
+    "file": "scripts/lib/planning/requirement-history.mjs",
+    "old": "if (texts.length !== versions.length) {",
+    "new": "if (false) {"
   }
 ]

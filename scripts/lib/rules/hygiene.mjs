@@ -120,6 +120,20 @@ function citations(entry, ids) {
     }));
 }
 
+// Ids are unique across every rule doc; a Set of ids would silently collapse a second definition.
+export function duplicateRules(entries) {
+  const claims = new Map();
+  for (const entry of entries.filter((e) => !e.guidance)) {
+    claims.set(entry.id, [...(claims.get(entry.id) ?? []), entry]);
+  }
+  return [...claims.entries()]
+    .filter(([, claimed]) => claimed.length > 1)
+    .map(
+      ([id, claimed]) =>
+        `${id} is defined at ${claimed.map((e) => `${e.label}:${e.line}`).join(" and ")}`,
+    );
+}
+
 export function findViolations(entries) {
   const ids = new Set(entries.filter((e) => !e.guidance).map((e) => e.id));
   return entries.flatMap((entry) =>

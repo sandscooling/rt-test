@@ -383,5 +383,26 @@
     "file": "scripts/lib/rules/hygiene-cli.mjs",
     "old": "    assertRulesRead(docs);\n",
     "new": ""
+  },
+  {
+    "id": "D805",
+    "defect": "A rule id defined twice passes hygiene.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": ".filter(([, claimed]) => claimed.length > 1)",
+    "new": ".filter(() => false)"
+  },
+  {
+    "id": "D806",
+    "defect": "A duplicate rule id report names only one of its locations.",
+    "file": "scripts/lib/rules/hygiene.mjs",
+    "old": "claimed.map((e) => `${e.label}:${e.line}`).join(\" and \")",
+    "new": "`${claimed[0].label}:${claimed[0].line}`"
+  },
+  {
+    "id": "D807",
+    "defect": "--update-baseline succeeds and writes a baseline while a rule id is defined twice.",
+    "file": "scripts/lib/rules/hygiene-cli.mjs",
+    "old": "if (duplicates.length > 0) return",
+    "new": "if (duplicates.length > 0 && !args.update) return"
   }
 ]

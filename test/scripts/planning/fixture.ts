@@ -34,11 +34,13 @@ export function run(
   command: Command,
   edits: readonly Edit[] = [],
   args: readonly string[] = [],
+  prepare: (root: string) => void = () => {},
 ): Result {
   const root = mkdtempSync(join(tmpdir(), "rt-test-planning-"));
   try {
     cpSync(BASE, root, { recursive: true });
     cpSync(join(REPO, FLOW_CONFIG_FILE), join(root, FLOW_CONFIG_FILE));
+    prepare(root);
     for (const edit of edits) apply(root, edit);
     return command(loadFlowConfig(root), args);
   } finally {
@@ -46,7 +48,7 @@ export function run(
   }
 }
 
-function apply(root: string, edit: Edit): void {
+export function apply(root: string, edit: Edit): void {
   const file = join(root, edit.path);
   if ("content" in edit) {
     writeFileSync(file, edit.content);
