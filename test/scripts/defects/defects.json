@@ -59,8 +59,8 @@
     "id": "D908",
     "defect": "Any error counts as a detection, so a timed-out named test passes as caught.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "message.includes(\"AssertionError\")",
-    "new": "message.includes(\"Error\")"
+    "old": "const ASSERTION_FAILURE = /^AssertionError: /;",
+    "new": "const ASSERTION_FAILURE = /Error/;"
   },
   {
     "id": "D909",
@@ -348,5 +348,26 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "status !== 1 ||",
     "new": ""
+  },
+  {
+    "id": "D950",
+    "defect": "An id that two tests and two records share passes the catalog, so one record stands for two tests.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "new Set(defectIds).size !== defectIds.length ||\n    new Set(testIds).size !== testIds.length ||",
+    "new": ""
+  },
+  {
+    "id": "D951",
+    "defect": "A failing diff against HEAD reads as no change, narrowing --changed instead of stopping.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (!tracked.ok || !untracked.ok) {",
+    "new": "if (!untracked.ok) {"
+  },
+  {
+    "id": "D952",
+    "defect": "A node:assert failure in the code under test counts as the named test's assertion failure.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "const ASSERTION_FAILURE = /^AssertionError: /;",
+    "new": "const ASSERTION_FAILURE = /^AssertionError/;"
   }
 ]

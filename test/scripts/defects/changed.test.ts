@@ -84,6 +84,14 @@ describe("the --changed selection", () => {
     expect(() => changedPaths(repo)).toThrow(/needs git/);
   });
 
+  it("D951: refuses to select when git cannot diff against HEAD", () => {
+    const repo = fakeGit({
+      diff: { ok: false, out: "fatal: bad revision 'HEAD'" },
+      "ls-files": { ok: true, out: "" },
+    });
+    expect(() => changedPaths(repo)).toThrow(/needs git/);
+  });
+
   it("D927: selects the defects of a test whose helper in another folder changed", () => {
     expect(idsFor(["test/shared/helper.ts"], IMPORTING)).toEqual(["D1", "D2"]);
   });

@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { toPosix } from "./catalog.mjs";
 
 const RUN_TIMEOUT_MS = 120_000;
+const ASSERTION_FAILURE = /^AssertionError: /;
 
 function vitestEntry() {
   const require = createRequire(import.meta.url);
@@ -114,9 +115,7 @@ export function detectionProblem({ status, report }, sandbox, defect) {
     report.numPassedTests !== 0 ||
     failures.length !== 1 ||
     !target?.title.startsWith(`${defect.id}:`) ||
-    !target.failureMessages.some((message) =>
-      message.includes("AssertionError"),
-    )
+    !target.failureMessages.some((message) => ASSERTION_FAILURE.test(message))
   ) {
     return "expected one named assertion failure; inspect the mutation";
   }
