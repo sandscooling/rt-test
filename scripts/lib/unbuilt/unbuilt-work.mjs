@@ -3,6 +3,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { fenceKinds } from "../fences.mjs";
 import { changedPaths, gitIn, trackedPaths } from "../git.mjs";
+import { toPosix } from "../paths.mjs";
 import { display, planningFiles, readText } from "../planning/files.mjs";
 import { readStatus } from "../planning/status.mjs";
 import { result } from "../standards/result.mjs";
@@ -51,9 +52,9 @@ function parseArgv(argv) {
 }
 
 function normalize(config, path) {
-  const slashed = path.replaceAll("\\", "/");
+  const slashed = toPosix(path);
   const rooted = isAbsolute(slashed)
-    ? relative(config.root, slashed).replaceAll("\\", "/")
+    ? toPosix(relative(config.root, slashed))
     : slashed;
   return rooted.replace(/^\.\//, "").replace(/\/+$/, "");
 }

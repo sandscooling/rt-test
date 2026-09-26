@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { toPosix } from "../paths.mjs";
 import { analyzeRequirements } from "../planning/requirements.mjs";
 import { readStatus } from "../planning/status.mjs";
 import { loadBlocks } from "../rules/blocks.mjs";
@@ -220,7 +221,7 @@ export function sprintContext(config, argv) {
   const args = parseArgs(argv);
   if (args === undefined) return done(1, [], [USAGE]);
   const dir = config.sprint_context_dir;
-  const shown = relative(config.root, dir).replaceAll("\\", "/");
+  const shown = toPosix(relative(config.root, dir));
   const files = existsSync(dir)
     ? readdirSync(dir)
         .filter((name) => BUNDLE_NAME.test(name))

@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { loadFlowConfig } from "../flow-config.mjs";
-import { isInside } from "../paths.mjs";
+import { isInside, toPosix } from "../paths.mjs";
 
 export const PATH_CLASS = Object.freeze({
   ORCHESTRATOR_ONLY: "orchestrator-only",
@@ -31,13 +31,11 @@ const AGENT_DOCS_TOP_LEVEL = /^_agent-docs\/[^/]+\.md$/;
 
 export const comparable = (repoPath) => repoPath.toLowerCase();
 
-const toSlash = (path) => path.replace(/\\/g, "/");
-
 export function toRepoPath(root, input) {
-  const slashed = toSlash(input);
+  const slashed = toPosix(input);
   const absolute = isAbsolute(slashed) ? slashed : resolve(root, slashed);
   if (!isInside(root, absolute)) return null;
-  return toSlash(relative(root, absolute));
+  return toPosix(relative(root, absolute));
 }
 
 // A path covers itself and everything beneath it; comparable paths only.
@@ -46,7 +44,7 @@ export const covers = (outer, inner) =>
 
 export function pathRules(config = loadFlowConfig()) {
   const fromConfig = ORCHESTRATOR_ONLY_KEYS.map((key) =>
-    toSlash(relative(config.root, config[key])),
+    toPosix(relative(config.root, config[key])),
   );
   return Object.freeze({
     owned: [

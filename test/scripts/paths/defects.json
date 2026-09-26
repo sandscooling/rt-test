@@ -1,0 +1,9 @@
+[
+  {
+    "id": "D1200",
+    "defect": "Only the first backslash in a path becomes a slash, so a nested Windows path keeps its deeper separators.",
+    "file": "scripts/lib/paths.mjs",
+    "old": "path.replaceAll(\"\\\\\", \"/\")",
+    "new": "path.replace(\"\\\\\", \"/\")"
+  }
+]

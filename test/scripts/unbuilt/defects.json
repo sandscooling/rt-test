@@ -87,7 +87,7 @@
     "id": "D612",
     "defect": "A path given with Windows separators is not normalized and matches nothing.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "const slashed = path.replaceAll(\"\\\\\", \"/\");",
+    "old": "const slashed = toPosix(path);",
     "new": "const slashed = path;"
   },
   {
@@ -276,8 +276,8 @@
     "id": "D960",
     "defect": "Paths read from git are trimmed, so a file whose name ends in a space is searched as a different file.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "const slashed = path.replaceAll(",
-    "new": "const slashed = path.trim().replaceAll("
+    "old": "const slashed = toPosix(path);",
+    "new": "const slashed = toPosix(path.trim());"
   },
   {
     "id": "D961",

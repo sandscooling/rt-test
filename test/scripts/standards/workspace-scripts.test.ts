@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Result } from "../../../scripts/lib/standards/result.mjs";
 import { checkWorkspaceScripts } from "../../../scripts/lib/standards/workspace-scripts.mjs";
+import { settle } from "../settle.js";
 import { inTree, type Files } from "./harness.js";
 
 const BOTH = { build: "tsc -p tsconfig.build.json", typecheck: "tsc --noEmit" };
@@ -16,20 +17,11 @@ function workspace(name: string, scripts: Record<string, string>): string {
   return JSON.stringify({ name, scripts });
 }
 
-function check(files: Files) {
+function check(files: Files): Result {
   return inTree(files, checkWorkspaceScripts);
 }
 
-type Settled = Result | { readonly thrown: string };
-
-// A crash must reach the assertion as a value: the defect checker counts only an assertion failure.
-function settle(files: Files): Settled {
-  try {
-    return check(files);
-  } catch (error) {
-    return { thrown: String(error) };
-  }
-}
+const settleCheck = (files: Files) => settle(() => check(files));
 
 const TWO_VALID: Files = {
   "packages/a/package.json": workspace("@x/a", BOTH),
@@ -134,7 +126,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1130: refuses a negated pattern beside a glob and examines no workspace", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", "!packages/b"]),
       ...TWO_VALID,
     });
@@ -148,7 +140,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1131: refuses a lone negated glob rather than reporting no workspaces", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["!packages/*"]),
       ...TWO_VALID,
     });
@@ -162,12 +154,15 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1132: fails on a null workspaces field instead of crashing", () => {
-    const outcome = settle({ "package.json": manifest(null), ...TWO_VALID });
+    const outcome = settleCheck({
+      "package.json": manifest(null),
+      ...TWO_VALID,
+    });
     expect(outcome).toEqual({ code: 1, out: "", err: FIELD_SHAPE_FAIL });
   });
 
   it("D1133: fails on a string workspaces field instead of reading it as one pattern", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest("packages/*"),
       ...TWO_VALID,
     });
@@ -175,7 +170,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1134: fails on an object workspaces field whose packages is not an array", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest({ packages: null }),
       ...TWO_VALID,
     });
@@ -183,7 +178,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1135: fails on a non-string workspaces entry, naming it", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", 7]),
       ...TWO_VALID,
     });
@@ -195,7 +190,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1136: fails on an empty workspaces entry instead of examining the root", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", ""]),
       ...TWO_VALID,
     });
@@ -207,7 +202,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1137: fails on a whitespace-only workspaces entry", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", "  "]),
       ...TWO_VALID,
     });
@@ -219,7 +214,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1138: fails on a member package.json holding null instead of crashing", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*"]),
       ...TWO_VALID,
       "packages/a/package.json": "null",
@@ -232,7 +227,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1139: fails on a member package.json holding an array", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*"]),
       ...TWO_VALID,
       "packages/a/package.json": "[]",
@@ -245,7 +240,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1140: fails on a member package.json holding a string", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*"]),
       ...TWO_VALID,
       "packages/a/package.json": '"text"',
@@ -258,7 +253,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1141: reports both scripts missing when a member's scripts is null", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*"]),
       ...TWO_VALID,
       "packages/a/package.json": JSON.stringify({
@@ -275,7 +270,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1142: labels a member whose name is not a string by its directory", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*"]),
       ...TWO_VALID,
       "packages/a/package.json": JSON.stringify({
@@ -290,7 +285,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1143: examines and counts a workspace matched by two patterns once", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", "packages/a"]),
       ...TWO_VALID,
     });
@@ -302,7 +297,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1145: counts a workspace listed again with a leading ./ once", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", "./packages/a"]),
       ...TWO_VALID,
     });
@@ -314,7 +309,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1146: counts a workspace listed again with a trailing slash once", () => {
-    const outcome = settle({
+    const outcome = settleCheck({
       "package.json": manifest(["packages/*", "packages/a/"]),
       ...TWO_VALID,
     });
@@ -326,7 +321,7 @@ describe("check-workspace-scripts", () => {
   });
 
   it("D1144: names a root package.json holding null as not a JSON object", () => {
-    const outcome = settle({ "package.json": "null", ...TWO_VALID });
+    const outcome = settleCheck({ "package.json": "null", ...TWO_VALID });
     expect(outcome).toEqual({
       code: 1,
       out: "",

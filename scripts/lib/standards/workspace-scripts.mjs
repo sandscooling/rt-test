@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative } from "node:path";
+import { toPosix } from "../paths.mjs";
 import { result } from "./result.mjs";
 
 const REQUIRED_SCRIPTS = Object.freeze(["build", "typecheck"]);
@@ -51,7 +52,20 @@ function patternsOf(manifest) {
 const isWorkspace = (root, dir) => existsSync(join(root, dir, "package.json"));
 
 const canonical = (root, dir) =>
-  relative(root, join(root, dir)).split(sep).join("/") || ".";
+  toPosix(relative(root, join(root, dir))) || ".";
+
+// The canonical spelling only names a workspace; its manifest is read through
+// the spelling the pattern produced, which is the directory on disk.
+function listedWorkspaces(root, manifest) {
+  const byName = new Map();
+  for (const dir of patternsOf(manifest).flatMap((pattern) =>
+    expand(root, pattern),
+  )) {
+    const name = canonical(root, dir);
+    if (!byName.has(name)) byName.set(name, dir);
+  }
+  return [...byName].map(([name, dir]) => ({ name, dir }));
+}
 
 function expand(root, pattern) {
   if (pattern.startsWith(NEGATION)) {
@@ -84,13 +98,15 @@ function missingScripts(scripts) {
   );
 }
 
-function examine(root, dir) {
-  const manifest = readJson(join(root, dir, "package.json"));
+function examine(root, workspace) {
+  const manifest = readJson(join(root, workspace.dir, "package.json"));
   if (!isObject(manifest)) {
-    throw new WorkspaceError(`${dir}/package.json is not a JSON object.`);
+    throw new WorkspaceError(
+      `${workspace.name}/package.json is not a JSON object.`,
+    );
   }
   const { name, scripts } = manifest;
-  const label = `${typeof name === "string" ? name : dir} (${dir})`;
+  const label = `${typeof name === "string" ? name : workspace.name} (${workspace.name})`;
   const absent = missingScripts(isObject(scripts) ? scripts : {});
   return absent.length === 0
     ? { ok: true, line: `ok       ${label}` }
@@ -100,13 +116,7 @@ function examine(root, dir) {
 export function checkWorkspaceScripts(config) {
   try {
     const manifest = readJson(join(config.root, "package.json"));
-    const workspaces = [
-      ...new Set(
-        patternsOf(manifest)
-          .flatMap((pattern) => expand(config.root, pattern))
-          .map((dir) => canonical(config.root, dir)),
-      ),
-    ];
+    const workspaces = listedWorkspaces(config.root, manifest);
     if (workspaces.length === 0) {
       return result(
         1,
@@ -114,7 +124,9 @@ export function checkWorkspaceScripts(config) {
         ["FAIL: found no workspaces, so the check examined nothing."],
       );
     }
-    const reports = workspaces.map((dir) => examine(config.root, dir));
+    const reports = workspaces.map((workspace) =>
+      examine(config.root, workspace),
+    );
     const out = reports.map((report) => report.line);
     const offenders = reports.filter((report) => !report.ok).length;
     const required = REQUIRED_SCRIPTS.join(" and ");

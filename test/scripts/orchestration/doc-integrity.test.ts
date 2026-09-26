@@ -122,6 +122,24 @@ describe("doc-integrity hook", () => {
     expect(runHook("modified", true).code).toBe(0);
   });
 
+  it("D1201: says no gate ran when git status fails, rather than passing silently", () => {
+    const outcome = withTemp((root) => {
+      const config = flowConfigIn(root);
+      writeIn(root, ".git", "gitdir: no-such-git-dir\n");
+      return docIntegrity(config, {});
+    });
+    expect(outcome).toEqual({
+      code: 0,
+      err: "doc-integrity hook skipped: git status failed, so no documentation gate ran.\n",
+    });
+  });
+
+  it("D1202: throws on a gate watching an unknown flow-config key instead of reporting a git failure", () => {
+    const gates = [{ script: "scripts/ghost.mjs", watches: ["no_such_key"] }];
+    const run = () => docIntegrity(loadFlowConfig(REPO), {}, { gates });
+    expect(run).toThrow("doc-integrity: unknown flow-config key no_such_key");
+  });
+
   it("D353: runs rule hygiene for an AGENTS.md edit", () => {
     expect(gatesFor("AGENTS.md")).toEqual([HYGIENE]);
   });

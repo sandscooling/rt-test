@@ -6,7 +6,7 @@ import {
   statSync,
 } from "node:fs";
 import { join, relative } from "node:path";
-import { isAtOrInside, isInside } from "../paths.mjs";
+import { isAtOrInside, isInside, toPosix } from "../paths.mjs";
 
 export const SANDBOX_DIRS = [
   "packages",
@@ -26,8 +26,6 @@ const SKIPPED_DIRS = new Set([ROOT_PACKAGES, "dist"]);
 const SCOPE_MARK = "@";
 const TOOL_ENTRY_MARK = ".";
 const DEFECT_TEST = /\bit\(\s*"(D\d+):/g;
-
-export const toPosix = (path) => path.split("\\").join("/");
 
 function isSkipped(path) {
   return toPosix(path)

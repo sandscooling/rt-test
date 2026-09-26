@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { toPosix } from "../paths.mjs";
 
 // A gate runs when this session named a dirty path under one of its `watches`: a flow-config key,
 // or a literal repo path, where a trailing slash marks a folder.
@@ -43,8 +44,10 @@ export const GIT_TIMEOUT_MS = 10_000;
 // Every gate plus git stays inside the Stop hook's 150 s timeout in .claude/settings.json.
 export const GATE_TIMEOUT_MS = 30_000;
 const CONFIG_KEY = /^[a-z_]+$/;
+const GIT_FAILED =
+  "doc-integrity hook skipped: git status failed, so no documentation gate ran.\n";
 
-const normalize = (s) => s.replace(/\\/g, "/").toLowerCase();
+const normalize = (s) => toPosix(s).toLowerCase();
 
 function watchedPath(config, key) {
   if (!CONFIG_KEY.test(key)) {
@@ -53,7 +56,7 @@ function watchedPath(config, key) {
   if (typeof config[key] !== "string") {
     throw new Error(`doc-integrity: unknown flow-config key ${key}`);
   }
-  const rel = relative(config.root, config[key]).replace(/\\/g, "/");
+  const rel = toPosix(relative(config.root, config[key]));
   return { key, path: rel, dir: key.endsWith("_dir") };
 }
 
@@ -185,11 +188,12 @@ function sessionScope(transcriptPath) {
 export function docIntegrity(config, input, options = {}) {
   const { gates = GATES, runGate = runGateScript } = options;
   if (input.stop_hook_active) return { code: 0, err: "" };
+  const watched = watchedPaths(config, gates);
   let dirty;
   try {
-    dirty = dirtyPaths(config.root, watchedPaths(config, gates));
+    dirty = dirtyPaths(config.root, watched);
   } catch {
-    return { code: 0, err: "" };
+    return { code: 0, err: GIT_FAILED };
   }
   if (dirty.length === 0) return { code: 0, err: "" };
   const paths = scopeToSession(dirty, sessionScope(input.transcript_path));

@@ -409,8 +409,8 @@
     "id": "D1140",
     "defect": "A member package.json holding a string is examined as a manifest with no scripts.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "if (!isObject(manifest)) {\n    throw new WorkspaceError(`${dir}",
-    "new": "if (manifest === null || Array.isArray(manifest)) {\n    throw new WorkspaceError(`${dir}"
+    "old": "if (!isObject(manifest)) {\n    throw new WorkspaceError(\n      `${workspace.name}",
+    "new": "if (manifest === null || Array.isArray(manifest)) {\n    throw new WorkspaceError(\n      `${workspace.name}"
   },
   {
     "id": "D1141",
@@ -423,15 +423,15 @@
     "id": "D1142",
     "defect": "A member whose name is not a string is labeled with its stringified value instead of its directory.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "typeof name === \"string\" ? name : dir",
-    "new": "name ?? dir"
+    "old": "typeof name === \"string\" ? name : workspace.name",
+    "new": "name ?? workspace.name"
   },
   {
     "id": "D1143",
     "defect": "A workspace matched by two patterns is examined and counted twice.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "...new Set(",
-    "new": "...Array.from("
+    "old": "    if (!byName.has(name)) byName.set(name, dir);\n  }\n  return [...byName].map(([name, dir]) => ({ name, dir }));",
+    "new": "    byName.set(byName.size, { name, dir });\n  }\n  return [...byName.values()];"
   },
   {
     "id": "D1144",
@@ -444,14 +444,21 @@
     "id": "D1145",
     "defect": "A workspace listed again with a leading ./ beside a glob that matches it is examined and counted twice.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "\n          .map((dir) => canonical(config.root, dir))",
-    "new": ""
+    "old": "if (!byName.has(name)) byName.set(name, dir);",
+    "new": "if (!byName.has(dir)) byName.set(dir, dir);"
   },
   {
     "id": "D1146",
     "defect": "A workspace listed again with a trailing slash beside a glob that matches it is examined and counted twice.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "\n          .map((dir) => canonical(config.root, dir))",
+    "old": "if (!byName.has(name)) byName.set(name, dir);",
+    "new": "if (!byName.has(dir)) byName.set(dir, dir);"
+  },
+  {
+    "id": "D1204",
+    "defect": "A doc argument naming a directory crashes doc-section with EISDIR instead of exiting 1 as not a file.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "  if (!statSync(path).isFile()) throw new SectionError(`not a file: ${file}`);\n",
     "new": ""
   }
 ]

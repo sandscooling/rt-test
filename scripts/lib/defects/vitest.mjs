@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync, rmSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { toPosix } from "./catalog.mjs";
+import { toPosix } from "../paths.mjs";
 
 const RUN_TIMEOUT_MS = 120_000;
 const ASSERTION_FAILURE = /^AssertionError: /;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { docSection } from "../../../scripts/lib/standards/doc-section.mjs";
+import { settle } from "../settle.js";
 import { inTree, repoConfig, SECTIONS } from "./harness.js";
 
 function sections(...wanted: string[]) {
@@ -72,6 +73,17 @@ describe("doc-section", () => {
 
   it("D429: refuses a call that names no heading", () => {
     expect(sections().code).toBe(1);
+  });
+
+  it("D1204: exits 1 naming a directory as not a file instead of crashing", () => {
+    const outcome = settle(() =>
+      docSection(repoConfig(), ["test/fixtures/standards", "Lint"]),
+    );
+    expect(outcome).toEqual({
+      code: 1,
+      out: "",
+      err: "doc-section: not a file: test/fixtures/standards\n",
+    });
   });
 
   it("D447: keeps a longer fence open across a shorter fence inside it", () => {

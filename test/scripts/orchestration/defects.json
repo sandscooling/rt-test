@@ -24,8 +24,8 @@
     "id": "D303",
     "defect": "A backslash path keeps its backslashes, so it never matches the same file named with slashes.",
     "file": "scripts/lib/orchestration/paths.mjs",
-    "old": "const toSlash = (path) => path.replace(/\\\\/g, \"/\");",
-    "new": "const toSlash = (path) => path;"
+    "old": "  const slashed = toPosix(input);\n  const absolute = isAbsolute(slashed) ? slashed : resolve(root, slashed);\n  if (!isInside(root, absolute)) return null;\n  return toPosix(relative(root, absolute));",
+    "new": "  const slashed = input;\n  const absolute = isAbsolute(slashed) ? slashed : resolve(root, slashed);\n  if (!isInside(root, absolute)) return null;\n  return relative(root, absolute);"
   },
   {
     "id": "D304",
@@ -227,8 +227,8 @@
     "id": "D332",
     "defect": "A watched path named in another case fires no gate.",
     "file": "scripts/lib/orchestration/doc-integrity.mjs",
-    "old": "const normalize = (s) => s.replace(/\\\\/g, \"/\").toLowerCase();",
-    "new": "const normalize = (s) => s.replace(/\\\\/g, \"/\");"
+    "old": "const normalize = (s) => toPosix(s).toLowerCase();",
+    "new": "const normalize = (s) => toPosix(s);"
   },
   {
     "id": "D333",
@@ -509,5 +509,19 @@
     "file": "scripts/lib/orchestration/stage.mjs",
     "old": "const check = [\"apply\", \"--cached\", \"--check\", \"--unidiff-zero\", \"-\"];",
     "new": "const check = [\"apply\", \"--cached\", \"--check\", \"--unidiff-zero\", \"-\"];\n  if (plan.whole.length > 0) gitOk(root, [\"add\", \"-A\", \"--\", ...plan.whole.map((w) => w.path)]);"
+  },
+  {
+    "id": "D1201",
+    "defect": "A failed git status passes the Stop gate silently, so nothing says no documentation gate ran.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "return { code: 0, err: GIT_FAILED };",
+    "new": "return { code: 0, err: \"\" };"
+  },
+  {
+    "id": "D1202",
+    "defect": "A gate watching an unknown flow-config key is swallowed as a git failure instead of throwing.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "  const watched = watchedPaths(config, gates);\n  let dirty;\n  try {\n    dirty = dirtyPaths(config.root, watched);",
+    "new": "  let dirty;\n  try {\n    dirty = dirtyPaths(config.root, watchedPaths(config, gates));"
   }
 ]

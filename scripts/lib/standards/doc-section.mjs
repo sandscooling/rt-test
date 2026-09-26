@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fenceKinds } from "../fences.mjs";
 import { result } from "./result.mjs";
@@ -54,6 +54,7 @@ function sectionText(lines, headings, start) {
 function readLines(root, file) {
   const path = resolve(root, file);
   if (!existsSync(path)) throw new SectionError(`no such file: ${file}`);
+  if (!statSync(path).isFile()) throw new SectionError(`not a file: ${file}`);
   return readFileSync(path, "utf8").split(/\r?\n/);
 }
 

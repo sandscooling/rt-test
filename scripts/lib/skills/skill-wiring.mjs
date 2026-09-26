@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { toPosix } from "../paths.mjs";
 import { docSection } from "../standards/doc-section.mjs";
 import { TEMPLATE_FILE, templateProblems } from "./ticket.mjs";
 import { findReferences } from "./wiring-refs.mjs";
@@ -10,8 +11,6 @@ const DOC_SECTION = "doc-section.mjs";
 const IMPORT = /(?:\bfrom\s+|\bimport\s*\(?\s*)["'](\.{1,2}\/[^"']+)["']/g;
 const SKIPPED_PATH = /(?:^|\/)\.scratch\//;
 const NON_PATH_KEYS = new Set(["root", "scale"]);
-
-const posix = (path) => path.replaceAll("\\", "/");
 
 function markdownFiles(dir) {
   if (!existsSync(dir)) return [];
@@ -49,9 +48,9 @@ function flagDefined(source, flag) {
 
 function resolveDocArg(config, arg) {
   const key = /^\{cfg\.([a-z_]+)\}$/.exec(arg)?.[1];
-  if (key === undefined) return arg;
+  if (key === undefined || NON_PATH_KEYS.has(key)) return arg;
   const path = config[key];
-  return typeof path === "string" ? posix(relative(config.root, path)) : arg;
+  return typeof path === "string" ? toPosix(relative(config.root, path)) : arg;
 }
 
 function callProblems(config, call, closures) {
@@ -154,7 +153,7 @@ export function skillWiring(config, argv) {
   const closures = new Map();
   const files = scannedFiles(config);
   const problems = files.flatMap((path) => {
-    const file = posix(relative(config.root, path));
+    const file = toPosix(relative(config.root, path));
     const refs = findReferences(readFileSync(path, "utf8"));
     return [
       ...referenceProblems(config, file, refs, closures),

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fenceKinds } from "../fences.mjs";
+import { toPosix } from "../paths.mjs";
 
 export function readText(path) {
   try {
@@ -11,7 +12,7 @@ export function readText(path) {
 }
 
 export function display(config, path) {
-  return relative(config.root, path).replaceAll("\\", "/");
+  return toPosix(relative(config.root, path));
 }
 
 // Fenced blocks hold format examples, never planning facts.

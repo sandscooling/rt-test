@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative } from "node:path";
 import { fenceKinds } from "../fences.mjs";
+import { toPosix } from "../paths.mjs";
 import { loadBlocks } from "./blocks.mjs";
 import { DOC_NAMES, sources } from "./docs.mjs";
 
@@ -28,15 +29,13 @@ const RULE_PROVENANCE = [
 ];
 const CITATION = /\b([CP]\d+)\b/g;
 
-const posix = (path) => path.split(sep).join("/");
-
 export function collectRules(docs, root) {
   return DOC_NAMES.flatMap((name) => {
     const spec = docs[name];
     const base = spec.file ?? spec.dir;
     return loadBlocks(spec).map((block) => ({
       id: block.anchor,
-      label: posix(relative(root, spec.file ? base : join(base, block.file))),
+      label: toPosix(relative(root, spec.file ? base : join(base, block.file))),
       line: block.line,
       text: block.lines.join("\n"),
       guidance: false,
@@ -76,7 +75,7 @@ export function lineId(text) {
 
 export function collectGuidance(root, config) {
   return guidancePaths(root, config).flatMap((path) => {
-    const label = posix(relative(root, path));
+    const label = toPosix(relative(root, path));
     const lines = readFileSync(path, "utf8").split(/\r?\n/);
     const kinds = fenceKinds(lines);
     return lines.flatMap((line, index) => {

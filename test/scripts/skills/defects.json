@@ -311,7 +311,7 @@
     "id": "D564",
     "defect": "A {cfg.key} doc argument is passed to doc-section unsubstituted.",
     "file": "scripts/lib/skills/skill-wiring.mjs",
-    "old": "if (key === undefined) return arg;",
+    "old": "if (key === undefined || NON_PATH_KEYS.has(key)) return arg;",
     "new": "if (key !== undefined) return arg;"
   },
   {
@@ -425,5 +425,12 @@
     "file": "scripts/lib/skills/wiring-refs.mjs",
     "old": "      if (pending) units.push(pending);\n      pending = undefined;\n      return;",
     "new": "      return;"
+  },
+  {
+    "id": "D1203",
+    "defect": "A doc-section call citing {cfg.root} resolves to the repository root and is read as that directory instead of being reported as no such file.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "if (key === undefined || NON_PATH_KEYS.has(key)) return arg;",
+    "new": "if (key === undefined) return arg;"
   }
 ]

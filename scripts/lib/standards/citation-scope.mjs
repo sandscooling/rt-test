@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { relative } from "node:path";
+import { toPosix } from "../paths.mjs";
 import { readStatus } from "../planning/status.mjs";
 
 const HARNESS_ROOTS = [
@@ -36,8 +37,7 @@ const ARTIFACT = /\.(?:md|ts|tsx|mts|cts|js|jsx|mjs|cjs|ya?ml)$/;
 const SPRINT_FILE = /^sprint-([1-9]\d*)(?:-[^/]*)?\.md$/;
 const DONE = "done";
 
-const posix = (path) => path.replaceAll("\\", "/");
-const repoPath = (config, path) => posix(relative(config.root, path));
+const repoPath = (config, path) => toPosix(relative(config.root, path));
 const within = (path, root) => path === root || path.startsWith(`${root}/`);
 
 export function liveRoots(config) {

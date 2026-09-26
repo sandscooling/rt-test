@@ -25,7 +25,6 @@ export interface Catalog {
 export declare const SANDBOX_DIRS: readonly string[];
 export declare const SANDBOX_FILES: readonly string[];
 
-export declare function toPosix(path: string): string;
 export declare function walkTree(
   root: string,
   dir?: string,

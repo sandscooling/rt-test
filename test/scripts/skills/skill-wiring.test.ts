@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { skillWiring } from "../../../scripts/lib/skills/skill-wiring.mjs";
 import { TEMPLATE_FILE } from "../../../scripts/lib/skills/ticket.mjs";
+import { settle } from "../settle.js";
 import { inTree, type Files } from "./harness.js";
 
 const SKILL = ".claude/skills/demo/SKILL.md";
@@ -55,6 +56,16 @@ describe("check-skill-wiring", () => {
     const skill =
       '`node scripts/doc-section.mjs {cfg.code_change_standards} "Nope"`\n';
     expect(wiring(skill).err).toContain('no heading matches "Nope"');
+  });
+
+  it("D1203: a doc-section call citing {cfg.root} is reported as no such file, not read as the repository root", () => {
+    const skill = '`node scripts/doc-section.mjs {cfg.root} "Nope"`\n';
+    expect(settle(() => wiring(skill))).toMatchObject({
+      code: 1,
+      err: expect.stringContaining(
+        `${SKILL}:1: doc-section: no such file: {cfg.root}\n`,
+      ),
+    });
   });
 
   it("D565: a flag on a continued fenced line is checked", () => {
