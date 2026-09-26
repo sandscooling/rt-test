@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { changedPaths } from "../git.mjs";
-import { SANDBOX_DIRS, SANDBOX_FILES } from "./catalog.mjs";
+import { isInSandboxDir, SANDBOX_FILES } from "./catalog.mjs";
 import { importClosures } from "./imports.mjs";
 
 const ROOT_INPUTS = new Set(["vitest.config.ts", "package.json", "bun.lock"]);
@@ -34,7 +34,7 @@ const isVerifierInput = (path, files) =>
   files.has(path) ||
   ROOT_INPUTS.has(path) ||
   SANDBOX_FILES.includes(path) ||
-  SANDBOX_DIRS.some((dir) => path.startsWith(`${dir}/`));
+  isInSandboxDir(path);
 
 const needsAttribution = (path, files) =>
   isVerifierInput(path, files) &&

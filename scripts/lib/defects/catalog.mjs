@@ -64,8 +64,10 @@ export function snapshotFiles(root) {
   );
 }
 
-const isSnapshotted = (path) =>
-  SANDBOX_DIRS.some((dir) => path.startsWith(`${dir}/`)) && !isSkipped(path);
+export const isInSandboxDir = (path) =>
+  SANDBOX_DIRS.some((dir) => path.startsWith(`${dir}/`));
+
+const isSnapshotted = (path) => isInSandboxDir(path) && !isSkipped(path);
 
 // Bun links each workspace dependency inside the workspace that uses it, so a
 // sandbox recreates every link that resolves to a directory it copies.
