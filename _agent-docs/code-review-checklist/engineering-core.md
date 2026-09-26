@@ -70,7 +70,7 @@ C26. **Filter before slicing**: A visibility or scope filter runs before the sli
 
 C27. **Clamp the hard limit outermost**: A value clamped between two independently movable constants puts the limit that is not ours to choose outermost, so no later edit to the inner bound can breach it.
 
-C28. **Bound every recursive walk**: A recursive traversal checks a named depth ceiling and throws on reaching it rather than returning a partial answer.
+C28. **Bound every recursive walk**: A recursive traversal checks a named depth ceiling and throws on reaching it rather than returning a partial answer. A formatter of diagnostic text may instead end at the ceiling with a line saying what it did not show, since a throw there loses the error it describes.
 
 C29. **Take the first match only where one can exist**: Picking the first element of a lookup is allowed only where at most one match can exist; otherwise select by an explicit criterion.
 

@@ -4,7 +4,7 @@ Test execution and falsification for Vitest projects, taken off coding agents.
 
 Coding agents spend most of their time running and falsifying the tests they write. RT Test is meant to do that work for them: a local daemon runs each edit's tests and proves them against their named defects, and agents query the answers instead of running anything. It answers three questions: does the code pass, are the results still current, and have the tests shown that they detect their intended defects?
 
-**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, and a small tested result-freshness core. It does not yet run a daemon, execute or watch a project's tests, build a dependency graph, persist results, falsify defects, or expose a product CLI. It is not published to npm.
+**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, and a daemon package that discovers a consumer's Vitest tests but has no caller until the daemon start is built. It does not yet run a daemon, execute or watch a project's tests, build a dependency graph, persist results, falsify defects, or expose a product CLI. It is not published to npm.
 
 ## Intended experience
 

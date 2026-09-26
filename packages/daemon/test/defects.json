@@ -1,0 +1,429 @@
+[
+  {
+    "id": "D1010",
+    "defect": "An aggregate error loses its members, so a browser project's setup failure reads only as \"Failed to initialize projects\".",
+    "file": "packages/daemon/src/vitest/error-text.ts",
+    "old": "const members = error instanceof AggregateError ? error.errors : [];",
+    "new": "const members: unknown[] = [];"
+  },
+  {
+    "id": "D1011",
+    "defect": "A serialized worker error is printed as JSON instead of its message.",
+    "file": "packages/daemon/src/vitest/error-text.ts",
+    "old": "if (typeof message === \"string\") return message;",
+    "new": ""
+  },
+  {
+    "id": "D1012",
+    "defect": "An error's cause is dropped, so a wrapped configuration failure loses the consumer's own message.",
+    "file": "packages/daemon/src/vitest/error-text.ts",
+    "old": "const cause = fieldOf(error, \"cause\");",
+    "new": "const cause = undefined;"
+  },
+  {
+    "id": "D1013",
+    "defect": "A cause chain that loops back recurses until the stack overflows.",
+    "file": "packages/daemon/src/vitest/error-text.ts",
+    "old": "if (seen.has(error)) return [];",
+    "new": ""
+  },
+  {
+    "id": "D1020",
+    "defect": "A prerelease of a supported line is accepted as that line.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "const RELEASE_VERSION = /^(\\d+)\\.(\\d+)\\.(\\d+)$/;",
+    "new": "const RELEASE_VERSION = /^(\\d+)\\.(\\d+)\\.(\\d+)/;"
+  },
+  {
+    "id": "D1021",
+    "defect": "Any 4.x minor is accepted, not only 4.1.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "(line.minor === undefined || line.minor === minor)",
+    "new": "true"
+  },
+  {
+    "id": "D1022",
+    "defect": "A major below a supported line is accepted.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "line.major === major &&",
+    "new": "line.major >= major &&"
+  },
+  {
+    "id": "D1023",
+    "defect": "A major above a supported line is accepted.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "line.major === major &&",
+    "new": "line.major <= major &&"
+  },
+  {
+    "id": "D1024",
+    "defect": "Vitest is resolved from the daemon's own location, so a 4.1 workspace is discovered with the daemon's Vitest.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "const require = createRequire(join(directory, PACKAGE_JSON));",
+    "new": "const require = createRequire(import.meta.url);"
+  },
+  {
+    "id": "D1025",
+    "defect": "The 5.x line is limited to one minor, so 5.0 is rejected.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "  { major: 5 },",
+    "new": "  { major: 5, minor: 1 },"
+  },
+  {
+    "id": "D1026",
+    "defect": "A workspace with no resolvable Vitest throws instead of being reported unsupported.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "return unsupported(undefined, `no Vitest resolves: ${errorText(error)}`);",
+    "new": "throw error;"
+  },
+  {
+    "id": "D1028",
+    "defect": "A Vitest whose vitest/node entry does not resolve throws out of resolution instead of reporting the workspace unsupported.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "    return unsupported(\n      version,\n      `vitest/node does not resolve",
+    "new": "    throw error;\n    return unsupported(\n      version,\n      `vitest/node does not resolve"
+  },
+  {
+    "id": "D1030",
+    "defect": "A vitest.config file does not make its directory a workspace.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (VITEST_CONFIG_FILES.some((file) => files.has(file))) return true;",
+    "new": ""
+  },
+  {
+    "id": "D1031",
+    "defect": "A vitest devDependency is not read, so a vite.config package testing with Vitest is missed.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "const VITEST_DEPENDENCY_FIELDS = [\"dependencies\", \"devDependencies\"];",
+    "new": "const VITEST_DEPENDENCY_FIELDS = [\"dependencies\"];"
+  },
+  {
+    "id": "D1032",
+    "defect": "A vitest dependency is not read, so a vite.config package listing Vitest in dependencies is missed.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "const VITEST_DEPENDENCY_FIELDS = [\"dependencies\", \"devDependencies\"];",
+    "new": "const VITEST_DEPENDENCY_FIELDS = [\"devDependencies\"];"
+  },
+  {
+    "id": "D1033",
+    "defect": "Any vite.config directory is taken for a Vitest workspace, whatever its dependencies.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (!dependsOnVitest(manifest.value)) return false;",
+    "new": ""
+  },
+  {
+    "id": "D1034",
+    "defect": "A directory depending on Vitest with no config file vanishes without a report.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  notRead.push({\n    source: path,\n    reason:\n      \"depends on Vitest",
+    "new": "  [].push({\n    source: path,\n    reason:\n      \"depends on Vitest"
+  },
+  {
+    "id": "D1036",
+    "defect": "A root pnpm-workspace.yaml is ignored silently, so its packages go missing without a report.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (existsSync(join(consumerRoot, PNPM_WORKSPACE_FILE))) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1037",
+    "defect": "A pattern with a wildcard beyond parent/* is dropped silently.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (expandable.includes(WILDCARD)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1038",
+    "defect": "A negation pattern is treated as a literal directory and dropped silently.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (pattern.startsWith(NEGATION_PREFIX)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1039",
+    "defect": "A literal directory pattern is never searched.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "return isDirectory(join(root, pattern)) ? [join(root, pattern)] : [];",
+    "new": "return [];"
+  },
+  {
+    "id": "D1040",
+    "defect": "The { packages: [...] } form of workspaces is not read.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": ": objectField(field, WORKSPACE_PACKAGES_FIELD);",
+    "new": ": undefined;"
+  },
+  {
+    "id": "D1041",
+    "defect": "The consumer root's workspace path is empty instead of \".\".",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "return path === \"\" ? ROOT_PATH : path;",
+    "new": "return path;"
+  },
+  {
+    "id": "D1042",
+    "defect": "Workspace paths keep the platform separator, so Windows and Linux store different paths.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "return relative(from, to).split(sep).join(POSIX_SEPARATOR);",
+    "new": "return relative(from, to).split(POSIX_SEPARATOR).join(POSIX_SEPARATOR);"
+  },
+  {
+    "id": "D1043",
+    "defect": "An unreadable package.json beside a vite.config is skipped silently.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    notRead.push({\n      source: joinPath(path, PACKAGE_JSON),",
+    "new": "    [].push({\n      source: joinPath(path, PACKAGE_JSON),"
+  },
+  {
+    "id": "D1044",
+    "defect": "An unreadable root package.json is skipped silently, so no workspace pattern is searched and none is reported.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "notRead.push({ source: PACKAGE_JSON, reason: manifest.reason });",
+    "new": ""
+  },
+  {
+    "id": "D1045",
+    "defect": "A workspaces field that is neither an array nor { packages } is not reported.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  if (!Array.isArray(patterns)) {\n    notRead.push({",
+    "new": "  if (!Array.isArray(patterns)) {\n    return [];\n    notRead.push({"
+  },
+  {
+    "id": "D1050",
+    "defect": "Discovery collects with Vitest's default collect, which on 5.x parses statically and lists a parameterized test as one unformatted test.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": ": await instance.collectTests(specifications);",
+    "new": ": await instance.collect();"
+  },
+  {
+    "id": "D1051",
+    "defect": "Only a module's top-level tests are listed, so every test inside a suite is lost.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "const tests = [...testModule.children.allTests()];",
+    "new": "const tests = [...testModule.children.tests()];"
+  },
+  {
+    "id": "D1052",
+    "defect": "Only tests pending a run are listed, so skipped and todo tests are dropped.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "const tests = [...testModule.children.allTests()];",
+    "new": "const tests = [...testModule.children.allTests(\"pending\")];"
+  },
+  {
+    "id": "D1053",
+    "defect": "Every test is reported with mode run, so a skipped or todo test reads as one that will run.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "return test.options.mode;",
+    "new": "return \"run\";"
+  },
+  {
+    "id": "D1054",
+    "defect": "Discovery runs the tests it lists on Vitest 5, executing test bodies and hooks.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": ": await instance.collectTests(specifications);",
+    "new": ": await instance.runTestSpecifications(specifications);"
+  },
+  {
+    "id": "D1055",
+    "defect": "Discovery runs the tests it lists on Vitest 4.1, executing test bodies and hooks.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": ": await instance.collectTests(specifications);",
+    "new": ": await instance.runTestSpecifications(specifications);"
+  },
+  {
+    "id": "D1056",
+    "defect": "A typecheck module's tests are listed as tests beside being reported as not discovered.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "report.typecheckModules.push(moduleReport);\n    return;",
+    "new": "report.typecheckModules.push(moduleReport);"
+  },
+  {
+    "id": "D1057",
+    "defect": "A module with one load error reads as a module holding zero tests.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "if (errors.length > 0) {",
+    "new": "if (errors.length > 1) {"
+  },
+  {
+    "id": "D1058",
+    "defect": "A failed module is reported without its errors.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "errors: errors.map(errorText),",
+    "new": "errors: [],"
+  },
+  {
+    "id": "D1059",
+    "defect": "A workspace whose configuration fails to load is reported without its error.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "error: errorText(error),",
+    "new": "error: \"\","
+  },
+  {
+    "id": "D1060",
+    "defect": "One workspace's load failure aborts discovery of every other workspace.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "  } catch (error) {\n    discovery = {",
+    "new": "  } catch (error) {\n    throw error;\n    discovery = {"
+  },
+  {
+    "id": "D1061",
+    "defect": "A workspace on an unsupported Vitest is loaded anyway instead of being reported unsupported with its version.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "if (!vitest.supported) return { status: \"unsupported\", workspace, vitest };",
+    "new": ""
+  },
+  {
+    "id": "D1062",
+    "defect": "A browser-mode project is dropped without being reported unsupported.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "const browserProjects = instance.projects.filter(usesBrowserMode);",
+    "new": "const browserProjects = instance.projects.filter(() => false);"
+  },
+  {
+    "id": "D1063",
+    "defect": "A browser-mode project's modules are collected, which launches or fails to launch a browser.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "!usesBrowserMode(specification.project),",
+    "new": "true,"
+  },
+  {
+    "id": "D1064",
+    "defect": "A 5.x workspace failing on a browser project without a provider is reported only as \"Failed to initialize projects\", hiding the cause.",
+    "file": "packages/daemon/src/vitest/error-text.ts",
+    "old": "const members = error instanceof AggregateError ? error.errors : [];",
+    "new": "const members: unknown[] = [];"
+  },
+  {
+    "id": "D1065",
+    "defect": "A module that fails to collect leaves the host process's exit code set.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "process.exitCode = exitCode;",
+    "new": ""
+  },
+  {
+    "id": "D1066",
+    "defect": "Environment values a workspace's configuration wrote stay in the host process after discovery.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "if (!Object.hasOwn(env, key)) delete process.env[key];",
+    "new": ""
+  },
+  {
+    "id": "D1067",
+    "defect": "The identity is built from Vitest's own test id, which differs between 4.1 and 5 for the same test.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "identifyModuleTests(location, tests.map(namePath))",
+    "new": "identifyModuleTests(location, tests.map((test) => [test.id]))"
+  },
+  {
+    "id": "D1068",
+    "defect": "The module path is absolute, so the same test gets a new identity wherever the consumer sits.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "modulePath: relativePosixPath(realDirectory, realPath(testModule.moduleId)),",
+    "new": "modulePath: realPath(testModule.moduleId),"
+  },
+  {
+    "id": "D1069",
+    "defect": "Module paths are made relative to the unresolved workspace directory, so a consumer root reached through a link gives paths that climb out of the workspace.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "const realDirectory = realPath(workspace.directory);",
+    "new": "const realDirectory = workspace.directory;"
+  },
+  {
+    "id": "D1070",
+    "defect": "The name path drops the enclosing suites, so renaming a suite keeps the old identity and same-named tests in different suites collide.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "names.unshift(parent.name);",
+    "new": "names.unshift();"
+  },
+  {
+    "id": "D1071",
+    "defect": "The identity omits the workspace, so the same module and test name in two workspaces collide.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "workspacePath: workspace.path,",
+    "new": "workspacePath: \".\","
+  },
+  {
+    "id": "D1072",
+    "defect": "The identity omits the Vitest project, so one module run by two projects gives colliding identities.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "projectName: testModule.project.name,",
+    "new": "projectName: \"\","
+  },
+  {
+    "id": "D1073",
+    "defect": "A host environment value a workspace's configuration overwrote keeps the workspace's value after discovery.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "Object.assign(process.env, env);",
+    "new": ""
+  },
+  {
+    "id": "D1074",
+    "defect": "Discovery never closes the Vitest instance it created, so its server, workers and process handlers outlive discovery.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "await instance?.close();",
+    "new": "await Promise.resolve();"
+  },
+  {
+    "id": "D1075",
+    "defect": "Unhandled errors raised during collection are dropped, so the workspace reads as cleanly discovered.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "unhandledErrors: unhandledErrors.map(errorText),",
+    "new": "unhandledErrors: [],"
+  },
+  {
+    "id": "D1076",
+    "defect": "A module whose worker crashed during collection reads as a module holding zero tests on Vitest 5, so the file vanishes from the report.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "if (!wasCollected(testModule)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1083",
+    "defect": "A module whose worker crashed during collection reads as a module holding zero tests on Vitest 4.1, so the file vanishes from the report.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "return task.mode !== PLACEHOLDER_MODULE_MODE;",
+    "new": "return true;"
+  },
+  {
+    "id": "D1077",
+    "defect": "Discovery collects under Vite's NODE_ENV=development, so a test registered only under NODE_ENV=test is missing though a run would hold it.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "process.env[\"NODE_ENV\"] ??= TEST_NODE_ENV;",
+    "new": ""
+  },
+  {
+    "id": "D1078",
+    "defect": "A candidate directory that cannot be stat'ed (a link loop) aborts discovery of every workspace instead of being reported as not read.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  } catch (error) {\n    notRead.push({\n      source: pattern,\n      reason: `cannot stat",
+    "new": "  } catch (error) {\n    throw error;\n    notRead.push({\n      source: pattern,\n      reason: `cannot stat"
+  },
+  {
+    "id": "D1079",
+    "defect": "A cause chain deeper than the stack overflows while formatting, so the failure it describes escapes as a RangeError.",
+    "file": "packages/daemon/src/vitest/error-text.ts",
+    "old": "if (depth > MAX_ERROR_DEPTH) return [DEPTH_CUT_TEXT];",
+    "new": ""
+  },
+  {
+    "id": "D1080",
+    "defect": "Two overlapping discoveries restore each other's host snapshots, leaving a workspace's environment values in the host.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "const discovery = discoveryQueue.then(() => discoverAll(consumerRoot));",
+    "new": "const discovery = discoverAll(consumerRoot);"
+  },
+  {
+    "id": "D1081",
+    "defect": "A non-string entry in workspaces is dropped without a notRead report.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    notRead.push({\n      source: `${PACKAGE_JSON} workspaces`,\n      reason: `pattern",
+    "new": "    [].push({\n      source: `${PACKAGE_JSON} workspaces`,\n      reason: `pattern"
+  },
+  {
+    "id": "D1082",
+    "defect": "A plain file under a parent/* directory is taken as a candidate and reported as unreadable.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    .filter(isDirectory);",
+    "new": "    .filter(() => true);"
+  }
+]

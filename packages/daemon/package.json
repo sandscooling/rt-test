@@ -1,0 +1,21 @@
+{
+  "name": "@rt-test/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test discovery and execution for RT Test, the only package that loads a consumer's Vitest.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rt-test/core": "workspace:*"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "tools/lit",
+    "tools/**",
+    "!packages/skip",
+    "a*b/*"
+  ]
+}

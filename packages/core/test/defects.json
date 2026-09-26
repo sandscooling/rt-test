@@ -54,5 +54,47 @@
     "file": "packages/core/src/evidence.ts",
     "old": "if (!evidence || !currentFingerprint || !evidence.fingerprint)",
     "new": "if (evidence && currentFingerprint === \"\") return \"current\"; if (!evidence || !currentFingerprint || !evidence.fingerprint)"
+  },
+  {
+    "id": "D1000",
+    "defect": "Same-named tests in one module all get occurrence 0, so their identities collide.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "const occurrence = seen.get(key) ?? 0;",
+    "new": "const occurrence = 0;"
+  },
+  {
+    "id": "D1001",
+    "defect": "A uniquely named test is marked duplicate.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "isDuplicate: (totals.get(key) ?? 0) > 1,",
+    "new": "isDuplicate: (totals.get(key) ?? 0) > 0,"
+  },
+  {
+    "id": "D1002",
+    "defect": "Only the later copies of a repeated name path are marked duplicate, so the first copy reads as unique.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "isDuplicate: (totals.get(key) ?? 0) > 1,",
+    "new": "isDuplicate: occurrence > 0,"
+  },
+  {
+    "id": "D1003",
+    "defect": "Name paths are keyed by their joined text, so [\"a b\", \"c\"] and [\"a\", \"b c\"] count as the same test.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "return JSON.stringify(namePath);",
+    "new": "return namePath.join(\" \");"
+  },
+  {
+    "id": "D1004",
+    "defect": "The occurrence index counts earlier tests of any name, so adding, removing or moving another test shifts the identity.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "const occurrence = seen.get(key) ?? 0;",
+    "new": "const occurrence = seen.size;"
+  },
+  {
+    "id": "D1005",
+    "defect": "The identity keeps only the test's own name, so renaming an enclosing suite keeps the old identity.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "identity: { ...location, namePath: [...namePath], occurrence },",
+    "new": "identity: { ...location, namePath: namePath.slice(-1), occurrence },"
   }
 ]

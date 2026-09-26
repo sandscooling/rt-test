@@ -69,6 +69,15 @@
       "rules": {
         "rt-test/no-nonlocal-comment": ["error", { "maxBlockLines": 0 }]
       }
+    },
+    {
+      "files": ["test/fixtures/**"],
+      "rules": {
+        "vitest/expect-expect": "off",
+        "vitest/no-conditional-tests": "off",
+        "vitest/no-disabled-tests": "off",
+        "vitest/warn-todo": "off"
+      }
     }
   ]
 }

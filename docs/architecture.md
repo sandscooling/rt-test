@@ -2,9 +2,11 @@
 
 ## Current implementation
 
-`packages/core/src/evidence.ts` assesses a historical result against a caller-supplied fingerprint. It preserves the outcome and returns freshness plus an explicit current-pass predicate. Missing or empty fingerprints produce unknown freshness.
+`packages/core/src/evidence.ts` assesses a historical result against a caller-supplied fingerprint. It preserves the outcome and returns freshness plus an explicit current-pass predicate. Missing or empty fingerprints produce unknown freshness. `packages/core/src/test-identity.ts` gives each test of one module a test identity (its Vitest workspace, Vitest project, module path, suite and test names, and its position among tests sharing those names), and marks a test whose names repeat in its module as a duplicate.
 
-This function does not build fingerprints, select tests, ingest runner events, or store history. The sections below describe the intended architecture. Every component is TypeScript on Node ([ADR-0001](adr/0001-typescript-on-node.md)), and terms follow [the glossary](glossary.md).
+`packages/daemon` holds Vitest discovery. `findVitestWorkspaces` lists a consumer's Vitest workspaces from the root `package.json` `workspaces` field and config file names (a `vitest.config.*`, or a `vite.config.*` in a directory whose `package.json` depends on Vitest), reading files only; it reports a root `pnpm-workspace.yaml` and each pattern it cannot expand as not read. `discoverTests` loads each workspace's own Vitest, 4.1.x or 5.x, collects the modules of every project without running a test body or hook, and returns each test with its identity. It reports modules and workspaces that failed to load, workspaces with no supported Vitest, browser-mode projects, and typecheck modules, each as not discovered. Discovery loads Vitest configs and imports test files, so only the daemon calls it, after an explicit start; that start is not built yet, so discovery has no production caller.
+
+Nothing yet builds fingerprints, selects or runs tests, ingests runner events, or stores history. The sections below describe the intended architecture. Every component is TypeScript on Node ([ADR-0001](adr/0001-typescript-on-node.md)), and terms follow [the glossary](glossary.md).
 
 ## Components
 
