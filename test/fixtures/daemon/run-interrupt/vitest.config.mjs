@@ -25,9 +25,7 @@ const runHook = {
         onTestRunStart: () => {
           notify("run-start");
         },
-        onTestCaseReady: (testCase) => {
-          notify(`ready:${testCase.name}`);
-        },
+        onTestCaseAnnotate: (testCase) => notify(`running:${testCase.name}`),
         onTestRunEnd: () => {
           notify("run-end");
         },

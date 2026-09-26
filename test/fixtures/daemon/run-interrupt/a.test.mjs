@@ -15,7 +15,10 @@ describe("blocked", () => {
 
 it("passes first", () => {});
 
-// Settles only when a cancel aborts it or its timeout fails it, so a slow host cannot let it pass first.
-it("running at abort", () => new Promise(() => {}), 10_000);
+// The host answers the annotation only after its run hook returns, and a cancel posted by that hook reaches this
+// worker first. A timeout of 0 sets no deadline, so no timer can end the test before the host acts.
+it("running at abort", async ({ annotate }) => {
+  await annotate("running");
+}, 0);
 
 it("never finishes", () => {});

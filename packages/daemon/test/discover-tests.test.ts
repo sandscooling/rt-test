@@ -680,7 +680,7 @@ describe("errors and lost modules during collection", () => {
 });
 
 type RunResult = WorkspaceRun | { thrown: string };
-/** A promise returned for run-interrupt's `configure` or run-unqueued's `global-setup` holds that fixture until it settles. */
+/** A promise returned for run-interrupt's `configure` or `running:<test>`, or run-unqueued's `global-setup`, holds that fixture until it settles. */
 type RunHook = (event: string) => Promise<void> | undefined;
 
 interface FixtureRun {
@@ -690,7 +690,8 @@ interface FixtureRun {
 
 /** The run-interrupt fixture's config reports its run events to this global. */
 const RUN_HOOK = Symbol.for("rt-test.fixture.run-hook");
-const MID_RUN_EVENT = "ready:running at abort";
+/** The running test's annotation, which Vitest reports straight from the worker rather than in a throttled task update. */
+const MID_RUN_EVENT = "running:running at abort";
 const NOTHING_RAN_WORKSPACES = [
   "empty",
   "setup-fail",
