@@ -4,12 +4,8 @@ import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { gitIn } from "../git.mjs";
-import {
-  isAtOrInside,
-  loadCatalog,
-  recordLinks,
-  snapshotFiles,
-} from "./catalog.mjs";
+import { isAtOrInside } from "../paths.mjs";
+import { loadCatalog, recordLinks, snapshotFiles } from "./catalog.mjs";
 import { headRecordsIn, requireChangeset, selectChanged } from "./changed.mjs";
 import { treeDifference, verifyInSandboxes } from "./pool.mjs";
 import { createVitestRunner, testFilesOf } from "./vitest.mjs";

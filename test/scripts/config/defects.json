@@ -87,8 +87,8 @@
     "id": "D033",
     "defect": "A path that climbs out of the repository is accepted.",
     "file": "scripts/lib/flow-config.mjs",
-    "old": "const escapes = inside === \"..\" || inside.startsWith(`..${sep}`);",
-    "new": "const escapes = false;"
+    "old": "if (isAbsolute(value) || !isAtOrInside(base, path)) {",
+    "new": "if (isAbsolute(value)) {"
   },
   {
     "id": "D034",

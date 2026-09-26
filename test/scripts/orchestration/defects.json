@@ -122,7 +122,7 @@
     "id": "D317",
     "defect": "A path outside the repository is accepted as a repo path.",
     "file": "scripts/lib/orchestration/paths.mjs",
-    "old": "rel.startsWith(\"../\") || ",
+    "old": "if (!isInside(root, absolute)) return null;",
     "new": ""
   },
   {

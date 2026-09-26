@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isAtOrInside } from "./paths.mjs";
 
 export const FLOW_CONFIG_FILE = "_agent-docs/_flow-config.yaml";
 
@@ -133,9 +134,7 @@ function resolvePath(base, key, value, file) {
     throw new Error(`${file}: ${key} must be a non-empty path.`);
   }
   const path = resolve(base, value);
-  const inside = relative(base, path);
-  const escapes = inside === ".." || inside.startsWith(`..${sep}`);
-  if (isAbsolute(value) || escapes || isAbsolute(inside)) {
+  if (isAbsolute(value) || !isAtOrInside(base, path)) {
     throw new Error(`${file}: ${key} must stay inside the repository.`);
   }
   return path;

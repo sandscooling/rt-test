@@ -15,6 +15,7 @@ const PROJECT_DIR = "$CLAUDE_PROJECT_DIR/";
 const ENTRY_DEPENDENCIES = [
   HOOKS,
   "scripts/lib/flow-config.mjs",
+  "scripts/lib/paths.mjs",
   "scripts/lib/orchestration",
   "_agent-docs/_flow-config.yaml",
 ];

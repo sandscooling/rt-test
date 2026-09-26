@@ -259,6 +259,15 @@ describe("the sandbox pool", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("D1157: runs no mutation in a sandbox built unlike the snapshot", async () => {
+    const tree = { ...TREE, "node_modules/.vite/vitest/0a1b/results.json": "" };
+    const catalog = catalogOf(tree);
+    const result = await withScratch((parent) =>
+      inSandboxes(parent, fakeVitest(catalog), 1, catalog),
+    );
+    expect(result.detected).toEqual([]);
+  });
+
   it("D1117: resolves each sandbox's package link to its absolute target", async () => {
     const resolved = new Set<boolean>();
     await withScratch((parent) => {

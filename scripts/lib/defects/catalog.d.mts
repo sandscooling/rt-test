@@ -26,8 +26,6 @@ export declare const SANDBOX_DIRS: readonly string[];
 export declare const SANDBOX_FILES: readonly string[];
 
 export declare function toPosix(path: string): string;
-export declare function isInside(parent: string, child: string): boolean;
-export declare function isAtOrInside(parent: string, child: string): boolean;
 export declare function walkTree(
   root: string,
   dir?: string,

@@ -7,7 +7,7 @@ import {
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
-import { isInside } from "./catalog.mjs";
+import { isInside } from "../paths.mjs";
 
 const RUN_PREFIX = "rt-test-verify-defects-";
 const RUN_NAME = new RegExp(`^${RUN_PREFIX}(\\d+)-`);

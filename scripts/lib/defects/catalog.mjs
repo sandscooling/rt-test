@@ -5,7 +5,8 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { join, relative } from "node:path";
+import { isAtOrInside, isInside } from "../paths.mjs";
 
 export const SANDBOX_DIRS = [
   "packages",
@@ -27,19 +28,6 @@ const TOOL_ENTRY_MARK = ".";
 const DEFECT_TEST = /\bit\(\s*"(D\d+):/g;
 
 export const toPosix = (path) => path.split("\\").join("/");
-
-export function isInside(parent, child) {
-  const path = relative(parent, child);
-  return (
-    path !== "" &&
-    path !== ".." &&
-    !path.startsWith(`..${sep}`) &&
-    !isAbsolute(path)
-  );
-}
-
-export const isAtOrInside = (parent, child) =>
-  relative(parent, child) === "" || isInside(parent, child);
 
 function isSkipped(path) {
   return toPosix(path)

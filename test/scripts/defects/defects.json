@@ -656,5 +656,12 @@
     "file": "scripts/lib/defects/runs.mjs",
     "old": "log(`Removed leftover defect run ${run}: process ${pid} has exited.`);",
     "new": "log(`Removed leftover defect run ${run}.`);"
+  },
+  {
+    "id": "D1157",
+    "defect": "The pool starts the queue in a sandbox that differs from the snapshot, so detections from a mis-built sandbox are recorded before the run fails.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "    writeLinks(slot.sandbox, ctx.links);\n    assertSnapshot(ctx, slot);",
+    "new": "    writeLinks(slot.sandbox, ctx.links);"
   }
 ]

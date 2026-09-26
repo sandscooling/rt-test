@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { loadFlowConfig } from "../flow-config.mjs";
+import { isInside } from "../paths.mjs";
 
 export const PATH_CLASS = Object.freeze({
   ORCHESTRATOR_ONLY: "orchestrator-only",
@@ -35,11 +36,8 @@ const toSlash = (path) => path.replace(/\\/g, "/");
 export function toRepoPath(root, input) {
   const slashed = toSlash(input);
   const absolute = isAbsolute(slashed) ? slashed : resolve(root, slashed);
-  const rel = toSlash(relative(root, absolute));
-  if (rel === "" || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
-    return null;
-  }
-  return rel;
+  if (!isInside(root, absolute)) return null;
+  return toSlash(relative(root, absolute));
 }
 
 // A path covers itself and everything beneath it; comparable paths only.

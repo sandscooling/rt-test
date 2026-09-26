@@ -142,7 +142,7 @@ C57. **Remove what is superseded in the same change**: A superseded function, fi
 
 C58. **Remove every usage, including tests and prose**: A deletion removes the symbol's tests, mocks, fixtures, docs and comments along with its code, and `tsc` over the test tree is clean afterwards.
 
-C59. **No unused export**: Every export has a production consumer. A reference from test code, a mock or a barrel re-export is not a consumer; delete the export and its tests, then re-check the layer it exposed.
+C59. **No unused export**: Every export has a production consumer. A reference from test code, a mock or a barrel re-export is not a consumer, except a test's import of a constant that sizes its inputs or of a pure function it drives in place of the disk-reading entry point that wraps it; delete the export and its tests, then re-check the layer it exposed.
 
 ## Tooling and gates
 
