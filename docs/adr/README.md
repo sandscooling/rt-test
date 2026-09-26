@@ -4,7 +4,7 @@ Record each hard-to-reverse, surprising decision with real alternatives as one A
 
 ## File format
 
-Name the file `NNNN-<slug>.md`: the next unused four-digit number, then lowercase words joined by hyphens. Never renumber or reuse a number.
+Name the file `NNNN-<slug>.md`: the four-digit number the orchestrator allocates (the next unused one), then lowercase words joined by hyphens. Never renumber or reuse a number.
 
 ```md
 # Store results in SQLite

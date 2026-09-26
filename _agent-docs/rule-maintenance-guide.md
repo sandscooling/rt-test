@@ -21,7 +21,7 @@ If neither holds, it is not a rule: put a long-form behavior in the design docs 
 ## Ids
 
 - Checklist ids are `C<n>` and project-context ids are `P<n>`: a prefix and digits only, flat across the whole doc, so an id resolves in whichever shard its rule lives. There are no letter suffixes and no bullet forms.
-- A new rule takes the next unused number in its doc. Find the highest with `node scripts/expand-rules.mjs --doc <checklist|project-context> --list`.
+- The orchestrator allocates a new rule's id: the next unused number in its doc, found with `node scripts/expand-rules.mjs --doc <checklist|project-context> --list`.
 - Never renumber. A gap left by a removal is fine; tickets and other rules cite ids.
 - A rule starts at column 0 as `C12. **Title**: text` and runs until the next rule, heading, `---` divider or HTML comment. Separate rules with a blank line.
 - Every line of guidance sits inside a rule block. Prose between a heading and the next rule can never be selected, and `--list` fails on it. The one exemption is a `>` blockquote signpost addressed to maintainers.

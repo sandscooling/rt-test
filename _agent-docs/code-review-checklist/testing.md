@@ -1,6 +1,6 @@
 <!--
 SHARD: testing. Checks a reviewer runs against Vitest tests and their named-defect records.
-Ids are C<n>, flat and unique across every shard; take the next unused number and never renumber.
+Ids are C<n>, flat and unique across every shard. The orchestrator allocates each new id, the next unused number; never renumber.
 Maintenance: _agent-docs/rule-maintenance-guide.md. A rule states the check and nothing about its origin.
 -->
 
