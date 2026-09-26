@@ -57,7 +57,13 @@ const STATUS_LINE = /^(?:\*\*)?Status(?:\*\*)?:/i;
 
 const splitLines = (text) => text.split(/\r?\n/);
 const normalize = (text) => splitLines(text).join("\n");
-const hasDataFence = (lines) => lines.some((line) => DATA_FENCE.test(line));
+// A data fence nested inside a longer fenced example is text, not the block.
+function hasDataFence(lines) {
+  const kinds = fenceKinds(lines);
+  return lines.some(
+    (line, index) => kinds[index] !== "code" && DATA_FENCE.test(line),
+  );
+}
 
 // Heading level per line, 0 for a non-heading or a line inside a code fence.
 function headingLevels(lines) {

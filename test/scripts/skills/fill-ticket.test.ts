@@ -143,6 +143,14 @@ describe("section fills", () => {
     ]);
     expect(result.errors).toBeUndefined();
   });
+
+  it("D879: a data fence nested inside a longer fenced example is not the section's machine-read block", () => {
+    const example = "````md\n```yaml\na: 1\n```\n````";
+    const result = applyFills(TICKET.replace("none", example), [
+      fill("References", "plain"),
+    ]);
+    expect(result.errors).toBeUndefined();
+  });
 });
 
 describe("scaffold", () => {

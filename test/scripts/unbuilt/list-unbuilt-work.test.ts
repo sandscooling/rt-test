@@ -422,3 +422,27 @@ describe("matching a folder in prose", () => {
     ).toContain("Ticket 1.5 (backlog)");
   });
 });
+
+function barePathTree(extra: Files = {}): Files {
+  return {
+    "_agent-docs/sprint-status.yaml": "1-5-new-module: backlog\n",
+    "_agent-docs/tickets/1-5-new-module.md":
+      "# Ticket 1.5: New module\n\nThe fences helper.\n",
+    ...extra,
+  };
+}
+
+describe("directory arguments", () => {
+  it("D881: a directory argument's last segment is not matched as a bare file name", () => {
+    const files = barePathTree({ "test/scripts/fences/a.test.ts": "" });
+    expect(unbuilt(["test/scripts/fences/"], fakeGit(), files).out).toContain(
+      "unbuilt-work: clean.",
+    );
+  });
+
+  it("D882: a path that does not exist on disk still matches its unique bare name", () => {
+    expect(
+      unbuilt(["test/scripts/gone/fences"], fakeGit(), barePathTree()).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+});

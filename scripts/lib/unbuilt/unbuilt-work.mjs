@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { isAbsolute, relative } from "node:path";
+import { statSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
 import { fenceKinds } from "../fences.mjs";
 import { display, planningFiles, readText } from "../planning/files.mjs";
 import { readStatus } from "../planning/status.mjs";
@@ -108,6 +109,10 @@ function tokensFor(path, counts) {
     tokens.push(name);
   return tokens;
 }
+
+// A folder's name is never a file's, so the basename counts cannot vouch for it.
+const isDirectory = (root, path) =>
+  statSync(join(root, path), { throwIfNoEntry: false })?.isDirectory() === true;
 
 const startsName = (line, at) =>
   at === 0 || !CHAR_BEFORE_NAME.test(line[at - 1]);
@@ -326,7 +331,10 @@ export function listUnbuiltWork(config, argv, git = gitIn(config.root)) {
   const counts = basenameCounts(git);
   const searches = paths.map((path) => ({
     path,
-    tokens: tokensFor(path, counts),
+    tokens: tokensFor(
+      path,
+      isDirectory(config.root, path) ? undefined : counts,
+    ),
     folders: foldersFor(path),
   }));
   const searchable = searches.filter(({ tokens }) => tokens.length > 0);

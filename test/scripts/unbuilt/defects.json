@@ -243,5 +243,19 @@
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
     "old": "search.folders.some((folder) => cites(line, folder, endsFolder));",
     "new": "search.folders.some((folder) => cites(line, folder, endsFolder) && !line.includes(`/${folder}`));"
+  },
+  {
+    "id": "D881",
+    "defect": "A directory argument has its last segment matched as a bare file name, so every pending ticket using that word is reported.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "isDirectory(config.root, path) ? undefined : counts,",
+    "new": "counts,"
+  },
+  {
+    "id": "D882",
+    "defect": "No argument gets a bare-name token, so a path that does not exist on disk misses the ticket naming its unique file name.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "isDirectory(config.root, path) ? undefined : counts,",
+    "new": "undefined,"
   }
 ]

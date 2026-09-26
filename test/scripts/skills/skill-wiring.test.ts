@@ -84,6 +84,22 @@ describe("check-skill-wiring", () => {
     );
   });
 
+  it("D880: a continued command ends at its fence, so the next fence's call is checked on its own line", () => {
+    const skill = [
+      "```sh",
+      "node scripts/tool.mjs --quiet \\",
+      "```",
+      "",
+      "```sh",
+      "node scripts/tool.mjs --bogus",
+      "```",
+      "",
+    ].join("\n");
+    expect(wiring(skill).err).toBe(
+      `${SKILL}:6: scripts/tool.mjs has no --bogus flag\n`,
+    );
+  });
+
   it("D566: a backticked agent name with no agent file is reported", () => {
     expect(wiring("Spawn `ctx-ghost`.\n").err).toBe(
       `${SKILL}:1: no agent .claude/agents/ctx-ghost.md\n`,

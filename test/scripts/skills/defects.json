@@ -411,5 +411,19 @@
     "file": "scripts/lib/skills/wiring-refs.mjs",
     "old": "if (kinds[index] === \"code\") {",
     "new": "if (false) {"
+  },
+  {
+    "id": "D879",
+    "defect": "A data fence nested inside a longer fenced example counts as the section's machine-read block, so a fill replacing that section is refused.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "(line, index) => kinds[index] !== \"code\" && DATA_FENCE.test(line),",
+    "new": "(line) => DATA_FENCE.test(line),"
+  },
+  {
+    "id": "D880",
+    "defect": "A fenced command ending in a backslash is never closed at its fence's end, so the next fence's command is appended to it and checked on the wrong line.",
+    "file": "scripts/lib/skills/wiring-refs.mjs",
+    "old": "      if (pending) units.push(pending);\n      pending = undefined;\n      return;",
+    "new": "      return;"
   }
 ]

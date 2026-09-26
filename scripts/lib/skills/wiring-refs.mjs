@@ -27,7 +27,11 @@ function commandUnits(lines) {
   const kinds = fenceKinds(lines);
   let pending;
   lines.forEach((line, index) => {
-    if (kinds[index] === "marker") return;
+    if (kinds[index] === "marker") {
+      if (pending) units.push(pending);
+      pending = undefined;
+      return;
+    }
     if (kinds[index] === "code") {
       const text = line.replace(/\\\s*$/, "");
       pending = pending
