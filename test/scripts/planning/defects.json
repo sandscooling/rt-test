@@ -1,0 +1,324 @@
+[
+  {
+    "id": "D200",
+    "defect": "A README in the sprints folder is parsed as a sprint file, so a clean tree fails.",
+    "file": "scripts/lib/planning/files.mjs",
+    "old": "name !== \"README.md\"",
+    "new": "name !== \"README.mdx\""
+  },
+  {
+    "id": "D201",
+    "defect": "A status key with an unknown state is accepted.",
+    "file": "scripts/lib/planning/status.mjs",
+    "old": "if (!states.has(entry.state)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D202",
+    "defect": "A second status key for one ticket id is accepted.",
+    "file": "scripts/lib/planning/status.mjs",
+    "old": "if (previous) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D203",
+    "defect": "A malformed status key is silently skipped.",
+    "file": "scripts/lib/planning/status.mjs",
+    "old": "status.problems.push(`${where}: malformed status key ${key}.`);",
+    "new": "return;"
+  },
+  {
+    "id": "D204",
+    "defect": "A ticket status key with no heading in its sprint file passes.",
+    "file": "scripts/lib/planning/sprint-keys.mjs",
+    "old": "if (!sprint?.tickets.has(id)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D205",
+    "defect": "A ticket heading with no status key passes.",
+    "file": "scripts/lib/planning/sprint-keys.mjs",
+    "old": "if (!status.tickets.has(id)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D206",
+    "defect": "A sprint status key with no sprint file passes.",
+    "file": "scripts/lib/planning/sprint-keys.mjs",
+    "old": "if (!plan.sprints.has(number)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D207",
+    "defect": "A sprint file with no sprint status key passes.",
+    "file": "scripts/lib/planning/sprint-keys.mjs",
+    "old": "if (!status.sprints.has(number)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D208",
+    "defect": "A ticket heading filed under another sprint's file is accepted there.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "if (match[1] !== number) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D209",
+    "defect": "A ticket heading that breaks the grammar is ignored instead of failing.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "const TICKET_LIKE = /^#{1,6}\\s+Tickets?\\b/;",
+    "new": "const TICKET_LIKE = /^## Ticket \\d+\\./;"
+  },
+  {
+    "id": "D210",
+    "defect": "A sprint file with no milestone passes.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "if (!lines.some((line) => MILESTONE.test(line.text))) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D211",
+    "defect": "A sprint title whose number differs from its file name passes.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "SPRINT_TITLE.exec(title?.text ?? \"\")?.[1] !== number",
+    "new": "SPRINT_TITLE.exec(title?.text ?? \"\") === null"
+  },
+  {
+    "id": "D212",
+    "defect": "A misnamed file in the sprints folder is read as a sprint.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "if (number === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D213",
+    "defect": "Lines inside a fenced example are read as requirements.",
+    "file": "scripts/lib/planning/files.mjs",
+    "old": "else if (fence === undefined) lines.push(",
+    "new": "else lines.push("
+  },
+  {
+    "id": "D214",
+    "defect": "A requirement with no marker is accepted.",
+    "file": "scripts/lib/planning/requirements.mjs",
+    "old": "const TRAILING_MARKER = /^(.*?)\\s*\\[([^[\\]]*)\\]$/;",
+    "new": "const TRAILING_MARKER = /^(.*?)\\s*(?:\\[([^[\\]]*)\\])?$/;"
+  },
+  {
+    "id": "D215",
+    "defect": "A marker carrying a state word before its link is accepted.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "new RegExp(`^Ticket (",
+    "new": "new RegExp(`Ticket ("
+  },
+  {
+    "id": "D216",
+    "defect": "An Unscheduled marker with an empty reason is accepted.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "const UNSCHEDULED = /^Unscheduled: (\\S.*)$/;",
+    "new": "const UNSCHEDULED = /^Unscheduled:(.*)$/;"
+  },
+  {
+    "id": "D217",
+    "defect": "A Partial marker that names no remainder is accepted.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "const PARTIAL = /^Partial: ([^;]+); remainder: (\\S.*)$/;",
+    "new": "const PARTIAL = /^Partial: ([^;]+)(?:; remainder: (\\S.*))?$/;"
+  },
+  {
+    "id": "D218",
+    "defect": "A marker linking a sprint with no status key passes.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "return status.sprints.has(sprint) ? [] : [`Sprint ${sprint}`];",
+    "new": "return [];"
+  },
+  {
+    "id": "D219",
+    "defect": "A marker linking a ticket with no status key passes.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": ".filter((id) => !status.tickets.has(id))",
+    "new": ".filter(() => false)"
+  },
+  {
+    "id": "D220",
+    "defect": "A requirement id defined twice is accepted.",
+    "file": "scripts/lib/planning/requirements.mjs",
+    "old": "if (previous) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D221",
+    "defect": "A requirement line with a malformed id is skipped instead of failing.",
+    "file": "scripts/lib/planning/requirements.mjs",
+    "old": "const DEFINITION_LIKE = /^\\s*[-*+]\\s+\\W*N?FR\\d/;",
+    "new": "const DEFINITION_LIKE = /^- N?FR[1-9]/;"
+  },
+  {
+    "id": "D222",
+    "defect": "Sprint files are not scanned for unknown requirement ids.",
+    "file": "scripts/lib/planning/requirements.mjs",
+    "old": "...planningFiles(config.sprints_dir),",
+    "new": ""
+  },
+  {
+    "id": "D223",
+    "defect": "Ticket files are not scanned for unknown requirement ids.",
+    "file": "scripts/lib/planning/requirements.mjs",
+    "old": "...planningFiles(config.ticket_dir, { optional: true }),",
+    "new": ""
+  },
+  {
+    "id": "D224",
+    "defect": "A requirement whose linked tickets are all done derives in-progress.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "if (states.every((state) => state === \"done\")) return \"implemented\";",
+    "new": ""
+  },
+  {
+    "id": "D225",
+    "defect": "A requirement with one done ticket among unstarted ones derives implemented.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "states.every((state) => state === \"done\")",
+    "new": "states.some((state) => state === \"done\")"
+  },
+  {
+    "id": "D226",
+    "defect": "A ready-for-dev ticket counts as started, so its requirement derives in-progress.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "const STARTED = new Set([\"in-progress\", \"review\", \"done\"]);",
+    "new": "const STARTED = new Set([\"ready-for-dev\", \"in-progress\", \"review\", \"done\"]);"
+  },
+  {
+    "id": "D227",
+    "defect": "A sprint link whose sprint closed derives planned forever.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "? \"unclaimed\"",
+    "new": "? \"planned\""
+  },
+  {
+    "id": "D228",
+    "defect": "A Partial marker whose tickets are done derives implemented, hiding its remainder.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "marker.kind === \"partial\" && linked === \"implemented\"",
+    "new": "false"
+  },
+  {
+    "id": "D229",
+    "defect": "The index derives a state from an unresolved link instead of failing.",
+    "file": "scripts/lib/planning/requirements-index.mjs",
+    "old": "if (problems.length > 0) return failed(problems);",
+    "new": ""
+  },
+  {
+    "id": "D230",
+    "defect": "An --ids id that names no requirement is silently dropped.",
+    "file": "scripts/lib/planning/requirements-index.mjs",
+    "old": "if (missing.length > 0)",
+    "new": "if (false)"
+  },
+  {
+    "id": "D231",
+    "defect": "--next offers the count plus one, colliding with an existing id after a gap.",
+    "file": "scripts/lib/planning/requirements-index.mjs",
+    "old": "Math.max(0, ...numbers) + 1",
+    "new": "numbers.length + 1"
+  },
+  {
+    "id": "D232",
+    "defect": "The successor ADR's supersedes relation is not derived.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "const replaced = numbers ? `; supersedes ${numbers}` : \"\";",
+    "new": "const replaced = \"\";"
+  },
+  {
+    "id": "D233",
+    "defect": "A supersession naming a missing ADR is accepted.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "if (target === adr.number || !adrs.has(target)) {",
+    "new": "if (target === adr.number) {"
+  },
+  {
+    "id": "D234",
+    "defect": "A supersession naming an ADR that is itself superseded is accepted.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "} else if (adrs.get(target)?.supersededBy !== undefined) {",
+    "new": "} else if (false) {"
+  },
+  {
+    "id": "D235",
+    "defect": "An ADR with no Status line is accepted.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "if (status === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D236",
+    "defect": "An ADR with an unknown status is accepted.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "if (!PLAIN_STATUSES.has(status) && supersededBy === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D237",
+    "defect": "An ADR whose first line is not a title is accepted.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "if (title === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D238",
+    "defect": "Two ADRs sharing a number are both accepted.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "} else if (adrs.has(number)) {",
+    "new": "} else if (false) {"
+  },
+  {
+    "id": "D239",
+    "defect": "A misnamed file in the ADR folder is read as an ADR.",
+    "file": "scripts/lib/planning/adr-index.mjs",
+    "old": "if (number === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D240",
+    "defect": "A sprint link derives unclaimed while its sprint is still open.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "status.sprints.get(link.sprint)?.state === \"done\"",
+    "new": "true"
+  },
+  {
+    "id": "D241",
+    "defect": "An in-progress ticket does not count as started, so its requirement derives planned.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "const STARTED = new Set([\"in-progress\", \"review\", \"done\"]);",
+    "new": "const STARTED = new Set([\"review\", \"done\"]);"
+  },
+  {
+    "id": "D242",
+    "defect": "An Unscheduled marker derives planned, as if some sprint owned it.",
+    "file": "scripts/lib/planning/markers.mjs",
+    "old": "if (marker.kind === \"unscheduled\") return \"unscheduled\";",
+    "new": "if (marker.kind === \"unscheduled\") return \"planned\";"
+  },
+  {
+    "id": "D243",
+    "defect": "A status line that is not key: state is silently skipped.",
+    "file": "scripts/lib/planning/status.mjs",
+    "old": "status.problems.push(`${where}: expected \"key: state\", got: ${line}`);",
+    "new": ""
+  },
+  {
+    "id": "D244",
+    "defect": "A second sprint file for one sprint number silently replaces the first.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "if (previous) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D245",
+    "defect": "A ticket heading repeated in one sprint file is accepted, giving the ticket two titles.",
+    "file": "scripts/lib/planning/sprints.mjs",
+    "old": "if (sprint.tickets.has(id)) {",
+    "new": "if (false) {"
+  }
+]

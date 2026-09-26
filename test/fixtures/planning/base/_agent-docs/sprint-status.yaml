@@ -1,0 +1,9 @@
+# Planning fixture status.
+
+sprint-1: in-progress
+1-1-parse-events: done
+1-2-store-results: in-progress
+1-3-query-status: backlog # after 1.2
+
+sprint-2: backlog
+2-1-select-tests: ready-for-dev

@@ -173,7 +173,11 @@ try {
   for (const defect of defects) {
     const original = watched.get(defect.file);
     const target = join(sandbox, defect.file);
-    writeFileSync(target, original.replace(defect.old, defect.new));
+    // A replacer function inserts `new` literally; a string would expand `$&`.
+    writeFileSync(
+      target,
+      original.replace(defect.old, () => defect.new),
+    );
     assertDetected(defect);
     writeFileSync(target, original);
     console.log(`${defect.id}: detected (${defect.defect})`);
