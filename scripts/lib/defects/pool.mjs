@@ -13,7 +13,7 @@ import { baselineProblem, detectionProblem } from "./vitest.mjs";
 
 const VITEST_RESULTS_CACHE = /(^|\/)node_modules\/\.vite\/vitest(\/|$)/;
 
-export function writeTree(dir, files) {
+function writeTree(dir, files) {
   for (const [path, content] of files) {
     const target = join(dir, path);
     mkdirSync(dirname(target), { recursive: true });

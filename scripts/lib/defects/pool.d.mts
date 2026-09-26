@@ -9,7 +9,6 @@ export interface PoolResult {
   readonly undetected: readonly string[];
 }
 
-export declare function writeTree(dir: string, files: Files): void;
 export declare function treeDifference(
   expected: Files,
   actual: Files,

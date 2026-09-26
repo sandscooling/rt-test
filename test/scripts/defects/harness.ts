@@ -4,6 +4,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -16,7 +17,6 @@ import {
 } from "../../../scripts/lib/defects/catalog.mjs";
 import {
   verifyInSandboxes,
-  writeTree,
   type PoolResult,
 } from "../../../scripts/lib/defects/pool.mjs";
 import type {
@@ -196,6 +196,13 @@ export function inSandboxes(
     parent,
     log: () => {},
   });
+}
+
+function writeTree(root: string, files: ReadonlyMap<string, Buffer>): void {
+  for (const [path, content] of files) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
+  }
 }
 
 export function writeRoot(root: string, tree: Tree = TREE): void {
