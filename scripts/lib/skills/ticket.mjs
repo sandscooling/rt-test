@@ -2,6 +2,8 @@
 // ticket and the template must keep. Every byte a fill writes comes from its
 // input verbatim, and any problem aborts the whole batch.
 
+import { fenceKinds } from "../fences.mjs";
+
 export const TEMPLATE_FILE = ".claude/skills/create-ticket/template.md";
 
 export const ID_MARKERS = Object.freeze({
@@ -45,7 +47,6 @@ export const METADATA_KEYS = Object.freeze([
 ]);
 
 const DOWNSTREAM_SECTION = "Dev Agent Record";
-const FENCE = /^\s*(`{3,}|~{3,})/;
 const DATA_FENCE = /^\s*```(ya?ml|json|toml)\b/i;
 const PLACEHOLDER = /\{\{[a-z_0-9]+\}\}/gi;
 const PENDING = /RULE_IDS:\s*PENDING\s*-->/;
@@ -60,17 +61,10 @@ const hasDataFence = (lines) => lines.some((line) => DATA_FENCE.test(line));
 
 // Heading level per line, 0 for a non-heading or a line inside a code fence.
 function headingLevels(lines) {
-  let fence;
-  return lines.map((line) => {
-    const marker = FENCE.exec(line)?.[1];
-    if (marker !== undefined) {
-      if (fence === undefined) fence = marker[0];
-      else if (marker[0] === fence) fence = undefined;
-      return 0;
-    }
-    if (fence !== undefined) return 0;
-    return /^(#{1,6}) \S/.exec(line)?.[1].length ?? 0;
-  });
+  const kinds = fenceKinds(lines);
+  return lines.map((line, index) =>
+    kinds[index] === "prose" ? (/^(#{1,6}) \S/.exec(line)?.[1].length ?? 0) : 0,
+  );
 }
 
 const headingText = (line) => line.replace(/^#{1,6}\s+/, "").trim();

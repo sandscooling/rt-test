@@ -88,6 +88,24 @@ describe("rule hygiene provenance", () => {
     expect(run.code).toBe(0);
   });
 
+  it("D866: a date stays exempt across a shorter marker inside a longer fence", () => {
+    const run = checkAfter((root) =>
+      write(
+        root,
+        "AGENTS.md",
+        "# Agents\n\n````md\n```\ngit log --since 2026-01-02\n```\n````\n",
+      ),
+    );
+    expect(run.code).toBe(0);
+  });
+
+  it("D867: guidance after an opener that never closes is still scanned", () => {
+    const run = checkAfter((root) =>
+      write(root, "AGENTS.md", "# Agents\n\n```sh\n\nDecided on 2026-01-02.\n"),
+    );
+    expect(run.code).toBe(1);
+  });
+
   it("D136: the rule maintenance guide named in the flow config is scanned", () => {
     const run = checkAfter((root) =>
       write(

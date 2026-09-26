@@ -76,7 +76,7 @@ Parse by exact heading:
 **Bind `{{pending_siblings}}` in two halves.** From the status file: every other ticket in this sprint not
 `done`, each with its one-line scope from `{cfg.sprints_dir}/sprint-<N>-*.md`. Then
 `node scripts/list-unbuilt-work.mjs <every file in files_to_modify and files_to_create>`: every ticket not
-`done` in any sprint whose ticket file or sprint section names one of those files. Bind the union.
+`done` in any sprint whose ticket file or sprint section names one of those files or a folder holding one. Bind the union.
 
 **Mid-sprint, the code is not the design**: it lacks what pending siblings add and still carries what they
 delete. The by-file half finds work in other sprints, which a sprint-scoped list cannot see. Every gate below

@@ -22,6 +22,22 @@ describe("check-requirement-markers", () => {
     expect(check().code).toBe(0);
   });
 
+  it("D859: keeps a fenced example hidden across a shorter marker inside its longer fence", () => {
+    const example = "```md\n- FR9: A fenced example [Sprint 99]\n```";
+    const longer =
+      "````md\n```\n- FR9: A fenced example [Sprint 99]\n```\n````";
+    expect(check(marker(example, longer)).code).toBe(0);
+  });
+
+  it("D860: still reads the requirements after an opener that never closes", () => {
+    expect(
+      check(
+        marker("## Non-functional requirements", "```text"),
+        marker("- NFR2: Stay fast [Ticket 1.2]", "- NFR2: Stay fast"),
+      ),
+    ).toEqual(failsWith("NFR2 has no marker"));
+  });
+
   it("D214: rejects a requirement with no marker", () => {
     expect(check(marker("Watch files [Sprint 2]", "Watch files"))).toEqual(
       failsWith("FR5 has no marker"),

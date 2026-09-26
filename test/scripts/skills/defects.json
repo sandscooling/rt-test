@@ -369,5 +369,47 @@
     "file": "scripts/lib/skills/skill-wiring.mjs",
     "old": "  problems.push(...templateContract(config));\n",
     "new": "  problems.push();\n"
+  },
+  {
+    "id": "D861",
+    "defect": "A shorter marker inside a longer fence closes it, so a fenced example heading collides with the real one.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length >= 3"
+  },
+  {
+    "id": "D862",
+    "defect": "An unclosed opener hides every ticket heading after it, so a fill cannot find its section.",
+    "file": "scripts/lib/fences.mjs",
+    "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
+    "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
+  },
+  {
+    "id": "D863",
+    "defect": "A shorter marker inside a longer fence closes it, so the fenced command after it is never checked.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length >= 3"
+  },
+  {
+    "id": "D864",
+    "defect": "An unclosed opener turns the prose after it into commands.",
+    "file": "scripts/lib/fences.mjs",
+    "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
+    "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
+  },
+  {
+    "id": "D877",
+    "defect": "headingLevels stops consulting the fence scanner, so a heading inside a fenced example collides with the real section.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "kinds[index] === \"prose\" ? (/^(#{1,6}) \\S/",
+    "new": "true ? (/^(#{1,6}) \\S/"
+  },
+  {
+    "id": "D878",
+    "defect": "commandUnits stops treating fenced lines as code, so a fenced script call is never checked.",
+    "file": "scripts/lib/skills/wiring-refs.mjs",
+    "old": "if (kinds[index] === \"code\") {",
+    "new": "if (false) {"
   }
 ]

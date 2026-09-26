@@ -77,7 +77,7 @@ scope line and any acceptance criteria still under it → `{{ticket_requirements
 as `{{sprint_context}}`.
 
 **Bind `{{pending_siblings}}`**: every ticket not `done` in this sprint, plus every ticket not `done` in any
-sprint whose section or ticket file names one of this ticket's target files:
+sprint whose section or ticket file names one of this ticket's target files or a folder holding one:
 `node scripts/list-unbuilt-work.mjs <each file in {{files_to_modify}} and {{files_to_create}}>`. It searches both
 homes, since a drafted ticket file names paths its one-line sprint scope does not, and prints each hit under the
 ticket heading or ticket file that holds it, with its state from `{cfg.sprint_status}`. Re-run it whenever the

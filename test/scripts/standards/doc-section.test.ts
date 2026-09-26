@@ -82,4 +82,12 @@ describe("doc-section", () => {
     );
     expect(outcome.out).toBe("#\tDoc\n##\tExample\n##\tAfter\n");
   });
+
+  it("D865: lists the headings after an opener that never closes", () => {
+    const doc = "# Doc\n\n```sh\n\n## After\n";
+    const outcome = inTree({ "doc.md": doc }, (config) =>
+      docSection(config, ["doc.md", "--list"]),
+    );
+    expect(outcome.out).toBe("#\tDoc\n##\tAfter\n");
+  });
 });

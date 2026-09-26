@@ -64,6 +64,26 @@ describe("check-skill-wiring", () => {
     );
   });
 
+  it("D863: a command inside a longer fence is checked past a shorter marker", () => {
+    const skill = "````md\n```\nnode scripts/tool.mjs --bogus\n```\n````\n";
+    expect(wiring(skill).err).toBe(
+      `${SKILL}:3: scripts/tool.mjs has no --bogus flag\n`,
+    );
+  });
+
+  it("D864: prose after an opener that never closes is not read as a command", () => {
+    const skill =
+      "```sh\nPass `node scripts/tool.mjs --quiet`, never --bogus.\n";
+    expect(wiring(skill)).toMatchObject({ code: 0, err: "" });
+  });
+
+  it("D878: a script call inside a fence is checked", () => {
+    const skill = "```sh\nnode scripts/tool.mjs --bogus\n```\n";
+    expect(wiring(skill).err).toBe(
+      `${SKILL}:2: scripts/tool.mjs has no --bogus flag\n`,
+    );
+  });
+
   it("D566: a backticked agent name with no agent file is reported", () => {
     expect(wiring("Spawn `ctx-ghost`.\n").err).toBe(
       `${SKILL}:1: no agent .claude/agents/ctx-ghost.md\n`,

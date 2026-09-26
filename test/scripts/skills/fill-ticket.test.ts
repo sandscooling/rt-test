@@ -120,6 +120,29 @@ describe("section fills", () => {
     ]);
     expect(result.errors).toBeDefined();
   });
+
+  it("D861: a heading inside a longer fence stays text across a shorter marker", () => {
+    const example = "````md\n```\n## Acceptance Criteria\n```\n````";
+    const result = applyFills(TICKET.replace("none", example), [
+      fill("Acceptance Criteria", "- [ ] AC1: a"),
+    ]);
+    expect(result.errors).toBeUndefined();
+  });
+
+  it("D862: an opener that never closes leaves the headings after it findable", () => {
+    const result = applyFills(TICKET.replace("none", "~~~sh"), [
+      fill("Dev Agent Record", "notes"),
+    ]);
+    expect(result.errors).toBeUndefined();
+  });
+
+  it("D877: a heading inside a fenced example does not collide with the real section", () => {
+    const example = "```md\n## Acceptance Criteria\n```";
+    const result = applyFills(TICKET.replace("none", example), [
+      fill("Acceptance Criteria", "- [ ] AC1: a"),
+    ]);
+    expect(result.errors).toBeUndefined();
+  });
 });
 
 describe("scaffold", () => {

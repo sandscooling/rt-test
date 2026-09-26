@@ -1,7 +1,8 @@
 // Finds the references a skill's prose makes, line by line, so the wiring
 // check can confirm each still points at something real.
 
-const FENCE = /^\s*(`{3,}|~{3,})/;
+import { fenceKinds } from "../fences.mjs";
+
 const INLINE_CODE = /`([^`]+)`/g;
 const COMMAND_BREAK = /\s(?:&&|\|\||\||;)\s/;
 const SCRIPT_CALL = /scripts\/([A-Za-z0-9_-]+\.mjs)\b(.*)$/;
@@ -23,16 +24,11 @@ const PATTERNS = Object.freeze({
 
 function commandUnits(lines) {
   const units = [];
-  let fence;
+  const kinds = fenceKinds(lines);
   let pending;
   lines.forEach((line, index) => {
-    const marker = FENCE.exec(line)?.[1];
-    if (marker !== undefined) {
-      if (fence === undefined) fence = marker[0];
-      else if (marker[0] === fence) fence = undefined;
-      return;
-    }
-    if (fence !== undefined) {
+    if (kinds[index] === "marker") return;
+    if (kinds[index] === "code") {
       const text = line.replace(/\\\s*$/, "");
       pending = pending
         ? { ...pending, text: `${pending.text} ${text.trim()}` }

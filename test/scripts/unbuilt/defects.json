@@ -31,8 +31,8 @@
     "id": "D604",
     "defect": "A sprint-file hit reports its line within the section instead of within the file.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "found.push(unit.offset + index + 1);",
-    "new": "found.push(index + 1);"
+    "old": "test(line) ? [unit.offset + index + 1] : [],",
+    "new": "test(line) ? [index + 1] : [],"
   },
   {
     "id": "D605",
@@ -45,7 +45,7 @@
     "id": "D606",
     "defect": "A ticket heading inside a code fence starts a section.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "const id = fenced[index] ? undefined : TICKET_HEADING.exec(line)?.[1];",
+    "old": "const id = prose ? TICKET_HEADING.exec(line)?.[1] : undefined;",
     "new": "const id = TICKET_HEADING.exec(line)?.[1];"
   },
   {
@@ -170,14 +170,14 @@
   {
     "id": "D624",
     "defect": "An unclosed fence runs to the end of the file, hiding every ticket heading after it.",
-    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "file": "scripts/lib/fences.mjs",
     "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
     "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
   },
   {
     "id": "D625",
     "defect": "Any marker of the fence's character closes it, so a shorter marker inside a longer fence exposes the fenced example headings.",
-    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "file": "scripts/lib/fences.mjs",
     "old": "marker.length >= opener.length",
     "new": "marker.length >= 3"
   },
@@ -194,5 +194,54 @@
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
     "old": "[unkeyedUnit(file, readText(path).split(/\\r?\\n/))]",
     "new": "[]"
+  },
+  {
+    "id": "D868",
+    "defect": "Only folders three or more segments deep are matched, so a ticket citing a two-segment folder is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const MIN_FOLDER_SEGMENTS = 2;",
+    "new": "const MIN_FOLDER_SEGMENTS = 3;"
+  },
+  {
+    "id": "D869",
+    "defect": "A folder cited with a trailing slash reads as a citation of a child, so the ticket is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "!(line[end] === \"/\" && NAME_CHAR.test(line[end + 1] ?? \"\"))",
+    "new": "line[end] !== \"/\""
+  },
+  {
+    "id": "D870",
+    "defect": "One-segment folders are matched, so a ticket citing a top-level folder floods the report.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const MIN_FOLDER_SEGMENTS = 2;",
+    "new": "const MIN_FOLDER_SEGMENTS = 1;"
+  },
+  {
+    "id": "D871",
+    "defect": "A folder citation ignores the name boundary, so it matches a sibling that shares its prefix.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "  endsName(line, end) &&\n",
+    "new": "  true &&\n"
+  },
+  {
+    "id": "D872",
+    "defect": "A folder followed by a child name counts as a folder citation, so any cited file matches every change in its folder.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "!(line[end] === \"/\" && NAME_CHAR.test(line[end + 1] ?? \"\"))",
+    "new": "true"
+  },
+  {
+    "id": "D873",
+    "defect": "A line that names only a folder is printed as naming the changed path, so a reader searching the cited line for that path finds nothing and dismisses a real pending ticket.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "addSource(hits, unit, `a folder holding ${search.path}`, folders);",
+    "new": "addSource(hits, unit, search.path, folders);"
+  },
+  {
+    "id": "D874",
+    "defect": "A folder cited through a relative link is missed, as a root-relative-only match start would cause.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "search.folders.some((folder) => cites(line, folder, endsFolder));",
+    "new": "search.folders.some((folder) => cites(line, folder, endsFolder) && !line.includes(`/${folder}`));"
   }
 ]

@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { isAbsolute, relative } from "node:path";
+import { fenceKinds } from "../fences.mjs";
 import { display, planningFiles, readText } from "../planning/files.mjs";
 import { readStatus } from "../planning/status.mjs";
 import { result } from "../standards/result.mjs";
 
 export const USAGE = [
   "Usage: list-unbuilt-work.mjs [<path>...]",
-  "  Lists each ticket not done whose ticket file or sprint-file section names one of the paths.",
+  "  Lists each ticket not done whose ticket file or sprint-file section names one of the paths,",
+  "  or a folder at least two segments deep that holds one.",
   "  With no paths, reads the changeset from git: unstaged, staged and untracked files.",
 ].join("\n");
 
@@ -18,10 +20,9 @@ const TICKET_FILE =
   /^([1-9]\d*)-([1-9]\d*[a-z]?)-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 const SPRINT_FILE = /^sprint-([1-9]\d*)-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 const TICKET_HEADING = /^## Ticket ([1-9]\d*\.[1-9]\d*[a-z]?): /;
-const FENCE_OPEN = /^\s*(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^\s*(`{3,}|~{3,})\s*$/;
 const NAME_CHAR = /[A-Za-z0-9_$-]/;
 const CHAR_BEFORE_NAME = /[A-Za-z0-9_$.-]/;
+const MIN_FOLDER_SEGMENTS = 2;
 const SHOWN_LINES = 4;
 const GIT_BUFFER_BYTES = 64 * 1024 * 1024;
 const CHANGESET_COMMANDS = [
@@ -118,16 +119,38 @@ function endsName(line, end) {
   return !(next === "." && NAME_CHAR.test(line[end + 1] ?? ""));
 }
 
-function citesToken(line, token) {
+// A pending ticket often cites the folder a new file will join. Shallower
+// folders than MIN_FOLDER_SEGMENTS would match nearly every ticket.
+function foldersFor(path) {
+  const parts = path.split("/");
+  const folders = [];
+  for (let end = MIN_FOLDER_SEGMENTS; end < parts.length; end += 1)
+    folders.push(parts.slice(0, end).join("/"));
+  return folders;
+}
+
+// A folder followed by a child name cites that child, not the folder.
+const endsFolder = (line, end) =>
+  endsName(line, end) &&
+  !(line[end] === "/" && NAME_CHAR.test(line[end + 1] ?? ""));
+
+function cites(line, token, ends) {
   for (
     let at = line.indexOf(token);
     at !== -1;
     at = line.indexOf(token, at + 1)
   ) {
-    if (startsName(line, at) && endsName(line, at + token.length)) return true;
+    if (startsName(line, at) && ends(line, at + token.length)) return true;
   }
   return false;
 }
+
+const citesFile = (line, { tokens }) =>
+  tokens.some((token) => cites(line, token, endsName));
+
+const citesFolder = (line, search) =>
+  !citesFile(line, search) &&
+  search.folders.some((folder) => cites(line, folder, endsFolder));
 
 const stateOf = (entries, id) => entries.get(id)?.state ?? NO_STATUS;
 
@@ -164,45 +187,15 @@ function ticketUnits(config, status) {
   );
 }
 
-function closes(opener, line) {
-  const marker = FENCE_CLOSE.exec(line)?.[1];
-  return (
-    marker !== undefined &&
-    marker[0] === opener[0] &&
-    marker.length >= opener.length
-  );
-}
-
-// A fence closes only on a bare marker of its own character and at least its
-// length. An opener that never closes fences nothing, so a stray marker cannot
-// hide the ticket headings after it.
-function fencedLines(lines) {
-  const fenced = lines.map(() => false);
-  let index = 0;
-  while (index < lines.length) {
-    const opener = FENCE_OPEN.exec(lines[index])?.[1];
-    const end =
-      opener === undefined
-        ? -1
-        : lines.findIndex((line, at) => at > index && closes(opener, line));
-    if (end === -1) {
-      index += 1;
-      continue;
-    }
-    fenced.fill(true, index, end + 1);
-    index = end + 1;
-  }
-  return fenced;
-}
-
 // Splits a sprint file at each ticket heading outside a code fence; the
 // section before the first heading is the sprint's own preamble.
 function sections(text) {
   const all = [{ id: undefined, offset: 0, lines: [] }];
   const lines = text.split(/\r?\n/);
-  const fenced = fencedLines(lines);
+  const kinds = fenceKinds(lines);
   lines.forEach((line, index) => {
-    const id = fenced[index] ? undefined : TICKET_HEADING.exec(line)?.[1];
+    const prose = kinds[index] === "prose";
+    const id = prose ? TICKET_HEADING.exec(line)?.[1] : undefined;
     if (id !== undefined) all.push({ id, offset: index, lines: [] });
     all.at(-1).lines.push(line);
   });
@@ -239,22 +232,31 @@ function sprintUnits(config, status) {
   );
 }
 
+function addSource(hits, unit, path, lines) {
+  if (lines.length === 0) return;
+  const hit = hits.get(unit.id) ?? {
+    label: unit.label,
+    state: unit.state,
+    sources: [],
+  };
+  hits.set(unit.id, hit);
+  hit.sources.push({ file: unit.file, path, lines });
+}
+
+const citingLines = (unit, test) =>
+  unit.lines.flatMap((line, index) =>
+    test(line) ? [unit.offset + index + 1] : [],
+  );
+
+// A line naming only the folder must say so, or a reader searching it for the
+// changed path finds nothing and dismisses the hit.
 function scan(hits, unit, searches) {
   if (SETTLED_STATES.has(unit.state)) return;
-  for (const { path, tokens } of searches) {
-    const found = [];
-    unit.lines.forEach((line, index) => {
-      if (tokens.some((token) => citesToken(line, token)))
-        found.push(unit.offset + index + 1);
-    });
-    if (found.length === 0) continue;
-    const hit = hits.get(unit.id) ?? {
-      label: unit.label,
-      state: unit.state,
-      sources: [],
-    };
-    hits.set(unit.id, hit);
-    hit.sources.push({ file: unit.file, path, lines: found });
+  for (const search of searches) {
+    const files = citingLines(unit, (line) => citesFile(line, search));
+    const folders = citingLines(unit, (line) => citesFolder(line, search));
+    addSource(hits, unit, search.path, files);
+    addSource(hits, unit, `a folder holding ${search.path}`, folders);
   }
 }
 
@@ -325,6 +327,7 @@ export function listUnbuiltWork(config, argv, git = gitIn(config.root)) {
   const searches = paths.map((path) => ({
     path,
     tokens: tokensFor(path, counts),
+    folders: foldersFor(path),
   }));
   const searchable = searches.filter(({ tokens }) => tokens.length > 0);
   const unsearchable = searches

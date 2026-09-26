@@ -1,26 +1,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fenceKinds } from "../fences.mjs";
 import { result } from "./result.mjs";
 
 const USAGE =
   'Usage: doc-section.mjs <file> "Heading" ["Heading"...]  |  doc-section.mjs <file> --list';
 
-const FENCE = /^\s*(`{3,}|~{3,})/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*$/;
 
 class SectionError extends Error {}
 
-const closes = (open, marker) =>
-  marker[0] === open[0] && marker.length >= open.length;
-
 function readHeadings(lines) {
   const headings = [];
-  let fence;
+  const kinds = fenceKinds(lines);
   lines.forEach((line, index) => {
-    const marker = FENCE.exec(line)?.[1];
-    if (marker !== undefined && fence === undefined) fence = marker;
-    else if (marker !== undefined && closes(fence, marker)) fence = undefined;
-    if (fence !== undefined || marker !== undefined) return;
+    if (kinds[index] !== "prose") return;
     const match = HEADING.exec(line);
     if (match) headings.push({ index, level: match[1].length, text: match[2] });
   });

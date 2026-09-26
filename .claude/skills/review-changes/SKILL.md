@@ -53,7 +53,7 @@ reads an unbound variable as text it cannot parse and re-derives every exclusion
 
 - **By sprint**, ticket mode only: every other ticket in this sprint not `done`, with its one-line scope.
 - **By file**, every mode: `node scripts/list-unbuilt-work.mjs <changed paths>`, every ticket not `done` in any
-  sprint that names a changed file.
+  sprint that names a changed file or a folder holding one.
 
 Bind the union, each entry with its ticket id, state, scope line and the file it names; say `(none)` aloud when
 both come back empty. The by-file half is the one a sprint-scoped list cannot produce: work sharing a file with

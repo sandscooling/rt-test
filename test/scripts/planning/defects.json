@@ -94,8 +94,8 @@
     "id": "D213",
     "defect": "Lines inside a fenced example are read as requirements.",
     "file": "scripts/lib/planning/files.mjs",
-    "old": "else if (fence === undefined) lines.push(",
-    "new": "else lines.push("
+    "old": "kinds[index] === \"prose\" ? [{ text: line, number: index + 1 }] : [],",
+    "new": "[{ text: line, number: index + 1 }],"
   },
   {
     "id": "D214",
@@ -383,5 +383,19 @@
     "file": "scripts/lib/planning/requirement-history.mjs",
     "old": "if (texts.length !== versions.length) {",
     "new": "if (false) {"
+  },
+  {
+    "id": "D859",
+    "defect": "A shorter marker inside a longer fence closes it, so the fenced example is read as a requirement.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length >= 3"
+  },
+  {
+    "id": "D860",
+    "defect": "An unclosed opener hides every requirement after it.",
+    "file": "scripts/lib/fences.mjs",
+    "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
+    "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
   }
 ]

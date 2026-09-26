@@ -361,3 +361,64 @@ describe("exit codes and inputs", () => {
     expect(unbuilt(["--json"]).code).toBe(2);
   });
 });
+
+function citing(path: string, citation: string): Result {
+  const files: Files = {
+    "_agent-docs/sprint-status.yaml": "1-5-new-module: backlog\n",
+    "_agent-docs/tickets/1-5-new-module.md": `# Ticket 1.5: New module\n\n${citation}\n`,
+  };
+  return unbuilt([path], fakeGit(), files);
+}
+
+describe("matching a folder in prose", () => {
+  it("D868: a ticket citing a two-segment folder is reported for a file inside it", () => {
+    expect(
+      citing("packages/core/src/new.ts", "Adds a module to packages/core.").out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+
+  it("D869: a folder cited with a trailing slash is reported for a file inside it", () => {
+    expect(
+      citing(
+        "packages/core/src/store/index.ts",
+        "Adds a module under packages/core/src/store/ for the store.",
+      ).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+
+  it("D870: a one-segment folder matches nothing", () => {
+    expect(
+      citing("packages/core/src/new.ts", "Touches every folder in packages/.")
+        .out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D871: a folder does not match a sibling that shares its prefix", () => {
+    expect(
+      citing("packages/core/src/new.ts", "Adds packages/core-extra/ helpers.")
+        .out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D872: a cited file inside a folder does not cite the folder", () => {
+    expect(
+      citing("packages/core/src/new.ts", "Edits packages/core/src/other.ts.")
+        .out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D873: a line naming only a folder says it names a folder holding the path", () => {
+    expect(
+      citing("packages/core/src/new.ts", "Adds a module to packages/core.").out,
+    ).toContain("names a folder holding packages/core/src/new.ts");
+  });
+
+  it("D874: a folder cited through a relative link is reported for a file inside it", () => {
+    expect(
+      citing(
+        "packages/core/src/store/new.ts",
+        "See [store](../../packages/core/src/store/).",
+      ).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+});

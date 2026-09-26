@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import { fenceKinds } from "../fences.mjs";
 import { loadBlocks } from "./blocks.mjs";
 import { DOC_NAMES, sources } from "./docs.mjs";
 
@@ -75,18 +76,16 @@ export function lineId(text) {
 
 export function collectGuidance(root, config) {
   return guidancePaths(root, config).flatMap((path) => {
-    let fenced = false;
     const label = posix(relative(root, path));
-    return readFileSync(path, "utf8")
-      .split(/\r?\n/)
-      .flatMap((line, index) => {
-        if (/^\s*```/.test(line)) fenced = !fenced;
-        const text = line.trim();
-        if (fenced || text === "" || text.startsWith("```")) return [];
-        return [
-          { id: lineId(text), label, line: index + 1, text, guidance: true },
-        ];
-      });
+    const lines = readFileSync(path, "utf8").split(/\r?\n/);
+    const kinds = fenceKinds(lines);
+    return lines.flatMap((line, index) => {
+      const text = line.trim();
+      if (kinds[index] !== "prose" || text === "") return [];
+      return [
+        { id: lineId(text), label, line: index + 1, text, guidance: true },
+      ];
+    });
   });
 }
 

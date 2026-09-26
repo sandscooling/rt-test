@@ -132,7 +132,7 @@ touched files as `{{blast_radius_files}}`; bind the doc findings as `{{doc_conte
 change touches, since contradicting an ADR needs explicit reconciliation.
 
 **Then bind `{{pending_siblings}}`**: every ticket not `done` whose sprint section or ticket file names a file
-in `{{blast_radius_files}}`: `node scripts/list-unbuilt-work.mjs <each file in {{blast_radius_files}}>`, which
+in `{{blast_radius_files}}`, or a folder holding one: `node scripts/list-unbuilt-work.mjs <each file in {{blast_radius_files}}>`, which
 prints each hit with its state from `{cfg.sprint_status}`. Read each hit's criteria, not its title. `(none)` is
 the common answer; say it.
 

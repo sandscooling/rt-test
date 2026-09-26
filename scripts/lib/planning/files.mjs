@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-
-const FENCE = /^\s*(`{3,}|~{3,})/;
+import { fenceKinds } from "../fences.mjs";
 
 export function readText(path) {
   try {
@@ -17,15 +16,11 @@ export function display(config, path) {
 
 // Fenced blocks hold format examples, never planning facts.
 export function proseLines(text) {
-  const lines = [];
-  let fence;
-  text.split(/\r?\n/).forEach((line, index) => {
-    const marker = FENCE.exec(line)?.[1][0];
-    if (marker !== undefined && fence === undefined) fence = marker;
-    else if (marker !== undefined && marker === fence) fence = undefined;
-    else if (fence === undefined) lines.push({ text: line, number: index + 1 });
-  });
-  return lines;
+  const lines = text.split(/\r?\n/);
+  const kinds = fenceKinds(lines);
+  return lines.flatMap((line, index) =>
+    kinds[index] === "prose" ? [{ text: line, number: index + 1 }] : [],
+  );
 }
 
 export function planningFiles(dir, { optional = false } = {}) {

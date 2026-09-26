@@ -1,0 +1,79 @@
+[
+  {
+    "id": "D850",
+    "defect": "The lines between a fence's markers are left as prose.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "kinds.fill(\"code\", index + 1, end);",
+    "new": "kinds.fill(\"prose\", index + 1, end);"
+  },
+  {
+    "id": "D851",
+    "defect": "Any marker of the fence's character closes it, so a shorter marker inside a longer fence ends it early.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length >= 3"
+  },
+  {
+    "id": "D852",
+    "defect": "A marker of either character closes a fence.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker[0] === opener[0] &&",
+    "new": ""
+  },
+  {
+    "id": "D853",
+    "defect": "An unclosed opener runs to the end of the document, hiding every line after it.",
+    "file": "scripts/lib/fences.mjs",
+    "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
+    "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
+  },
+  {
+    "id": "D854",
+    "defect": "A marker followed by an info string closes a fence.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "const CLOSER = /^\\s*(`{3,}|~{3,})\\s*$/;",
+    "new": "const CLOSER = /^\\s*(`{3,}|~{3,})/;"
+  },
+  {
+    "id": "D855",
+    "defect": "A backtick run whose info string holds a backtick opens a fence.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "(`{3,})[^`]*|",
+    "new": "(`{3,}).*|"
+  },
+  {
+    "id": "D856",
+    "defect": "A tilde run opens no fence.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "const opener = match?.[1] ?? match?.[2];",
+    "new": "const opener = match?.[1];"
+  },
+  {
+    "id": "D857",
+    "defect": "An unclosed opener stops the scan, so a later fence is read as prose.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "      index += 1;",
+    "new": "      index = lines.length;"
+  },
+  {
+    "id": "D858",
+    "defect": "Only a closer exactly as long as its opener closes the fence.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length === opener.length"
+  },
+  {
+    "id": "D875",
+    "defect": "A fence indented inside a list item is not recognized, so the lines inside it leak out as prose.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "const OPENER = /^\\s*(?:",
+    "new": "const OPENER = /^(?:"
+  },
+  {
+    "id": "D876",
+    "defect": "A tilde opener whose info string holds a backtick opens no fence.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "(~{3,}).*)$",
+    "new": "(~{3,})[^`]*)$"
+  }
+]

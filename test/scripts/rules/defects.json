@@ -248,7 +248,7 @@
     "id": "D135",
     "defect": "Fenced code in guidance is scanned, so a command holding a date fails the check.",
     "file": "scripts/lib/rules/hygiene.mjs",
-    "old": "if (fenced || text === \"\" || text.startsWith(\"```\")) return [];",
+    "old": "if (kinds[index] !== \"prose\" || text === \"\") return [];",
     "new": "if (text === \"\") return [];"
   },
   {
@@ -404,5 +404,19 @@
     "file": "scripts/lib/rules/hygiene-cli.mjs",
     "old": "if (duplicates.length > 0) return",
     "new": "if (duplicates.length > 0 && !args.update) return"
+  },
+  {
+    "id": "D866",
+    "defect": "A shorter marker inside a longer fence closes it, so the fenced command after it is scanned as guidance.",
+    "file": "scripts/lib/fences.mjs",
+    "old": "marker.length >= opener.length",
+    "new": "marker.length >= 3"
+  },
+  {
+    "id": "D867",
+    "defect": "An unclosed opener exempts every guidance line after it from the scan.",
+    "file": "scripts/lib/fences.mjs",
+    "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
+    "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
   }
 ]
