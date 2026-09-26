@@ -42,6 +42,14 @@ _Avoid_: cancelled run, aborted run
 A test module whose worker exited during a run, so none of its tests gets an outcome from that run.
 _Avoid_: failed module
 
+**Project**:
+A consumer's repository, shared by every worktree checked out from it; outside a git repository, the consumer root itself.
+_Avoid_: repo, package
+
+**Worktree**:
+One checked-out consumer root, to which results are scoped, so two worktrees of one project never answer for each other.
+_Avoid_: checkout, clone
+
 **Outcome**:
 What a test did in its last run: passed, failed, skipped, error, or never run.
 _Avoid_: result, status

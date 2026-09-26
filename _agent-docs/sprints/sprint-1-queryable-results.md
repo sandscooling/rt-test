@@ -4,7 +4,7 @@
 
 Capture Vitest runs from every workspace of a consumer, persist them, and answer queries about them from a daemon the user starts explicitly. Nothing runs on edits yet and no input is fingerprinted, so every result's freshness is honestly unknown; Sprint 2 makes results current. The sprint comes first because every later milestone, falsification included, reads the test identities, states, and store it builds, and those must hold on Fleet Cooling's Vitest 4.1 as well as 5.x.
 
-Ticket 1.3 opens with a spike on the local IPC transport on Windows and Linux, since its design rests on facts nobody has observed. The observed Vitest 4.1 and 5 API facts that tickets 1.1 and 1.1b rest on are recorded in ticket 1.1's Dev Notes. Ticket 1.2 raises the Node floor to `^22.13.0`, where `node:sqlite` needs no flag (per the Node documentation's module history), and updates the README's Develop line with it.
+Ticket 1.3 opens with a spike on the local IPC transport on Windows and Linux, since its design rests on facts nobody has observed. The observed Vitest 4.1 and 5 API facts that tickets 1.1 and 1.1b rest on are recorded in ticket 1.1's Dev Notes. Ticket 1.2 raises the Node floor to `^22.13.0`, where `node:sqlite` needs no flag (observed on Node 22.13.0 in ticket 1.2's Dev Notes), and updates the README's Develop line with it.
 
 ## Ticket 1.1: Discover tests across Vitest workspaces
 
@@ -18,7 +18,7 @@ Ticket 1.1 was estimated at 40 files against the 20-file limit, so it was split 
 
 ## Ticket 1.2: Persist runs and results
 
-Scope: store runs and results in `node:sqlite` bound to project, worktree, run identity, input fingerprint, and adapter version, with runs visible atomically, a versioned schema, and state only under the local state directory; raise the Node floor to `^22.13.0`. Requirements: FR3, NFR4, NFR5.
+Scope: store runs and discoveries in `node:sqlite` bound to project, worktree, run identity, input fingerprint, and adapter version, each visible atomically, with a versioned schema and state only under the local state directory; raise the Node floor to `^22.13.0`. Requirements: FR3, NFR4, NFR5. Ticket file: [1-2-persist-results](../tickets/1-2-persist-results.md)
 
 ## Ticket 1.3: Daemon lifecycle and local protocol
 
@@ -30,6 +30,10 @@ While a discovery holds a Vitest instance open, Vitest's logger holds `SIGINT`, 
 
 A test stuck in a synchronous loop keeps an interrupted run from ending, and discovery and runs share one queue, so it would block every later run and discovery: after an interrupt, the start waits a named grace period and then force-stops Vitest. The daemon's runs never write into the consumer's tree: they run with coverage off, snapshot update set to none, and Vitest's results cache off, whatever the consumer's config says, and the start verifies what else a run writes and names any file under `node_modules` it cannot avoid, such as Vitest 5's API token file (owner rulings 2026-09-26). A run aborted while it waits in the session queue resolves only when the job ahead of it finishes, so shutdown does not await it alone.
 
+Ticket 1.2's store lets the daemons of different worktrees share one state directory, so this ticket keeps one daemon per worktree, and decides how a user configures the state directory (default `.rt-test` under the consumer root).
+
 ## Ticket 1.4: Query CLI
 
 Scope: `summary` and `status <path>` with counts per state for files and folders through versioned `--json` output on stdout, failing with a reason rather than answering empty, and never starting a test. Requirements: FR5.
+
+This ticket counts from ticket 1.2's store: stored runs, and the worktree's latest discovery for never-run and unknown tests (C132). The store keeps an explicit not-fingerprinted value, which this ticket's queries map to an absent fingerprint before `assessEvidence`.

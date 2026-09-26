@@ -27,7 +27,7 @@ The daemon is an independent local process and the only component that executes 
 
 ## Identity and freshness
 
-Identify a project by canonical root and configuration, not package name alone. Distinguish Vitest workspaces, parameterized test cases, duplicate display names, file paths, and run identities. Scope state to a worktree; two worktrees must not overwrite each other's results.
+Identify a project by its git repository's common directory, shared by every worktree checked out from it, or by its canonical root outside git; never by package name alone. Distinguish Vitest workspaces, parameterized test cases, duplicate display names, file paths, and run identities. Scope state to a worktree; two worktrees must not overwrite each other's results.
 
 Fingerprint relevant source and test content, fixtures, setup, configuration, declared environment inputs, dependency lockfiles, runtime, runner version, adapter version, and selection policy version. Persist digests rather than secret environment values. Content hashes alone cannot establish that the input set is complete; record completeness and reasons for uncertainty.
 
