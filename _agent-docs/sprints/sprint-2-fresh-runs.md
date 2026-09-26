@@ -12,12 +12,20 @@ Scope: watch saved inputs, fingerprint them, and mark every result an edit could
 
 ## Ticket 2.2: Workspace-level selection
 
-Scope: select each change's tests at workspace granularity across dependent workspaces, widening on uncertainty, with a reason per test, each broad fallback's trigger, and selected and total counts. Requirements: FR7, NFR2.
+Scope: select each change's tests at workspace granularity from declared dependency information (package manifests, discovered test modules, setup files and config aliases), widening on uncertainty, with a reason per test, each broad fallback's trigger, and selected and total counts. Requirements: FR7, NFR2. Ticket file: [2-2-workspace-selection](../tickets/2-2-workspace-selection.md)
+
+## Ticket 2.2b: Undeclared cross-workspace edges
+
+Scope: find statically the cross-workspace dependencies no `package.json` declares (relative and bare source imports, tsconfig `extends`, `references` and `paths`, and `package.json` `imports`), widening on any file it cannot read or parse and naming the kinds it cannot see as known limits until M3. It builds after 2.2, and 2.3 waits for it, so selection never runs without it (owner, 2026-09-26 18:07). Requirements: FR7, NFR2. Ticket file: [2-2b-undeclared-edges](../tickets/2-2b-undeclared-edges.md)
 
 ## Ticket 2.3: Schedule and run selections
 
-Scope: run every selection in the daemon with debounce and deduplication, never re-executing a test that holds a current result, and invalidate and rerun a run whose inputs changed while it ran, leaving explicit interrupted states. Requirements: FR8, NFR1.
+Scope: run every selection in the daemon with debounce and deduplication, never re-executing a test that holds a current result, and invalidate and rerun a run whose inputs changed while it ran, leaving explicit interrupted states. Discovery reports each workspace's resolved setup files and config aliases, which ticket 2.2's selection takes as required inputs, and each workspace that cannot run (not confirmed at start, unsupported) is passed with its reason, so no selection runs it and every explanation and count stays true (orchestrator, 2026-09-26 18:07 and 18:22). It builds after 2.2 and 2.2b. Requirements: FR8, NFR1.
 
 ## Ticket 2.4: Wait for files
 
 Scope: `wait <files>` binds to the input revision at the call and returns once every covering test has a current result or an explicit non-current state, or as superseded, naming the newer revision, when a covering input changes after the call. Requirements: FR9.
+
+## Ticket 2.5: Controlled edit corpus
+
+Scope: a committed synthetic multi-workspace fixture and a set of edits to it, with a check that runs each edit's selection and a full run over the same input snapshot, and fails on any failure the full run finds that the selection missed (NFR2) or any test run again while it held a current result (NFR1). It is the measure the sprint's correctness targets are read from, so it follows 2.3 and 2.4 (orchestrator, 2026-09-26 18:22). Requirements: NFR1, NFR2.

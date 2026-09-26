@@ -22,7 +22,7 @@ The product direction agreed with the owner is carried by `docs/plan.md`, `docs/
 
 ## Starter contents
 
-The repository includes documentation, strict TypeScript tooling, the result-freshness core and test identity in `packages/core`, Vitest test discovery and runs across workspaces and a `node:sqlite` store of runs and discoveries in `packages/daemon`, and per-workspace defect records checked in disposable copies. There is no running daemon, watcher, dependency graph, persistence layer, consumer CLI, or general falsification engine yet.
+The repository includes documentation, strict TypeScript tooling, the result-freshness core and test identity in `packages/core`, Vitest test discovery and runs across workspaces and a `node:sqlite` store of runs and discoveries in `packages/daemon`, and per-workspace defect records checked in disposable copies. There is no running daemon, watcher, dependency graph, consumer CLI, or general falsification engine yet.
 
 The repository is a Bun workspace: the core lives in `packages/core` (`@rt-test/core`), `apps/*` is reserved for editor integrations, and repository tooling stays at the root. `packages/core/src/evidence.ts` trusts caller-supplied fingerprints. Completeness, hashing, project identity, revision ordering, and run ingestion remain M1/M2 work. `scripts/verify-defects.mjs` verifies this repository's own named defects, recorded in the `defects.json` beside each workspace's tests (`docs/testing.md`); it is not the product's falsification engine.
 

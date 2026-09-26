@@ -10,6 +10,10 @@ RT Test runs a consumer's Vitest tests and falsifies them in place of coding age
 One directory RT Test runs as its own Vitest instance: the consumer root or a package workspace that holds a Vitest configuration.
 _Avoid_: project, package
 
+**Package workspace**:
+One directory the consumer's package manager treats as a package: the consumer root, or a directory the root `package.json` `workspaces` field lists. Every Vitest workspace is one, and the dependencies between them decide selection.
+_Avoid_: package, project
+
 **Test identity**:
 The stable name RT Test gives one test: its Vitest workspace, Vitest project, module path, suite and test names, and its position among tests sharing those names.
 _Avoid_: test id, test name
