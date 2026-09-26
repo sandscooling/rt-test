@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import {
-  appendFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -17,6 +16,7 @@ import {
   type FlowConfig,
 } from "../../../scripts/lib/flow-config.mjs";
 import type { Result } from "../../../scripts/lib/standards/result.mjs";
+import { writeFixtureGitConfig } from "../git-fixture.js";
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const FIXTURES = join(REPO, "test/fixtures/standards");
@@ -87,29 +87,13 @@ function applyEdit(root: string, edit: SourceEdit): void {
   writeFileSync(path, lines.join("\n"));
 }
 
-// About four times the slowest git scenario seen under a loaded full run (7971 ms).
-export const GIT_SCENARIO_TIMEOUT_MS = 30_000;
-
 function git(root: string, args: readonly string[]): void {
   execFileSync("git", args, { cwd: root, stdio: "ignore", windowsHide: true });
 }
 
-const REPOSITORY_CONFIG = [
-  "[user]",
-  "\tname = RT Test fixture",
-  "\temail = fixture@example.invalid",
-  "[core]",
-  "\tautocrlf = false",
-  "\thooksPath = .git/no-hooks",
-  "[commit]",
-  "\tgpgsign = false",
-  "",
-].join("\n");
-
-// Writing the config saves a git spawn per value; git reads a repeated [core] section as one.
 function initRepository(root: string): void {
   git(root, ["init", "-q"]);
-  appendFileSync(join(root, ".git/config"), REPOSITORY_CONFIG);
+  writeFixtureGitConfig(root);
 }
 
 function commitAll(root: string, message: string): void {

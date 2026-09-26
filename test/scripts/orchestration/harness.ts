@@ -8,6 +8,7 @@ import {
   loadFlowConfig,
   type FlowConfig,
 } from "../../../scripts/lib/flow-config.mjs";
+import { writeFixtureGitConfig } from "../git-fixture.js";
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 export const FIXTURES = join(REPO, "test/fixtures/orchestration");
@@ -33,14 +34,7 @@ export function git(root: string, ...args: string[]): string {
 export function initRepo(root: string, files: Record<string, string>): void {
   mkdirSync(root, { recursive: true });
   git(root, "init", "-q");
-  for (const [key, value] of [
-    ["user.name", "fixture"],
-    ["user.email", "fixture@example.invalid"],
-    ["core.autocrlf", "false"],
-    ["commit.gpgsign", "false"],
-  ] as const) {
-    git(root, "config", key, value);
-  }
+  writeFixtureGitConfig(root);
   for (const [path, text] of Object.entries(files)) writeIn(root, path, text);
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "fixture");

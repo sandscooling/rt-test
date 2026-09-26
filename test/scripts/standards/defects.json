@@ -467,5 +467,12 @@
     "file": "scripts/lib/standards/workspace-scripts.mjs",
     "old": "const onDisk = realpathSync.native(join(root, dir));",
     "new": "const onDisk = canonical(root, dir);"
+  },
+  {
+    "id": "D1273",
+    "defect": "The standards initRepository stops applying the shared fixture git config, so citation fixture commits run under the developer's global hooks, signing and identity.",
+    "file": "test/scripts/standards/harness.ts",
+    "old": "  writeFixtureGitConfig(root);\n",
+    "new": ""
   }
 ]

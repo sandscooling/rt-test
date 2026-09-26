@@ -663,5 +663,40 @@
     "file": "scripts/lib/defects/pool.mjs",
     "old": "    writeLinks(slot.sandbox, ctx.links);\n    assertSnapshot(ctx, slot);",
     "new": "    writeLinks(slot.sandbox, ctx.links);"
+  },
+  {
+    "id": "D1250",
+    "defect": "An undetected defect's report drops the failed tests, so the cause of a survivor such as a timeout cannot be read.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "inspect the mutation (exit ${status}; passed ${report.numPassedTests}; failed: ${failedLines(report)})",
+    "new": "inspect the mutation (exit ${status}; passed ${report.numPassedTests})"
+  },
+  {
+    "id": "D1251",
+    "defect": "A failed test with an empty failure message list is reported as undefined.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "${(test.failureMessages[0] || NO_MESSAGE).split(/\\r?\\n/)[0]}",
+    "new": "${test.failureMessages[0]?.split(/\\r?\\n/)[0]}"
+  },
+  {
+    "id": "D1252",
+    "defect": "A CRLF failure message is split at the line feed only, so the reported first line keeps a carriage return.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": ".split(/\\r?\\n/)[0]}",
+    "new": ".split(\"\\n\")[0]}"
+  },
+  {
+    "id": "D1270",
+    "defect": "A failed test whose first failure message is the empty string is reported with nothing after its title.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "(test.failureMessages[0] || NO_MESSAGE)",
+    "new": "(test.failureMessages[0] ?? NO_MESSAGE)"
+  },
+  {
+    "id": "D1271",
+    "defect": "A run with no failed test reports an empty failed list, so the commonest survivor reads as a truncated message.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "    .join(\"; \") || \"none\";",
+    "new": "    .join(\"; \");"
   }
 ]

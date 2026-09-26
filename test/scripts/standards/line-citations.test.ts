@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FLOW_CONFIG_FILE } from "../../../scripts/lib/flow-config.mjs";
 import { checkLineCitations } from "../../../scripts/lib/standards/line-citations.mjs";
+import { authorOf, outcomeOf } from "../git-fixture.js";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   citations,
   ENGINE,
-  GIT_SCENARIO_TIMEOUT_MS,
   inTree,
   REPO,
   USE_FETCH,
@@ -25,7 +26,7 @@ function architecture(...lines: string[]): Scenario {
   };
 }
 
-describe("check-line-citations", { timeout: GIT_SCENARIO_TIMEOUT_MS }, () => {
+describe("check-line-citations", PROCESS_SCENARIO, () => {
   it("D430: reports a citation below an insertion with its shifted line", () => {
     const outcome = check(architecture("See `src/engine.mjs:20`."));
     expect(outcome.out).toContain(
@@ -162,5 +163,17 @@ describe("check-line-citations", { timeout: GIT_SCENARIO_TIMEOUT_MS }, () => {
       args: ["--base", "HEAD~1"],
     });
     expect(outcome.out).toContain("cites engine.mjs:20  (now ~22)");
+  });
+
+  it("D1273: the citation fixture repository commits under the shared fixture identity", () => {
+    const author = outcomeOf(
+      () =>
+        citations((config) => ({
+          code: 0,
+          out: authorOf(config.root),
+          err: "",
+        })).out,
+    );
+    expect(author).toBe("RT Test fixture <fixture@example.invalid>");
   });
 });

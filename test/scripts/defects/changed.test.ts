@@ -8,6 +8,7 @@ import {
 } from "../../../scripts/lib/defects/changed.mjs";
 import { gitIn, type Git } from "../../../scripts/lib/git.mjs";
 import { git, initRepo } from "../orchestration/harness.js";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   CALC,
   CALC_TEST,
@@ -47,7 +48,7 @@ const fakeGit =
     answers[args.join(" ")] ??
     answers[args[0]!] ?? { ok: false, out: "unexpected" };
 
-describe("the --changed selection", () => {
+describe("the --changed selection", PROCESS_SCENARIO, () => {
   it("D922: selects every defect whose test file changed", () => {
     expect(idsFor([OTHER_TEST])).toEqual(["D3"]);
   });

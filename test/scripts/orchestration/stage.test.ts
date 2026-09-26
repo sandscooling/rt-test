@@ -10,6 +10,7 @@ import {
   type HunkSpec,
   type StageOptions,
 } from "../../../scripts/lib/orchestration/stage.mjs";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import { git, initRepo, REPO, withTemp, writeIn } from "./harness.js";
 
 const DOC = "notes/shared doc.md";
@@ -81,7 +82,7 @@ function stagedStatus(root: string): Map<string, string> {
   return staged;
 }
 
-describe("stage-lane", () => {
+describe("stage-lane", PROCESS_SCENARIO, () => {
   it("D320: leaves another lane's claimed file unstaged", () => {
     const staged = withTemp((base) => {
       const { root } = stageIn(base);

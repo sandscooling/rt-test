@@ -9,6 +9,7 @@ import {
   type AssertionResult,
   type RunResult,
 } from "../../../scripts/lib/defects/vitest.mjs";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import { CALC_TEST, catalogOf, OTHER_TEST, withScratch } from "./harness.js";
 
 const SANDBOX = join("scratch", "sandbox-0");
@@ -53,7 +54,7 @@ const ARGS = {
   report: "report.json",
 };
 
-describe("the Vitest runner", () => {
+describe("the Vitest runner", PROCESS_SCENARIO, () => {
   it("D905: scopes a run to the sandbox copy of the test file by absolute path", () => {
     const args = vitestArgs({ ...ARGS, files: [CALC_TEST] });
     expect(args).toContain(join(SANDBOX, CALC_TEST));
@@ -155,5 +156,64 @@ describe("the Vitest runner", () => {
       [CALC_TEST]: [test("D1", "failed"), test("D2", "skipped")],
     });
     expect(detectionProblem(run, SANDBOX, defect("D1"))).not.toBeNull();
+  });
+
+  it("D1250: names an undetected run's exit status, passed count and the failed test's first message line", () => {
+    const timedOut = test(
+      "D1",
+      "failed",
+      "Error: Test timed out in 5000ms.\n    at calc.test.ts:1:1",
+    );
+    const run = result(1, {
+      [CALC_TEST]: [timedOut, test("D2", "skipped")],
+    });
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toContain(
+      "(exit 1; passed 0; failed: D1: behaves: Error: Test timed out in 5000ms.)",
+    );
+  });
+
+  it("D1251: reads a failed test with no failure message as no failure message", () => {
+    const silent = { ...test("D1", "failed"), failureMessages: [] };
+    const run = result(1, {
+      [CALC_TEST]: [silent, test("D2", "skipped")],
+    });
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toContain(
+      "failed: D1: behaves: no failure message)",
+    );
+  });
+
+  it("D1270: reads a failed test whose first failure message is empty as no failure message", () => {
+    const empty = test("D1", "failed", "");
+    const run = result(1, {
+      [CALC_TEST]: [empty, test("D2", "skipped")],
+    });
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toContain(
+      "failed: D1: behaves: no failure message)",
+    );
+  });
+
+  it("D1271: reports failed none when the named test passed under its mutation", () => {
+    const run = result(0, {
+      [CALC_TEST]: [test("D1", "passed"), test("D2", "skipped")],
+    });
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toContain(
+      "(exit 0; passed 1; failed: none)",
+    );
+  });
+
+  it("D1252: cuts a CRLF failure message at its first line with no carriage return", () => {
+    const { defects } = catalogOf();
+    const crlf = test(
+      "D1",
+      "failed",
+      "AssertionError: expected 0 to be 1\r\n    at calc.test.ts:1:1",
+    );
+    const run = result(1, {
+      [CALC_TEST]: [crlf, test("D2", "passed")],
+      [OTHER_TEST]: [test("D3", "passed")],
+    });
+    expect(baselineProblem(run, SANDBOX, defects)).toContain(
+      "failed: D1: behaves: AssertionError: expected 0 to be 1)",
+    );
   });
 });

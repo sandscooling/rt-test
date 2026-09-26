@@ -9,6 +9,7 @@ import {
   scopeToSession,
   selectGates,
 } from "../../../scripts/lib/orchestration/doc-integrity.mjs";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   FIXTURES,
   flowConfigIn,
@@ -57,7 +58,7 @@ function runHook(dirtyAdr: "modified" | "untracked", stopHookActive = false) {
   });
 }
 
-describe("doc-integrity hook", () => {
+describe("doc-integrity hook", PROCESS_SCENARIO, () => {
   it("D329: runs both sprint gates for a sprint file", () => {
     expect(gatesFor("_agent-docs/sprints/sprint-1.md")).toEqual([
       "scripts/check-sprint-keys.mjs",

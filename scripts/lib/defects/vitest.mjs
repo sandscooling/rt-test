@@ -6,6 +6,7 @@ import { toPosix } from "../paths.mjs";
 
 const RUN_TIMEOUT_MS = 120_000;
 const ASSERTION_FAILURE = /^AssertionError: /;
+const NO_MESSAGE = "no failure message";
 
 function vitestEntry() {
   const require = createRequire(import.meta.url);
@@ -79,6 +80,15 @@ const idOf = (title) => /^(D\d+):/.exec(title)?.[1];
 export const testFilesOf = (defects) =>
   [...new Set(defects.map((defect) => defect.test))].sort();
 
+const failedLines = (report) =>
+  testsOf(report)
+    .filter((test) => test.status === "failed")
+    .map(
+      (test) =>
+        `${test.title}: ${(test.failureMessages[0] || NO_MESSAGE).split(/\r?\n/)[0]}`,
+    )
+    .join("; ") || "none";
+
 export function baselineProblem({ status, report }, sandbox, defects, files) {
   const passed = testsOf(report)
     .filter((test) => test.status === "passed")
@@ -90,12 +100,7 @@ export function baselineProblem({ status, report }, sandbox, defects, files) {
     report.numPassedTests !== ids.length ||
     [...passed].sort().join() !== [...ids].sort().join()
   ) {
-    const failed = testsOf(report)
-      .filter((test) => test.status === "failed")
-      .map(
-        (test) => `${test.title}: ${test.failureMessages[0]?.split("\n")[0]}`,
-      );
-    return `the unmodified baseline must pass every named test and no other (passed ${report.numPassedTests} for ${ids.length} named; failed: ${failed.join("; ") || "none"})`;
+    return `the unmodified baseline must pass every named test and no other (passed ${report.numPassedTests} for ${ids.length} named; failed: ${failedLines(report)})`;
   }
   if (files && reportedFiles(report, sandbox).join() !== files.join()) {
     return "the baseline ran a different set of test files";
@@ -117,7 +122,7 @@ export function detectionProblem({ status, report }, sandbox, defect) {
     !target?.title.startsWith(`${defect.id}:`) ||
     !target.failureMessages.some((message) => ASSERTION_FAILURE.test(message))
   ) {
-    return "expected one named assertion failure; inspect the mutation";
+    return `expected one named assertion failure; inspect the mutation (exit ${status}; passed ${report.numPassedTests}; failed: ${failedLines(report)})`;
   }
   return null;
 }

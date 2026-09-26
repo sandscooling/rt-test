@@ -397,5 +397,12 @@
     "file": "scripts/lib/fences.mjs",
     "old": ": lines.findIndex((line, at) => at > index && closes(opener, line));",
     "new": ": ([...lines.keys()].find((at) => at > index && (at === lines.length - 1 || closes(opener, lines[at]))) ?? -1);"
+  },
+  {
+    "id": "D1274",
+    "defect": "The requirements-index git helper stops passing the shared fixture git flags, so history fixture commits run under the developer's global hooks, signing and identity.",
+    "file": "test/scripts/planning/requirements-index.test.ts",
+    "old": "spawnSync(\"git\", [...FIXTURE_GIT_FLAGS, ...args], {",
+    "new": "spawnSync(\"git\", [...args], {"
   }
 ]

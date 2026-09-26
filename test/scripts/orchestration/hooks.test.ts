@@ -7,6 +7,7 @@ import {
   GATES,
   GIT_TIMEOUT_MS,
 } from "../../../scripts/lib/orchestration/doc-integrity.mjs";
+import { PROCESS_SCENARIO, PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 import { FIXTURES, initRepo, REPO, withTemp, writeIn } from "./harness.js";
 
 const ADR = "docs/adr/0001-first.md";
@@ -71,7 +72,7 @@ function runEntry(
     cwd: root,
     input: JSON.stringify(input),
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: PROCESS_SCENARIO_TIMEOUT_MS,
   });
 }
 
@@ -120,7 +121,7 @@ function hookOutput(entry: string, tokens: number, args: string[] = []) {
   };
 }
 
-describe("hook entries", () => {
+describe("hook entries", PROCESS_SCENARIO, () => {
   it("D357: exits 2 from the doc-integrity entry when a gate fails", () => {
     expect(runDocIntegrity().status).toBe(2);
   });

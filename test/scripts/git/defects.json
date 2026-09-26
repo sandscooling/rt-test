@@ -33,5 +33,33 @@
     "file": "scripts/lib/git.mjs",
     "old": "\"-z\", \"HEAD\", \"--\"]",
     "new": "\"-z\", \"--cached\", \"HEAD\", \"--\"]"
+  },
+  {
+    "id": "D1253",
+    "defect": "The fixture config sets no hooks path, so a developer's global hooks run on every fixture commit and a failing one fails the fixture.",
+    "file": "test/scripts/git-fixture.ts",
+    "old": "  [\"core\", \"hooksPath\", \".git/no-hooks\"],\n",
+    "new": ""
+  },
+  {
+    "id": "D1254",
+    "defect": "The fixture config leaves signing to the developer's global config, so a fixture commit invokes gpg and fails or stalls without it.",
+    "file": "test/scripts/git-fixture.ts",
+    "old": "  [\"commit\", \"gpgsign\", \"false\"],\n",
+    "new": ""
+  },
+  {
+    "id": "D1255",
+    "defect": "The fixture config sets no user email, so a fixture commit fails on a machine whose global config forbids a guessed identity.",
+    "file": "test/scripts/git-fixture.ts",
+    "old": "  [\"user\", \"email\", \"fixture@example.invalid\"],\n",
+    "new": ""
+  },
+  {
+    "id": "D1272",
+    "defect": "The orchestration initRepo stops applying the shared fixture git config, so its commits run under the developer's global hooks, signing and identity.",
+    "file": "test/scripts/orchestration/harness.ts",
+    "old": "  writeFixtureGitConfig(root);\n",
+    "new": ""
   }
 ]

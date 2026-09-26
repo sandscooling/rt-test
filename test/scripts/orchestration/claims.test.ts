@@ -20,6 +20,7 @@ import {
   pathRules,
   toRepoPath,
 } from "../../../scripts/lib/orchestration/paths.mjs";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import { git, initRepo, REPO, withTemp } from "./harness.js";
 
 const A = { lane: "lane-a", thread: "thread-a" };
@@ -38,7 +39,7 @@ const grant = (dir: string, owner: typeof A, paths: string[]) =>
 const lanes = (dir: string) =>
   listClaims(dir).map((c) => `${c.lane} ${c.path}`);
 
-describe("file claims", () => {
+describe("file claims", PROCESS_SCENARIO, () => {
   it("D300: refuses a path another lane holds and names the holder", () => {
     const holder = withTemp((dir) => {
       claim(dir, A, [X]);

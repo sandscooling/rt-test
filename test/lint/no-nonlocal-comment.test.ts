@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  PROCESS_SCENARIO,
+  PROCESS_SCENARIO_TIMEOUT_MS,
+} from "../scripts/timeouts.js";
 
 const RULE = "rt-test(no-nonlocal-comment)";
 const KIND_PREFIXES = {
@@ -89,7 +93,12 @@ function runOxlint(cwd: string): { diagnostics: Diagnostic[] } {
   const result = spawnSync(
     process.execPath,
     [entry, "--format", "json", "-c", "config.json", "."],
-    { cwd, encoding: "utf8", timeout: 60_000, windowsHide: true },
+    {
+      cwd,
+      encoding: "utf8",
+      timeout: PROCESS_SCENARIO_TIMEOUT_MS,
+      windowsHide: true,
+    },
   );
   if (result.error || result.signal) {
     throw new Error(`oxlint interrupted: ${result.error ?? result.signal}`);
@@ -118,7 +127,7 @@ function kindOf(message: string): Kind {
 
 const kindsIn = (file: string) => [...(lintFixtures().get(file) ?? [])].sort();
 
-describe("no-nonlocal-comment", () => {
+describe("no-nonlocal-comment", PROCESS_SCENARIO, () => {
   it("D009: a directive carrying a reference must not be reported", () => {
     expect(kindsIn("d009.ts")).toEqual([]);
   });

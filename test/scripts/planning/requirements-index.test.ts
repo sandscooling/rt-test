@@ -3,6 +3,9 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { requirementsIndex } from "../../../scripts/lib/planning/requirements-index.mjs";
+import { authorOf, FIXTURE_GIT_FLAGS, outcomeOf } from "../git-fixture.js";
+import { withTemp } from "../orchestration/harness.js";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   apply,
   failsWith,
@@ -26,21 +29,10 @@ const DROP_FR8: Edit = {
 };
 
 function git(root: string, ...args: string[]): string {
-  const result = spawnSync(
-    "git",
-    [
-      "-c",
-      "user.name=RT Test",
-      "-c",
-      "user.email=rt-test@example.invalid",
-      "-c",
-      "core.autocrlf=false",
-      "-c",
-      "commit.gpgsign=false",
-      ...args,
-    ],
-    { cwd: root, encoding: "utf8" },
-  );
+  const result = spawnSync("git", [...FIXTURE_GIT_FLAGS, ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
   }
@@ -70,7 +62,7 @@ function stateOf(id: string, ...edits: Edit[]): string | undefined {
   return line?.split(" | ")[1];
 }
 
-describe("requirements-index", () => {
+describe("requirements-index", PROCESS_SCENARIO, () => {
   it("D224: derives implemented when every linked ticket is done", () => {
     expect(stateOf("FR1")).toBe("implemented");
   });
@@ -129,7 +121,7 @@ describe("requirements-index", () => {
   });
 });
 
-describe("requirements-index --next history", () => {
+describe("requirements-index --next history", PROCESS_SCENARIO, () => {
   it("D800: never offers an id that exists only in the file's history", () => {
     expect(lineFor(next(deletedFr8).out, "NEXT_FR:")).toBe("NEXT_FR: FR9");
   });
@@ -272,5 +264,17 @@ describe("requirements-index --next history", () => {
       git(root, "commit", "-q", "-m", "rename, deleting FR8");
     });
     expect(result).toEqual(failsWith("cat-file returned"));
+  });
+
+  it("D1274: the history fixture repository commits under the shared fixture identity", () => {
+    const author = withTemp((root) =>
+      outcomeOf(() => {
+        git(root, "init", "-q");
+        writeFileSync(join(root, "a.md"), "");
+        commit(root, "fixture");
+        return authorOf(root);
+      }),
+    );
+    expect(author).toBe("RT Test fixture <fixture@example.invalid>");
   });
 });

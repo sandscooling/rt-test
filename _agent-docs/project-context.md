@@ -76,6 +76,10 @@ P30. **Keep every switched-off path tested**: A mode kept off by a `scale` switc
 
 P42. **Add a test to an existing test file before creating one**: Put a new test in the existing test file for the module or area it covers. Create a test file only when none covers that area, or when the tests need a different environment, config, or fixture setup than that file provides. Vitest builds each test file's module graph separately, so the number of test files, not their length, drives suite time.
 
+P43. **Give a root test that spawns a process the shared budget**: A `describe` in the root `test/` tree whose tests spawn git, node, oxlint or any other process, directly or through a helper, passes `PROCESS_SCENARIO` from `test/scripts/timeouts.ts`, and a child-process `timeout` inside it uses `PROCESS_SCENARIO_TIMEOUT_MS`; Vitest's 5000 ms default fails such a test under a loaded run.
+
+P44. **Build fixture git repositories from the shared settings**: A root test that commits in a fixture repository applies `test/scripts/git-fixture.ts` (`writeFixtureGitConfig` or `FIXTURE_GIT_FLAGS`) or builds it with `initRepo` from `test/scripts/orchestration/harness.ts`, so a developer's global hooks, signing and identity never reach it.
+
 ## Product direction
 
 P31. **Keep RT Test generic**: Fleet Cooling is the proving ground, not a dependency. Nothing application- or backend-specific enters the core; Convex support lives in an adapter.

@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { gitIn, type Git } from "../../../scripts/lib/git.mjs";
 import { listUnbuiltWork } from "../../../scripts/lib/unbuilt/unbuilt-work.mjs";
 import type { Result } from "../../../scripts/lib/standards/result.mjs";
-import { git } from "../orchestration/harness.js";
+import { git, initRepo } from "../orchestration/harness.js";
 import { inTree, type Files } from "../skills/harness.js";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 
 const STATUS = [
   "sprint-1: in-progress",
@@ -276,7 +277,7 @@ describe("matching a path in prose", () => {
   });
 });
 
-describe("what gets searched", () => {
+describe("what gets searched", PROCESS_SCENARIO, () => {
   it("D613: a changed planning file is not searched for", () => {
     expect(unbuilt(["_agent-docs/tickets/1-2-store-results.md"]).out).toContain(
       "Nothing to search.",
@@ -332,20 +333,7 @@ describe("what gets searched", () => {
         "# Ticket 1.3: Query status\n\nReads packages/core/src/renamed.ts.\n",
     };
     const out = inTree(files, ({ config, root }) => {
-      git(root, "init", "-q");
-      git(root, "add", "-A");
-      git(
-        root,
-        "-c",
-        "user.name=fixture",
-        "-c",
-        "user.email=fixture@example.invalid",
-        "-c",
-        "commit.gpgsign=false",
-        "commit",
-        "-qm",
-        "fixture",
-      );
+      initRepo(root, {});
       git(
         root,
         "mv",
