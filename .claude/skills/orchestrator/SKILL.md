@@ -61,6 +61,8 @@ Never send a standby or roll-call message: a settled member answers it by going 
 
 **Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run. A red in a file another live lane holds is that lane's, or a reason to hold: route it to that lane's member, never to the one you are committing.
 
+**When a sibling lane is mid-edit, gate in isolation instead of holding.** Add a detached worktree of `HEAD` under `_agent-docs/.scratch/`, copy in exactly the committing lane's paths (its new files from `git ls-files --others` plus its modified files and your own edits), run `bun install --frozen-lockfile` and `bun run check` there, then stage that same path list in the real checkout and confirm the staged count matches. Remove the worktree after the commit. This gates exactly what the commit contains, and a sibling's partial work can neither fail it nor slip into it.
+
 **A gate result expires the moment any lane edits again.** Quote results with the window they measured ("check exit 0 at 22:51-22:53"), and read your own log before disputing a member's figure: both are usually right about different trees.
 
 **Every long command runs in the background**, and so does every wait. A foreground run makes you unreachable while the owner watches a frozen thread. Redirect the whole command to a log unpiped and bracket it with `date` inside the redirect:
