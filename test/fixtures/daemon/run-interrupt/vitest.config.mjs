@@ -1,7 +1,7 @@
 const RUN_HOOK = Symbol.for("rt-test.fixture.run-hook");
 
 function notify(event) {
-  globalThis[RUN_HOOK]?.(event);
+  return globalThis[RUN_HOOK]?.(event);
 }
 
 class ByModuleId {
@@ -19,14 +19,21 @@ class ByModuleId {
 const runHook = {
   name: "rt-test-run-hook",
   configureVitest({ vitest }) {
-    notify("configure");
+    const held = notify("configure");
     vitest.onAfterSetServer(() => {
       vitest.reporters.push({
-        onTestRunStart: () => notify("run-start"),
-        onTestCaseReady: (testCase) => notify(`ready:${testCase.name}`),
-        onTestRunEnd: () => notify("run-end"),
+        onTestRunStart: () => {
+          notify("run-start");
+        },
+        onTestCaseReady: (testCase) => {
+          notify(`ready:${testCase.name}`);
+        },
+        onTestRunEnd: () => {
+          notify("run-end");
+        },
       });
     });
+    return held;
   },
 };
 

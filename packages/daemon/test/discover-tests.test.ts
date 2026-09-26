@@ -589,15 +589,29 @@ describe("discovery's effect on the host process", () => {
     "D1080: overlapping discoveries leave no workspace's environment values in the host",
     async () => {
       const leftover = await inConsumerCopy(ENV_FIXTURE, "vitest", (envRoot) =>
-        inConsumerCopy("consumer", "vitest", async (otherRoot) => {
-          const first = settledDiscovery(envRoot);
-          await waitUntil(
-            () =>
-              FIXTURE_ENV_KEYS.some((key) => process.env[key] !== undefined),
-            first,
-          );
-          await Promise.all([first, settledDiscovery(otherRoot)]);
-          return FIXTURE_ENV_KEYS.map((key) => process.env[key]);
+        inConsumerCopy("run-interrupt", "vitest", async (gatedRoot) => {
+          let openGate = (): void => undefined;
+          const gate = new Promise<void>((resolve) => {
+            openGate = resolve;
+          });
+          runHooks()[RUN_HOOK] = (event) =>
+            event === "configure" ? gate : undefined;
+          try {
+            const first = settledDiscovery(envRoot);
+            await waitUntil(
+              () =>
+                FIXTURE_ENV_KEYS.some((key) => process.env[key] !== undefined),
+              first,
+            );
+            const second = settledDiscovery(gatedRoot);
+            await first;
+            openGate();
+            await second;
+            return FIXTURE_ENV_KEYS.map((key) => process.env[key]);
+          } finally {
+            openGate();
+            delete runHooks()[RUN_HOOK];
+          }
         }),
       );
       expect(leftover).toEqual([undefined, undefined]);
@@ -666,7 +680,7 @@ describe("errors and lost modules during collection", () => {
 });
 
 type RunResult = WorkspaceRun | { thrown: string };
-/** A promise returned for `global-setup` holds the run-unqueued fixture's run until it settles. */
+/** A promise returned for run-interrupt's `configure` or run-unqueued's `global-setup` holds that fixture until it settles. */
 type RunHook = (event: string) => Promise<void> | undefined;
 
 interface FixtureRun {
