@@ -98,7 +98,8 @@ function directorySuffixes(path) {
 }
 
 // Every suffix that keeps a directory, plus the bare file name when no other
-// tracked file shares it: planning prose often cites a file by name alone.
+// tracked or searched file shares it: planning prose often cites a file by
+// name alone.
 function tokensFor(path, counts) {
   const tokens = directorySuffixes(path);
   const name = path.split("/").at(-1);
@@ -134,13 +135,15 @@ function searchFor(config, path, { counts, rootFiles }) {
   };
 }
 
-function trackedIndex(git) {
+// A new or deleted path is missing from the tracked listing, yet it shares
+// its name with any tracked file of that name all the same.
+function trackedIndex(git, searched) {
   const tracked = trackedPaths(git);
   if (tracked.error !== undefined) {
     return { error: tracked.error, counts: undefined, rootFiles: new Set() };
   }
   return {
-    counts: basenameCounts(tracked.paths),
+    counts: basenameCounts(new Set([...tracked.paths, ...searched])),
     rootFiles: new Set(tracked.paths.filter((path) => !path.includes("/"))),
   };
 }
@@ -384,7 +387,7 @@ export function listUnbuiltWork(config, argv, git = gitIn(config.root)) {
       "unbuilt-work: no changed path outside the planning files. Nothing to search.",
     ]);
   }
-  const index = trackedIndex(git);
+  const index = trackedIndex(git, paths);
   const searches = paths.map((path) => searchFor(config, path, index));
   const searchable = searches.filter(isSearchable);
   const unsearchable = searches

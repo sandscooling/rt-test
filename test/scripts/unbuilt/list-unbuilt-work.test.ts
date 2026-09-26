@@ -288,6 +288,19 @@ describe("what gets searched", () => {
     expect(unbuilt(["index.ts"], git).out).toContain("NOT SEARCHED: index.ts.");
   });
 
+  it("D1100: an untracked path whose bare name a tracked file shares does not match that name", () => {
+    const git = fakeGit({
+      tracked: [...TRACKED, "packages/core/src/intro.ts"],
+      untracked: ["packages/new/intro.ts"],
+    });
+    const files: Files = {
+      "_agent-docs/sprint-status.yaml": "1-5-new-module: backlog\n",
+      "_agent-docs/tickets/1-5-new-module.md":
+        "# Ticket 1.5: New module\n\nExtends intro.ts.\n",
+    };
+    expect(unbuilt([], git, files).out).toContain("unbuilt-work: clean.");
+  });
+
   it("D615: with no paths, untracked files from git are searched", () => {
     const git = fakeGit({ untracked: ["packages/core/src/untracked.ts"] });
     expect(unbuilt([], git).out).toContain("Ticket 1.2 (in-progress)");

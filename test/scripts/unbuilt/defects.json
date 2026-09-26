@@ -425,5 +425,12 @@
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
     "old": "cannot read the changeset with ${changeset.error}. Pass the paths instead.",
     "new": "cannot read the changeset. Pass the paths instead."
+  },
+  {
+    "id": "D1100",
+    "defect": "Uniqueness is counted over tracked files only, so an untracked path whose name one tracked file shares keeps its bare name and matches that other file's citations.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "basenameCounts(new Set([...tracked.paths, ...searched]))",
+    "new": "basenameCounts(tracked.paths)"
   }
 ]
