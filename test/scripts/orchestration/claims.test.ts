@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadFlowConfig } from "../../../scripts/lib/flow-config.mjs";
 import {
+  CLAIMS_DIR,
   claimPaths,
   endGrants,
   grantPaths,
@@ -10,13 +11,16 @@ import {
   listGrants,
   releasePaths,
 } from "../../../scripts/lib/orchestration/claims.mjs";
-import { runClaimsCli } from "../../../scripts/lib/orchestration/claims-cli.mjs";
+import {
+  claimsDirFor,
+  runClaimsCli,
+} from "../../../scripts/lib/orchestration/claims-cli.mjs";
 import {
   classifyPath,
   pathRules,
   toRepoPath,
 } from "../../../scripts/lib/orchestration/paths.mjs";
-import { REPO, withTemp } from "./harness.js";
+import { git, initRepo, REPO, withTemp } from "./harness.js";
 
 const A = { lane: "lane-a", thread: "thread-a" };
 const B = { lane: "lane-b", thread: "thread-b" };
@@ -237,5 +241,48 @@ describe("file claims", () => {
       ).code;
     });
     expect(code).toBe(0);
+  });
+
+  it("D700: refuses a claim in a linked worktree on a path the main checkout's lane holds", () => {
+    const code = withTemp((base) => {
+      const main = join(base, "main");
+      const tree = join(base, "wt-1");
+      initRepo(main, { [X]: "x\n" });
+      git(main, "worktree", "add", "-q", tree, "-b", "wt/1");
+      const cli = (root: string, lane: string) =>
+        runClaimsCli(["claim", "--lane", lane, "--thread", "t", X], {
+          root,
+          dir: claimsDirFor(root, {}),
+          rules: rules(),
+        }).code;
+      cli(main, "lane-a");
+      return cli(tree, "lane-b");
+    });
+    expect(code).toBe(1);
+  });
+
+  it("D701: keeps claims in the directory FILE_CLAIMS_DIR names", () => {
+    expect(claimsDirFor(REPO, { FILE_CLAIMS_DIR: "elsewhere" })).toBe(
+      "elsewhere",
+    );
+  });
+
+  it("D702: keeps claims under the root itself when the root is not a git checkout", () => {
+    const found = withTemp((root) => {
+      try {
+        return claimsDirFor(root, {}) === join(root, CLAIMS_DIR);
+      } catch (error) {
+        return String(error);
+      }
+    });
+    expect(found).toBe(true);
+  });
+
+  it("D703: grants none of a request's paths when one of them is claimable", () => {
+    const held = withTemp((dir) => {
+      grant(dir, A, ["docs/adr", X]);
+      return listGrants(dir).length;
+    });
+    expect(held).toBe(0);
   });
 });

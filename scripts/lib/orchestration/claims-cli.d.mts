@@ -6,6 +6,7 @@ export interface CliResult {
   readonly err: readonly string[];
 }
 
+export declare function mainCheckoutRoot(root: string): string;
 export declare function claimsDirFor(
   root: string,
   env?: Readonly<Record<string, string | undefined>>,

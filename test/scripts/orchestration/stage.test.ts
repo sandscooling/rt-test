@@ -1,4 +1,4 @@
-import { unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadFlowConfig } from "../../../scripts/lib/flow-config.mjs";
@@ -160,5 +160,22 @@ describe("stage-lane", () => {
       return [status.get("src/gone.ts"), status.get("notes/new.md")];
     });
     expect(staged).toEqual(["D", "A"]);
+  });
+
+  it("D704: stages no whole file when git apply --check refuses a hunk patch", () => {
+    const rows = withTemp((base) => {
+      const { root, claimsDir } = buildRepo(base);
+      git(root, "config", "apply.whitespace", "error");
+      const doc = readFileSync(join(root, DOC), "utf8");
+      writeIn(root, DOC, `${doc}\nLANE_A_WS trailing   \n`);
+      stageLane({
+        root,
+        claimsDir,
+        lane: "lane-a",
+        hunkSpecs: [hunk("LANE_A_WS")],
+      });
+      return indexNumstat(root).length;
+    });
+    expect(rows).toBe(0);
   });
 });
