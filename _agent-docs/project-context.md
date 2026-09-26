@@ -74,6 +74,8 @@ P29. **Assert before restoring a spy**: In Vitest, `mockRestore()` resets the mo
 
 P30. **Keep every switched-off path tested**: A mode kept off by a `scale` switch in the flow config keeps a fixture test that exercises it, so the dormant path works when the switch turns on.
 
+P42. **Add a test to an existing test file before creating one**: Put a new test in the existing test file for the module or area it covers. Create a test file only when none covers that area, or when the tests need a different environment, config, or fixture setup than that file provides. Vitest builds each test file's module graph separately, so the number of test files, not their length, drives suite time.
+
 ## Product direction
 
 P31. **Keep RT Test generic**: Fleet Cooling is the proving ground, not a dependency. Nothing application- or backend-specific enters the core; Convex support lives in an adapter.
