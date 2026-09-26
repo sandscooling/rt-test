@@ -7,6 +7,8 @@ ticket_dir: _agent-docs/tickets
 sprints_dir: _agent-docs/sprints
 # Read by sprint and ticket skills and scripts: the only record of ticket and sprint status.
 sprint_status: _agent-docs/sprint-status.yaml
+# Read by sprint-context and ticket skills while scale.sprint_context is on: one rule and doc shortlist per sprint.
+sprint_context_dir: _agent-docs/sprint-context
 
 # Read by planning skills: the product requirements.
 requirements: docs/requirements.md

@@ -9,6 +9,7 @@ const PATH_KEYS = [
   "ticket_dir",
   "sprints_dir",
   "sprint_status",
+  "sprint_context_dir",
   "requirements",
   "adr_dir",
   "glossary",

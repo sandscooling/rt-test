@@ -13,6 +13,7 @@ const VALID = `# Workflow path config.
 ticket_dir: _agent-docs/tickets
 sprints_dir: _agent-docs/sprints
 sprint_status: _agent-docs/sprint-status.yaml
+sprint_context_dir: _agent-docs/sprint-context
 requirements: docs/requirements.md
 adr_dir: docs/adr
 glossary: docs/glossary.md
@@ -284,6 +285,7 @@ describe("committed flow config", () => {
       ticket_dir: at("_agent-docs/tickets"),
       sprints_dir: at("_agent-docs/sprints"),
       sprint_status: at("_agent-docs/sprint-status.yaml"),
+      sprint_context_dir: at("_agent-docs/sprint-context"),
       requirements: at("docs/requirements.md"),
       adr_dir: at("docs/adr"),
       glossary: at("docs/glossary.md"),

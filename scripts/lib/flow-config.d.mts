@@ -14,6 +14,7 @@ export interface FlowConfig {
   readonly ticket_dir: string;
   readonly sprints_dir: string;
   readonly sprint_status: string;
+  readonly sprint_context_dir: string;
   readonly requirements: string;
   readonly adr_dir: string;
   readonly glossary: string;
