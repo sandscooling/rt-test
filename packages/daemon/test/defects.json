@@ -198,14 +198,14 @@
   {
     "id": "D1051",
     "defect": "Only a module's top-level tests are listed, so every test inside a suite is lost.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "const tests = [...testModule.children.allTests()];",
     "new": "const tests = [...testModule.children.tests()];"
   },
   {
     "id": "D1052",
     "defect": "Only tests pending a run are listed, so skipped and todo tests are dropped.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "const tests = [...testModule.children.allTests()];",
     "new": "const tests = [...testModule.children.allTests(\"pending\")];"
   },
@@ -213,8 +213,8 @@
     "id": "D1053",
     "defect": "Every test is reported with mode run, so a skipped or todo test reads as one that will run.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "return test.options.mode;",
-    "new": "return \"run\";"
+    "old": "report.tests.push({ ...identified, mode: test.options.mode });",
+    "new": "report.tests.push({ ...identified, mode: \"run\" });"
   },
   {
     "id": "D1054",
@@ -233,9 +233,9 @@
   {
     "id": "D1056",
     "defect": "A typecheck module's tests are listed as tests beside being reported as not discovered.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "report.typecheckModules.push(moduleReport);\n    return;",
-    "new": "report.typecheckModules.push(moduleReport);"
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "(specification) => !isTypecheck(specification),",
+    "new": "() => true,"
   },
   {
     "id": "D1057",
@@ -254,35 +254,35 @@
   {
     "id": "D1059",
     "defect": "A workspace whose configuration fails to load is reported without its error.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "error: errorText(error),",
     "new": "error: \"\","
   },
   {
     "id": "D1060",
     "defect": "One workspace's load failure aborts discovery of every other workspace.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "  } catch (error) {\n    discovery = {",
-    "new": "  } catch (error) {\n    throw error;\n    discovery = {"
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  } catch (error) {\n    result = {",
+    "new": "  } catch (error) {\n    throw error;\n    result = {"
   },
   {
     "id": "D1061",
     "defect": "A workspace on an unsupported Vitest is loaded anyway instead of being reported unsupported with its version.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "if (!vitest.supported) return { status: \"unsupported\", workspace, vitest };",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "if (!vitest.supported) return { status: \"unsupported\", vitest };",
     "new": ""
   },
   {
     "id": "D1062",
     "defect": "A browser-mode project is dropped without being reported unsupported.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "const browserProjects = instance.projects.filter(usesBrowserMode);",
-    "new": "const browserProjects = instance.projects.filter(() => false);"
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "      .filter(usesBrowserMode)",
+    "new": "      .filter(() => false)"
   },
   {
     "id": "D1063",
     "defect": "A browser-mode project's modules are collected, which launches or fails to launch a browser.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "!usesBrowserMode(specification.project),",
     "new": "true,"
   },
@@ -296,70 +296,70 @@
   {
     "id": "D1065",
     "defect": "A module that fails to collect leaves the host process's exit code set.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "process.exitCode = exitCode;",
     "new": ""
   },
   {
     "id": "D1066",
     "defect": "Environment values a workspace's configuration wrote stay in the host process after discovery.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "if (!Object.hasOwn(env, key)) delete process.env[key];",
     "new": ""
   },
   {
     "id": "D1067",
     "defect": "The identity is built from Vitest's own test id, which differs between 4.1 and 5 for the same test.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "identifyModuleTests(location, tests.map(namePath))",
     "new": "identifyModuleTests(location, tests.map((test) => [test.id]))"
   },
   {
     "id": "D1068",
     "defect": "The module path is absolute, so the same test gets a new identity wherever the consumer sits.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "modulePath: relativePosixPath(realDirectory, realPath(testModule.moduleId)),",
-    "new": "modulePath: realPath(testModule.moduleId),"
+    "file": "packages/daemon/src/vitest/module-tests.ts",
+    "old": "modulePath: relativePosixPath(realDirectory, realPath(moduleId)),",
+    "new": "modulePath: realPath(moduleId),"
   },
   {
     "id": "D1069",
     "defect": "Module paths are made relative to the unresolved workspace directory, so a consumer root reached through a link gives paths that climb out of the workspace.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "const realDirectory = realPath(workspace.directory);",
     "new": "const realDirectory = workspace.directory;"
   },
   {
     "id": "D1070",
     "defect": "The name path drops the enclosing suites, so renaming a suite keeps the old identity and same-named tests in different suites collide.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "names.unshift(parent.name);",
     "new": "names.unshift();"
   },
   {
     "id": "D1071",
     "defect": "The identity omits the workspace, so the same module and test name in two workspaces collide.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "workspacePath: workspace.path,",
     "new": "workspacePath: \".\","
   },
   {
     "id": "D1072",
     "defect": "The identity omits the Vitest project, so one module run by two projects gives colliding identities.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "projectName: testModule.project.name,",
-    "new": "projectName: \"\","
+    "file": "packages/daemon/src/vitest/module-tests.ts",
+    "old": "    projectName,\n    modulePath: relativePosixPath",
+    "new": "    projectName: \"\",\n    modulePath: relativePosixPath"
   },
   {
     "id": "D1073",
     "defect": "A host environment value a workspace's configuration overwrote keeps the workspace's value after discovery.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "Object.assign(process.env, env);",
     "new": ""
   },
   {
     "id": "D1074",
     "defect": "Discovery never closes the Vitest instance it created, so its server, workers and process handlers outlive discovery.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "await instance?.close();",
     "new": "await Promise.resolve();"
   },
@@ -380,14 +380,14 @@
   {
     "id": "D1083",
     "defect": "A module whose worker crashed during collection reads as a module holding zero tests on Vitest 4.1, so the file vanishes from the report.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "return task.mode !== PLACEHOLDER_MODULE_MODE;",
     "new": "return true;"
   },
   {
     "id": "D1077",
     "defect": "Discovery collects under Vite's NODE_ENV=development, so a test registered only under NODE_ENV=test is missing though a run would hold it.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "process.env[\"NODE_ENV\"] ??= TEST_NODE_ENV;",
     "new": ""
   },
@@ -408,9 +408,9 @@
   {
     "id": "D1080",
     "defect": "Two overlapping discoveries restore each other's host snapshots, leaving a workspace's environment values in the host.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "const discovery = discoveryQueue.then(() => discoverAll(consumerRoot));",
-    "new": "const discovery = discoverAll(consumerRoot);"
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "const queued = sessionQueue.then(job);",
+    "new": "const queued = job();"
   },
   {
     "id": "D1081",
@@ -425,5 +425,306 @@
     "file": "packages/daemon/src/vitest/find-workspaces.ts",
     "old": "    .filter(isDirectory);",
     "new": "    .filter(() => true);"
+  },
+  {
+    "id": "D1160",
+    "defect": "A run locates its modules without their Vitest project, so a run's test identity differs from the one discovery gives the same test.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "      evidence.locate(testModule.project.name, testModule.moduleId),",
+    "new": "      evidence.locate(\"\", testModule.moduleId),"
+  },
+  {
+    "id": "D1161",
+    "defect": "A failed or timed-out test is recorded without its error text.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "return finished(\"failed\", result.errors.map(errorText));",
+    "new": "return finished(\"failed\");"
+  },
+  {
+    "id": "D1162",
+    "defect": "A passing test, including an expected failure, is recorded failed.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "    case \"passed\":\n      return finished(\"passed\");",
+    "new": "    case \"passed\":\n      return finished(\"failed\");"
+  },
+  {
+    "id": "D1163",
+    "defect": "A module that throws at load reads as a module that ran with no tests instead of a failed module.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "if (tests.length === 0 && moduleErrors.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1164",
+    "defect": "A test its suite's failing beforeAll blocked is recorded skipped instead of an error.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "    : finished(\"error\", blocking.map(errorText));",
+    "new": "    : finished(\"skipped\");"
+  },
+  {
+    "id": "D1165",
+    "defect": "Only a test's own suite is searched for a failing hook, so a test in a nested suite under a failing beforeAll is recorded skipped.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "    parent = parent.parent;\n  }\n  return parent.errors();",
+    "new": "    break;\n  }\n  return parent.errors();"
+  },
+  {
+    "id": "D1166",
+    "defect": "The module's own errors are never consulted, so a test a module-level beforeAll blocked is recorded skipped.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  return parent.errors();\n}",
+    "new": "  return [];\n}"
+  },
+  {
+    "id": "D1167",
+    "defect": "Suite hook errors are dropped from the module, so a failing beforeAll or afterAll leaves no error on the run.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "      ...[...testModule.children.allSuites()].flatMap((suite) =>\n        suite.errors().map(errorText),\n      ),\n",
+    "new": ""
+  },
+  {
+    "id": "D1168",
+    "defect": "A test that skipped itself in a suite whose afterAll failed is recorded as an error with the hook's text.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (skippedItself(test)) return finished(\"skipped\");",
+    "new": ""
+  },
+  {
+    "id": "D1169",
+    "defect": "A failing module-level hook's error is dropped from a module that ran.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "      ...moduleErrors,\n",
+    "new": ""
+  },
+  {
+    "id": "D1170",
+    "defect": "Unhandled errors are dropped from the run, so an error no test owns leaves no trace.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    unhandledErrors: unhandledErrors.map(errorText),",
+    "new": "    unhandledErrors: [],"
+  },
+  {
+    "id": "D1171",
+    "defect": "A run leaves the host process's exit code at the 1 Vitest sets.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "process.exitCode = exitCode;",
+    "new": ""
+  },
+  {
+    "id": "D1172",
+    "defect": "A run that executed tests is still given a reason that nothing ran.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (tests.some(executedBody)) return undefined;",
+    "new": ""
+  },
+  {
+    "id": "D1173",
+    "defect": "A crashed module's finished tests keep their outcomes, so a test from a worker that died reads as passed.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (!interrupted && tests.some(({ test }) => isUnfinished(test))) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1174",
+    "defect": "A module whose worker crashed at load in a completed run is recorded not run instead of crashed.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "    state: interrupted ? \"not-run\" : \"crashed\",",
+    "new": "    state: \"not-run\","
+  },
+  {
+    "id": "D1175",
+    "defect": "An interrupted run's unfinished and cancelled tests are recorded skipped or as errors instead of interrupted.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "      return interrupted ? INTERRUPTED : skippedAtRunTime(test);",
+    "new": "      return skippedAtRunTime(test);"
+  },
+  {
+    "id": "D1176",
+    "defect": "A declared skip in an interrupted run is recorded interrupted instead of skipped.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (DECLARED_SKIP_MODES.has(test.options.mode)) return finished(\"skipped\");",
+    "new": ""
+  },
+  {
+    "id": "D1177",
+    "defect": "A test that skipped itself before an interruption is recorded skipped, though only note text tells it from a cancelled test.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "      return interrupted ? INTERRUPTED : skippedAtRunTime(test);",
+    "new": "      return interrupted && !skippedItself(test)\n        ? INTERRUPTED\n        : skippedAtRunTime(test);"
+  },
+  {
+    "id": "D1178",
+    "defect": "A test a failing beforeAll blocked before an interruption is recorded as an error, though only note text tells it from a cancelled test.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "      return interrupted ? INTERRUPTED : skippedAtRunTime(test);",
+    "new": "      return interrupted && nearestHookErrors(test).length === 0\n        ? INTERRUPTED\n        : skippedAtRunTime(test);"
+  },
+  {
+    "id": "D1179",
+    "defect": "A module an interrupted run never started is recorded crashed instead of not run.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "    state: interrupted ? \"not-run\" : \"crashed\",",
+    "new": "    state: \"crashed\","
+  },
+  {
+    "id": "D1180",
+    "defect": "An abort as Vitest starts the run is issued at once and dropped by Vitest's cancel reset, so the run completes as if never interrupted.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "      if (this.queued) this.cancel();",
+    "new": "      this.cancel();"
+  },
+  {
+    "id": "D1181",
+    "defect": "A test an interruption left pending is recorded skipped instead of interrupted.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "    case \"pending\":\n      return INTERRUPTED;",
+    "new": "    case \"pending\":\n      return finished(\"skipped\");"
+  },
+  {
+    "id": "D1182",
+    "defect": "A run interrupted before any test finished is given a skip or module reason instead of the interruption.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (execution === \"interrupted\")\n    return \"interrupted-before-any-test-finished\";\n",
+    "new": ""
+  },
+  {
+    "id": "D1183",
+    "defect": "An abort that arrives before the first module is queued is never issued, so every test runs to its outcome.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    if (this.signal.aborted) this.cancel();",
+    "new": ""
+  },
+  {
+    "id": "D1184",
+    "defect": "An abort while the workspace loads is not checked once the instance exists, so the run starts executing modules.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "  if (interruption.signal.aborted) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1185",
+    "defect": "A run aborted while it waits in the queue loads the workspace anyway.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    if (signal.aborted) {\n      return { status: \"interrupted-before-load\", workspace };\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D1186",
+    "defect": "A run is recorded interrupted whenever its signal aborted, even after Vitest ended the run.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    return this.endReason === INTERRUPTED_END_REASON",
+    "new": "    return this.signal.aborted"
+  },
+  {
+    "id": "D1187",
+    "defect": "Only the daemon's own cancel marks a run interrupted, so a run Vitest stopped under the consumer's bail reads as completed.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    return this.endReason === INTERRUPTED_END_REASON",
+    "new": "    return this.cancelled !== undefined"
+  },
+  {
+    "id": "D1188",
+    "defect": "Runs skip the shared session queue, so two overlapping runs restore each other's host snapshots and leave a workspace's environment values in the host.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "  return queueSessionJob(async () => {",
+    "new": "  return ((job: () => Promise<WorkspaceRun>) => job())(async () => {"
+  },
+  {
+    "id": "D1189",
+    "defect": "A workspace with no test module is given a reason other than having none.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (modules.length === 0) return \"no-module\";",
+    "new": ""
+  },
+  {
+    "id": "D1190",
+    "defect": "A run whose every module failed is given a reason other than that no module ran.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (!modules.some((module) => module.state === \"ran\")) return \"no-module-ran\";",
+    "new": ""
+  },
+  {
+    "id": "D1191",
+    "defect": "A run whose modules declared no test reads as every test skipped.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (tests.length === 0) return \"no-test-declared\";",
+    "new": ""
+  },
+  {
+    "id": "D1192",
+    "defect": "A run whose every test was skipped reads as blocked by a hook.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  return tests.some(isError) ? \"tests-blocked-by-hook\" : \"every-test-skipped\";",
+    "new": "  return \"tests-blocked-by-hook\";"
+  },
+  {
+    "id": "D1193",
+    "defect": "A run whose every test a failing hook blocked reads as every test skipped.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  return tests.some(isError) ? \"tests-blocked-by-hook\" : \"every-test-skipped\";",
+    "new": "  return \"every-test-skipped\";"
+  },
+  {
+    "id": "D1194",
+    "defect": "Only a passed test counts as executed, so a run whose tests all failed reads as a run where nothing ran.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "(test.outcome === \"passed\" || test.outcome === \"failed\")",
+    "new": "test.outcome === \"passed\""
+  },
+  {
+    "id": "D1195",
+    "defect": "A run over a workspace on an unsupported Vitest reads as a run that ran instead of unsupported.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    if (result.status !== \"loaded\") return { ...result, workspace };",
+    "new": "    if (result.status === \"failed\") return { ...result, workspace };"
+  },
+  {
+    "id": "D1196",
+    "defect": "A run over a workspace whose configuration fails to load reads as a run that ran instead of failed.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    if (result.status !== \"loaded\") return { ...result, workspace };",
+    "new": "    if (result.status === \"unsupported\") return { ...result, workspace };"
+  },
+  {
+    "id": "D1197",
+    "defect": "A run drops the workspace's typecheck modules without reporting them.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    typecheckModules: session.typecheckModules,",
+    "new": "    typecheckModules: [],"
+  },
+  {
+    "id": "D1198",
+    "defect": "A run drops a browser-mode project without reporting it unsupported.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    unsupportedProjects: session.unsupportedProjects,",
+    "new": "    unsupportedProjects: [],"
+  },
+  {
+    "id": "D1199",
+    "defect": "A declared todo in an interrupted run is recorded interrupted instead of skipped.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  \"skip\",\n  \"todo\",\n]);",
+    "new": "  \"skip\",\n]);"
+  },
+  {
+    "id": "D1206",
+    "defect": "A run aborted while its workspace loads is given a module reason instead of the interruption.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "...nothingRan(\"interrupted\", modules),",
+    "new": "...nothingRan(\"completed\", modules),"
+  },
+  {
+    "id": "D1207",
+    "defect": "A placeholder module the run never collected reads as a module that ran with no tests.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "  if (!wasCollected(testModule)) return unstartedModule(location, interrupted);\n",
+    "new": ""
+  },
+  {
+    "id": "D1208",
+    "defect": "An abort withheld until the first queued module, in a run where Vitest never queues one, leaves the run completed.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": " || withheldAbort",
+    "new": ""
   }
 ]

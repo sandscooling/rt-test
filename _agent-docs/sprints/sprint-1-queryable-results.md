@@ -28,6 +28,8 @@ Ticket 1.1's test discovery executes project code, so this ticket's start is its
 
 While a discovery holds a Vitest instance open, Vitest's logger holds `SIGINT`, `SIGTERM`, `exit` and `unhandledRejection` handlers that exit the process, and discovery rewrites the host's `process.env` until it restores it; the start runs discovery where neither reaches other daemon work. On Vitest 5, a browser-mode project makes `createVitest` listen on a port and call the provider's prewarm before discovery rejects the project.
 
+A test stuck in a synchronous loop keeps an interrupted run from ending, and discovery and runs share one queue, so it would block every later run and discovery: after an interrupt, the start waits a named grace period and then force-stops Vitest. The daemon's runs never write into the consumer's tree: they run with coverage off, snapshot update set to none, and Vitest's results cache off, whatever the consumer's config says, and the start verifies what else a run writes and names any file under `node_modules` it cannot avoid, such as Vitest 5's API token file (owner rulings 2026-09-26). A run aborted while it waits in the session queue resolves only when the job ahead of it finishes, so shutdown does not await it alone.
+
 ## Ticket 1.4: Query CLI
 
 Scope: `summary` and `status <path>` with counts per state for files and folders through versioned `--json` output on stdout, failing with a reason rather than answering empty, and never starting a test. Requirements: FR5.
