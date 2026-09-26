@@ -17,7 +17,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - FR1: Discover every test in each Vitest workspace of a consumer on Vitest 4.1.x and 5.x, and give each a stable identity that distinguishes parameterized arms and duplicate display names. [Ticket 1.1]
 - FR2: Record each run's test outcomes, skips, collection errors, module and run-level errors, worker crashes, and interruptions as distinct states. [Tickets 1.1b, 1.3b]
 - FR3: Persist results bound to project, worktree, run identity, input fingerprint, and adapter version, and keep them available across a daemon restart. [Ticket 1.2]
-- FR4: Start and stop the daemon explicitly for one trusted project, and execute no project code before that start. [Tickets 1.3, 1.3c]
+- FR4: Start and stop the daemon explicitly for one trusted project, and execute no project code before that start. [Tickets 1.3, 1.3b, 1.3c]
 - FR5: Answer summary and `status <path>` queries through a CLI with versioned `--json` output, reporting counts per state for files and folders, without starting a test. [Sprint 1]
 - FR6: Mark every result a saved edit could affect as stale, and reconcile inputs after a start, a missed event, or a branch change before reporting any result current. [Sprint 2]
 - FR7: Select the tests each change requires at workspace granularity, widening on uncertain dependencies, with a reason for each selected test, the trigger of each broad fallback, and selected and total counts. [Sprint 2]

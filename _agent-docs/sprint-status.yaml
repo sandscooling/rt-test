@@ -5,8 +5,8 @@ sprint-1: in-progress
 1-1b-record-run-states: done
 1-2-persist-results: done
 1-3-daemon-lifecycle: ready-for-dev
-1-3b-run-safety: backlog
-1-3c-start-stop-cli: backlog
+1-3b-run-safety: ready-for-dev
+1-3c-start-stop-cli: ready-for-dev
 1-4-query-cli: backlog
 
 sprint-2: backlog
