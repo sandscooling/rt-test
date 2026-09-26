@@ -7,7 +7,7 @@ The mechanism is the T3 Code `session_spawn` tool with `handoff: true`. The succ
 ## When to hand off
 
 - The user asks for a handoff.
-- Your context is past about 60% of its window. Hand off at the next safe point rather than finishing one more large task first.
+- Your context is past about 60% of its window, or 75% if you are the orchestrator. Hand off at the next safe point rather than finishing one more large task first. The prompt-context hook warns after every tool call from 60%; the orchestrator continues past that warning until 75%.
 - Never let the harness compact. If you are close, stop and hand off even mid-task, stating exactly where the work stands.
 
 A safe point has no edit half-applied, no process you started still running, and a known verification state for every change.

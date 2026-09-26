@@ -162,4 +162,4 @@ When dev reports, dispatch `rt-<lane>-review` with the dev's threadId, its path 
 
 When the review reports, run `bun run check` in the background, commit on exit 0, send the sha, settle, and sweep. Tell the owner in one message: what landed, the sha, the gate window, anything the review found, and every open decision with your recommendation.
 
-Hand off to a successor by `_agent-docs/handoff.md` at about 60% context; the state doc and the adopted lanes carry over.
+Hand off to a successor by `_agent-docs/handoff.md` at about 75% context, continuing past the hook's 60% warning until then; the state doc and the adopted lanes carry over.
