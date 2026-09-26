@@ -42,6 +42,7 @@ Rewrite `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md` to carry t
   - Requirement markers store only the sprint or ticket link, and status is derived from the status file.
   - Docs live at `docs/adr/`, `docs/glossary.md`, `docs/requirements.md`, and `docs/design-decisions/`.
   - Keep two rule homes with a sharp boundary: `_agent-docs/project-context.md` holds directions that override an agent's default instinct and are read while writing; the checklist holds constraints a reviewer checks against a diff; never both. Technical directions move out of `AGENTS.md` into project context.
+- Language: TypeScript on Node for every product component (ADR-0001). Inputs for the plan's `change-request`: add a separate end-to-end CLI call target (proposed p95 under 100 ms), since a Node CLI spends about 40 ms starting; the summary target applies inside the daemon. First M1 spike: confirm `node:sqlite` works unflagged on the Node 22 floor, else raise the floor or use `better-sqlite3`.
 - Interface: a CLI with versioned `--json` output in front of the daemon, plus a small programmatic API. No MCP server. Support `status <path>` for files and folders with non-binary states, for a later VS Code folder-view extension.
 
 ## Starter contents
