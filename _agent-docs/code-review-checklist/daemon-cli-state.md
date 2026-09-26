@@ -99,7 +99,7 @@ C148. **Keep local endpoints local**: A daemon endpoint binds to loopback or a l
 
 C149. **Migrate or invalidate on a state schema change**: A change to the persisted state schema ships a migration or invalidates the old records; old records are never read under the new meaning.
 
-C150. **Make a run visible atomically**: A run's results become visible together; a reader never sees a partial run presented as complete.
+C150. **Make a run visible atomically**: A run's results become visible together; a reader never sees a partial run presented as complete. A read that decides from several values of shared state (a record's rows, a file header) takes them from one snapshot: one statement or one read transaction.
 
 ## CLI output
 

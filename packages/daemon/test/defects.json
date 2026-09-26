@@ -726,5 +726,355 @@
     "file": "packages/daemon/src/vitest/run-workspace.ts",
     "old": " || withheldAbort",
     "new": ""
+  },
+  {
+    "id": "D1211",
+    "defect": "A root spelled through a link keeps the spelling given instead of resolving to its real path, so one worktree gets two identities.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "real = realpathSync.native(path);",
+    "new": "real = resolve(path);"
+  },
+  {
+    "id": "D1212",
+    "defect": "A root that cannot be resolved falls back to the spelling given, so it gets an identity no canonical spelling shares.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "real = realpathSync.native(path);",
+    "new": "real = existsSync(path) ? realpathSync.native(path) : path;"
+  },
+  {
+    "id": "D1213",
+    "defect": "A linked worktree's commondir is ignored, so its project identity is its own git directory rather than the main checkout's.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "const common = existsSync(commonDirectoryFile)",
+    "new": "const common = false"
+  },
+  {
+    "id": "D1214",
+    "defect": "A relative gitdir resolves against the process's working directory instead of the .git file's directory.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "resolve(dirname(gitEntry), gitDirectoryTarget(gitEntry))",
+    "new": "resolve(gitDirectoryTarget(gitEntry))"
+  },
+  {
+    "id": "D1215",
+    "defect": "The worktree identity is the project identity, so two worktrees of one repository answer for each other.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "    worktreeIdentity,\n  };",
+    "new": "    worktreeIdentity: projectIdentity(worktreeIdentity),\n  };"
+  },
+  {
+    "id": "D1216",
+    "defect": "The search for .git stops at the root, so a root below a repository's top is treated as outside git.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "return parent === directory ? undefined : enclosingCommonDirectory(parent);",
+    "new": "return undefined;"
+  },
+  {
+    "id": "D1217",
+    "defect": "Outside git the project identity is empty instead of the worktree identity.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "return enclosingCommonDirectory(worktreeIdentity) ?? worktreeIdentity;",
+    "new": "return enclosingCommonDirectory(worktreeIdentity) ?? \"\";"
+  },
+  {
+    "id": "D1218",
+    "defect": "The default state directory is named something other than .rt-test.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "const DEFAULT_STATE_DIRECTORY = \".rt-test\";",
+    "new": "const DEFAULT_STATE_DIRECTORY = \"rt-test\";"
+  },
+  {
+    "id": "D1219",
+    "defect": "A ran run's cancel error is not stored, so it reads back without one.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "cancelError: run.cancelError ?? null,",
+    "new": "cancelError: null,"
+  },
+  {
+    "id": "D1220",
+    "defect": "A ran run's nothing-ran reason is not stored, so a run in which nothing ran reads back as one in which tests ran.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "nothingRan: run.nothingRan ?? null,",
+    "new": "nothingRan: null,"
+  },
+  {
+    "id": "D1221",
+    "defect": "An unsupported Vitest's version is dropped on read, so the version found reads back as none found.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "...(version === undefined ? {} : { version }),",
+    "new": "...{},"
+  },
+  {
+    "id": "D1222",
+    "defect": "A failed run's error column holds its close error when it has one, so its own error is lost.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "error: run.error,",
+    "new": "error: run.closeError ?? run.error,"
+  },
+  {
+    "id": "D1223",
+    "defect": "A run's workspace directory is stored as its path.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "run.workspace.directory,",
+    "new": "run.workspace.path,"
+  },
+  {
+    "id": "D1224",
+    "defect": "A stored run carries an adapter version other than the integration's current one.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "adapterVersion: VITEST_ADAPTER_VERSION,",
+    "new": "adapterVersion: 0,"
+  },
+  {
+    "id": "D1225",
+    "defect": "Every run is stored under one fixed run identity, so a second run of a worktree cannot be stored.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "runId: randomUUID(),",
+    "new": "runId: \"run\","
+  },
+  {
+    "id": "D1226",
+    "defect": "A test recorded interrupted reads back with an outcome it never had.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "if (execution === \"interrupted\") return { execution };",
+    "new": "if (execution === \"interrupted\") return { execution, outcome: \"skipped\", errors: [] } as unknown as TestRunState;"
+  },
+  {
+    "id": "D1227",
+    "defect": "A crashed or not-run module reads back with an empty test list it never recorded.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "      return { ...report, state };",
+    "new": "      return { ...report, state, tests: [] } as unknown as RecordedModule;"
+  },
+  {
+    "id": "D1228",
+    "defect": "The run writer skips the binding check, so an absent worktree identity fails on an SQLite bind error that names no binding.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "  requireBindings(bindings);\n",
+    "new": ""
+  },
+  {
+    "id": "D1229",
+    "defect": "An absent input fingerprint is defaulted to not fingerprinted instead of refused.",
+    "file": "packages/daemon/src/store/stored-records.ts",
+    "old": "  throw new Error(\n    `The input fingerprint is required:",
+    "new": "  return { fingerprintKind: NOT_FINGERPRINTED, fingerprintDigest: null };\n  throw new Error(\n    `The input fingerprint is required:"
+  },
+  {
+    "id": "D1230",
+    "defect": "The discovery writer skips the binding check, so an empty project identity fails on a constraint that names a column, not the binding.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "  requireBindings(bindings);\n",
+    "new": ""
+  },
+  {
+    "id": "D1231",
+    "defect": "A digest is normalized to lower case instead of stored exactly as given.",
+    "file": "packages/daemon/src/store/stored-records.ts",
+    "old": "      fingerprintDigest: fingerprint.digest,",
+    "new": "      fingerprintDigest: fingerprint.digest.toLowerCase(),"
+  },
+  {
+    "id": "D1232",
+    "defect": "A not-fingerprinted record reads back as an empty digest.",
+    "file": "packages/daemon/src/store/stored-records.ts",
+    "old": "if (kind === NOT_FINGERPRINTED) return { kind: NOT_FINGERPRINTED };",
+    "new": "if (kind === NOT_FINGERPRINTED) return { kind: FINGERPRINT_DIGEST, digest: \"\" };"
+  },
+  {
+    "id": "D1233",
+    "defect": "A discovered workspace's failed modules are not stored, so they read back as none.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "failedModules: JSON.stringify(entry.failedModules),",
+    "new": "failedModules: \"[]\","
+  },
+  {
+    "id": "D1234",
+    "defect": "The workspace sources a discovery did not read are not stored, so they read back as none.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "JSON.stringify(discovery.notRead),",
+    "new": "\"[]\","
+  },
+  {
+    "id": "D1235",
+    "defect": "The latest discovery is the first one stored rather than the last.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "ORDER BY sequence DESC LIMIT 1",
+    "new": "ORDER BY sequence LIMIT 1"
+  },
+  {
+    "id": "D1236",
+    "defect": "A stored discovery carries an adapter version other than the integration's current one.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "        VITEST_ADAPTER_VERSION,",
+    "new": "        0,"
+  },
+  {
+    "id": "D1237",
+    "defect": "A write that throws part way commits the rows it inserted instead of rolling them back.",
+    "file": "packages/daemon/src/store/transaction.ts",
+    "old": "database.exec(\"ROLLBACK\");",
+    "new": "database.exec(\"COMMIT\");"
+  },
+  {
+    "id": "D1238",
+    "defect": "The discovery writer writes outside a transaction, so a failure part way leaves the rows before it.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "return inWriteTransaction(database, () => {",
+    "new": "return ((write: () => StoredDiscovery) => write())(() => {"
+  },
+  {
+    "id": "D1239",
+    "defect": "The run writer writes outside a transaction, so a reader mid-write sees part of the run.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "return inWriteTransaction(database, () => {",
+    "new": "return ((write: () => StoredRun) => write())(() => {"
+  },
+  {
+    "id": "D1240",
+    "defect": "The run writer does not read its run back before commit, so a run the readers refuse is stored and every later read of the worktree throws.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "return readBack(selectRun(database, stored, stored.runId), stored.runId);",
+    "new": "return stored;"
+  },
+  {
+    "id": "D1241",
+    "defect": "The discovery writer does not read its discovery back before commit, so a discovery the reader refuses is stored and every later read of the worktree throws.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "    writeWorkspaces(database, lastInsertRowid, discovery.workspaces);\n",
+    "new": "    writeWorkspaces(database, lastInsertRowid, discovery.workspaces);\n    return { projectIdentity, worktreeIdentity, inputFingerprint, adapterVersion: VITEST_ADAPTER_VERSION, discoveryId, discovery };\n"
+  },
+  {
+    "id": "D1242",
+    "defect": "Run reads ignore the project identity, so another project's runs under the same worktree path answer.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "const IN_SCOPE = \"r.project_identity = ? AND r.worktree_identity = ?\";",
+    "new": "const IN_SCOPE = \"? IS NOT NULL AND r.worktree_identity = ?\";"
+  },
+  {
+    "id": "D1243",
+    "defect": "Run reads ignore the worktree identity, so another worktree's runs answer.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "const IN_SCOPE = \"r.project_identity = ? AND r.worktree_identity = ?\";",
+    "new": "const IN_SCOPE = \"r.project_identity = ? AND ? IS NOT NULL\";"
+  },
+  {
+    "id": "D1244",
+    "defect": "A run read by identity ignores the scope, so another worktree's run answers it.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "const SELECT_RUN = `SELECT ${RUN_COLUMNS} FROM runs r WHERE ${IN_SCOPE} AND run_id = ?`;",
+    "new": "const SELECT_RUN = `SELECT ${RUN_COLUMNS} FROM runs r WHERE ? IS NOT NULL AND ? IS NOT NULL AND run_id = ?`;"
+  },
+  {
+    "id": "D1245",
+    "defect": "The latest discovery ignores the worktree identity, so another worktree's discovery answers.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "FROM discoveries WHERE project_identity = ? AND worktree_identity = ?",
+    "new": "FROM discoveries WHERE project_identity = ? AND ? IS NOT NULL"
+  },
+  {
+    "id": "D1246",
+    "defect": "An empty identity passes the identity check, so a read with an empty scope answers with nothing stored.",
+    "file": "packages/daemon/src/store/stored-records.ts",
+    "old": "if (typeof value !== \"string\" || value === \"\") {",
+    "new": "if (typeof value !== \"string\") {"
+  },
+  {
+    "id": "D1247",
+    "defect": "The latest-discovery read skips the scope check, so an empty scope answers with no discovery.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "  requireScope(scope);\n",
+    "new": ""
+  },
+  {
+    "id": "D1248",
+    "defect": "The run-by-identity read skips the scope check, so an empty scope answers with no run.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "  requireScope(scope);\n  return inReadTransaction(database, () => selectRun(database, scope, runId));",
+    "new": "  return inReadTransaction(database, () => selectRun(database, scope, runId));"
+  },
+  {
+    "id": "D1249",
+    "defect": "A worktree's runs read back newest first instead of in the order they were stored.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "WHERE ${IN_SCOPE} ORDER BY sequence`;",
+    "new": "WHERE ${IN_SCOPE} ORDER BY sequence DESC`;"
+  },
+  {
+    "id": "D1256",
+    "defect": "The store holds its data in memory, so nothing survives close and reopen.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "const database = new DatabaseSync(file);",
+    "new": "const database = new DatabaseSync(\":memory:\");"
+  },
+  {
+    "id": "D1257",
+    "defect": "The store's file is created beside the state directory instead of inside it.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "const file = join(stateDirectory, STORE_FILE_NAME);",
+    "new": "const file = join(stateDirectory, \"..\", STORE_FILE_NAME);"
+  },
+  {
+    "id": "D1258",
+    "defect": "Opening assumes the state directory exists, so a missing one fails to open.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  mkdirSync(stateDirectory, { recursive: true });\n",
+    "new": ""
+  },
+  {
+    "id": "D1259",
+    "defect": "A new store does not record the RT Test application id.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    database.exec(`PRAGMA application_id = ${STORE_APPLICATION_ID}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D1260",
+    "defect": "A store with a newer schema version is opened and read under this version's meaning.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  if (header.userVersion > STORE_SCHEMA_VERSION) {\n    return \"it was written by a newer RT Test\";\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D1261",
+    "defect": "The opener switches the file to WAL before checking it, rewriting the header of a file it then refuses.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    const header = checkedHeader(database, file);\n    database.exec(\"PRAGMA journal_mode = WAL\");",
+    "new": "    database.exec(\"PRAGMA journal_mode = WAL\");\n    const header = checkedHeader(database, file);"
+  },
+  {
+    "id": "D1262",
+    "defect": "The application id is not checked, so another application's database at the store's schema version opens as a store.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  if (header.applicationId !== STORE_APPLICATION_ID) {\n    return \"it is not an RT Test store\";\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D1263",
+    "defect": "A file that is not a database fails with SQLite's own error, which names neither the file nor what was expected.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    if (!isNotADatabase(error)) throw error;",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D1264",
+    "defect": "Schema creation does not re-check the header under the write lock, so of two openers of one new file the second creates the tables again and fails.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    if (!isNew(checkedHeader(database, file))) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D1265",
+    "defect": "A .git file whose git directory has no commondir takes the worktree root as its project identity instead of that git directory.",
+    "file": "packages/daemon/src/store/consumer-identity.ts",
+    "old": "    : gitDirectory;",
+    "new": "    : dirname(gitEntry);"
+  },
+  {
+    "id": "D1266",
+    "defect": "A failed discovery workspace's close error is not stored, so it reads back without one.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "        error: entry.error,\n        closeError: entry.closeError ?? null,",
+    "new": "        error: entry.error,\n        closeError: null,"
   }
 ]

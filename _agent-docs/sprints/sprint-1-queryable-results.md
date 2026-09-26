@@ -36,4 +36,4 @@ Ticket 1.2's store lets the daemons of different worktrees share one state direc
 
 Scope: `summary` and `status <path>` with counts per state for files and folders through versioned `--json` output on stdout, failing with a reason rather than answering empty, and never starting a test. Requirements: FR5.
 
-This ticket counts from ticket 1.2's store: stored runs, and the worktree's latest discovery for never-run and unknown tests (C132). The store keeps an explicit not-fingerprinted value, which this ticket's queries map to an absent fingerprint before `assessEvidence`.
+This ticket counts from ticket 1.2's store: stored runs, and the worktree's latest discovery for never-run and unknown tests (C132). The store keeps an explicit not-fingerprinted value, which this ticket's queries map to an absent fingerprint before `assessEvidence`. A stored run or discovery whose adapter version differs from the daemon's current Vitest adapter version is reported as not current, since it was recorded under another meaning (C124).

@@ -13,16 +13,16 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: Storing a workspace run (every status `runWorkspace` returns: ran, unsupported, failed, interrupted before load) records it under a new run identity the store assigns, bound to the project identity, the worktree identity, the input fingerprint the caller gives, and the adapter version the store stamps, and reading that run back returns every field of the `WorkspaceRun` unchanged, including its status and the workspace it ran, an unsupported or failed run's report, each test's identity, duplicate mark, execution state, outcome and errors; each module's path, state and errors; the run's unhandled errors, nothing-ran reason, typecheck modules, unsupported projects, cancel and close errors; and the Vitest version found or loaded. A write whose project identity, worktree identity or input fingerprint is absent or empty is rejected and stores nothing.
-- [ ] AC2: Storing a discovery (what `discoverTests` returns for a consumer) records it whole under the same project, worktree and input-fingerprint bindings and the adapter version, and reading back the worktree's latest discovery returns every field of the `TestDiscovery` unchanged, including each workspace's status, and for a discovered workspace its tests with identity, duplicate mark and declared mode, its failed modules, typecheck modules, unsupported projects, unhandled errors and close error; each unsupported or failed workspace's report; and each workspace source that was not read. A discovery write whose project identity, worktree identity or input fingerprint is absent or empty is rejected and stores nothing.
-- [ ] AC3: A stored run or discovery becomes visible whole. A write that fails part way leaves no trace of that run or discovery, and a reader never sees part of one without the rest.
-- [ ] AC4: The store never supplies a value that was not recorded, and stores no freshness. A test recorded interrupted reads back with no outcome, a crashed or not-run module reads back with no tests, and outcome and execution state read back as separate values.
-- [ ] AC5: The input fingerprint is stored exactly as the caller gives it. A run or discovery whose inputs were not fingerprinted (every one until Sprint 2) is stored as not fingerprinted, never as an empty or invented digest, and reads back as not fingerprinted, distinct from every digest.
-- [ ] AC6: A consumer's worktree identity is its root's canonical real path, the same however that root is spelled (separators, a trailing separator, a link or junction, and on Windows letter case). Two worktrees of one git repository share a project identity and have different worktree identities; a consumer outside any git repository has its worktree identity as its project identity. Every read answers for one project and worktree only, so runs and discoveries stored for another never answer it, even when both share one state directory. Two stores open on one state directory at once, as two worktrees' daemons would be, each store and read back their own runs.
-- [ ] AC7: After the store is closed and opened again, as across a daemon restart, every stored run and each worktree's latest discovery read back unchanged, and a worktree's runs read back in the order they were stored.
-- [ ] AC8: Every file the store leaves on disk lies inside the state directory it was opened with, which is `.rt-test` under the consumer root unless the caller names another. Opening creates that directory when it is missing.
-- [ ] AC9: The store records its schema version and that the file is an RT Test store. Opening a new store creates the current schema; opening a store with a newer schema version than the code's, or a file that is not an RT Test store (another SQLite database, or not a database at all), fails with a reason naming the file and the versions found and expected, and leaves the file unchanged.
-- [ ] AC10: The workspace's supported Node range is `^22.13.0 || ^24.0.0 || >=26.0.0`, the README's Develop line states that floor, and the store stores and reads back a run on Node 22.13.0 with no flag.
+- [x] AC1: Storing a workspace run (every status `runWorkspace` returns: ran, unsupported, failed, interrupted before load) records it under a new run identity the store assigns, bound to the project identity, the worktree identity, the input fingerprint the caller gives, and the adapter version the store stamps, and reading that run back returns every field of the `WorkspaceRun` unchanged, including its status and the workspace it ran, an unsupported or failed run's report, each test's identity, duplicate mark, execution state, outcome and errors; each module's path, state and errors; the run's unhandled errors, nothing-ran reason, typecheck modules, unsupported projects, cancel and close errors; and the Vitest version found or loaded. A write whose project identity, worktree identity or input fingerprint is absent or empty is rejected and stores nothing.
+- [x] AC2: Storing a discovery (what `discoverTests` returns for a consumer) records it whole under the same project, worktree and input-fingerprint bindings and the adapter version, and reading back the worktree's latest discovery returns every field of the `TestDiscovery` unchanged, including each workspace's status, and for a discovered workspace its tests with identity, duplicate mark and declared mode, its failed modules, typecheck modules, unsupported projects, unhandled errors and close error; each unsupported or failed workspace's report; and each workspace source that was not read. A discovery write whose project identity, worktree identity or input fingerprint is absent or empty is rejected and stores nothing.
+- [x] AC3: A stored run or discovery becomes visible whole. A write that fails part way leaves no trace of that run or discovery, and a reader never sees part of one without the rest.
+- [x] AC4: The store never supplies a value that was not recorded, and stores no freshness. A test recorded interrupted reads back with no outcome, a crashed or not-run module reads back with no tests, and outcome and execution state read back as separate values.
+- [x] AC5: The input fingerprint is stored exactly as the caller gives it. A run or discovery whose inputs were not fingerprinted (every one until Sprint 2) is stored as not fingerprinted, never as an empty or invented digest, and reads back as not fingerprinted, distinct from every digest.
+- [x] AC6: A consumer's worktree identity is its root's canonical real path, the same however that root is spelled (separators, a trailing separator, a link or junction, and on Windows letter case). Two worktrees of one git repository share a project identity and have different worktree identities; a consumer outside any git repository has its worktree identity as its project identity. Every read answers for one project and worktree only, so runs and discoveries stored for another never answer it, even when both share one state directory. Two stores open on one state directory at once, as two worktrees' daemons would be, each store and read back their own runs.
+- [x] AC7: After the store is closed and opened again, as across a daemon restart, every stored run and each worktree's latest discovery read back unchanged, and a worktree's runs read back in the order they were stored.
+- [x] AC8: Every file the store leaves on disk lies inside the state directory it was opened with, which is `.rt-test` under the consumer root unless the caller names another. Opening creates that directory when it is missing.
+- [x] AC9: The store records its schema version and that the file is an RT Test store. Opening a new store creates the current schema; opening a store with a newer schema version than the code's, or a file that is not an RT Test store (another SQLite database, or not a database at all), fails with a reason naming the file, the application id and schema version expected, and those found (or, for a file that is not a database, that none could be read), and leaves the file unchanged.
+- [x] AC10: The workspace's supported Node range is `^22.13.0 || ^24.0.0 || >=26.0.0`, the README's Develop line states that floor, and the store stores and reads back a run on Node 22.13.0 with no flag.
 
 ## Unverified Assumptions
 
@@ -35,9 +35,11 @@ Write "None: the ticket calls no third-party behavior this repository has not al
 when that is literally true.
 -->
 
-| #   | Assumption (as a question)                                                                                                                                                                                                                                                                                                          | Why it matters if wrong                                                                                                                             | How to check                                                                                                                                                                        |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| U1  | Does every `node:sqlite` call the finished store makes behave on Node 22.13.0 as on 22.23.3, the oldest Node the repository's gates run? The probes (Dev Notes § Spike facts) covered opening, WAL, `user_version`, `STRICT`, a transaction seen by a second connection, and constraint errors, but not the store's own statements. | A call absent or different at the floor (Dev Notes § Node 22.13 API floor) passes every gate and fails for a user on 22.13 to 22.22, breaking AC10. | Run the store's test file under the Node 22.13.0 binary (`npm install --prefix <scratch> node@22.13.0`, then that binary with Vitest's entry point) and compare with the 24.19 run. |
+| #   | Assumption (as a question)                                                                                                                                                                                                                                                                                                          | Why it matters if wrong                                                                                                                             | How to check                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| U1  | Does every `node:sqlite` call the finished store makes behave on Node 22.13.0 as on 22.23.3, the oldest Node the repository's gates run? The probes (Dev Notes § Spike facts) covered opening, WAL, `user_version`, `STRICT`, a transaction seen by a second connection, and constraint errors, but not the store's own statements. | A call absent or different at the floor (Dev Notes § Node 22.13 API floor) passes every gate and fails for a user on 22.13 to 22.22, breaking AC10. | Dev: a scratch probe under `_agent-docs/.scratch/`, run by the Node 22.13.0 binary (`npm install --prefix <scratch> node@22.13.0`) against the built daemon, calling every store function the ticket ships (each open and refusal, a write of each run status, a discovery write, every reader, two stores on one state directory), compared with the same probe under Node 24. create-tests: run the store's test file under that binary with Vitest's entry point (Dev Agent Record § Tests Owed). |
+
+**U1: CONFIRMED** (dev, 2026-09-26). `_agent-docs/.scratch/1-2/probe.mjs`, run against the built daemon (`bun run --filter @rt-test/core build`, then `@rt-test/daemon`) by the npm `node@22.13.0` binary and by the host Node 24.19.0, printed the same 14 `PASS` lines on both, differing only in temporary directory names: a write of each run status (7 runs, `ran` with and without its optional fields, `unsupported` with and without a version, `failed` with and without a close error, `interrupted-before-load`); `readRuns` order and round trip by `assert.deepStrictEqual`; `readRun` by identity, and nothing from another worktree; a discovery write and `readLatestDiscovery`; every empty or absent binding rejected with nothing stored; a partial write (a module whose `projectName` is `undefined`, after earlier rows were inserted) rejected with nothing stored; a run holding a test execution the reader refuses (`pending`) and a discovery holding a mode it refuses (`queued`), each rejected whole with the stored history still readable, and an empty read scope rejected; a second store on the same state directory reading and writing its own scope; the round trip after close and reopen; only `store.sqlite` left in the state directory after close; refusal, file hash unchanged, of a newer schema version, another SQLite database and a text file, each reason naming the file and the versions found and expected; and `consumerIdentity` giving this worktree `C:/source/rt-test-wt/wt-1` under the main checkout's `C:/source/rt-test/.git`. Node 22.13.0 printed the one `ExperimentalWarning` to stderr and exited 0. The store calls only `DatabaseSync` `exec`, `prepare`, `close` and `StatementSync` `all`, `get`, `run` with positional parameters (`node_modules/.bun/@types+node@22.20.4/node_modules/@types/node/sqlite.d.ts`: `exec` and `prepare` `@since v22.5.0`). The store's test file under 22.13.0 is owed by create-tests (§ Tests Owed).
 
 ## Tasks / Subtasks
 
@@ -47,17 +49,17 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Resolve every Unverified Assumption above before implementing; U1 can only be answered once the store and its tests exist, so answer it before handing off to review.
-- [ ] (AC6, AC8) Create the consumer-identity module (for example `packages/daemon/src/store/consumer-identity.ts`): the worktree identity as the consumer root's `realpathSync.native` path with `/` separators, failing with a reason when the root cannot be resolved rather than falling back to the spelling given; the project identity as the canonical git common directory found by walking up from the root (Dev Notes § Spike facts, Git layout), resolving a relative `gitdir:` or `commondir` against the directory of the file holding it and canonicalizing the result the same way as the worktree identity, or the worktree identity outside git; and the default state directory, `.rt-test` under the root (P41). Read the git files directly; spawn no process.
-- [ ] (AC3, AC6, AC8, AC9) Create the store opener (for example `packages/daemon/src/store/open-store.ts`): create the state directory, open the database file inside it, set `PRAGMA busy_timeout` to a named bound so a write waits for another process's write on the same file (Dev Notes § Grill record), then check `PRAGMA application_id` and `PRAGMA user_version` against named constants before writing anything. Treat the file as new only when it holds no schema objects and both values are 0; create the current schema in one `BEGIN IMMEDIATE` transaction that re-reads both, so two openers of one new file create it once. Refuse a newer version, another SQLite database, or a file that is not a database at all (it opens, then throws `file is not a database` at the first statement) with the reason AC9 names. Use WAL journaling. Use only `node:sqlite` APIs that exist on Node 22.13.0 (Dev Notes § Node 22.13 API floor).
-- [ ] (AC1, AC2, AC4, AC5, AC7) Define the schema (for example `packages/daemon/src/store/schema.ts`) with outcome and execution state in separate columns (C119), no freshness column (C114), a column per value 1.4 will count by (workspace path, project name, module path, module state, execution, outcome), and an explicit not-fingerprinted value distinct from any digest.
-- [ ] (AC1, AC3, AC4, AC5) Create the run writer (for example `packages/daemon/src/store/write-run.ts`): take one `WorkspaceRun` and its bindings (project identity, worktree identity, input fingerprint), reject an absent or empty binding before opening a transaction (C122), stamp the adapter version constant, assign the run identity, and write every row inside one `BEGIN IMMEDIATE` transaction that rolls back on any throw, so a concurrent writer waits on `busy_timeout` instead of failing on a read-to-write upgrade.
-- [ ] (AC2, AC3, AC5) Create the discovery writer the same way, over one `TestDiscovery`.
-- [ ] (AC1, AC2, AC4, AC5, AC6, AC7) Create the readers (for example `packages/daemon/src/store/read-store.ts`): a worktree's runs in stored order, one run by identity, and a worktree's latest discovery, each rebuilding the recorded types unchanged and each filtered on project and worktree identity (C123). Absent values stay absent (C12). Read each fingerprint back as the caller gave it: a digest as that digest, and the not-fingerprinted value as itself (AC5).
-- [ ] (Support) Export the store's open, write and read functions and their types from `packages/daemon/src/index.ts`.
-- [ ] (AC10) Send the orchestrator the root `package.json` `engines.node` value `^22.13.0 || ^24.0.0 || >=26.0.0` and the README Develop line's new floor, and check the store against Node 22.13.0 by U1, since the repository's gates run Node 22.23.3 at the oldest (Dev Notes § Grill record).
-- [ ] (Support) Send the orchestrator the `docs/architecture.md` § Current implementation text for the store, replacing only "or stores history; a run's record lives only in memory", so the sentence still says nothing builds fingerprints or selects tests (P21, C48). The **Project** and **Worktree** glossary entries in Dev Notes § Grill record, and the `docs/architecture.md` § Identity and freshness correction of "Identify a project by canonical root and configuration" to the owner's identity ruling, go to the orchestrator from create-ticket, not from dev (P21).
-- [ ] (Support) Lint and typecheck.
+- [x] (Support) Resolve every Unverified Assumption above before implementing; U1 needs the built store, so answer it with its dev probe once the store builds and before handing off to create-tests, and list the 22.13.0 run of the store's test file under § Tests Owed for create-tests.
+- [x] (AC6, AC8) Create the consumer-identity module (for example `packages/daemon/src/store/consumer-identity.ts`): the worktree identity as the consumer root's `realpathSync.native` path with `/` separators, failing with a reason when the root cannot be resolved rather than falling back to the spelling given; the project identity as the canonical git common directory found by walking up from the root (Dev Notes § Spike facts, Git layout), resolving a relative `gitdir:` or `commondir` against the directory of the file holding it and canonicalizing the result the same way as the worktree identity, or the worktree identity outside git; and the default state directory, `.rt-test` under the root (P41). Read the git files directly; spawn no process.
+- [x] (AC3, AC6, AC8, AC9) Create the store opener (for example `packages/daemon/src/store/open-store.ts`): create the state directory, open the database file inside it, set `PRAGMA busy_timeout` to a named bound so a write waits for another process's write on the same file (Dev Notes § Grill record), then check `PRAGMA application_id` and `PRAGMA user_version` against named constants before writing anything. Treat the file as new only when it holds no schema objects and both values are 0; create the current schema in one `BEGIN IMMEDIATE` transaction that re-reads both, so two openers of one new file create it once. Refuse a newer version, another SQLite database, or a file that is not a database at all (it opens, then throws `file is not a database` at the first statement) with the reason AC9 names. Set WAL journaling only after those checks pass, since `PRAGMA journal_mode = WAL` rewrites the file header and would change a file AC9 refuses. Use only `node:sqlite` APIs that exist on Node 22.13.0 (Dev Notes § Node 22.13 API floor).
+- [x] (AC1, AC2, AC4, AC5, AC7) Define the schema (for example `packages/daemon/src/store/schema.ts`) with outcome and execution state in separate columns (C119), no freshness column (C114), a column per value 1.4 will count by (workspace path, project name, module path, module state, execution, outcome), and an explicit not-fingerprinted value distinct from any digest.
+- [x] (AC1, AC3, AC4, AC5) Create the run writer (for example `packages/daemon/src/store/write-run.ts`): take one `WorkspaceRun` and its bindings (project identity, worktree identity, input fingerprint), reject an absent or empty binding before opening a transaction (C122), stamp the adapter version constant, assign the run identity, and write every row inside one `BEGIN IMMEDIATE` transaction that rolls back on any throw, so a concurrent writer waits on `busy_timeout` instead of failing on a read-to-write upgrade.
+- [x] (AC2, AC3, AC5) Create the discovery writer the same way, over one `TestDiscovery`.
+- [x] (AC1, AC2, AC4, AC5, AC6, AC7) Create the readers (for example `packages/daemon/src/store/read-store.ts`): a worktree's runs in stored order, one run by identity, and a worktree's latest discovery, each rebuilding the recorded types unchanged and each filtered on project and worktree identity (C123). Absent values stay absent (C12). Read each fingerprint back as the caller gave it: a digest as that digest, and the not-fingerprinted value as itself (AC5).
+- [x] (Support) Export the store's open, write and read functions and their types from `packages/daemon/src/index.ts`.
+- [x] (AC10) Send the orchestrator the root `package.json` `engines.node` value `^22.13.0 || ^24.0.0 || >=26.0.0` and the README Develop line's new floor, and check the store against Node 22.13.0 by U1, since the repository's gates run Node 22.23.3 at the oldest (Dev Notes § Grill record).
+- [x] (Support) Send the orchestrator the `docs/architecture.md` § Current implementation text for the store, replacing only "or stores history; a run's record lives only in memory", so the sentence still says nothing builds fingerprints or selects tests (P21, C48). The **Project** and **Worktree** glossary entries in Dev Notes § Grill record, and the `docs/architecture.md` § Identity and freshness correction of "Identify a project by canonical root and configuration" to the owner's identity ruling, go to the orchestrator from create-ticket, not from dev (P21).
+- [x] (Support) Lint and typecheck.
 
 ## Reusable Code
 
@@ -240,41 +242,150 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 0ad1d7ea-9485-4484-b1a2-54cb42ae0533
 
 #### Test Files This Change Broke
 
-None.
+None. The change adds modules and exports only; no test imports the daemon's export list, and the daemon typecheck (which compiles `packages/daemon/test`) exits 0.
 
 #### ACs Owed a Test
 
-None.
+- AC3, "a reader never sees part of one without the rest": the partial-write half has probe evidence (U1), but a concurrent reader has none. The guarantee: every multi-statement read runs in one `BEGIN` snapshot (`inReadTransaction`), so a second connection (worker thread or child process) reading while a large run commits sees none of it or all of it (Dev Notes § Design notes, Testing AC3).
+- AC10: the Node 22.13.0 half has probe evidence; the criterion stays open until the orchestrator writes the `engines.node` value and the README Develop line (§ Completion Notes).
 
 #### Tests Owed
 
-None.
+- U1 / AC10: run the store's test file under the Node 22.13.0 binary with Vitest's entry point (`npm install --prefix <scratch> node@22.13.0`, then that binary with `node_modules/vitest/vitest.mjs run <store test file>`), and compare with the Node 24 run.
+- AC9: two openers of one new file create the schema once. `createSchema` re-reads the header under `BEGIN IMMEDIATE`, so the second opener finds the current schema and creates nothing; a defect that skips the re-check makes the second `CREATE TABLE` throw `table runs already exists`.
+- AC1 / AC2 write-side guard: `writeRun` and `writeDiscovery` read their own record back (`selectRun`, `selectDiscovery`) inside the write transaction, so a record the readers would refuse (a test execution `pending`, a mode `queued`, an unknown status or state) is rejected whole and the worktree's stored history stays readable. Removing the read-back lets such a row commit, after which every `readRuns` for that worktree throws.
+- AC6 read scope: `readRuns`, `readRun` and `readLatestDiscovery` reject an empty or absent scope identity (`requireScope`), as writes do, rather than answering with nothing stored.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 600e0979-8e24-44b2-981d-50241875a13c
+
+All in `packages/daemon/test/store.test.ts`, records in `packages/daemon/test/defects.json`.
 
 #### Named Defects
 
-None.
+- D1211: A root spelled through a link keeps the spelling given instead of resolving to its real path, so one worktree gets two identities. (AC6)
+- D1212: A root that cannot be resolved falls back to the spelling given, so it gets an identity no canonical spelling shares. (AC6)
+- D1213: A linked worktree's commondir is ignored, so its project identity is its own git directory rather than the main checkout's. (AC6)
+- D1214: A relative gitdir resolves against the process's working directory instead of the .git file's directory. (AC6)
+- D1215: The worktree identity is the project identity, so two worktrees of one repository answer for each other. (AC6)
+- D1216: The search for .git stops at the root, so a root below a repository's top is treated as outside git. (AC6)
+- D1217: Outside git the project identity is empty instead of the worktree identity. (AC6)
+- D1218: The default state directory is named something other than .rt-test. (AC8)
+- D1219: A ran run's cancel error is not stored, so it reads back without one. (AC1)
+- D1220: A ran run's nothing-ran reason is not stored, so a run in which nothing ran reads back as one in which tests ran. (AC1)
+- D1221: An unsupported Vitest's version is dropped on read, so the version found reads back as none found. (AC1)
+- D1222: A failed run's error column holds its close error when it has one, so its own error is lost. (AC1)
+- D1223: A run's workspace directory is stored as its path. (AC1)
+- D1224: A stored run carries an adapter version other than the integration's current one. (AC1)
+- D1225: Every run is stored under one fixed run identity, so a second run of a worktree cannot be stored. (AC1)
+- D1226: A test recorded interrupted reads back with an outcome it never had. (AC4)
+- D1227: A crashed or not-run module reads back with an empty test list it never recorded. (AC4)
+- D1228: The run writer skips the binding check, so an absent worktree identity fails on an SQLite bind error that names no binding. (AC1)
+- D1229: An absent input fingerprint is defaulted to not fingerprinted instead of refused. (AC1, AC5)
+- D1230: The discovery writer skips the binding check, so an empty project identity fails on a constraint that names a column, not the binding. (AC2)
+- D1231: A digest is normalized to lower case instead of stored exactly as given. (AC5)
+- D1232: A not-fingerprinted record reads back as an empty digest. (AC5)
+- D1233: A discovered workspace's failed modules are not stored, so they read back as none. (AC2)
+- D1234: The workspace sources a discovery did not read are not stored, so they read back as none. (AC2)
+- D1235: The latest discovery is the first one stored rather than the last. (AC2)
+- D1236: A stored discovery carries an adapter version other than the integration's current one. (AC2)
+- D1237: A write that throws part way commits the rows it inserted instead of rolling them back. (AC3)
+- D1238: The discovery writer writes outside a transaction, so a failure part way leaves the rows before it. (AC3)
+- D1239: The run writer writes outside a transaction, so a reader mid-write sees part of the run. (AC3)
+- D1240: The run writer does not read its run back before commit, so a run the readers refuse is stored and every later read of the worktree throws. (AC1)
+- D1241: The discovery writer does not read its discovery back before commit, so a discovery the reader refuses is stored and every later read of the worktree throws. (AC2)
+- D1242: Run reads ignore the project identity, so another project's runs under the same worktree path answer. (AC6)
+- D1243: Run reads ignore the worktree identity, so another worktree's runs answer. (AC6)
+- D1244: A run read by identity ignores the scope, so another worktree's run answers it. (AC6)
+- D1245: The latest discovery ignores the worktree identity, so another worktree's discovery answers. (AC6)
+- D1246: An empty identity passes the identity check, so a read with an empty scope answers with nothing stored. (AC6)
+- D1247: The latest-discovery read skips the scope check, so an empty scope answers with no discovery. (AC6)
+- D1248: The run-by-identity read skips the scope check, so an empty scope answers with no run. (AC6)
+- D1249: A worktree's runs read back newest first instead of in the order they were stored. (AC7)
+- D1256: The store holds its data in memory, so nothing survives close and reopen. (AC7)
+- D1257: The store's file is created beside the state directory instead of inside it. (AC8)
+- D1258: Opening assumes the state directory exists, so a missing one fails to open. (AC8)
+- D1259: A new store does not record the RT Test application id. (AC9)
+- D1260: A store with a newer schema version is opened and read under this version's meaning. (AC9)
+- D1261: The opener switches the file to WAL before checking it, rewriting the header of a file it then refuses. (AC9)
+- D1262: The application id is not checked, so another application's database at the store's schema version opens as a store. (AC9)
+- D1263: A file that is not a database fails with SQLite's own error, which names neither the file nor what was expected. (AC9)
+- D1264: Schema creation does not re-check the header under the write lock, so of two openers of one new file the second creates the tables again and fails. (AC9)
+- D1265: A .git file whose git directory has no commondir takes the worktree root as its project identity instead of that git directory. (AC6)
+- D1266: A failed discovery workspace's close error is not stored, so it reads back without one. (AC2)
+
+AC10's Node 22.13.0 half is a run, not a named defect: after the review's fixes (the one-statement header query included), the Node 22.13.0 npm binary running `node_modules/vitest/vitest.mjs run packages/daemon/test/store.test.ts` passed 50 of 50 and exited 0, as did host Node 24.19.0 (2026-09-26, 14:29:51 to 14:29:57); 22.13.0 printed the SQLite ExperimentalWarning once per thread that loads `node:sqlite` (the D1264 worker is the second).
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/store/consumer-identity.ts` (`canonicalPath`, the `/` separator join and `realpathSync.native` letter case): observable only on Windows, and `consumerIdentity` takes no platform module to inject, so a mutation would survive the Linux gate (C156). The link and trailing-separator spellings are covered by D1211.
+- `packages/daemon/src/store/transaction.ts` (`inReadTransaction`): every record commits whole (D1237 to D1239) and every reader fetches a record's parent row before its children, so no interleaving between a reader's statements can show part of a record, and removing the read snapshot is not observable.
+- `packages/daemon/src/store/open-store.ts` `readHeader`'s single statement: splitting it back into three reads fails only when another opener's schema commit lands between two of them, inside one synchronous call that gives a test no point to act at, so no test observes it deterministically; D1264 covers the race one step later, where the re-check under the write lock settles it.
+- `packages/daemon/src/store/stored-records.ts` `requireNonEmpty` on writes of an empty project or worktree identity, and the empty-digest check: each is guarded again by the schema's `CHECK` constraints, so no single mutation changes whether the write is refused. D1228 and D1230 pin that the refusal names the binding, and D1246 to D1248 pin the read side, where no constraint stands behind the check.
 
 ### Review Record
 
+Review session: threadId e66c0c8a-5392-4b30-8394-9fccfd63f9e8
+
+Fixed in review: `openStore` reads the header (`application_id`, `user_version`, schema object count) in one statement, so an opener racing another opener's schema creation can no longer read a mixed header and refuse a valid store as not an RT Test store; the discovery reader groups tests with `rowsBy` and refuses test rows under no stored workspace, as the run reader does; one `closeError` column reader in `columns.ts` serves both readers; the refusal of children under a non-ran run names both counts; `requireIdentity` became `requireNonEmpty`, since it also checks the digest.
+
+Tech debt: none undisposed.
+
 #### Test Coverage Gaps
 
-None.
+| Source                                                 | Named defect                                                                                                                                                                     | Expected test                                                                                                                                                                                                                                             | Severity |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `packages/daemon/src/store/consumer-identity.ts:55-57` | A `.git` file whose git directory has no `commondir` (a submodule's layout) takes the worktree root, or fails, instead of that git directory as its project identity. (AC6)      | A consumer whose `.git` file points at `<super>/.git/modules/sub` with no `commondir` has that directory's canonical path as its project identity.                                                                                                        | MEDIUM   |
+| `packages/daemon/src/store/write-discovery.ts:161-167` | A failed discovery workspace's close error is not stored, so it reads back without one. (AC2)                                                                                    | A discovery with a failed workspace carrying a `closeError` reads back with it, for example by giving `DISCOVERY_WITHOUT_TESTS`'s failed workspace one.                                                                                                   | MEDIUM   |
+| `packages/daemon/src/store/open-store.ts` `readHeader` | The header is read in separate statements, so an opener racing another opener's schema commit reads application id 0 with schema version 1 and refuses a valid store. (AC6, AC9) | Decide whether a deterministic test exists; if not, record it under Deliberately Untested with the reason. Also include the one-statement header query (`pragma_application_id`, `pragma_user_version`) in the Node 22.13.0 run of the store's test file. | MEDIUM   |
 
 ### Completion Notes
 
+**Built.** A `node:sqlite` store in `packages/daemon/src/store/`, exported from the daemon index as `openStore` (returning an `RtTestStore` with `writeRun`, `writeDiscovery`, `readRuns`, `readRun`, `readLatestDiscovery`, `close`), `consumerIdentity`, `defaultStateDirectory`, and the types `InputFingerprint`, `StoreBindings`, `StoreScope`, `StoredRun`, `StoredDiscovery`. The opener creates the state directory, opens `store.sqlite` in it, sets `busy_timeout` (5000 ms), refuses a newer schema, another SQLite database or a non-database with the AC9 reason, and only then sets WAL and, for a new file, creates the schema under `BEGIN IMMEDIATE` with a header re-check. Six `STRICT` tables hold runs, their modules and tests, and discoveries, their workspaces and tests; outcome and execution are separate columns, no freshness is stored, and the fingerprint is a kind column (`digest` or `not-fingerprinted`) plus a digest column tied by a `CHECK`. The adapter version is `VITEST_ADAPTER_VERSION` in `packages/daemon/src/vitest/adapter-version.ts`, stamped by both writers.
+
+**File layout against the ticket's example names.** The single example `read-store.ts` became `read-runs.ts` and `read-discovery.ts`, with the column readers and JSON decoders both use in `columns.ts` (one answer to each column question, C8). The contract the writers and readers share lives in `stored-records.ts` (record types, `requireBindings`, `requireScope`, the fingerprint column mapping) and `transaction.ts` (`inWriteTransaction`, `inReadTransaction`). `read-store.ts` was claimed and never created.
+
+**Delegation.** Wave 0 (schema, stored records, transactions, adapter version, opener) was written in this session; three implementer agents then wrote the identity module, the run writer and readers, and the discovery writer and reader in parallel, against the wave-0 signatures. The collect gate (daemon typecheck, oxlint) was green, after which this session consolidated the two readers' duplicated column helpers into `columns.ts` and made three single-file exports private (C59).
+
+**Sanity check (13:32).** F1 (U1's check needed a test file dev cannot have) and F2 (AC9 promised versions a non-database lacks) went to the author (threadId 6d5a2cf7-292c-48f9-977a-18b7b1b26952), which confirmed both at about 13:33 and rewrote U1's check, the first task, AC9 and the opener task (WAL after the checks). Built against the updated text.
+
+**Assumption resolution.** U1 CONFIRMED, beneath the table. AC6 was also checked by `_agent-docs/.scratch/1-2/idprobe.mjs` on both Node versions: `C:\source\rt-test-wt\wt-1`, `c:/SOURCE/rt-test-wt/WT-1/`, `C:/source/rt-test-wt/wt-1\` and a junction to it gave one identity (`C:/source/rt-test/.git`, `C:/source/rt-test-wt/wt-1`); the main checkout gave the same project identity with worktree `C:/source/rt-test`; an unresolvable root threw `Cannot resolve the consumer root, C:/does/not/exist, to a real path, so it has no identity.`
+
+**Adversarial review (14 findings).** Fixed: F1 HIGH (a writer accepted a record its reader refuses, after which every read of that worktree throws with no recovery, since runs are never deleted): both writers now read their record back inside the write transaction and return it, so such a record is rejected whole; F10 (the returned fingerprint could differ from the stored one) by the same read-back; F4 (`readRuns` issued two queries per run) now reads modules and tests for the whole scope in one query each; F9 (reads accepted an empty scope) by `requireScope`; F3 (the schema-version comment omitted the migration a bump needs); F11 (a misleading rollback message); F12 (test identity columns mapped four times) by `identifiedTestColumns` and `identifiedTest`; F13 (`flag` renamed to a private `duplicateMark`). Discarded: F8, foreign keys are enforced (`enableForeignKeyConstraints` `@default true`, `@types/node@22.20.4` `sqlite.d.ts`); F5, rollback journaling keeps AC3's atomicity and isolation and costs only contention; F6, the header re-check under the write lock already refuses the file; F7, AC9 concerns the file, whose bytes the probe hashed unchanged; F14, callers are in the same package and the literal type checks the value. F2 is a change-request candidate below. Lint and typecheck re-ran green after the fixes, and the probe re-ran with 14 `PASS` lines on both Node versions.
+
+**README.** A user-visible change: the supported Node floor moves to 22.13.0. `README.md` is orchestrator-owned, so its Develop line went to the orchestrator as exact text, with the root `package.json` `engines.node` value and the `docs/architecture.md` § Current implementation sentence (AC10 stays open until they land).
+
+**Change-request candidates.**
+
+- F2 (decision, not a defect): no reader compares a row's `adapter_version` with `VITEST_ADAPTER_VERSION`; every row is rebuilt under the current code's meaning. C124 puts the decision with whatever reports currency, which is 1.4's query and Sprint 2's freshness, not the store. Recommendation: 1.4 treats a row from another adapter version as not current and never compares its outcome, and the store keeps returning the stored version. Ready to paste: "Ticket 1.4: a stored run or discovery whose `adapterVersion` differs from `VITEST_ADAPTER_VERSION` is reported as not current (C124); decide whether a newer version is refused or reported unknown."
+
 ### File List
+
+Created by dev:
+
+- `packages/daemon/src/store/schema.ts`
+- `packages/daemon/src/store/stored-records.ts`
+- `packages/daemon/src/store/transaction.ts`
+- `packages/daemon/src/store/open-store.ts`
+- `packages/daemon/src/store/columns.ts`
+- `packages/daemon/src/store/consumer-identity.ts`
+- `packages/daemon/src/store/write-run.ts`
+- `packages/daemon/src/store/read-runs.ts`
+- `packages/daemon/src/store/write-discovery.ts`
+- `packages/daemon/src/store/read-discovery.ts`
+- `packages/daemon/src/vitest/adapter-version.ts`
+
+Modified by dev:
+
+- `packages/daemon/src/index.ts`
+- `_agent-docs/tickets/1-2-persist-results.md` (task and criterion boxes, U1 resolution, Dev Agent Record)
+
+No dependency change.
 
 Planning files the create-ticket run wrote:
 

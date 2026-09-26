@@ -1,3 +1,16 @@
+export {
+  consumerIdentity,
+  defaultStateDirectory,
+} from "./store/consumer-identity.js";
+export { openStore } from "./store/open-store.js";
+export type { RtTestStore } from "./store/open-store.js";
+export type {
+  InputFingerprint,
+  StoreBindings,
+  StoredDiscovery,
+  StoredRun,
+  StoreScope,
+} from "./store/stored-records.js";
 export { discoverTests } from "./vitest/discover-tests.js";
 export type {
   DiscoveredTest,
