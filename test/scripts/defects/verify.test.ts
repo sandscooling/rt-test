@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Git } from "../../../scripts/lib/unbuilt/unbuilt-work.mjs";
+import type { Git } from "../../../scripts/lib/git.mjs";
 import {
   defaultJobs,
   parseOptions,
@@ -37,6 +37,10 @@ function headWithChangedD1(): Git {
 describe("the verification entry point", () => {
   it("D929: refuses a job count of zero", () => {
     expect(() => parseOptions(["--jobs", "0"], 16)).toThrow(/at least 1/);
+  });
+
+  it("D979: refuses a job count not written in decimal digits", () => {
+    expect(() => parseOptions(["--jobs", "0x4"], 16)).toThrow(/whole number/);
   });
 
   it("D930: bounds the default job count by the cores", () => {

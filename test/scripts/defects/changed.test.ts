@@ -2,11 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  changedPaths,
   headRecordsIn,
+  requireChangeset,
   selectChanged,
 } from "../../../scripts/lib/defects/changed.mjs";
-import { gitIn, type Git } from "../../../scripts/lib/unbuilt/unbuilt-work.mjs";
+import { gitIn, type Git } from "../../../scripts/lib/git.mjs";
 import { git, initRepo } from "../orchestration/harness.js";
 import {
   CALC,
@@ -38,9 +38,13 @@ const idsFor = (changed: readonly string[], tree: Tree = TREE) =>
     (pick) => pick.defect.id,
   );
 
+const DIFF_HEAD = "diff --name-only --no-renames -z HEAD --";
+
+// An answer keyed by the whole command wins over one keyed by its subcommand.
 const fakeGit =
   (answers: Readonly<Record<string, { ok: boolean; out: string }>>): Git =>
   (args) =>
+    answers[args.join(" ")] ??
     answers[args[0]!] ?? { ok: false, out: "unexpected" };
 
 describe("the --changed selection", () => {
@@ -73,7 +77,7 @@ describe("the --changed selection", () => {
       diff: { ok: true, out: "" },
       "ls-files": { ok: true, out: `${OTHER_TEST}\0` },
     });
-    expect([...changedPaths(repo)]).toEqual([OTHER_TEST]);
+    expect([...requireChangeset(repo)]).toEqual([OTHER_TEST]);
   });
 
   it("D926: refuses to select when git cannot list untracked files", () => {
@@ -81,15 +85,27 @@ describe("the --changed selection", () => {
       diff: { ok: true, out: "" },
       "ls-files": { ok: false, out: "fatal: broken index" },
     });
-    expect(() => changedPaths(repo)).toThrow(/needs git/);
+    expect(() => requireChangeset(repo)).toThrow(/needs git/);
   });
 
-  it("D951: refuses to select when git cannot diff against HEAD", () => {
+  it("D951: refuses to select when git cannot diff against an existing HEAD", () => {
     const repo = fakeGit({
-      diff: { ok: false, out: "fatal: bad revision 'HEAD'" },
+      [DIFF_HEAD]: { ok: false, out: "fatal: cannot read the index" },
+      "rev-parse": { ok: true, out: "abc123\n" },
+      diff: { ok: true, out: "" },
       "ls-files": { ok: true, out: "" },
     });
-    expect(() => changedPaths(repo)).toThrow(/needs git/);
+    expect(() => requireChangeset(repo)).toThrow(/needs git/);
+  });
+
+  it("D957: a changeset git could not read throws with git's error rather than selecting nothing", () => {
+    const repo = fakeGit({
+      diff: { ok: true, out: "" },
+      "ls-files": { ok: false, out: "fatal: broken index" },
+    });
+    expect(() => requireChangeset(repo)).toThrow(
+      /^--changed needs git to compare with HEAD: .*fatal: broken index/,
+    );
   });
 
   it("D927: selects the defects of a test whose helper in another folder changed", () => {
@@ -101,7 +117,7 @@ describe("the --changed selection", () => {
       initRepo(dir, { [CALC_TEST]: "one\n" });
       writeFileSync(join(dir, CALC_TEST), "two\n");
       git(dir, "add", "-A");
-      return [...changedPaths(gitIn(dir))];
+      return [...requireChangeset(gitIn(dir))];
     });
     expect(changed).toEqual([CALC_TEST]);
   });
@@ -111,7 +127,7 @@ describe("the --changed selection", () => {
       initRepo(dir, { "test/a/helper.ts": "export const h = 1;\n" });
       mkdirSync(join(dir, "test/b"));
       git(dir, "mv", "test/a/helper.ts", "test/b/helper.ts");
-      return [...changedPaths(gitIn(dir))].sort();
+      return [...requireChangeset(gitIn(dir))].sort();
     });
     expect(changed).toEqual(["test/a/helper.ts", "test/b/helper.ts"]);
   });

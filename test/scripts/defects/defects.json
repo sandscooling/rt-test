@@ -177,16 +177,16 @@
   {
     "id": "D925",
     "defect": "--changed ignores untracked files, so a new test file is never verified.",
-    "file": "scripts/lib/defects/changed.mjs",
-    "old": "return new Set([...paths(tracked.out), ...paths(untracked.out)]);",
-    "new": "return new Set(paths(tracked.out));"
+    "file": "scripts/lib/git.mjs",
+    "old": "return { paths: [...tracked.paths, ...untracked.paths] };",
+    "new": "return { paths: [...tracked.paths] };"
   },
   {
     "id": "D926",
     "defect": "A failed untracked-file listing is read as none, narrowing the selection instead of stopping.",
-    "file": "scripts/lib/defects/changed.mjs",
-    "old": "if (!tracked.ok || !untracked.ok) {",
-    "new": "if (!tracked.ok) {"
+    "file": "scripts/lib/git.mjs",
+    "old": "if (untracked.error !== undefined) return untracked;",
+    "new": "if (untracked.error !== undefined) return tracked;"
   },
   {
     "id": "D927",
@@ -198,30 +198,30 @@
   {
     "id": "D928",
     "defect": "--changed diffs against the index, so a staged change is missed.",
-    "file": "scripts/lib/defects/changed.mjs",
-    "old": "    \"HEAD\",\n",
-    "new": ""
+    "file": "scripts/lib/git.mjs",
+    "old": "\"-z\", \"HEAD\", \"--\"]",
+    "new": "\"-z\", \"--\"]"
   },
   {
     "id": "D929",
     "defect": "A job count of zero is accepted instead of refused.",
     "file": "scripts/lib/defects/verify.mjs",
-    "old": "jobs < 1",
+    "old": "jobs < MIN_JOBS",
     "new": "jobs < 0"
   },
   {
     "id": "D930",
     "defect": "The default job count exceeds the cores.",
     "file": "scripts/lib/defects/verify.mjs",
-    "old": "Math.floor((cores * 3) / 4)",
+    "old": "Math.floor(cores * SHARE_OF_CORES)",
     "new": "cores * 2"
   },
   {
     "id": "D931",
     "defect": "The default job count is zero on a single core.",
     "file": "scripts/lib/defects/verify.mjs",
-    "old": "Math.max(1, Math.floor((cores * 3) / 4))",
-    "new": "Math.max(0, Math.floor((cores * 3) / 4))"
+    "old": "Math.max(MIN_JOBS, Math.floor(cores * SHARE_OF_CORES))",
+    "new": "Math.max(0, Math.floor(cores * SHARE_OF_CORES))"
   },
   {
     "id": "D932",
@@ -275,9 +275,9 @@
   {
     "id": "D939",
     "defect": "A staged move lists only its destination, so defects importing the old path are skipped.",
-    "file": "scripts/lib/defects/changed.mjs",
-    "old": "    \"--no-renames\",\n",
-    "new": ""
+    "file": "scripts/lib/git.mjs",
+    "old": "\"--no-renames\", \"-z\", \"HEAD\"",
+    "new": "\"-z\", \"HEAD\""
   },
   {
     "id": "D940",
@@ -358,10 +358,10 @@
   },
   {
     "id": "D951",
-    "defect": "A failing diff against HEAD reads as no change, narrowing --changed instead of stopping.",
-    "file": "scripts/lib/defects/changed.mjs",
-    "old": "if (!tracked.ok || !untracked.ok) {",
-    "new": "if (!untracked.ok) {"
+    "defect": "A failing diff against an existing HEAD falls back to the staged listing, narrowing --changed instead of stopping.",
+    "file": "scripts/lib/git.mjs",
+    "old": "if (againstHead.error === undefined || git(HEAD_EXISTS).ok)",
+    "new": "if (againstHead.error === undefined)"
   },
   {
     "id": "D952",
@@ -369,5 +369,19 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "const ASSERTION_FAILURE = /^AssertionError: /;",
     "new": "const ASSERTION_FAILURE = /^AssertionError/;"
+  },
+  {
+    "id": "D957",
+    "defect": "--changed returns an unreadable changeset as an empty selection instead of throwing.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (changeset.error !== undefined) {",
+    "new": "if (changeset.error === \"\") {"
+  },
+  {
+    "id": "D979",
+    "defect": "--jobs accepts a non-decimal number such as 0x4, so a mistyped count runs with an unintended number of sandboxes.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "DECIMAL_DIGITS.test(text) ? Number(text) : Number.NaN",
+    "new": "Number(text)"
   }
 ]

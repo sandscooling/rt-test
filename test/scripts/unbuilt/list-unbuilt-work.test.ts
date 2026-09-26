@@ -1,10 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  gitIn,
-  listUnbuiltWork,
-  type Git,
-} from "../../../scripts/lib/unbuilt/unbuilt-work.mjs";
+import { gitIn, type Git } from "../../../scripts/lib/git.mjs";
+import { listUnbuiltWork } from "../../../scripts/lib/unbuilt/unbuilt-work.mjs";
 import type { Result } from "../../../scripts/lib/standards/result.mjs";
 import { git } from "../orchestration/harness.js";
 import { inTree, type Files } from "../skills/harness.js";
@@ -90,6 +87,10 @@ const TRACKED = [
   "packages/b/index.ts",
 ];
 
+const TRACKED_LISTING = "ls-files --full-name -z";
+const DIFF_HEAD = "diff --name-only --no-renames -z HEAD --";
+const UNTRACKED_LISTING = "ls-files --others --exclude-standard --full-name -z";
+
 interface FakeGit {
   readonly tracked?: readonly string[];
   readonly untracked?: readonly string[];
@@ -102,15 +103,17 @@ function fakeGit({
   failing,
 }: FakeGit = {}): Git {
   const outputs: Record<string, readonly string[]> = {
-    "ls-files": tracked,
-    "diff --name-only --no-renames": [],
-    "diff --cached --name-only --no-renames": [],
-    "ls-files --others --exclude-standard": untracked,
+    [TRACKED_LISTING]: tracked,
+    [DIFF_HEAD]: [],
+    [UNTRACKED_LISTING]: untracked,
   };
   return (args) => {
     const command = args.join(" ");
     if (command === failing) return { ok: false, out: "fatal: failed" };
-    return { ok: true, out: (outputs[command] ?? []).join("\n") };
+    return {
+      ok: true,
+      out: (outputs[command] ?? []).map((path) => `${path}\0`).join(""),
+    };
   };
 }
 
@@ -291,8 +294,15 @@ describe("what gets searched", () => {
   });
 
   it("D616: a git failure while reading the changeset exits 1", () => {
-    const git = fakeGit({ failing: "diff --cached --name-only --no-renames" });
+    const git = fakeGit({ failing: DIFF_HEAD });
     expect(unbuilt([], git).code).toBe(1);
+  });
+
+  it("D983: a failed changeset read names git's error and the remedy", () => {
+    const git = fakeGit({ failing: DIFF_HEAD });
+    expect(unbuilt([], git).err).toContain(
+      "fatal: failed. Pass the paths instead.",
+    );
   });
 
   it("D622: a directory path with a trailing slash matches the files cited under it", () => {
@@ -335,9 +345,34 @@ describe("what gets searched", () => {
   });
 
   it("D620: a failed tracked-file listing is reported, not silently dropped", () => {
-    const git = fakeGit({ failing: "ls-files" });
+    const git = fakeGit({ failing: TRACKED_LISTING });
     expect(unbuilt(["packages/core/src/evidence.ts"], git).out).toContain(
       "Bare file names were not matched",
+    );
+  });
+
+  it("D958: a failed tracked-file listing's caveat names git's error", () => {
+    const git = fakeGit({ failing: TRACKED_LISTING });
+    expect(unbuilt(["packages/core/src/evidence.ts"], git).out).toContain(
+      "fatal: failed",
+    );
+  });
+
+  it("D959: when no given path could be searched, the report says so rather than clean", () => {
+    const git = fakeGit({ tracked: [...TRACKED, "packages/c/index.ts"] });
+    expect(unbuilt(["index.ts"], git).out).toContain(
+      "unbuilt-work: no path could be searched. Nothing was checked.",
+    );
+  });
+
+  it("D960: a path read from git is searched untrimmed, as the file it names", () => {
+    const git = fakeGit({ untracked: ["packages/core/src/query.ts "] });
+    expect(unbuilt([], git).out).toContain("unbuilt-work: clean.");
+  });
+
+  it("D961: a path passed as an argument is trimmed", () => {
+    expect(unbuilt(["packages/core/src/query.ts "]).out).toContain(
+      "Ticket 1.3 (backlog)",
     );
   });
 });
@@ -362,12 +397,18 @@ describe("exit codes and inputs", () => {
   });
 });
 
-function citing(path: string, citation: string): Result {
+function citing(
+  path: string,
+  citation: string,
+  git: Git = fakeGit(),
+  extra: Files = {},
+): Result {
   const files: Files = {
     "_agent-docs/sprint-status.yaml": "1-5-new-module: backlog\n",
     "_agent-docs/tickets/1-5-new-module.md": `# Ticket 1.5: New module\n\n${citation}\n`,
+    ...extra,
   };
-  return unbuilt([path], fakeGit(), files);
+  return unbuilt([path], git, files);
 }
 
 describe("matching a folder in prose", () => {
@@ -420,6 +461,162 @@ describe("matching a folder in prose", () => {
         "See [store](../../packages/core/src/store/).",
       ).out,
     ).toContain("Ticket 1.5 (backlog)");
+  });
+});
+
+describe("matching a module cited without its extension", () => {
+  it("D962: a module cited by its full path without the extension is reported", () => {
+    expect(
+      citing(
+        "packages/core/src/evidence.ts",
+        "Extends packages/core/src/evidence with a reader.",
+      ).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+
+  it("D963: a module cited by a shorter directory suffix without the extension is reported", () => {
+    expect(
+      citing("packages/core/src/evidence.ts", "Extends core/src/evidence.").out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+
+  it("D964: an extensionless module path followed by a slash names a folder, not the module", () => {
+    expect(
+      citing(
+        "packages/core/src/evidence.ts",
+        "Adds packages/core/src/evidence/ helpers.",
+      ).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D965: an extensionless module path does not match a longer dotted file name", () => {
+    expect(
+      citing(
+        "packages/core/src/evidence.ts",
+        "Edits packages/core/src/evidence.test.ts.",
+      ).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D966: a module's bare name without a directory is not a citation", () => {
+    expect(
+      citing("packages/core/src/evidence.ts", "Extends the evidence module.")
+        .out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D967: a non-module file gets no extensionless citation", () => {
+    expect(
+      citing("docs/guide/intro.md", "See docs/guide/intro for the tour.").out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D968: an .mjs module cited without its extension is reported", () => {
+    expect(
+      citing(
+        "scripts/lib/git.mjs",
+        "Reads the changeset through scripts/lib/git.",
+      ).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+});
+
+const ROOT_SHARED = fakeGit({
+  tracked: [...TRACKED, "package.json", "packages/core/package.json"],
+});
+
+describe("matching a file at the repository root", () => {
+  it("D969: a tracked root file whose name other files share matches its bare name", () => {
+    expect(
+      citing("package.json", "Adds a script to `package.json`.", ROOT_SHARED)
+        .out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+
+  it("D970: a root file matches its name after a relative link", () => {
+    expect(
+      citing(
+        "package.json",
+        "See [the manifest](../../package.json).",
+        ROOT_SHARED,
+      ).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+
+  it("D971: a root file does not match the same name inside a folder", () => {
+    expect(
+      citing(
+        "package.json",
+        "Adds a script to packages/core/package.json.",
+        ROOT_SHARED,
+      ).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D981: a root file's bare name does not match inside a longer name", () => {
+    expect(
+      citing("package.json", "Edits the-package.json.", ROOT_SHARED).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D972: a root file on disk matches its bare name when the tracked listing failed", () => {
+    expect(
+      citing(
+        "package.json",
+        "Adds a script to `package.json`.",
+        fakeGit({ failing: TRACKED_LISTING }),
+        { "package.json": "{}\n" },
+      ).out,
+    ).toContain("Ticket 1.5 (backlog)");
+  });
+});
+
+describe("leaving a ticket out", () => {
+  it("D973: --except drops the ticket's own ticket file", () => {
+    expect(
+      unbuilt(["--except", "1.2", "packages/core/src/evidence.ts"]).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D974: --except drops the ticket's sprint-file section", () => {
+    expect(
+      unbuilt(["--except", "1.3", "packages/core/src/query.ts"]).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D975: --except leaves the other tickets in", () => {
+    expect(
+      unbuilt(["--except", "1.2", "packages/core/src/query.ts"]).out,
+    ).toContain("Ticket 1.3 (backlog)");
+  });
+
+  it("D976: --except can be given more than once", () => {
+    expect(
+      unbuilt([
+        "--except",
+        "1.3",
+        "--except",
+        "1.2",
+        "packages/core/src/query.ts",
+        "packages/core/src/evidence.ts",
+      ]).out,
+    ).toContain("unbuilt-work: clean.");
+  });
+
+  it("D982: --except accepts a lettered ticket id", () => {
+    expect(
+      unbuilt(["--except", "1.2b", "packages/core/src/query.ts"]).code,
+    ).toBe(0);
+  });
+
+  it("D977: --except with no value is a usage error", () => {
+    expect(unbuilt(["--except"]).code).toBe(2);
+  });
+
+  it("D978: --except with a value that is not a ticket id is a usage error", () => {
+    expect(unbuilt(["--except", "1", "packages/core/src/query.ts"]).code).toBe(
+      2,
+    );
   });
 });
 

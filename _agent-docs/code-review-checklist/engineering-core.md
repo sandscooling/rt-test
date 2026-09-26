@@ -24,6 +24,8 @@ C6. **Read each environment variable in one place**: Each environment variable i
 
 C7. **Document a new required setting in the same change**: A new required environment variable, config key or CLI flag is documented where a user sets it up in the same diff, including what failure looks like when it is missing.
 
+C155. **Parse a numeric flag by its written form**: A count or size read from a CLI flag or a config string is matched against a decimal digit pattern before it is converted. FAIL on `Number()` or `parseInt` alone, which accept hex, exponent, padded or trailing-garbage forms (`0x4`, `1e1`, `4`, `4x`).
+
 ## Design
 
 C8. **Answer one question once**: Two expressions in one scope must not answer the same question differently, such as two staleness tests with different windows. When a change corrects a predicate, the enclosing function holds no second spelling of it.

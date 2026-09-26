@@ -1,0 +1,37 @@
+[
+  {
+    "id": "D953",
+    "defect": "Untracked files are listed without -z, so a non-ASCII path arrives git-quoted and names no file.",
+    "file": "scripts/lib/git.mjs",
+    "old": "  \"--full-name\",\n  \"-z\",\n];",
+    "new": "  \"--full-name\",\n];"
+  },
+  {
+    "id": "D954",
+    "defect": "The diff against HEAD is read without -z, so a changed non-ASCII path arrives git-quoted and names no file.",
+    "file": "scripts/lib/git.mjs",
+    "old": "\"--no-renames\", \"-z\", \"HEAD\"",
+    "new": "\"--no-renames\", \"HEAD\""
+  },
+  {
+    "id": "D955",
+    "defect": "Before the first commit the failed diff against HEAD is returned as the changeset, so an unborn repository cannot be searched.",
+    "file": "scripts/lib/git.mjs",
+    "old": "return listed(git, DIFF_STAGED);",
+    "new": "return againstHead;"
+  },
+  {
+    "id": "D956",
+    "defect": "Tracked files are listed without -z, so a non-ASCII path arrives git-quoted and every listed path runs together.",
+    "file": "scripts/lib/git.mjs",
+    "old": "const TRACKED = [\"ls-files\", \"--full-name\", \"-z\"];",
+    "new": "const TRACKED = [\"ls-files\", \"--full-name\"];"
+  },
+  {
+    "id": "D980",
+    "defect": "The diff against HEAD reads only the index, so an unstaged edit to a tracked file is left out of the changeset.",
+    "file": "scripts/lib/git.mjs",
+    "old": "\"-z\", \"HEAD\", \"--\"]",
+    "new": "\"-z\", \"--cached\", \"HEAD\", \"--\"]"
+  }
+]

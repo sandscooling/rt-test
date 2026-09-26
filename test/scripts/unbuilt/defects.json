@@ -80,15 +80,15 @@
     "id": "D611",
     "defect": "Only the full path is a token, so prose citing a shorter directory suffix is missed.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "tokens.push(parts.slice(index).join(\"/\"));",
-    "new": "tokens.push(parts.join(\"/\"));"
+    "old": "suffixes.push(parts.slice(index).join(\"/\"));",
+    "new": "suffixes.push(parts.join(\"/\"));"
   },
   {
     "id": "D612",
     "defect": "A path given with Windows separators is not normalized and matches nothing.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "const slashed = path.trim().replaceAll(\"\\\\\", \"/\");",
-    "new": "const slashed = path.trim();"
+    "old": "const slashed = path.replaceAll(\"\\\\\", \"/\");",
+    "new": "const slashed = path;"
   },
   {
     "id": "D613",
@@ -107,16 +107,16 @@
   {
     "id": "D615",
     "defect": "Untracked files are left out of the changeset read from git.",
-    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "  [\"ls-files\", \"--others\", \"--exclude-standard\"],\n",
-    "new": ""
+    "file": "scripts/lib/git.mjs",
+    "old": "return { paths: [...tracked.paths, ...untracked.paths] };",
+    "new": "return { paths: [...tracked.paths] };"
   },
   {
     "id": "D616",
-    "defect": "A failed git command while reading the changeset is ignored and its error text is searched as paths.",
+    "defect": "A changeset git could not read is taken as an empty changeset, so the run reports nothing to search and exits 0.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "    if (!run.ok) {",
-    "new": "    if (run.ok === undefined) {"
+    "old": "if (changeset.error === undefined) return changeset;",
+    "new": "return { paths: changeset.paths ?? [] };"
   },
   {
     "id": "D617",
@@ -134,17 +134,17 @@
   },
   {
     "id": "D619",
-    "defect": "An unknown flag is taken as a path and searched.",
+    "defect": "An unknown flag is accepted, so the run reads the changeset instead of failing with the usage text.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "arg.startsWith(\"--\"))",
-    "new": "arg.startsWith(\"---\"))"
+    "old": "allowPositionals: true,",
+    "new": "allowPositionals: true, strict: false,"
   },
   {
     "id": "D620",
     "defect": "A failed tracked-file listing drops bare-name matching without saying so.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "if (counts === undefined) {",
-    "new": "if (counts === null) {"
+    "old": "if (trackedError !== undefined) {",
+    "new": "if (trackedError === null) {"
   },
   {
     "id": "D621",
@@ -163,9 +163,9 @@
   {
     "id": "D623",
     "defect": "Staged renames are detected, so git names only the new path and the old path a ticket cites is never searched.",
-    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "[\"diff\", \"--cached\", \"--name-only\", \"--no-renames\"],",
-    "new": "[\"diff\", \"--cached\", \"--name-only\"],"
+    "file": "scripts/lib/git.mjs",
+    "old": "\"--no-renames\", \"-z\", \"HEAD\"",
+    "new": "\"-z\", \"HEAD\""
   },
   {
     "id": "D624",
@@ -248,14 +248,182 @@
     "id": "D881",
     "defect": "A directory argument has its last segment matched as a bare file name, so every pending ticket using that word is reported.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "isDirectory(config.root, path) ? undefined : counts,",
-    "new": "counts,"
+    "old": "tokensFor(path, file ? counts : undefined)",
+    "new": "tokensFor(path, counts)"
   },
   {
     "id": "D882",
     "defect": "No argument gets a bare-name token, so a path that does not exist on disk misses the ticket naming its unique file name.",
     "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
-    "old": "isDirectory(config.root, path) ? undefined : counts,",
-    "new": "undefined,"
+    "old": "tokensFor(path, file ? counts : undefined)",
+    "new": "tokensFor(path, undefined)"
+  },
+  {
+    "id": "D958",
+    "defect": "The failed-listing caveat drops git's error, so the reader cannot tell why bare names went unmatched.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "below the repository root: ${trackedError}, so",
+    "new": "below the repository root: the listing failed, so"
+  },
+  {
+    "id": "D959",
+    "defect": "A run in which no path could be searched reports clean, reading as proof that no pending ticket names the change.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "if (searched === 0) {",
+    "new": "if (searched < 0) {"
+  },
+  {
+    "id": "D960",
+    "defect": "Paths read from git are trimmed, so a file whose name ends in a space is searched as a different file.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const slashed = path.replaceAll(",
+    "new": "const slashed = path.trim().replaceAll("
+  },
+  {
+    "id": "D961",
+    "defect": "Paths passed as arguments are not trimmed, so a pasted path with a trailing space matches nothing.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "return { paths: paths.map((path) => path.trim()) };",
+    "new": "return { paths };"
+  },
+  {
+    "id": "D962",
+    "defect": "A module gets no extensionless citation, so a ticket citing it the way an import names it is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "return stem === path ? [] : directorySuffixes(stem);",
+    "new": "return [];"
+  },
+  {
+    "id": "D963",
+    "defect": "Only the full extensionless path is a module citation, so a shorter directory suffix such as core/src/index is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": ": directorySuffixes(stem);",
+    "new": ": [stem];"
+  },
+  {
+    "id": "D964",
+    "defect": "An extensionless module citation followed by a slash matches, so a folder of the same name reads as the module.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const endsModule = (line, end) => endsName(line, end) && line[end] !== \"/\";",
+    "new": "const endsModule = (line, end) => endsName(line, end);"
+  },
+  {
+    "id": "D965",
+    "defect": "A match ending at a dot followed by a name character is accepted, so the module matches a longer dotted file name such as its test file.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "return !(next === \".\" && NAME_CHAR.test(line[end + 1] ?? \"\"));",
+    "new": "return true;"
+  },
+  {
+    "id": "D966",
+    "defect": "A module's bare stem is a citation, so every ticket using that word is reported.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": ": directorySuffixes(stem);",
+    "new": ": [...directorySuffixes(stem), stem.split(\"/\").at(-1)];"
+  },
+  {
+    "id": "D967",
+    "defect": "Every extension counts as a module extension, so a Markdown file matches prose citing its extensionless path.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const MODULE_EXTENSION = /\\.(?:tsx|[cm]?[jt]s)$/;",
+    "new": "const MODULE_EXTENSION = /\\.[a-z]+$/;"
+  },
+  {
+    "id": "D968",
+    "defect": "Only TypeScript extensions count as module extensions, so an .mjs script cited without its extension is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const MODULE_EXTENSION = /\\.(?:tsx|[cm]?[jt]s)$/;",
+    "new": "const MODULE_EXTENSION = /\\.(?:tsx|[cm]?ts)$/;"
+  },
+  {
+    "id": "D969",
+    "defect": "The tracked listing does not mark root files, so a root file whose name other files share, and which is absent from disk, matches nothing.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "rootFiles: new Set(tracked.paths.filter((path) => !path.includes(\"/\"))),",
+    "new": "rootFiles: new Set(),"
+  },
+  {
+    "id": "D970",
+    "defect": "Any slash before a root file's name blocks it, so a relative link such as ../../package.json is missed.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "(line[at - 1] !== \"/\" || line.slice(0, at).endsWith(RELATIVE_LINK_END));",
+    "new": "line[at - 1] !== \"/\";"
+  },
+  {
+    "id": "D971",
+    "defect": "A root file's bare name matches after a folder, so packages/core/package.json reads as the root package.json.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "rootNames.some((name) => cites(line, name, endsName, startsRootName));",
+    "new": "rootNames.some((name) => cites(line, name, endsName));"
+  },
+  {
+    "id": "D972",
+    "defect": "A root file counts only when the tracked listing names it, so a failed listing hides every root file.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "(rootFiles.has(path) || statOf(root, path)?.isFile() === true);",
+    "new": "rootFiles.has(path);"
+  },
+  {
+    "id": "D973",
+    "defect": "--except drops only sprint-file sections, so the ticket still lists itself through its own ticket file.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "(unit) => !except.has(unit.id))",
+    "new": "(unit) => !except.has(unit.id) || unit.offset === 0)"
+  },
+  {
+    "id": "D974",
+    "defect": "--except drops only the ticket file, so the ticket still lists itself through its sprint-file section.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "(unit) => !except.has(unit.id))",
+    "new": "(unit) => !except.has(unit.id) || unit.offset > 0)"
+  },
+  {
+    "id": "D975",
+    "defect": "Any --except drops every ticket, so the run reports clean over real pending work.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "(unit) => !except.has(unit.id))",
+    "new": "(unit) => except.size === 0)"
+  },
+  {
+    "id": "D976",
+    "defect": "Only the last --except is kept, so an earlier excepted ticket is still reported.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "except: new Set(values.except) };",
+    "new": "except: new Set(values.except.slice(-1)) };"
+  },
+  {
+    "id": "D977",
+    "defect": "An argument parse error is swallowed, so --except with no value reads the changeset and exits 0.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "return { error: error.message };",
+    "new": "return { paths: [], except: new Set() };"
+  },
+  {
+    "id": "D978",
+    "defect": "--except accepts any value, so a mistyped ticket id silently excepts nothing.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const bad = values.except.find((id) => !TICKET_ID.test(id));",
+    "new": "const bad = undefined;"
+  },
+  {
+    "id": "D981",
+    "defect": "A root file's bare name skips the start boundary, so the root package.json is reported for the-package.json.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "  startsName(line, at) &&\n  (line[at - 1] !== \"/\"",
+    "new": "  true &&\n  (line[at - 1] !== \"/\""
+  },
+  {
+    "id": "D982",
+    "defect": "A lettered ticket id is refused by --except, so --except 1.2b exits 2.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "const TICKET_ID = /^[1-9]\\d*\\.[1-9]\\d*[a-z]?$/;",
+    "new": "const TICKET_ID = /^[1-9]\\d*\\.[1-9]\\d*$/;"
+  },
+  {
+    "id": "D983",
+    "defect": "A failed changeset read drops git's error from its message, leaving no clue why the run stopped.",
+    "file": "scripts/lib/unbuilt/unbuilt-work.mjs",
+    "old": "cannot read the changeset with ${changeset.error}. Pass the paths instead.",
+    "new": "cannot read the changeset. Pass the paths instead."
   }
 ]

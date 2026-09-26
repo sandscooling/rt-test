@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { changedPaths } from "../git.mjs";
 import { SANDBOX_DIRS, SANDBOX_FILES } from "./catalog.mjs";
 import { importClosures } from "./imports.mjs";
 
@@ -6,30 +7,14 @@ const ROOT_INPUTS = new Set(["vitest.config.ts", "package.json", "bun.lock"]);
 const DECLARATION = /\.d\.m?ts$/;
 const RECORDS = "defects.json";
 
-const paths = (out) => out.split("\0").filter(Boolean);
-
-export function changedPaths(git) {
-  const tracked = git([
-    "diff",
-    "--name-only",
-    "--no-renames",
-    "-z",
-    "HEAD",
-    "--",
-  ]);
-  const untracked = git([
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "--full-name",
-    "-z",
-  ]);
-  if (!tracked.ok || !untracked.ok) {
+export function requireChangeset(git) {
+  const changeset = changedPaths(git);
+  if (changeset.error !== undefined) {
     throw new Error(
-      `--changed needs git to compare with HEAD: ${tracked.out || untracked.out}`,
+      `--changed needs git to compare with HEAD: ${changeset.error}`,
     );
   }
-  return new Set([...paths(tracked.out), ...paths(untracked.out)]);
+  return new Set(changeset.paths);
 }
 
 const recordText = ({ id, defect, file, old, new: replacement }) =>

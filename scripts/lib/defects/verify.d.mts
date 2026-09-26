@@ -1,4 +1,4 @@
-import type { Git } from "../unbuilt/unbuilt-work.mjs";
+import type { Git } from "../git.mjs";
 import type { RunTests } from "./vitest.mjs";
 
 export interface Options {

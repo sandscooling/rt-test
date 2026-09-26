@@ -1,16 +1,18 @@
-import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+import { parseArgs } from "node:util";
 import { fenceKinds } from "../fences.mjs";
+import { changedPaths, gitIn, trackedPaths } from "../git.mjs";
 import { display, planningFiles, readText } from "../planning/files.mjs";
 import { readStatus } from "../planning/status.mjs";
 import { result } from "../standards/result.mjs";
 
 export const USAGE = [
-  "Usage: list-unbuilt-work.mjs [<path>...]",
+  "Usage: list-unbuilt-work.mjs [--except <ticket id>]... [<path>...]",
   "  Lists each ticket not done whose ticket file or sprint-file section names one of the paths,",
   "  or a folder at least two segments deep that holds one.",
-  "  With no paths, reads the changeset from git: unstaged, staged and untracked files.",
+  "  --except leaves out a ticket, such as the one being written, built or reviewed.",
+  "  With no paths, reads the changeset from git: changes against HEAD, staged or not, and untracked files.",
 ].join("\n");
 
 const PROG = "list-unbuilt-work";
@@ -21,56 +23,48 @@ const TICKET_FILE =
   /^([1-9]\d*)-([1-9]\d*[a-z]?)-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 const SPRINT_FILE = /^sprint-([1-9]\d*)-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 const TICKET_HEADING = /^## Ticket ([1-9]\d*\.[1-9]\d*[a-z]?): /;
+const TICKET_ID = /^[1-9]\d*\.[1-9]\d*[a-z]?$/;
 const NAME_CHAR = /[A-Za-z0-9_$-]/;
 const CHAR_BEFORE_NAME = /[A-Za-z0-9_$.-]/;
+const MODULE_EXTENSION = /\.(?:tsx|[cm]?[jt]s)$/;
+const RELATIVE_LINK_END = "./";
 const MIN_FOLDER_SEGMENTS = 2;
 const SHOWN_LINES = 4;
-const GIT_BUFFER_BYTES = 64 * 1024 * 1024;
-const CHANGESET_COMMANDS = [
-  ["diff", "--name-only", "--no-renames"],
-  ["diff", "--cached", "--name-only", "--no-renames"],
-  ["ls-files", "--others", "--exclude-standard"],
-];
 
-export function gitIn(root) {
-  return (args) => {
-    const run = spawnSync("git", args, {
-      cwd: root,
-      encoding: "utf8",
-      maxBuffer: GIT_BUFFER_BYTES,
+function parseArgv(argv) {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      options: { except: { type: "string", multiple: true, default: [] } },
+      allowPositionals: true,
     });
-    if (run.status === 0) return { ok: true, out: run.stdout };
-    return { ok: false, out: run.stderr || run.error?.message || "" };
-  };
+  } catch (error) {
+    return { error: error.message };
+  }
+  const { values, positionals } = parsed;
+  const bad = values.except.find((id) => !TICKET_ID.test(id));
+  if (bad !== undefined) {
+    return { error: `--except takes a ticket id such as 1.2, not ${bad}` };
+  }
+  return { paths: positionals, except: new Set(values.except) };
 }
 
-const nonBlank = (text) =>
-  text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
 function normalize(config, path) {
-  const slashed = path.trim().replaceAll("\\", "/");
+  const slashed = path.replaceAll("\\", "/");
   const rooted = isAbsolute(slashed)
     ? relative(config.root, slashed).replaceAll("\\", "/")
     : slashed;
   return rooted.replace(/^\.\//, "").replace(/\/+$/, "");
 }
 
-function changedPaths(argv, git) {
-  if (argv.length > 0) return { paths: argv };
-  const paths = [];
-  for (const args of CHANGESET_COMMANDS) {
-    const run = git(args);
-    if (!run.ok) {
-      return {
-        error: `cannot read the changeset with git ${args.join(" ")}: ${run.out.trim()}. Pass the paths instead.`,
-      };
-    }
-    paths.push(...nonBlank(run.out));
-  }
-  return { paths };
+function searchedPaths(paths, git) {
+  if (paths.length > 0) return { paths: paths.map((path) => path.trim()) };
+  const changeset = changedPaths(git);
+  if (changeset.error === undefined) return changeset;
+  return {
+    error: `cannot read the changeset with ${changeset.error}. Pass the paths instead.`,
+  };
 }
 
 // The planning files are where unbuilt work lives, so one citing another is
@@ -85,37 +79,83 @@ function isPlanningPath(config, path) {
   );
 }
 
-function basenameCounts(git) {
-  const run = git(["ls-files"]);
-  if (!run.ok) return undefined;
+function basenameCounts(tracked) {
   const counts = new Map();
-  for (const path of nonBlank(run.out)) {
+  for (const path of tracked) {
     const name = path.split("/").at(-1);
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   return counts;
 }
 
+function directorySuffixes(path) {
+  const parts = path.split("/");
+  const suffixes = [];
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    suffixes.push(parts.slice(index).join("/"));
+  }
+  return suffixes;
+}
+
 // Every suffix that keeps a directory, plus the bare file name when no other
 // tracked file shares it: planning prose often cites a file by name alone.
 function tokensFor(path, counts) {
-  const parts = path.split("/");
-  const tokens = [];
-  for (let index = 0; index < parts.length - 1; index += 1) {
-    tokens.push(parts.slice(index).join("/"));
-  }
-  const name = parts.at(-1);
+  const tokens = directorySuffixes(path);
+  const name = path.split("/").at(-1);
   if (name !== "" && counts !== undefined && (counts.get(name) ?? 0) <= 1)
     tokens.push(name);
   return tokens;
 }
 
+// Prose cites a module the way an import names it, without its extension.
+function moduleTokensFor(path) {
+  const stem = path.replace(MODULE_EXTENSION, "");
+  return stem === path ? [] : directorySuffixes(stem);
+}
+
+const statOf = (root, path) =>
+  statSync(join(root, path), { throwIfNoEntry: false });
+
 // A folder's name is never a file's, so the basename counts cannot vouch for it.
-const isDirectory = (root, path) =>
-  statSync(join(root, path), { throwIfNoEntry: false })?.isDirectory() === true;
+const isDirectory = (root, path) => statOf(root, path)?.isDirectory() === true;
+
+const isRootFile = (root, path, rootFiles) =>
+  !path.includes("/") &&
+  (rootFiles.has(path) || statOf(root, path)?.isFile() === true);
+
+function searchFor(config, path, { counts, rootFiles }) {
+  const file = !isDirectory(config.root, path);
+  return {
+    path,
+    tokens: tokensFor(path, file ? counts : undefined),
+    modules: file ? moduleTokensFor(path) : [],
+    rootNames: file && isRootFile(config.root, path, rootFiles) ? [path] : [],
+    folders: foldersFor(path),
+  };
+}
+
+function trackedIndex(git) {
+  const tracked = trackedPaths(git);
+  if (tracked.error !== undefined) {
+    return { error: tracked.error, counts: undefined, rootFiles: new Set() };
+  }
+  return {
+    counts: basenameCounts(tracked.paths),
+    rootFiles: new Set(tracked.paths.filter((path) => !path.includes("/"))),
+  };
+}
+
+const isSearchable = ({ tokens, modules, rootNames }) =>
+  tokens.length + modules.length + rootNames.length > 0;
 
 const startsName = (line, at) =>
   at === 0 || !CHAR_BEFORE_NAME.test(line[at - 1]);
+
+// After a "/" a root file's name is another folder's file of that name,
+// unless the "/" ends a relative link such as "../".
+const startsRootName = (line, at) =>
+  startsName(line, at) &&
+  (line[at - 1] !== "/" || line.slice(0, at).endsWith(RELATIVE_LINK_END));
 
 function endsName(line, end) {
   if (end === line.length) return true;
@@ -139,19 +179,24 @@ const endsFolder = (line, end) =>
   endsName(line, end) &&
   !(line[end] === "/" && NAME_CHAR.test(line[end + 1] ?? ""));
 
-function cites(line, token, ends) {
+// A module cited without its extension followed by "/" names a folder.
+const endsModule = (line, end) => endsName(line, end) && line[end] !== "/";
+
+function cites(line, token, ends, starts = startsName) {
   for (
     let at = line.indexOf(token);
     at !== -1;
     at = line.indexOf(token, at + 1)
   ) {
-    if (startsName(line, at) && ends(line, at + token.length)) return true;
+    if (starts(line, at) && ends(line, at + token.length)) return true;
   }
   return false;
 }
 
-const citesFile = (line, { tokens }) =>
-  tokens.some((token) => cites(line, token, endsName));
+const citesFile = (line, { tokens, modules, rootNames }) =>
+  tokens.some((token) => cites(line, token, endsName)) ||
+  modules.some((token) => cites(line, token, endsModule)) ||
+  rootNames.some((name) => cites(line, name, endsName, startsRootName));
 
 const citesFolder = (line, search) =>
   !citesFile(line, search) &&
@@ -272,6 +317,9 @@ function shown(lines) {
 }
 
 function hitLines(hits, searched) {
+  if (searched === 0) {
+    return ["unbuilt-work: no path could be searched. Nothing was checked."];
+  }
   if (hits.size === 0) {
     return [
       `unbuilt-work: clean. No unbuilt ticket names any of ${searched} path(s).`,
@@ -294,29 +342,37 @@ function hitLines(hits, searched) {
   return out;
 }
 
-function caveatLines(unsearchable, counts) {
+function caveatLines(unsearchable, trackedError) {
   const out = [];
-  if (counts === undefined) {
+  if (trackedError !== undefined) {
     out.push(
       "",
-      "Bare file names were not matched: git ls-files failed, so no name could be shown to be unique.",
+      `Bare file names were not matched below the repository root: ${trackedError}, so no name could be shown to be unique.`,
     );
   }
   if (unsearchable.length > 0) {
     out.push(
       "",
-      `NOT SEARCHED: ${unsearchable.join(", ")}. A bare file name matches nothing unless it is unique among tracked files; pass the repo-relative path.`,
+      `NOT SEARCHED: ${unsearchable.join(", ")}. A bare file name matches nothing unless it is unique among tracked files or names a file at the repository root; pass the repo-relative path.`,
     );
   }
   return out;
 }
 
+function unitsToScan(config, except) {
+  const status = readStatus(config);
+  return [
+    ...ticketUnits(config, status),
+    ...sprintUnits(config, status),
+  ].filter((unit) => !except.has(unit.id));
+}
+
 export function listUnbuiltWork(config, argv, git = gitIn(config.root)) {
-  const flag = argv.find((arg) => arg.startsWith("--"));
-  if (flag !== undefined) {
-    return result(2, [], [`${PROG}: unknown flag ${flag}`, USAGE]);
+  const args = parseArgv(argv);
+  if (args.error !== undefined) {
+    return result(2, [], [`${PROG}: ${args.error}`, USAGE]);
   }
-  const changed = changedPaths(argv, git);
+  const changed = searchedPaths(args.paths, git);
   if (changed.error !== undefined) {
     return result(1, [], [`${PROG}: ${changed.error}`]);
   }
@@ -328,29 +384,18 @@ export function listUnbuiltWork(config, argv, git = gitIn(config.root)) {
       "unbuilt-work: no changed path outside the planning files. Nothing to search.",
     ]);
   }
-  const counts = basenameCounts(git);
-  const searches = paths.map((path) => ({
-    path,
-    tokens: tokensFor(
-      path,
-      isDirectory(config.root, path) ? undefined : counts,
-    ),
-    folders: foldersFor(path),
-  }));
-  const searchable = searches.filter(({ tokens }) => tokens.length > 0);
+  const index = trackedIndex(git);
+  const searches = paths.map((path) => searchFor(config, path, index));
+  const searchable = searches.filter(isSearchable);
   const unsearchable = searches
-    .filter(({ tokens }) => tokens.length === 0)
+    .filter((search) => !isSearchable(search))
     .map(({ path }) => path);
-  const status = readStatus(config);
   const hits = new Map();
-  for (const unit of [
-    ...ticketUnits(config, status),
-    ...sprintUnits(config, status),
-  ]) {
+  for (const unit of unitsToScan(config, args.except)) {
     scan(hits, unit, searchable);
   }
   return result(0, [
     ...hitLines(hits, searchable.length),
-    ...caveatLines(unsearchable, counts),
+    ...caveatLines(unsearchable, index.error),
   ]);
 }

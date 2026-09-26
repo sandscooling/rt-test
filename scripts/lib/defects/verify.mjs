@@ -2,13 +2,24 @@ import { createHash } from "node:crypto";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { gitIn } from "../unbuilt/unbuilt-work.mjs";
+import { gitIn } from "../git.mjs";
 import { loadCatalog, snapshotFiles } from "./catalog.mjs";
-import { changedPaths, headRecordsIn, selectChanged } from "./changed.mjs";
+import { headRecordsIn, requireChangeset, selectChanged } from "./changed.mjs";
 import { treeDifference, verifyInSandboxes } from "./pool.mjs";
 import { createVitestRunner, testFilesOf } from "./vitest.mjs";
 
-export const defaultJobs = (cores) => Math.max(1, Math.floor((cores * 3) / 4));
+const MIN_JOBS = 1;
+const SHARE_OF_CORES = 3 / 4;
+const DECIMAL_DIGITS = /^\d+$/;
+const SCRATCH_DIR = "_agent-docs/.scratch";
+
+export const defaultJobs = (cores) =>
+  Math.max(MIN_JOBS, Math.floor(cores * SHARE_OF_CORES));
+
+function jobsFrom(text, cores) {
+  if (text === undefined) return defaultJobs(cores);
+  return DECIMAL_DIGITS.test(text) ? Number(text) : Number.NaN;
+}
 
 export function parseOptions(argv, cores) {
   const { values } = parseArgs({
@@ -18,10 +29,11 @@ export function parseOptions(argv, cores) {
       jobs: { type: "string" },
     },
   });
-  const jobs =
-    values.jobs === undefined ? defaultJobs(cores) : Number(values.jobs);
-  if (!Number.isInteger(jobs) || jobs < 1) {
-    throw new Error("--jobs takes a whole number of sandboxes, at least 1.");
+  const jobs = jobsFrom(values.jobs, cores);
+  if (!Number.isInteger(jobs) || jobs < MIN_JOBS) {
+    throw new Error(
+      `--jobs takes a whole number of sandboxes, at least ${MIN_JOBS}.`,
+    );
   }
   return { changed: values.changed, jobs };
 }
@@ -29,7 +41,7 @@ export function parseOptions(argv, cores) {
 function pickChanged(catalog, git, log) {
   const { picks, unattributed } = selectChanged(
     catalog,
-    changedPaths(git),
+    requireChangeset(git),
     headRecordsIn(git),
   );
   if (unattributed.length) {
@@ -111,7 +123,7 @@ export async function runVerification({
     selected,
     jobs: options.jobs,
     runTests,
-    scratch: join(root, "_agent-docs/.scratch"),
+    scratch: join(root, SCRATCH_DIR),
     log,
   });
   assertLiveUnchanged(root, catalog, log);
