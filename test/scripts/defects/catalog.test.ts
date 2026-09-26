@@ -7,6 +7,7 @@ import {
   CALC_TEST,
   filesOf,
   OTHER,
+  OTHER_TEST,
   TREE,
   withScratch,
   writeRoot,
@@ -25,6 +26,16 @@ describe("the defect catalog", () => {
       [OTHER]: "export const three = 3;\n// three = 3\n",
     };
     expect(() => buildCatalog(filesOf(tree))).toThrow(/exactly once/);
+  });
+
+  it("D950: rejects an id that two tests and two records share", () => {
+    const [record] = JSON.parse(TREE["test/other/defects.json"]!);
+    const tree = {
+      ...TREE,
+      [OTHER_TEST]: TREE[OTHER_TEST]!.repeat(2),
+      "test/other/defects.json": JSON.stringify([record, record]),
+    };
+    expect(() => buildCatalog(filesOf(tree))).toThrow(/exactly one named/);
   });
 
   it("D902: rejects a record whose mutated file the sandbox does not copy", () => {

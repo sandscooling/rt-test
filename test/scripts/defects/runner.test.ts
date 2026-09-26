@@ -80,6 +80,18 @@ describe("the Vitest runner", () => {
     expect(detectionProblem(run, SANDBOX, defect("D1"))).not.toBeNull();
   });
 
+  it("D952: rejects a named failure raised by node:assert rather than an expectation", () => {
+    const nodeAssert = test(
+      "D1",
+      "failed",
+      "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal",
+    );
+    const run = result(1, {
+      [CALC_TEST]: [nodeAssert, test("D2", "skipped")],
+    });
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).not.toBeNull();
+  });
+
   it("D909: rejects a baseline where an extra pass hides a skipped named test", () => {
     const { defects } = catalogOf();
     const run = result(0, {
