@@ -1,0 +1,352 @@
+[
+  {
+    "id": "D900",
+    "defect": "A named test without a record passes the catalog, so its evidence is never demanded.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "[...testIds].sort().join() !== [...defectIds].sort().join()",
+    "new": "false"
+  },
+  {
+    "id": "D901",
+    "defect": "An anchor that matches twice is accepted, so the mutation lands on whichever copy comes first.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".split(record.old).length !== 2",
+    "new": ".split(record.old).length < 2"
+  },
+  {
+    "id": "D902",
+    "defect": "A record naming a file the sandbox never copies is accepted and fails later without naming the record.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "if (!files.has(record.file)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D903",
+    "defect": "The snapshot leaves out the root files, so tests reading the flow config fail in every sandbox.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "return [...nested, ...SANDBOX_FILES].sort();",
+    "new": "return nested.sort();"
+  },
+  {
+    "id": "D904",
+    "defect": "Dependency directories enter the snapshot and every sandbox.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": ".some((part) => SKIPPED_DIRS.has(part));",
+    "new": ".some((part) => part === \"dist\");"
+  },
+  {
+    "id": "D905",
+    "defect": "A scoped run filters by the relative test path, which Vitest also matches inside longer paths.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "args.push(join(sandbox, file));",
+    "new": "args.push(file);"
+  },
+  {
+    "id": "D906",
+    "defect": "The title filter drops the colon, so D1 also selects D10 through D19.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "args.push(\"-t\", `${pattern}:`);",
+    "new": "args.push(\"-t\", pattern);"
+  },
+  {
+    "id": "D907",
+    "defect": "A detection run that collected another test file besides the named one is accepted.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (reportedFiles(report, sandbox).join() !== defect.test) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D908",
+    "defect": "Any error counts as a detection, so a timed-out named test passes as caught.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "message.includes(\"AssertionError\")",
+    "new": "message.includes(\"Error\")"
+  },
+  {
+    "id": "D909",
+    "defect": "The baseline counts passes without naming them, so an extra pass hides a skipped named test.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "[...passed].sort().join() !== [...ids].sort().join()",
+    "new": "false"
+  },
+  {
+    "id": "D910",
+    "defect": "A baseline that collected a file outside its scope is accepted.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (files && reportedFiles(report, sandbox).join() !== files.join()) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D911",
+    "defect": "A stale report from the sandbox's previous run is read as the current run's result.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "rmSync(report, { force: true });",
+    "new": ""
+  },
+  {
+    "id": "D912",
+    "defect": "Every worker shares one sandbox, so two defects on one file overwrite each other's mutation.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "sandbox: join(run, `sandbox-${index}`),",
+    "new": "sandbox: join(run, \"sandbox-0\"),"
+  },
+  {
+    "id": "D913",
+    "defect": "A sandbox that differs from the snapshot, before or after its mutations, is never caught.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "const changed = treeDifference(ctx.files, readTree(slot.sandbox));",
+    "new": "const changed = null;"
+  },
+  {
+    "id": "D914",
+    "defect": "A red baseline before any mutation is ignored, so its failing tests count as detections.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "if (before) throw new Error(`before any mutation: ${before}.`);",
+    "new": "void before;"
+  },
+  {
+    "id": "D915",
+    "defect": "The baseline after the mutations is skipped, so state a mutation leaves behind goes unseen.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "const after = await checkBaseline(ctx, slots[0]);",
+    "new": "const after = null;"
+  },
+  {
+    "id": "D916",
+    "defect": "The run succeeds on detections alone, ignoring a sandbox that failed.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "ok: ctx.failures.length === 0 && undetected.length === 0,",
+    "new": "ok: undetected.length === 0,"
+  },
+  {
+    "id": "D917",
+    "defect": "A failing sandbox swallows its error, so a parallel run reports success once the others finish.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "ctx.stopped = true;\n    ctx.failures.push(error.message);",
+    "new": "ctx.stopped = true;\n    void error;"
+  },
+  {
+    "id": "D918",
+    "defect": "One sandbox starts per defect, ignoring the job count.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "Math.max(1, Math.min(jobs, selected.length))",
+    "new": "Math.max(1, selected.length)"
+  },
+  {
+    "id": "D919",
+    "defect": "The sandboxes are left in the scratch directory when the run ends.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "rmSync(run, { recursive: true, force: true });",
+    "new": "void run;"
+  },
+  {
+    "id": "D920",
+    "defect": "The tree comparison checks only that each file exists, so an unrestored mutation passes.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "if (!actual.get(path)?.equals(content)) return path;",
+    "new": "if (!actual.has(path)) return path;"
+  },
+  {
+    "id": "D921",
+    "defect": "The tree comparison ignores files that appeared.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "return [...actual.keys()].find((path) => !expected.has(path)) ?? null;",
+    "new": "return null;"
+  },
+  {
+    "id": "D922",
+    "defect": "--changed skips a defect whose test file changed.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (changed.has(defect.test)) reasons.push",
+    "new": "if (false) reasons.push"
+  },
+  {
+    "id": "D923",
+    "defect": "--changed skips a defect whose mutated file changed.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (changed.has(defect.file)) reasons.push",
+    "new": "if (false) reasons.push"
+  },
+  {
+    "id": "D924",
+    "defect": "A record whose mutation text changed compares equal to HEAD, so --changed skips it.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "JSON.stringify({ id, defect, file, old, new: replacement })",
+    "new": "JSON.stringify({ id, defect, file })"
+  },
+  {
+    "id": "D925",
+    "defect": "--changed ignores untracked files, so a new test file is never verified.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "return new Set([...paths(tracked.out), ...paths(untracked.out)]);",
+    "new": "return new Set(paths(tracked.out));"
+  },
+  {
+    "id": "D926",
+    "defect": "A failed untracked-file listing is read as none, narrowing the selection instead of stopping.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (!tracked.ok || !untracked.ok) {",
+    "new": "if (!tracked.ok) {"
+  },
+  {
+    "id": "D927",
+    "defect": "--changed skips the defects whose test imports a changed helper from another folder.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (imported.some((path) => changed.has(path))) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D928",
+    "defect": "--changed diffs against the index, so a staged change is missed.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "    \"HEAD\",\n",
+    "new": ""
+  },
+  {
+    "id": "D929",
+    "defect": "A job count of zero is accepted instead of refused.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "jobs < 1",
+    "new": "jobs < 0"
+  },
+  {
+    "id": "D930",
+    "defect": "The default job count exceeds the cores.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "Math.floor((cores * 3) / 4)",
+    "new": "cores * 2"
+  },
+  {
+    "id": "D931",
+    "defect": "The default job count is zero on a single core.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "Math.max(1, Math.floor((cores * 3) / 4))",
+    "new": "Math.max(0, Math.floor((cores * 3) / 4))"
+  },
+  {
+    "id": "D932",
+    "defect": "A --changed baseline expects only the selected tests, so an unchanged test in the same file fails it.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "baseline: catalog.defects.filter((defect) => files.has(defect.test)),",
+    "new": "baseline: selected,"
+  },
+  {
+    "id": "D933",
+    "defect": "A working file edited during verification goes unreported.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "const changed = treeDifference(catalog.files, snapshotFiles(root));",
+    "new": "const changed = null;"
+  },
+  {
+    "id": "D934",
+    "defect": "A verification with a surviving mutation exits zero.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "return result.ok ? 0 : 1;",
+    "new": "return 0;"
+  },
+  {
+    "id": "D935",
+    "defect": "A full run's baseline covers only files with named tests, so a passing test file with no named test goes unseen.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "baselineFiles: options.changed ? [...files] : undefined,",
+    "new": "baselineFiles: [...files],"
+  },
+  {
+    "id": "D936",
+    "defect": "A tree with no named defect exits zero as if verified.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (catalog.defects.length === 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D937",
+    "defect": "A file a run leaves under a sandbox's dist/ passes the byte comparison.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": ".filter((file) => !VITEST_RESULTS_CACHE.test(file))",
+    "new": ".filter((file) => !/(^|\\/)(node_modules|dist)\\//.test(file))"
+  },
+  {
+    "id": "D938",
+    "defect": "Vitest's own results cache fails a clean sandbox.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": ".filter((file) => !VITEST_RESULTS_CACHE.test(file))\n",
+    "new": ""
+  },
+  {
+    "id": "D939",
+    "defect": "A staged move lists only its destination, so defects importing the old path are skipped.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "    \"--no-renames\",\n",
+    "new": ""
+  },
+  {
+    "id": "D940",
+    "defect": "A changed input that no import reaches selects nothing instead of every defect.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (unattributed.length) reasons.push(\"a change no import explains\");",
+    "new": "if (false) reasons.push(\"a change no import explains\");"
+  },
+  {
+    "id": "D941",
+    "defect": "A changed type declaration widens --changed to every defect.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "!DECLARATION.test(path) &&",
+    "new": ""
+  },
+  {
+    "id": "D942",
+    "defect": "A changed path outside the verifier's inputs widens --changed to every defect.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "files.has(path) ||",
+    "new": "true ||"
+  },
+  {
+    "id": "D943",
+    "defect": "A .js specifier naming a .ts source is left unresolved, so its changes go unattributed.",
+    "file": "scripts/lib/defects/imports.mjs",
+    "old": "[\".js\", \".ts\"],",
+    "new": "[\".js\", \".js\"],"
+  },
+  {
+    "id": "D944",
+    "defect": "The import closure stops at direct imports, so a change two imports deep is missed.",
+    "file": "scripts/lib/defects/imports.mjs",
+    "old": "pending.push(next);",
+    "new": ""
+  },
+  {
+    "id": "D945",
+    "defect": "A run that threw counts as a detection.",
+    "file": "scripts/lib/defects/pool.mjs",
+    "old": "return error.message;",
+    "new": "return null;"
+  },
+  {
+    "id": "D946",
+    "defect": "A run whose only failure is a different test counts as the named detection.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "!target?.title.startsWith(`${defect.id}:`) ||",
+    "new": ""
+  },
+  {
+    "id": "D947",
+    "defect": "A run where the named test fails while another passes counts as a detection.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "report.numPassedTests !== 0 ||",
+    "new": ""
+  },
+  {
+    "id": "D948",
+    "defect": "A baseline whose named tests pass while Vitest exits nonzero is accepted.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "status !== 0 ||",
+    "new": ""
+  },
+  {
+    "id": "D949",
+    "defect": "A named assertion failure from a run that did not exit 1 counts as a detection.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "status !== 1 ||",
+    "new": ""
+  }
+]

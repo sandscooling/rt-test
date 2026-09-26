@@ -23,6 +23,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:defects": "node scripts/verify-defects.mjs",
+    "test:defects:changed": "node scripts/verify-defects.mjs --changed",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "oxlint",
