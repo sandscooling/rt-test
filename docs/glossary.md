@@ -34,6 +34,14 @@ _Avoid_: job, pass
 A run whose inputs changed while it ran, so none of its results become current.
 _Avoid_: cancelled run
 
+**Interrupted run**:
+A run stopped before it finished, so each test it had not finished gets no outcome from it.
+_Avoid_: cancelled run, aborted run
+
+**Crashed module**:
+A test module whose worker exited during a run, so none of its tests gets an outcome from that run.
+_Avoid_: failed module
+
 **Outcome**:
 What a test did in its last run: passed, failed, skipped, error, or never run.
 _Avoid_: result, status

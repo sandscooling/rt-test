@@ -12,14 +12,7 @@ Scope: find every Vitest workspace of a consumer, load each one's own Vitest 4.1
 
 ## Ticket 1.1b: Record Vitest run states
 
-Scope: run a Vitest workspace and record each test's outcome, skips, collection and module errors, unhandled run-level errors, and interruptions as distinct states, on Vitest 4.1.x and 5.x. Requirements: FR2.
-
-- A run records each test's outcome under the test identity ticket 1.1 defines, with a skipped test (skip, todo, or skipped at run time) distinct from a passed or failed one.
-- A module whose file or setup fails before its tests run is recorded with its error, and its tests are never recorded as passed.
-- An error no test owns is recorded on the run, apart from every test outcome.
-- An interrupted run is recorded as interrupted, and a test it never finished is never recorded as passed or at an earlier outcome.
-- A typecheck module or a browser-mode project, which ticket 1.1 reports as not discovered or unsupported, yields no test outcome.
-- A run sets `NODE_ENV` to `test` and saves and restores the host's env and exit code as discovery does, and never overlaps a discovery.
+Scope: run a Vitest workspace and record each test's outcome, skips, collection and module errors, unhandled run-level errors, worker crashes, and interruptions as distinct states, on Vitest 4.1.x and 5.x. Requirements: FR2. Ticket file: [1-1b-record-run-states](../tickets/1-1b-record-run-states.md)
 
 Ticket 1.1 was estimated at 40 files against the 20-file limit, so it was split by requirement: 1.1 delivers FR1's discovery and identity, and 1.1b delivers FR2's run states on top of them. 1.1b therefore follows 1.1 and reuses its workspace loading, version gate, and identity. Neither part's files are named by another unbuilt ticket; ticket 1.2 persists what 1.1b records.
 
@@ -31,7 +24,7 @@ Scope: store runs and results in `node:sqlite` bound to project, worktree, run i
 
 Scope: start and stop the daemon explicitly for one trusted project, executing no project code before that start, and serve a versioned, framed local protocol bound to loopback or a local socket. Requirements: FR4, NFR4.
 
-Ticket 1.1's test discovery executes project code, so this ticket's start is its only production caller: the daemon discovers tests only after the explicit start of a trusted project. Discovery runs each workspace's Vitest `globalSetup`, as `vitest list` does, so the start's trust prompt covers that setup code as well as config loading (owner ruling 2026-09-26).
+Ticket 1.1's test discovery executes project code, so this ticket's start is its only production caller: the daemon discovers tests only after the explicit start of a trusted project. Discovery runs each workspace's Vitest `globalSetup`, as `vitest list` does, so the start's trust prompt covers that setup code as well as config loading (owner ruling 2026-09-26). Ticket 1.1b's run executes project code the same way, with no trust check of its own, so this start is its only production caller too, and its shutdown interrupts a running run.
 
 While a discovery holds a Vitest instance open, Vitest's logger holds `SIGINT`, `SIGTERM`, `exit` and `unhandledRejection` handlers that exit the process, and discovery rewrites the host's `process.env` until it restores it; the start runs discovery where neither reaches other daemon work. On Vitest 5, a browser-mode project makes `createVitest` listen on a port and call the provider's prewarm before discovery rejects the project.
 
