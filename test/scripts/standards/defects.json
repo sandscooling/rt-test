@@ -430,8 +430,8 @@
     "id": "D1143",
     "defect": "A workspace matched by two patterns is examined and counted twice.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "    if (!byName.has(name)) byName.set(name, dir);\n  }\n  return [...byName].map(([name, dir]) => ({ name, dir }));",
-    "new": "    byName.set(byName.size, { name, dir });\n  }\n  return [...byName.values()];"
+    "old": "    if (!byDirectory.has(onDisk)) {\n      byDirectory.set(onDisk, { name: canonical(root, dir), dir });\n    }",
+    "new": "    byDirectory.set(byDirectory.size, { name: canonical(root, dir), dir });"
   },
   {
     "id": "D1144",
@@ -444,15 +444,15 @@
     "id": "D1145",
     "defect": "A workspace listed again with a leading ./ beside a glob that matches it is examined and counted twice.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "if (!byName.has(name)) byName.set(name, dir);",
-    "new": "if (!byName.has(dir)) byName.set(dir, dir);"
+    "old": "const onDisk = realpathSync.native(join(root, dir));",
+    "new": "const onDisk = dir;"
   },
   {
     "id": "D1146",
     "defect": "A workspace listed again with a trailing slash beside a glob that matches it is examined and counted twice.",
     "file": "scripts/lib/standards/workspace-scripts.mjs",
-    "old": "if (!byName.has(name)) byName.set(name, dir);",
-    "new": "if (!byName.has(dir)) byName.set(dir, dir);"
+    "old": "const onDisk = realpathSync.native(join(root, dir));",
+    "new": "const onDisk = dir;"
   },
   {
     "id": "D1204",
@@ -460,5 +460,12 @@
     "file": "scripts/lib/standards/doc-section.mjs",
     "old": "  if (!statSync(path).isFile()) throw new SectionError(`not a file: ${file}`);\n",
     "new": ""
+  },
+  {
+    "id": "D1205",
+    "defect": "A workspace listed again through a directory link beside a glob that matches its target is examined and counted twice.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "const onDisk = realpathSync.native(join(root, dir));",
+    "new": "const onDisk = canonical(root, dir);"
   }
 ]

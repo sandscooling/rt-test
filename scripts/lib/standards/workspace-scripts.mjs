@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 import { toPosix } from "../paths.mjs";
 import { result } from "./result.mjs";
@@ -54,17 +54,20 @@ const isWorkspace = (root, dir) => existsSync(join(root, dir, "package.json"));
 const canonical = (root, dir) =>
   toPosix(relative(root, join(root, dir))) || ".";
 
-// The canonical spelling only names a workspace; its manifest is read through
-// the spelling the pattern produced, which is the directory on disk.
+// One directory is one workspace however its patterns spell it, case included
+// on a case-insensitive disk. The canonical spelling only names it; its manifest
+// is read through the spelling the pattern produced.
 function listedWorkspaces(root, manifest) {
-  const byName = new Map();
+  const byDirectory = new Map();
   for (const dir of patternsOf(manifest).flatMap((pattern) =>
     expand(root, pattern),
   )) {
-    const name = canonical(root, dir);
-    if (!byName.has(name)) byName.set(name, dir);
+    const onDisk = realpathSync.native(join(root, dir));
+    if (!byDirectory.has(onDisk)) {
+      byDirectory.set(onDisk, { name: canonical(root, dir), dir });
+    }
   }
-  return [...byName].map(([name, dir]) => ({ name, dir }));
+  return [...byDirectory.values()];
 }
 
 function expand(root, pattern) {

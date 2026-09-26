@@ -1,3 +1,5 @@
+import { symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Result } from "../../../scripts/lib/standards/result.mjs";
 import { checkWorkspaceScripts } from "../../../scripts/lib/standards/workspace-scripts.mjs";
@@ -316,6 +318,30 @@ describe("check-workspace-scripts", () => {
     expect(outcome).toEqual({
       code: 0,
       out: "ok       @x/a (packages/a)\nok       @x/b (packages/b)\nPASS: all 2 workspaces define build and typecheck.\n",
+      err: "",
+    });
+  });
+
+  it("D1205: counts a workspace listed again through a directory link once", () => {
+    const outcome = settle(() =>
+      inTree(
+        {
+          "package.json": manifest(["packages/*", "alias"]),
+          "packages/a/package.json": workspace("@x/a", BOTH),
+        },
+        (config, root) => {
+          symlinkSync(
+            join(root, "packages/a"),
+            join(root, "alias"),
+            "junction",
+          );
+          return checkWorkspaceScripts(config);
+        },
+      ),
+    );
+    expect(outcome).toEqual({
+      code: 0,
+      out: "ok       @x/a (packages/a)\nPASS: all 1 workspaces define build and typecheck.\n",
       err: "",
     });
   });
