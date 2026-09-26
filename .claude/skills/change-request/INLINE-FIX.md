@@ -79,6 +79,8 @@ Walk every home the change could touch and either update it or state in one line
 silent skip and a considered one look the same afterwards. With three or more edits, add them to the task
 list.
 
+- **`README.md`**: a fix that changes user-visible behavior (the CLI, configuration, supported versions, what is
+  implemented) corrects each README line it made false, and its Status says only what is built.
 - **Design docs** (`docs/architecture.md`, `docs/plan.md`, `docs/roadmap.md`): the section describing any
   design this fix changed.
 - **ADRs** (`{cfg.adr_dir}`): a fix that contradicts an ADR is reconciled explicitly, with a new ADR

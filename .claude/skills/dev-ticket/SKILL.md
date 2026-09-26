@@ -255,6 +255,11 @@ Write what was done, each assumption resolution and anything left undone to `###
 A candidate that carries a decision rather than a defect is named as the fork it is, with your recommendation.
 Never file a GitHub issue or offer to; `review-changes` runs the closing scan.
 
+**The README.** A change to user-visible behavior (the CLI, configuration, supported versions, what is
+implemented) updates `README.md` in this change: correct each line it made false, touched or not, and keep its
+Status to what is built. Under a lane, report the exact text unless your dispatch grants the file. No such change:
+say so in one line in `### Completion Notes`.
+
 **The handoff.** Under `### Dev Handoff`, write `Dev session: threadId <your self row's threadId>` and fill each
 `####` heading, with `None.` under an empty one: `create-tests` binds them, and an absent heading reads as a
 change that broke nothing.

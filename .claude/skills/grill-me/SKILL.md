@@ -116,15 +116,14 @@ this session with the evidence, per `{cfg.rules_dir}/blocking-rule.md`, and swee
 ### Update the glossary inline
 
 When a term resolves and the owner agrees the wording, write it to `{cfg.glossary}` at once, in the format
-[GLOSSARY-FORMAT.md](GLOSSARY-FORMAT.md) gives. This skill is the glossary's only writer. The glossary defines
-terms and nothing else: no implementation detail, no specification.
+[GLOSSARY-FORMAT.md](GLOSSARY-FORMAT.md) gives, which also names the glossary's other writer. The glossary
+defines terms and nothing else: no implementation detail, no specification.
 
 ### Offer ADRs sparingly
 
 Offer one only when the decision is hard to reverse, surprising without context, and the result of a real
 trade-off. [ADR-FORMAT.md](ADR-FORMAT.md) owns when to offer one and the enforcement question each must answer;
-`{cfg.adr_dir}/README.md` owns the file format. **Ask the orchestrator for the ADR's number**, or the owner when no
-orchestrator is running; never take the next free one.
+`{cfg.adr_dir}/README.md` owns the file format.
 
 ### Propagate decisions to the living docs
 
@@ -142,7 +141,13 @@ crystallizes, update each home it touches, and only those:
   Never both, and never a cross-reference between them.
 
 **Draft the text during the grill and get the owner's nod before writing.** Before adding a rule, search for
-one that already governs the item and sharpen it in place instead. Rule ids come from the orchestrator.
+one that already governs the item and sharpen it in place instead.
+
+**Ids come in one request, after the owner approves the drafts.** Key each draft that needs an id (an ADR, a
+requirement, a rule) by a placeholder such as `ADR-new-1`, and write no file that needs one until it arrives. When
+a calling skill invoked you, hand it the drafts: it asks for every id in its own single request. Standalone, ask
+the orchestrator for them all in one message, or the owner when no orchestrator is running; never take the next
+free one.
 
 ## How to ask
 

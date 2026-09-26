@@ -30,8 +30,9 @@ Substitute every `{cfg.KEY}` and `{{variable}}` with its literal value before it
   path edits code; the proposal path writes the status file, sprint files and requirements, which are the
   orchestrator's unless your dispatch grants them.
 - **Ask for every id; never take the next free one.** The orchestrator allocates sprint numbers, ticket keys,
-  requirement ids, ADR numbers and rule ids. Ask for the ids and any document grant in one message before you
-  write. A planning proposal may be granted `{cfg.requirements}` and `{cfg.adr_dir}`.
+  requirement ids, ADR numbers and rule ids. Ask for the ids and any document grant in one message, once the
+  owner approves what needs them and before you write, counting the ids the grill's drafts need. A planning
+  proposal may be granted `{cfg.requirements}`, `{cfg.adr_dir}` and `{cfg.glossary}`.
 - **Real fixes only.** A comment documenting a problem, a TODO or a note for later is not a fix. When you
   cannot resolve something, present it for triage.
 - **Reuse before creating** (`{cfg.code_change_standards}` § Universal gates).
@@ -139,6 +140,8 @@ the common answer; say it.
 ## 2. Grill the change?
 
 Ask via `AskUserQuestion` (header `Grill`): **Grill this change first** to pin down scope, or **Skip the grill**.
+When the grill cannot move the size (Step 3 already reads plainly from what you gathered), ask this and Step 3's
+`Path` question in one `AskUserQuestion` call, as two questions.
 
 On a grill, invoke the `grill-me` skill for its grilling portion only, and hand it everything bound so far so
 it gathers nothing again: the change and the approach it implies, `{{doc_context}}`, `{{requirements_index}}`,
@@ -174,6 +177,10 @@ Apply `create-ticket`'s § One-ticket size limits to the code this change implie
 - `{{cr_units}}`: distinct code-change units, plus one for validation.
 - `{{cr_files}}`: files modified and created, including every test file a behavior change breaks, times the
   multiplier. Documentation files do not count.
+
+**A direction-level change with no code yet** has no files to count: estimate both counts to an order of
+magnitude from the components it implies, and stop there when every limit is crossed several times over. Name
+the components you counted.
 
 Route to a proposal only when a limit is exceeded on the code side, or the work splits into workstreams with
 an order between them. State what the change reaches, both counts against their limits, and the planning docs

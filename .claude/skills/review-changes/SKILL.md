@@ -49,6 +49,13 @@ and the resolutions beneath it → `{{unverified_assumptions}}` (a change record
 `### File List`. **Bind all of them in every mode**, `(none recorded)` where there is nothing: a spawned agent
 reads an unbound variable as text it cannot parse and re-derives every exclusion as a finding.
 
+**Uncommitted mode has no record, so two things come from elsewhere.** `{{tests_session}}` and `{{review_home}}`,
+the file whose `### Review Record` Step 7 writes, come from your dispatch. Where no dispatch names one,
+`{{tests_session}}` is `(none recorded)` and `{{review_home}}` is a change record Step 7 creates. Also bind
+`{{change_summary}}`, what the changeset does in two or three sentences, and `{{owner_rulings}}`, each ruling the
+owner or your dispatch gave on this change with its source and time, or `(none recorded)`. In the other modes
+`{{review_home}}` is `{{record}}`.
+
 **Bind `{{pending_siblings}}`, the unbuilt work bearing on this change, in two halves:**
 
 - **By sprint**, ticket mode only: every other ticket in this sprint not `done`, with its one-line scope.
@@ -61,10 +68,10 @@ this change often sits in another sprint, and its criteria were written against 
 
 **Discover the changed files** from `git status --porcelain --untracked-files=all`, which lists each new file
 rather than its new folder, unioned with the record's File List. **Under a lane, keep only the paths your lane
-file lists** (a folder entry covers what is under it): the checkout holds other lanes' work. **The reviewed set
-is these changed files**, and that binds every later step: an agent's search can reach a gitignored file that
-reads like live guidance, so run `git ls-files --error-unmatch <path>` on any finding outside the set and drop
-it when that fails.
+holds in the claims store**, `node scripts/file-claims.mjs list --lane <your group>` (a folder entry covers what
+is under it): the checkout holds other lanes' work. **The reviewed set is these changed files**, and that binds
+every later step: an agent's search can reach a gitignored file that reads like live guidance, so run
+`git ls-files --error-unmatch <path>` on any finding outside the set and drop it when that fails.
 
 **Split the changed files:**
 
@@ -130,14 +137,16 @@ adapters and defect verifier. Then drop each rule the file's code cannot exercis
 2. **Name the defect or move on**, by § Test Coverage Recommendation. A gap is a specific defect (an inverted
    comparison, a dropped guard, a write that never happens) no current test catches. Before recording one, find
    the covering test: list the module's test directory and `rg` the symbol, since coverage lives under other
-   names.
+   names. Where "already covered" is in doubt, settle it by mutation, with the mechanics that section gives.
 3. **Sweep the criteria**, which a file walk cannot: for each, state its guarantee, follow the code that makes it
    true across files, and name the test that goes red if it breaks. None is a gap even when every file reads as
    covered.
 
 Record each gap with its source file, the named defect verbatim, the expected test, and severity by
-`{cfg.rules_dir}/review-shared.md` § Finding severity. State the denominator as well: the named-defect tests in
-the touched test files against the behaviors the criteria name.
+`{cfg.rules_dir}/review-shared.md` § Finding severity. **A defect this change makes possible stays a gap until
+its own named test exists**, by § Test Coverage Recommendation, even when an existing test goes red on it: the
+row names that test, so the tests session can decide where the new one lives. State the denominator as well:
+the named-defect tests in the touched test files against the behaviors the criteria name.
 
 ## 4. Three passes at once, plus the checklist pass
 
@@ -207,6 +216,12 @@ comments, and ask whether each is correct.
 
 **In ticket mode, check one claim yourself**: the record's File List against the actual diff. A changed file the
 List omits is a discrepancy in the record every later gate reads.
+
+**In every mode, check the product docs yourself for lines this change made false**, since doc-verify reads only
+changed lines. When the diff changes user-visible behavior (the CLI, configuration, supported versions, what is
+implemented), read `README.md`, `docs/plan.md`, `docs/architecture.md` and `docs/roadmap.md` for what they say
+about it, touched or not. Each line now false is a doc discrepancy, and so is a README Status that claims what is
+not built or omits what now is.
 
 **Then run the checklist pass without waiting.** Read each file and review it against its rules in
 `{{file_review_plan}}`. Record each violation with the rule id, `file:line`, the issue, the fix, and severity,
@@ -293,14 +308,17 @@ resolved against the code, a rename, or an import reorder is a code fix.
 
 **A finding's rationale goes in the record, never a code comment** (P17). No test file enters the manifest.
 
-**The gap handoff**, once the manifest's fixes are on disk and before validation: under the record's
+**The gap handoff**, once the manifest's fixes are on disk and before validation: under `{{review_home}}`'s
 `### Review Record`, write `Review session: threadId <your self row's threadId>`, the undisposed tech-debt items in
 full, and then the gap block under **exactly** `#### Test Coverage Gaps`, on its own line, one row per gap with
 its defect sentence verbatim, and `None.` when there are none. `create-tests` searches for that heading, so a
-reworded one drops the whole log without a word. Then `session_wake` `{{tests_session}}` with the record's path,
+reworded one drops the whole log without a word. Then `session_wake` `{{tests_session}}` with `{{review_home}}`,
 the instruction to work those rows, and your threadId for the reply. **Wait for the reply before validating**,
 since its tests are part of the tree the suite measures. Under a lane, tell the orchestrator when you send it. No
-tests session reachable: ask the owner to run `create-tests` on the record, and wait.
+tests session reachable: ask the owner to run `create-tests` on the record, and wait. **When Step 1 fell back to
+a created `{{review_home}}`**, create it first as `_agent-docs/.scratch/change-requests/review-<YYYY-MM-DD-HHMM>.md`,
+holding `## Change` (`{{change_summary}}` and `{{owner_rulings}}`), `### File List` (the reviewed set) and
+`### Review Record`; it is a change record from then on.
 
 **A test your fix round breaks** is triaged by § Full-Suite Validation: a regression is fixed in the source here,
 and a test asserting behavior your fix deliberately changed goes to the tests session as a gap row.

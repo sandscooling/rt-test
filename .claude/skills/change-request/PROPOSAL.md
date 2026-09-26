@@ -20,15 +20,18 @@ is never a reason to stay here.
 
 Each planning fact has one home; edit the home, and link from elsewhere:
 
-| Fact                             | Home                                                                    |
-| -------------------------------- | ----------------------------------------------------------------------- |
-| What the product must do or keep | `{cfg.requirements}`, one line per requirement with its marker          |
-| A hard-to-reverse decision       | one ADR in `{cfg.adr_dir}`, in the format its `README.md` gives         |
-| Current design                   | `docs/architecture.md`, which links `ADR-NNNN` rather than restating it |
-| Milestones and their order       | `docs/roadmap.md`                                                       |
-| A sprint and its tickets' scope  | the sprint file in `{cfg.sprints_dir}`, per its `README.md`             |
-| Every sprint and ticket state    | `{cfg.sprint_status}`                                                   |
-| A term                           | `{cfg.glossary}`, written only by `grill-me`                            |
+| Fact                                                    | Home                                                                                                     |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| The product, its intended experience, and what is built | `README.md`: the product description, the intended experience, and a Status that says only what is built |
+| What the product must do or keep                        | `{cfg.requirements}`, one line per requirement with its marker                                           |
+| A hard-to-reverse decision                              | one ADR in `{cfg.adr_dir}`, in the format its `README.md` gives                                          |
+| Current design                                          | `docs/architecture.md`, which links `ADR-NNNN` rather than restating it                                  |
+| Milestones and their order                              | `docs/roadmap.md`                                                                                        |
+| A sprint and its tickets' scope                         | the sprint file in `{cfg.sprints_dir}`, per its `README.md`                                              |
+| A spike a design rests on                               | the opening task of the ticket whose design rests on it                                                  |
+| Every sprint and ticket state                           | `{cfg.sprint_status}`                                                                                    |
+| A term                                                  | `{cfg.glossary}`, in `grill-me`'s `GLOSSARY-FORMAT.md` format                                            |
+| The owner's answers during this path                    | the ADRs and sprint prose they settle; under a lane, also the lane's final report                        |
 
 Infer which homes the change touches from its substance, include every plausible one, and announce them.
 Ask the owner only when the target is genuinely indeterminate.
@@ -105,7 +108,10 @@ yourself: you hold the reasoning, and a document rewritten from a relay loses wh
   `{cfg.rule_maintenance_guide}` § Procedure across every checklist shard, `{cfg.project_context}` and the
   sprint files, and retire what still mandates the old pattern in this same change.
 - **Design docs**: the sections of `docs/architecture.md`, `docs/plan.md` and `docs/roadmap.md` whose current
-  design the change alters, linking any ADR rather than restating it.
+  design the change alters, linking any ADR rather than restating it, and each line of `README.md` the change
+  makes false. A plan change moves the intended experience; its Status moves only when code lands.
+- **Glossary**: a term the proposal review settled after the grill, under your grant, in the format
+  `grill-me`'s `GLOSSARY-FORMAT.md` gives.
 - **Rules**: per `{cfg.rule_maintenance_guide}`.
 - **Sprints and status**: each new sprint file and ticket heading in the format `{cfg.sprints_dir}/README.md`
   gives, with **the reasoning for the plan in prose under the sprint's objective or the ticket's scope line**;
@@ -116,7 +122,9 @@ yourself: you hold the reasoning, and a document rewritten from a relay loses wh
   § Writing a bundle, from the fan-out's `SPRINT_CANDIDATES:` and `DOC_IDS` lines. Adding a ticket to a sprint
   writes no bundle.
 
-Every checker named above must exit 0 before you report. Then ask via `AskUserQuestion` (header `Applied`):
+Every checker named above must exit 0 before you report, and so must these, over the tree you wrote:
+`bun run rules:check`, `node scripts/check-skill-wiring.mjs`, `node scripts/check-line-citations.mjs`, and
+`bun x prettier --check <every file you wrote>`. Then ask via `AskUserQuestion` (header `Applied`):
 **Confirm** or **Review changes**, showing each file's key change and re-applying adjustments.
 
 **Commit.** Under a lane, report the exact list of paths you wrote; the orchestrator stages and commits them.

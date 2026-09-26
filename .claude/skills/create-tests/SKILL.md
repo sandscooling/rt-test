@@ -103,6 +103,11 @@ In ticket mode, read the record's `## Acceptance Criteria` → `{{acceptance_cri
 `#### Tests Owed` → `{{dev_handoff}}`. **An absent handoff heading stops the run**: ask the dev session for it,
 since a missing list reads exactly like a change that broke nothing.
 
+**A review record is the exception**: a change record `review-changes` created in uncommitted mode
+(`review-<YYYY-MM-DD-HHMM>.md`), holding `## Change`, `### File List` and `### Review Record`. It has no criteria
+and no dev, so bind its `## Change` section → `{{acceptance_criteria}}` and `(none recorded)` →
+`{{dev_handoff}}`, and send code bugs to the review session named in its Review Record.
+
 On the round the review sends, bind the rows under `#### Test Coverage Gaps` → `{{review_gaps}}`; on the first
 round bind `(none logged)`.
 
@@ -120,7 +125,9 @@ Then discover the rest, over the record's `### File List` in ticket mode or `{{t
 
 - **Each logged gap is a prior finding, not the output.** Confirm the covering test really is absent: list the
   module's test directory and `rg` the symbol, since coverage lives under other file names. Carry its defect
-  sentence verbatim. A gap that turns out covered is said to be covered, naming the test; never omit it.
+  sentence verbatim. A gap that turns out covered is said to be covered, naming the test; never omit it. A
+  gap whose only covering test names another defect is not covered: write its own test by
+  `{cfg.code_change_standards}` § Test Coverage Recommendation.
 - **Scan every file the gap log does not name**: the review saw only its diff.
 - **Skip what yields no defect**: barrels and re-exports, type-only files, static copy, configuration no code
   branches on.

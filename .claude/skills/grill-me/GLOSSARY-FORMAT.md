@@ -1,7 +1,9 @@
 # Glossary format
 
-The glossary lives at `{cfg.glossary}`. `grill-me` writes it, one term at a time, as each term resolves with the
-owner's agreement; every other skill and document links to it rather than defining a term again.
+The glossary lives at `{cfg.glossary}`. Two writers add to it, one term at a time, each with the owner's agreement
+on the wording: `grill-me`, as a term resolves in the grill, and `change-request`'s proposal path, for a term its
+proposal review settles after the grill, under its grant. Every other skill and document links to it rather than
+defining a term again.
 
 ## Structure
 

@@ -11,13 +11,21 @@ can open goes by path.
 
 - **By value**: `{{batch.label}}`, `{{batch.files}}`, `{{recorded_exclusions}}`, `{{pending_siblings}}`. The last
   two each tell the agent that something it would report is already answered; omitted, the agent re-derives each
-  as a fresh finding.
+  as a fresh finding. In uncommitted mode, `{{change_summary}}` and `{{owner_rulings}}` as well.
 - **By command**: `{{rules_command}}`, the command itself, never its output.
 - **By path**: the acceptance criteria, as a named section of `{{record}}`.
 - **Not at all**: the unverified assumptions. One agent owns installed third-party behavior for the whole wave.
 
-**In uncommitted mode there is no record**: delete the record block from the prompt and write
-`There is no ticket. Judge the changeset on its own terms.` in its place.
+**In uncommitted mode there is no record**: replace the record block in the prompt with this one, passing both
+slots by value, so the agent neither guesses the change's intent nor re-flags a settled ruling:
+
+```text
+There is no ticket. What this changeset does:
+{{change_summary}}
+
+The owner has ruled on these points. Report one only when you can name a defect the ruling does not account for:
+{{owner_rulings}}
+```
 
 ```text
 You are reviewing code with fresh eyes. You know nothing of this project's requirements or architecture; you are
