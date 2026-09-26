@@ -19,7 +19,7 @@
   "packageManager": "bun@1.3.14",
   "scripts": {
     "build": "bun run --filter '*' build",
-    "typecheck": "tsc --noEmit && bun run --filter '*' typecheck",
+    "typecheck": "node scripts/check-workspace-scripts.mjs && tsc --noEmit && bun run --filter '*' typecheck",
     "test": "vitest",
     "test:run": "vitest run",
     "test:defects": "node scripts/verify-defects.mjs",

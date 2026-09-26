@@ -1,0 +1,331 @@
+[
+  {
+    "id": "D400",
+    "defect": "A workspace missing a required script is reported as ok.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "return REQUIRED_SCRIPTS.filter(",
+    "new": "return [].filter("
+  },
+  {
+    "id": "D401",
+    "defect": "A workspace defining both scripts is reported as missing them.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "scripts[name].trim() === \"\"",
+    "new": "scripts[name].trim() !== \"\""
+  },
+  {
+    "id": "D402",
+    "defect": "A whitespace-only script counts as defined, though bun runs nothing for it.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": " || scripts[name].trim() === \"\"",
+    "new": ""
+  },
+  {
+    "id": "D403",
+    "defect": "A tree with no workspaces passes after examining nothing.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (workspaces.length === 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D404",
+    "defect": "A declared pattern whose parent folder does not exist yet fails the check.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (!existsSync(join(root, parent))) return [];",
+    "new": "if (!existsSync(join(root, parent))) throw new WorkspaceError(\"absent parent\");"
+  },
+  {
+    "id": "D405",
+    "defect": "A folder with no package.json is treated as a workspace and fails the check.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": ".filter((dir) => isWorkspace(root, dir))",
+    "new": ""
+  },
+  {
+    "id": "D406",
+    "defect": "The object form of the workspaces field is rejected, so no workspace is examined.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (Array.isArray(workspaces.packages)) return workspaces.packages;",
+    "new": ""
+  },
+  {
+    "id": "D407",
+    "defect": "A pattern the check cannot expand is silently treated as matching nothing.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "if (parent === undefined || parent.includes(\"*\")) {",
+    "new": "if (parent === undefined) {"
+  },
+  {
+    "id": "D408",
+    "defect": "A workspace listed by its literal path is never examined.",
+    "file": "scripts/lib/standards/workspace-scripts.mjs",
+    "old": "return isWorkspace(root, pattern) ? [pattern] : [];",
+    "new": "return [];"
+  },
+  {
+    "id": "D410",
+    "defect": "A result that exactly fills the cap is reported as complete.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "issues.length >= options.cap",
+    "new": "issues.length > options.cap"
+  },
+  {
+    "id": "D411",
+    "defect": "A complete result does not say so on its first line.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "${truncated ? \"\" : \", complete\"}",
+    "new": ""
+  },
+  {
+    "id": "D412",
+    "defect": "A repository without a GitHub remote still calls gh.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "if (!/github\\.com/i.test(remotes)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D413",
+    "defect": "An unauthenticated gh is not reported as a skip.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "return \"`gh auth status` did not exit 0, so the open issues could not be read.\";",
+    "new": "return undefined;"
+  },
+  {
+    "id": "D414",
+    "defect": "The listing asks gh for its default 30 rows instead of the cap.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "String(options.cap),",
+    "new": "\"30\","
+  },
+  {
+    "id": "D415",
+    "defect": "Label filters are dropped before gh is called.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "for (const label of options.labels) args.push(\"--label\", label);",
+    "new": ""
+  },
+  {
+    "id": "D416",
+    "defect": "A failed gh call reports a generic message and hides gh's own error.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "error.stderr?.toString().trim() || error.message",
+    "new": "error.message"
+  },
+  {
+    "id": "D417",
+    "defect": "A cap of zero is accepted.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "options.cap < 1",
+    "new": "options.cap < 0"
+  },
+  {
+    "id": "D418",
+    "defect": "JSON output carries gh's full label objects instead of label names.",
+    "file": "scripts/lib/standards/open-issues.mjs",
+    "old": "(issue.labels ?? []).map((label) => label.name)",
+    "new": "issue.labels ?? []"
+  },
+  {
+    "id": "D420",
+    "defect": "A section runs on through its sibling sections.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "heading.level <= start.level",
+    "new": "heading.level < start.level"
+  },
+  {
+    "id": "D421",
+    "defect": "An exact heading is reported ambiguous because a longer heading shares its prefix.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "exact.length > 0",
+    "new": "false"
+  },
+  {
+    "id": "D422",
+    "defect": "A unique heading prefix matches nothing.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "headings.filter((heading) => heading.text.startsWith(wanted))",
+    "new": "headings.filter((heading) => heading.text === wanted)"
+  },
+  {
+    "id": "D423",
+    "defect": "An unmatched heading exits 0, so a caller proceeds with an empty section.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "return result(1, [], [`doc-section: ${error.message}`]);",
+    "new": "return result(0, [], [`doc-section: ${error.message}`]);"
+  },
+  {
+    "id": "D424",
+    "defect": "An ambiguous prefix silently takes the first matching heading.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "if (hits.length > 1) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D425",
+    "defect": "A # line inside a code fence is read as a heading and cuts the section short.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "if (fence !== undefined || marker !== undefined) return;",
+    "new": "if (marker !== undefined) return;"
+  },
+  {
+    "id": "D426",
+    "defect": "The heading list loses each heading's depth.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "\"#\".repeat(heading.level)",
+    "new": "\"#\""
+  },
+  {
+    "id": "D427",
+    "defect": "Several sections print in alphabetical rather than requested order.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "const sections = wanted.map(",
+    "new": "const sections = [...wanted].sort().map("
+  },
+  {
+    "id": "D428",
+    "defect": "A section stops at its first subsection.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "heading.level <= start.level",
+    "new": "heading.level >= start.level"
+  },
+  {
+    "id": "D429",
+    "defect": "A call naming a file and no heading exits 0 with empty output.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "if (file === undefined || wanted.length === 0)",
+    "new": "if (file === undefined)"
+  },
+  {
+    "id": "D430",
+    "defect": "The suggested line moves the wrong way for an insertion above the citation.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "shift += hunk.newCount - hunk.oldCount",
+    "new": "shift -= hunk.newCount - hunk.oldCount"
+  },
+  {
+    "id": "D431",
+    "defect": "A hunk below the citation still shifts it, so a citation above the first changed line is reported although it did not move.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "if (line >= end) shift",
+    "new": "shift"
+  },
+  {
+    "id": "D432",
+    "defect": "A citation whose line was edited gets a number instead of a warning to reread it.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "if (line >= hunk.oldStart && line < end) return undefined;",
+    "new": "if (false) return undefined;"
+  },
+  {
+    "id": "D433",
+    "defect": "A done ticket's citations are reported, so re-pointing would falsify the record.",
+    "file": "scripts/lib/standards/citation-scope.mjs",
+    "old": "if (entry.state === DONE) done.tickets.add(",
+    "new": "if (false) done.tickets.add("
+  },
+  {
+    "id": "D434",
+    "defect": "A done sprint's citations are reported.",
+    "file": "scripts/lib/standards/citation-scope.mjs",
+    "old": "if (entry.state === DONE) done.sprints.add(number);",
+    "new": "if (false) done.sprints.add(number);"
+  },
+  {
+    "id": "D435",
+    "defect": "Design-decision records are treated as live.",
+    "file": "scripts/lib/standards/citation-scope.mjs",
+    "old": "...RECORD_KEYS.map((key) => repoPath(config, config[key])),",
+    "new": ""
+  },
+  {
+    "id": "D436",
+    "defect": "A qualified citation matches any changed file sharing its leaf name.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "forms.some((form) => file === form || file.endsWith(`/${form}`))",
+    "new": "forms.some((form) => basename(file) === basename(form))"
+  },
+  {
+    "id": "D437",
+    "defect": "A citation matches a changed file whose name merely ends with the cited name.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "file.endsWith(`/${form}`)",
+    "new": "file.endsWith(form)"
+  },
+  {
+    "id": "D438",
+    "defect": "--strict does not fail on shifted citations.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "args.strict ? EXIT.HITS : EXIT.OK",
+    "new": "EXIT.OK"
+  },
+  {
+    "id": "D439",
+    "defect": "Shifted citations fail the run even without --strict.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "args.strict ? EXIT.HITS : EXIT.OK",
+    "new": "EXIT.HITS"
+  },
+  {
+    "id": "D440",
+    "defect": "A workflow doc the flow config moves outside the default roots is never scanned.",
+    "file": "scripts/lib/standards/citation-scope.mjs",
+    "old": "[...HARNESS_ROOTS, ...configured]",
+    "new": "[...HARNESS_ROOTS]"
+  },
+  {
+    "id": "D441",
+    "defect": "A citation to a line the file never had is reported as shifted.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "line <= analyses.get(file).oldLineCount",
+    "new": "true"
+  },
+  {
+    "id": "D442",
+    "defect": "A ticket that has started but is not done is treated as a historical record.",
+    "file": "scripts/lib/standards/citation-scope.mjs",
+    "old": "if (entry.state === DONE) done.tickets.add(",
+    "new": "if (entry.state !== \"backlog\") done.tickets.add("
+  },
+  {
+    "id": "D443",
+    "defect": "Test fixtures are scanned as live artifacts.",
+    "file": "scripts/lib/standards/citation-scope.mjs",
+    "old": "...FIXTURE_ROOTS,",
+    "new": ""
+  },
+  {
+    "id": "D444",
+    "defect": "A changed file's citation of itself is reported to someone other than its author.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "if (target === undefined || target === artifact) continue;",
+    "new": "if (target === undefined) continue;"
+  },
+  {
+    "id": "D445",
+    "defect": "--base is ignored and the diff always runs against HEAD.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "args.base = argv[index + 1];",
+    "new": "argv[index + 1];"
+  },
+  {
+    "id": "D446",
+    "defect": "A citation whose line did not move is reported as shifted, with its own line number as the suggestion.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "if (moved === line) continue;",
+    "new": ""
+  },
+  {
+    "id": "D447",
+    "defect": "A shorter fence line inside a longer fence closes it, so the fenced lines after it are read as headings.",
+    "file": "scripts/lib/standards/doc-section.mjs",
+    "old": "marker[0] === open[0] && marker.length >= open.length;",
+    "new": "marker[0] === open[0];"
+  },
+  {
+    "id": "D448",
+    "defect": "A pure insertion's hunk start is read as a changed line, so the unmoved line the insertion follows is reported as shifted.",
+    "file": "scripts/lib/standards/line-citations.mjs",
+    "old": "(count === 0 ? start + 1 : start)",
+    "new": "start"
+  }
+]
