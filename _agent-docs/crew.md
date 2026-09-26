@@ -37,7 +37,9 @@ Do not start watchers, daemons, or dev servers. Run anything long in the backgro
 
 ## Questions
 
-**Ask the owner in your own thread**, never through the orchestrator, and tell the orchestrator only that a question is waiting and whether it moves scope. **Record the question, the owner's answer, and the time in your lane's record** (the ticket or change record), since the orchestrator reads it before advising the owner on your lane's subject. A ruling the orchestrator passes down names its source and time; record it the same way.
+**Ask the orchestrator, never the owner, for what the orchestrator allocates or owns**: an ADR, requirement, rule, sprint, or ticket id, a defect-id range or more ids, a grant, a status transition, or a change to a project-wide file. The owner decides; the orchestrator hands out ids and grants and writes its own files. A skill step that says to ask for one of these means the orchestrator.
+
+**Ask the owner a decision in your own thread**, never through the orchestrator, and tell the orchestrator only that a question is waiting and whether it moves scope. **Record the question, the owner's answer, and the time in your lane's record** (the ticket or change record), since the orchestrator reads it before advising the owner on your lane's subject. A ruling the orchestrator passes down names its source and time; record it the same way.
 
 ## Your report
 
