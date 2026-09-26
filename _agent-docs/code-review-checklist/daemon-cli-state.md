@@ -37,7 +37,7 @@ C123. **Scope every read to one project and worktree**: A query joins on project
 
 C124. **Invalidate on an adapter version change**: Results produced by an older adapter or runner version are not reported current under a newer one.
 
-C125. **Keep test identity stable and distinct**: A test's identity does not depend only on its display name, each parameterized arm has its own identity, and a renamed or duplicate-named test never inherits another test's result.
+C125. **Keep test identity stable and distinct**: A test's identity does not depend only on its display name, and each parameterized arm has its own identity. A renamed test never inherits another test's result. A test told apart from same-named tests only by its position is marked duplicate, and never inherits another test's result as current.
 
 ## Selection
 
@@ -77,7 +77,7 @@ C139. **Never call an incomplete set verified**: "Verified" requires every defec
 
 ## Execution and trust
 
-C140. **Execute only a started, trusted project**: No code path runs a project's tests, loads its Vitest config or imports its files unless that project was explicitly started and trusted. Discovery reads files without executing them.
+C140. **Execute only a started, trusted project**: No code path runs a project's tests, loads its Vitest config or imports its files unless that project was explicitly started and trusted. Before that start, discovery reads files without executing them.
 
 C141. **Preserve a failed run's output and exit status**: A runner wrapper keeps stdout, stderr and the exit code of a failed run, and no output filter masks the status.
 

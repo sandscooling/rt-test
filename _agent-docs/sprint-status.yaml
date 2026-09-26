@@ -1,7 +1,8 @@
 # The only record of sprint and ticket state. Format: _agent-docs/sprints/README.md.
 
-sprint-1: backlog
-1-1-capture-vitest-runs: backlog
+sprint-1: in-progress
+1-1-capture-vitest-runs: ready-for-dev
+1-1b-record-run-states: backlog
 1-2-persist-results: backlog
 1-3-daemon-lifecycle: backlog
 1-4-query-cli: backlog

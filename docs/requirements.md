@@ -14,7 +14,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 
 ## Functional requirements
 
-- FR1: Discover every test in each Vitest workspace of a consumer on Vitest 4.1.x and 5.x, and give each a stable identity that distinguishes parameterized arms and duplicate display names. [Sprint 1]
+- FR1: Discover every test in each Vitest workspace of a consumer on Vitest 4.1.x and 5.x, and give each a stable identity that distinguishes parameterized arms and duplicate display names. [Ticket 1.1]
 - FR2: Record each run's test outcomes, skips, collection errors, module and run-level errors, and interruptions as distinct states. [Sprint 1]
 - FR3: Persist results bound to project, worktree, run identity, input fingerprint, and adapter version, and keep them available across a daemon restart. [Sprint 1]
 - FR4: Start and stop the daemon explicitly for one trusted project, and execute no project code before that start. [Sprint 1]

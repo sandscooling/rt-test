@@ -6,6 +6,14 @@ RT Test runs a consumer's Vitest tests and falsifies them in place of coding age
 
 ### Results and runs
 
+**Vitest workspace**:
+One directory RT Test runs as its own Vitest instance: the consumer root or a package workspace that holds a Vitest configuration.
+_Avoid_: project, package
+
+**Test identity**:
+The stable name RT Test gives one test: its Vitest workspace, Vitest project, module path, suite and test names, and its position among tests sharing those names.
+_Avoid_: test id, test name
+
 **Consumer**:
 A project whose tests RT Test runs.
 _Avoid_: target, host project

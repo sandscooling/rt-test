@@ -34,7 +34,7 @@ Run `bun install --frozen-lockfile` and `bun run check`. Inspect the committed s
 
 ## Next action
 
-The agent workflow is ported, and the plan `change-request` has written the M1 plan: sprints 1 and 2 in `_agent-docs/sprints/`, with every ticket in `backlog` in `_agent-docs/sprint-status.yaml`. Next, run `create-ticket` for ticket 1.1 (capture Vitest runs across workspaces), whose first task is the Vitest 4.1 and 5 API and test-identity spike, then take each ticket through `dev-ticket`, `create-tests`, and `review-changes`. The orchestrator's working state is in `_agent-docs/.scratch/orchestrator-state.md`.
+The agent workflow is ported, and the plan `change-request` has written the M1 plan: sprints 1 and 2 in `_agent-docs/sprints/`, with ticket state in `_agent-docs/sprint-status.yaml`. Ticket 1.1 (discover tests across Vitest workspaces) is ready for dev, with its Vitest 4.1 and 5 spike done; 1.1b (record Vitest run states) was split from it and follows. Take each ticket through `dev-ticket`, `create-tests`, and `review-changes`. The orchestrator's working state is in `_agent-docs/.scratch/orchestrator-state.md`.
 
 Work on `main`. Hand off to a successor instead of compacting, per `_agent-docs/handoff.md`. The owner's discussion session orchestrates: agreed changes go to lanes of child sessions (`.claude/skills/orchestrator/SKILL.md`, member half in `_agent-docs/crew.md` and `_agent-docs/code-change-standards.md` § Orchestrated Gate Delegation). No agent claims or persistent processes need to be resumed. No npm publication is authorized.
 
