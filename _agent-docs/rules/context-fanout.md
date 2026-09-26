@@ -15,7 +15,7 @@ With `scale.ctx_agents: off` and `scale.rule_selection: whole`, the defaults, **
 
 **Wave 1** is `ctx-impact` plus every other dimension agent your skill runs except `ctx-checklist`, all in one message, each in the background.
 
-**Wave 2** starts the moment `ctx-impact` returns, without waiting for the rest of wave 1: the checklist agents, in one message, each with `ctx-impact`'s whole report in its subject as `code_facts:`. A rule is often relevant only because of a fact in the code, and a checklist agent holding only the request cannot see it.
+**Wave 2** starts the moment `ctx-impact` returns, without waiting for the rest of wave 1: the checklist agents, in one message, each with `ctx-impact`'s whole report in its subject as `code_facts:`. A rule is often relevant only because of a fact in the code, and a checklist agent holding only the request cannot see it. With `scale.rule_selection: whole`, wave 2 spawns no checklist agent: pick checklist ids inline from the shards, as the off path does.
 
 - **No `ctx-impact` in your skill** (the subject is a sprint, not code): run one wave with no `code_facts`.
 - **`ctx-impact` returned `EMPTY` or `FAILED` after its retry**: start wave 2 with `code_facts: none`, and say so.

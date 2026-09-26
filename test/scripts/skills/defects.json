@@ -1,0 +1,373 @@
+[
+  {
+    "id": "D500",
+    "defect": "A fill drops the heading that follows the section it replaced.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "      ...lines.slice(at.bodyEnd),",
+    "new": "      ...lines.slice(at.bodyEnd + 1),"
+  },
+  {
+    "id": "D501",
+    "defect": "A fill drops the guidance comment the template ships in the section.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "const kept = suppliesComment ? [] : leadingComment(existing);",
+    "new": "const kept = [];"
+  },
+  {
+    "id": "D502",
+    "defect": "A batch with one unknown heading still writes the others.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (missing.length > 0) return { errors: missing };",
+    "new": "if (missing.length > 1) return { errors: missing };"
+  },
+  {
+    "id": "D503",
+    "defect": "A parent and child fill in one batch are not refused, so the parent swallows the child.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "inner.at.headingIndex < outer.at.bodyEnd;",
+    "new": "inner.at.headingIndex < outer.at.bodyStart;"
+  },
+  {
+    "id": "D504",
+    "defect": "The data-fence guard inspects the new body instead of the section being replaced, so a prose fill deletes the yaml block.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "hasDataFence(lines.slice(at.bodyStart, at.bodyEnd)) &&",
+    "new": "hasDataFence(block.body) &&"
+  },
+  {
+    "id": "D505",
+    "defect": "The scaffold offers a rule-id section as a fill block, because it looks for the marker at the start of a line.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (section.body.some((line) => line.includes(\"RULE_IDS:\")))",
+    "new": "if (section.body.some((line) => line.startsWith(\"RULE_IDS:\")))"
+  },
+  {
+    "id": "D506",
+    "defect": "The scaffold drops child headings, so a parent fill deletes them.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (section.bodyLevels[index] === 3) out.push(line, \"\");",
+    "new": "if (section.bodyLevels[index] === 4) out.push(line, \"\");"
+  },
+  {
+    "id": "D507",
+    "defect": "The scaffold compares the heading with its hashes and offers the Dev Agent Record as a fill block.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (section.name === DOWNSTREAM_SECTION)",
+    "new": "if (section.name === `## ${DOWNSTREAM_SECTION}`)"
+  },
+  {
+    "id": "D508",
+    "defect": "Two markers for one doc are both rewritten instead of refused.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (count !== 1) {",
+    "new": "if (count < 1) {"
+  },
+  {
+    "id": "D509",
+    "defect": "Placeholders the later sessions fill fail the authoring check.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "    if (downstream) return;\n",
+    "new": "    if (downstream && false) return;\n"
+  },
+  {
+    "id": "D510",
+    "defect": "A PENDING marker written with a space before the comment close passes the check.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "const PENDING = /RULE_IDS:\\s*PENDING\\s*-->/;",
+    "new": "const PENDING = /RULE_IDS:\\s*PENDING-->/;"
+  },
+  {
+    "id": "D511",
+    "defect": "The structure check compares only top-level headings, so a lost child heading passes.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": ".filter((_, index) => templateLevels[index] >= 2)",
+    "new": ".filter((_, index) => templateLevels[index] === 2)"
+  },
+  {
+    "id": "D512",
+    "defect": "The lost-block check inspects the template's section instead of the ticket's, so a lost yaml block passes.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (hasDataFence(ticketLines.slice(at.bodyStart, at.bodyEnd))) return [];",
+    "new": "if (hasDataFence(section.body)) return [];"
+  },
+  {
+    "id": "D513",
+    "defect": "A template missing a contract heading passes, since only duplicates are counted.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "    if (count !== 1)\n      problems.push(\n        `template carries \"${heading}\"",
+    "new": "    if (count > 1)\n      problems.push(\n        `template carries \"${heading}\""
+  },
+  {
+    "id": "D514",
+    "defect": "A template whose marker already holds ids passes the contract.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "new RegExp(`<!--\\\\s*${marker}:\\\\s*PENDING\\\\s*-->`).test(line),",
+    "new": "new RegExp(`<!--\\\\s*${marker}:[^>]*-->`).test(line),"
+  },
+  {
+    "id": "D515",
+    "defect": "A metadata block missing a key dev-ticket parses passes the contract.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "METADATA_KEYS.filter((key) => !hasKey(body, key))",
+    "new": "[].filter((key) => !hasKey(body, key))"
+  },
+  {
+    "id": "D517",
+    "defect": "A sections file naming one heading twice is accepted and the second block silently wins.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (names.indexOf(name) !== names.lastIndexOf(name))",
+    "new": "if (names.indexOf(name) !== names.indexOf(name))"
+  },
+  {
+    "id": "D518",
+    "defect": "The unclosed-block check compares with null, so an unclosed block is reported as an empty file.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "  if (current)\n    errors.push(",
+    "new": "  if (current === null)\n    errors.push("
+  },
+  {
+    "id": "D519",
+    "defect": "--check reads the ticket as its own template, so lost structure passes.",
+    "file": "scripts/lib/skills/fill-ticket-cli.mjs",
+    "old": "readFile(root, TEMPLATE_FILE, \"ticket template\"),",
+    "new": "readFile(root, ticket, \"ticket template\"),"
+  },
+  {
+    "id": "D520",
+    "defect": "--ids keeps the equals sign in the ids it writes.",
+    "file": "scripts/lib/skills/fill-ticket-cli.mjs",
+    "old": "assignments[pair.slice(0, at)] = pair.slice(at + 1);",
+    "new": "assignments[pair.slice(0, at)] = pair.slice(at);"
+  },
+  {
+    "id": "D521",
+    "defect": "Any first line passes as the ticket title.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "first !== -1 && TITLE.test(lines[first])",
+    "new": "first !== -1"
+  },
+  {
+    "id": "D522",
+    "defect": "A bold Status line in the ticket header slips past the check.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "const STATUS_LINE = /^(?:\\*\\*)?Status(?:\\*\\*)?:/i;",
+    "new": "const STATUS_LINE = /^Status:/i;"
+  },
+  {
+    "id": "D523",
+    "defect": "A marker emptied by hand passes, and expand-rules reads it as none.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "const EMPTY_MARKER = /RULE_IDS:\\s*-->/;",
+    "new": "const EMPTY_MARKER = /RULE_IDS:-->/;"
+  },
+  {
+    "id": "D524",
+    "defect": "A ticket that dropped a metadata key dev-ticket parses passes the check.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "(key) => hasKey(template, key) && !hasKey(ticket, key),",
+    "new": "(key) => hasKey(template, key) && !hasKey(template, key),"
+  },
+  {
+    "id": "D525",
+    "defect": "An empty --ids value writes an empty marker that later reads as none.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "if (ids.trim() === \"\") {",
+    "new": "if (ids === undefined) {"
+  },
+  {
+    "id": "D526",
+    "defect": "A path under a config key resolves against the repository root.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "return !existsSync(resolve(base, rest));",
+    "new": "return !existsSync(resolve(config.root, rest));"
+  },
+  {
+    "id": "D527",
+    "defect": "A split ticket's lettered number fails the title check.",
+    "file": "scripts/lib/skills/ticket.mjs",
+    "old": "const TITLE = /^# Ticket [1-9]\\d*\\.[1-9]\\d*[a-z]?: \\S/;",
+    "new": "const TITLE = /^# Ticket [1-9]\\d*\\.[1-9]\\d*: \\S/;"
+  },
+  {
+    "id": "D528",
+    "defect": "Paths under a config key are never checked.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "      refs.cfgPath,\n",
+    "new": "      [],\n"
+  },
+  {
+    "id": "D530",
+    "defect": "An absent bundle directory is read as an empty sprint set and reported as checked.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "if (args.restamp === undefined && files.length === 0)",
+    "new": "if (args.restamp === undefined && files.length < 0)"
+  },
+  {
+    "id": "D531",
+    "defect": "The candidate loop reads a misspelled key, so an unknown checklist id passes.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "for (const id of bundle.lists.checklist ?? []) {",
+    "new": "for (const id of bundle.lists.checklists ?? []) {"
+  },
+  {
+    "id": "D532",
+    "defect": "Only the requirements list is checked, so a dead requirement in doc_ids passes.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "    ...(bundle.lists.doc_ids ?? []),\n",
+    "new": ""
+  },
+  {
+    "id": "D533",
+    "defect": "ADR ids are built without their hyphen, so a live ADR pointer reads as dead.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": ".map((id) => `ADR-${id}`)",
+    "new": ".map((id) => `ADR${id}`)"
+  },
+  {
+    "id": "D534",
+    "defect": "A path pointer resolves against the working directory instead of the repository root.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "return existsSync(resolve(config.root, id))",
+    "new": "return existsSync(id)"
+  },
+  {
+    "id": "D535",
+    "defect": "A test_infra anchor is split on the wrong separator, so a missing symbol reads as a missing path.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "const [path, symbol] = anchor.split(\"#\");",
+    "new": "const [path, symbol] = anchor.split(\":\");"
+  },
+  {
+    "id": "D536",
+    "defect": "The orphan check is never reported, so a bundle for a sprint with no status key passes.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "    problems.push(`ORPHAN ${name} sprint-${sprint} has no status key`);",
+    "new": "    problems.push();"
+  },
+  {
+    "id": "D538",
+    "defect": "A bundle missing one of the two stamp keys passes as well formed.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "    bundle.scalars.checklist_rule_count === undefined ||\n",
+    "new": "    bundle.scalars.checklist_rule_count === undefined &&\n"
+  },
+  {
+    "id": "D541",
+    "defect": "Staleness compares only the rule count, so a replaced rule leaves the stamp reading current.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "(Number(count) !== stamp.count || sha !== stamp.sha)",
+    "new": "(Number(count) !== stamp.count)"
+  },
+  {
+    "id": "D542",
+    "defect": "The partial flag is compared as a boolean, so a partial bundle with enough ids never warns.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "if (bundle.scalars.partial === \"true\" || size < THIN_IDS)",
+    "new": "if (bundle.scalars.partial === true || size < THIN_IDS)"
+  },
+  {
+    "id": "D543",
+    "defect": "The stamp hashes ids in shard order, so moving a rule between shards reads as a changed set.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "  const sorted = [...ids].sort();",
+    "new": "  const sorted = [...ids];"
+  },
+  {
+    "id": "D544",
+    "defect": "Restamp accepts a bundle holding only one stamp key and leaves it half stamped.",
+    "file": "scripts/lib/skills/sprint-context.mjs",
+    "old": "!/^checklist_rule_count:/m.test(before) ||",
+    "new": "!/^checklist_rule_count:/m.test(before) &&"
+  },
+  {
+    "id": "D560",
+    "defect": "Path keys are looked up among the scale switches, so a real path key is reported.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "typeof config[value] !== \"string\"",
+    "new": "typeof config.scale[value] !== \"string\""
+  },
+  {
+    "id": "D561",
+    "defect": "A flag that prefixes a defined flag counts as defined.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "return new RegExp(`${escaped}(?![a-z0-9-])`).test(source);",
+    "new": "return new RegExp(`${escaped}`).test(source);"
+  },
+  {
+    "id": "D562",
+    "defect": "Imports resolve against the working directory, so a flag defined in an imported module reads as unknown.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "sourceClosure(resolve(dirname(entry), match[1]), seen),",
+    "new": "sourceClosure(resolve(match[1]), seen),"
+  },
+  {
+    "id": "D563",
+    "defect": "Flags after a pipe are charged to the script before it.",
+    "file": "scripts/lib/skills/wiring-refs.mjs",
+    "old": "const rest = call[2].split(COMMAND_BREAK)[0];",
+    "new": "const rest = call[2];"
+  },
+  {
+    "id": "D564",
+    "defect": "A {cfg.key} doc argument is passed to doc-section unsubstituted.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "if (key === undefined) return arg;",
+    "new": "if (key !== undefined) return arg;"
+  },
+  {
+    "id": "D565",
+    "defect": "Each fenced line is read as its own command, so a flag on a continued line is never checked.",
+    "file": "scripts/lib/skills/wiring-refs.mjs",
+    "old": "      if (!/\\\\\\s*$/.test(line)) {",
+    "new": "      if (line !== undefined) {"
+  },
+  {
+    "id": "D566",
+    "defect": "Backticked agent names are never checked, only .claude/agents paths.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "[...refs.agentPath, ...refs.agentName],",
+    "new": "[...refs.agentPath],"
+  },
+  {
+    "id": "D567",
+    "defect": "The config root passes as a path key a skill may cite.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "NON_PATH_KEYS.has(value) || typeof config[value] !== \"string\"",
+    "new": "typeof config[value] !== \"string\""
+  },
+  {
+    "id": "D568",
+    "defect": "A scale reference passes when it names either a switch or a top-level key.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "(value) => !(value in config.scale),",
+    "new": "(value) => !(value in config.scale) && !(value in config),"
+  },
+  {
+    "id": "D569",
+    "defect": "Disposable scratch paths are required to exist.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "!SKIPPED_PATH.test(value) && !exists(config.root, value)",
+    "new": "!exists(config.root, value)"
+  },
+  {
+    "id": "D570",
+    "defect": "The doc-path pattern omits Markdown, so a missing .md doc passes.",
+    "file": "scripts/lib/skills/wiring-refs.mjs",
+    "old": "|\\.claude)\\/[A-Za-z0-9_./-]+\\.(?:md|yaml|json|mjs|cjs)",
+    "new": "|\\.claude)\\/[A-Za-z0-9_./-]+\\.(?:yaml|json|mjs|cjs)"
+  },
+  {
+    "id": "D571",
+    "defect": "Relative links resolve from the repository root instead of the skill's folder.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": ".filter(({ value }) => !existsSync(resolve(dirname(path), value)))",
+    "new": ".filter(({ value }) => !existsSync(resolve(config.root, value)))"
+  },
+  {
+    "id": "D572",
+    "defect": "The ticket template contract is never run by the wiring check.",
+    "file": "scripts/lib/skills/skill-wiring.mjs",
+    "old": "  problems.push(...templateContract(config));\n",
+    "new": "  problems.push();\n"
+  }
+]
