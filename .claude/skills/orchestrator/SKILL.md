@@ -19,13 +19,13 @@ Read `_agent-docs/_flow-config.yaml` first. `{cfg.KEY}` means a value from it.
 
 A lane is one unit of agreed work. Its **group** is a short slug (`m1-store`, `vitest-spike`, or the ticket key). Member **names** are `rt-<lane>-<role>`; the `rt-` prefix keeps them apart from other projects' sessions on this machine.
 
-| Role   | Name               | Runs                                                                                      |
-| ------ | ------------------ | ----------------------------------------------------------------------------------------- |
-| create | `rt-<lane>-create` | `/create-ticket`, or `/change-request` for new work                                       |
-| dev    | `rt-<lane>-dev`    | `/dev-ticket`                                                                             |
-| tests  | `rt-<lane>-tests`  | `/create-tests`                                                                           |
-| review | `rt-<lane>-review` | `/review-changes`                                                                         |
-| spike  | `rt-<lane>-spike`  | research that edits no tracked file; its findings go to the owner or a later lane's brief |
+| Role   | Name                                                                          | Runs                                                                                      |
+| ------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| create | `rt-<lane>-create` for `/create-ticket`, `rt-<lane>-cr` for `/change-request` | `/create-ticket`, or `/change-request` for new work                                       |
+| dev    | `rt-<lane>-dev`                                                               | `/dev-ticket`                                                                             |
+| tests  | `rt-<lane>-tests`                                                             | `/create-tests`                                                                           |
+| review | `rt-<lane>-review`                                                            | `/review-changes`                                                                         |
+| spike  | `rt-<lane>-spike`                                                             | research that edits no tracked file; its findings go to the owner or a later lane's brief |
 
 **The order is create, dev, tests, review, and each member answers the one after it.** Dev writes no test and runs no suite. The tests member writes and repairs the tests, runs the targeted ones, and sends code bugs back to dev. The review reads the change cold, fixes its own code findings, sends its test gaps to the tests member, and its report triggers the lane's commit, which you make.
 
@@ -184,13 +184,13 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 
 `session_settle` by threadId clears a finished member, and refuses one that is running or waiting on the owner. A settle takes every session that member spawned with it. **Settle on the ROLE's completion**, the point the next role stops being able to need it:
 
-| Settle             | When                                                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `rt-<lane>-create` | when dev reports its transition to review, since dev asks it the author-only questions; an inline `change-request` when the tests member reports green |
-| `rt-<lane>-dev`    | when the tests member reports green, since it answers the tests member's code bugs                                                                     |
-| `rt-<lane>-tests`  | when the review's Step 9 is complete, since it answers gap rounds and tests a debt fix breaks                                                          |
-| `rt-<lane>-review` | when its Step 9 is complete                                                                                                                            |
-| `rt-<lane>-spike`  | when you have put its findings to the owner or into a brief                                                                                            |
+| Settle                      | When                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rt-<lane>-create` or `-cr` | when dev reports its transition to review, since dev asks it the author-only questions; an inline `change-request` when the tests member reports green |
+| `rt-<lane>-dev`             | when the tests member reports green, since it answers the tests member's code bugs                                                                     |
+| `rt-<lane>-tests`           | when the review's Step 9 is complete, since it answers gap rounds and tests a debt fix breaks                                                          |
+| `rt-<lane>-review`          | when its Step 9 is complete                                                                                                                            |
+| `rt-<lane>-spike`           | when you have put its findings to the owner or into a brief                                                                                            |
 
 **A review cannot complete Step 9 before you commit**, since Step 9 triages debt against your sha. Ask the direct question before settling: is your Step 9 complete against this sha?
 
@@ -216,7 +216,7 @@ Done when: the tools are present, you hold your threadId, and the state doc is y
 
 Keep discussing with the owner. When a change is agreed, route it: new work with no sprint entry to a `change-request` create member; a `backlog` ticket to a `create-ticket` create member; a `ready-for-dev` ticket to dev. Check the cap and the intersection, record the lane in the state doc, and return to the conversation. Then dispatch each stage as the one before it reports:
 
-1. `rt-<lane>-create`: `Run /create-ticket for <ticket>. Report when the ticket is ready for dev.` For new work: `Run /change-request on <subject and evidence>. Report its disposition and sizing.`
+1. `rt-<lane>-create`: `Run /create-ticket for <ticket>. Report when the ticket is ready for dev.` For new work, `rt-<lane>-cr`: `Run /change-request on <subject and evidence>. Report its disposition and sizing.`
 2. `rt-<lane>-dev`: `Run /dev-ticket for <ticket>. The ticket's author is threadId <create threadId>. Report the transition to review, then stay available: the tests member sends you code bugs.`
 3. `rt-<lane>-tests`: `Run /create-tests for <ticket or record>. The dev session is threadId <dev threadId>; your defect ids are <range>. Report when every test is green, then stay available: the review sends you test gaps.`
 4. `rt-<lane>-review`: `Run /review-changes for <ticket or record>. The tests session is threadId <tests threadId>. Leave these sibling paths out of your scope: <paths, or none>.`
