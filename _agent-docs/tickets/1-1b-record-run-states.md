@@ -325,6 +325,7 @@ The `run-interrupt` fixture's config appends a reporter through `configureVitest
 #### Deliberately Untested
 
 - `packages/daemon/src/vitest/run-states.ts` `recordModules`' `missing` modules (review gap G4): no fixture makes Vitest return no module for a specification. A module failing tag validation, one throwing at load, a failing setup file and a worker killed at load each come back as a module, and a forks worker given an unknown `execArgv` flag still started.
+- `packages/daemon/src/vitest/discover-tests.ts` `collectWorkspace`'s failed-module entries from `specificationsWithoutModule`: unreachable by a fixture for the same reason as G4, since collection runs through the same workers and a worker killed at load leaves a placeholder module there too (D1076, D1083). Vitest reaches the path only when a worker fails to start, which no fixture could produce.
 
 - `packages/daemon/src/vitest/run-workspace.ts` `RunInterruption` at-most-one-cancel guards (`this.cancelled !== undefined` in `cancel`, `if (this.queued) return;` in `onTestModuleQueued`): each is inert alone, since the abort listener is `once` and `onTestModuleQueued` cancels only on the first module, so neither mutation issues a second cancel while the other stands.
 - `packages/daemon/src/vitest/run-workspace.ts` `specifications.length === 0` early return: inert, since a run over no specifications records the same `no-module` result through `recordModules` (D1189 pins the reason).
@@ -348,7 +349,7 @@ Library facts found by this review (installed 5.0.1 and 4.1.11 source): `task.re
 
 Tech debt (not in this change's reach):
 
-- `packages/daemon/src/vitest/discover-tests.ts` `collectWorkspace`: the failed-module entries built from `specificationsWithoutModule` (a specification Vitest returned no module for) have no defect record, so dropping them survives every discovery test. The run's copy of the same path is gap G4 below.
+- `packages/daemon/src/vitest/discover-tests.ts` `collectWorkspace`: the failed-module entries built from `specificationsWithoutModule` (a specification Vitest returned no module for) have no defect record, so dropping them survives every discovery test. The run's copy of the same path is gap G4 below. Disposition: recorded under Deliberately Untested with G4, since no fixture reaches either copy.
 
 #### Test Coverage Gaps
 
