@@ -57,7 +57,7 @@ Never send a standby or roll-call message: a settled member answers it by going 
 
 ## Gates
 
-**Members run targeted gates**: the tests, lint, and typecheck for the files and workspace they touched, and `bun run test:defects` for their named defects. **`bun run check` is yours**, because it reads every lane's code at once.
+**Members run targeted gates**: the tests, lint, and typecheck for the files and workspace they touched, and `bun run test:defects` for their named defects. **`bun run check` is yours**, because it reads every lane's code at once. The exception is a worktree lane, whose review runs it in its own tree (§ Worktree lanes).
 
 **Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run. A red in a file another live lane holds is that lane's, or a reason to hold: route it to that lane's member, never to the one you are committing.
 
@@ -73,11 +73,24 @@ Never send a standby or roll-call message: a settled member answers it by going 
 
 Never pipe a gate through `tail` or `head`: a killed run leaves an empty file, and `$?` becomes the filter's status. Cite a scratch path only in live messages, never in a committed file.
 
+## Worktree lanes
+
+A lane can run in its own git worktree instead of the shared checkout, so its edits and gates never touch a sibling's tree. T3 Code attaches sessions to a worktree but never creates, recreates, or deletes one; you do.
+
+- **Create** from the main checkout: `git worktree add C:\source\rt-test-wt\wt-<n> -b wt/<n> main`, then `bun install --frozen-lockfile` in the new tree. It branches from `main`'s last commit, so commit what the lane needs first. Reuse a tree for the next lane rather than removing it.
+- **Attach**: spawn the lane's first member with `worktree: { path, branch }`, and every later member with `worktree: { sameAs: <first member's threadId> }`.
+- **The cap counts lanes, not trees**: two build lanes in total. The dispatch intersection still applies, because two trees turn a shared file from a silent overwrite into a merge conflict, which is better but not free. Serialize overlapping lanes.
+- **Lane files for every tree live in the main checkout's `_agent-docs/.scratch/lanes/`**, so an intersection sees every lane at once. Give a worktree member that absolute path in its dispatch.
+- **Orchestrator-only files in a worktree lane**: write them yourself in that tree, and they commit with the lane on `wt/<n>`. You still allocate every id for both trees; before handing one out, check it in both trees.
+- **The lane gates itself**: its review runs `bun run check` in its own tree and reports the exit code with its window. Members never commit.
+- **Land it**: commit the lane on `wt/<n>` in the worktree, then from the main checkout `git merge --no-ff wt/<n>` into `main`. Use a merge commit, never a rebase, so the sha the review gated stays stable. Commit any shared-checkout lane first, since a merge refuses while the main tree holds uncommitted changes to a file it touches. Run `bun run check` once on the merged `main`, push `main`, then fast-forward `wt/<n>` to `main` so the next lane starts current. Do not push `wt/<n>`.
+- **Sweep** the worktree's own `_agent-docs/.scratch/` as well as the main checkout's. When no lane needs the tree, `git worktree remove` it and `git branch -d wt/<n>`.
+
 ## Files you write
 
 **Project-wide files are yours**, because every lane would otherwise edit them at once: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, everything under `docs/`, `_agent-docs/*.md`, `.claude/skills/`, the root `package.json`, `bun.lock`, `bunfig.toml`, `.oxlintrc.json`, `tsconfig.base.json`, the root `vitest.config.ts`, and `.github/`. **A member reports the exact text or dependency it wants and you apply it.**
 
-**Grant a file when the lane decided its content.** A lane whose work IS a project-wide doc (a plan rewrite, a new procedure) writes it: name the granted paths in the dispatch, and read the diff before you commit. The grant moves the writing, never the review.
+**Grant a file when the lane decided its content.** A lane whose work IS a project-wide doc (a plan rewrite, a new procedure) writes it: name the granted paths in the dispatch, and read the diff before you commit. The grant moves the writing, never the review. A planning `change-request` lane is granted the ADRs and `docs/requirements.md` it decides. **You still allocate every ADR, requirement, and rule id**, because two lanes each taking the next free id take the same one.
 
 A lane's own record (a spike's findings, a dev's notes) belongs to that lane. **One named writer per lane**; its other sessions send that writer their content.
 

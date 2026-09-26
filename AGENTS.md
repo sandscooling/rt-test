@@ -20,7 +20,7 @@ Run `session_list` at the start of a session and read your own row. If your `gro
 - Make direct changes for explicitly requested work within your role. Do not introduce a ticket workflow or subagent fan-out unless requested; lanes of sessions are the delegation mechanism.
 - When asked for thoughts or an audit, give findings before implementing changes.
 - If a rule blocks the requested outcome, check its factual basis and intended scope. Surface a real product tradeoff rather than silently working around it.
-- Write durable instructions as actions. Keep historical justification in commits or decision records.
+- Write durable instructions as actions that state only current facts. Keep history, provenance, and retired or superseded entries out of rules, docs, and comments; git and decision records hold them, and a stale line reads as an instruction.
 - Do not use U+2014 in added or changed text. Do not rewrite untouched lines solely to remove it.
 
 ## Product guarantees
@@ -51,7 +51,7 @@ Run `session_list` at the start of a session and read your own row. If your `gro
 
 ## Git and public repository
 
-- Work and commit on `main` until the owner introduces a branch workflow.
+- Work and commit on `main`. A worktree lane commits on its `wt/<n>` branch, which the orchestrator merges into `main` with a merge commit.
 - Stage only files created or edited for the current task. Inspect the staged diff before committing.
 - Use concise conventional commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, and `chore:`. Explain meaningful behavior and validation in the body.
 - When asked to publish work, push its branch and report the repository URL and commit.

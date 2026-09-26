@@ -1,0 +1,478 @@
+[
+  {
+    "id": "D300",
+    "defect": "A lane claiming a path another lane holds is told it already holds it.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "if (existing.lane === owner.lane) return { status: \"held\" };",
+    "new": "if (true) return { status: \"held\" };"
+  },
+  {
+    "id": "D301",
+    "defect": "A claim that loses one path keeps the paths it won, so a lane holds half its set.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "for (const record of created) unlinkSync(record.file);",
+    "new": ""
+  },
+  {
+    "id": "D302",
+    "defect": "Paths differing only in case get separate claims, so two lanes edit one Windows file.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": ".update(comparable(repoPath))",
+    "new": ".update(repoPath)"
+  },
+  {
+    "id": "D303",
+    "defect": "A backslash path keeps its backslashes, so it never matches the same file named with slashes.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "const toSlash = (path) => path.replace(/\\\\/g, \"/\");",
+    "new": "const toSlash = (path) => path;"
+  },
+  {
+    "id": "D304",
+    "defect": "A set including an orchestrator-only file still claims its other paths.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "if (refused.length > 0) return { ok: false, ...EMPTY, refused };\n  return createAll(dir, claimFileFor",
+    "new": "if (false) return { ok: false, ...EMPTY, refused };\n  return createAll(dir, claimFileFor"
+  },
+  {
+    "id": "D305",
+    "defect": "A top-level _agent-docs markdown file is claimable by a lane.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "AGENT_DOCS_TOP_LEVEL.test(path)",
+    "new": "false"
+  },
+  {
+    "id": "D306",
+    "defect": "A ticket nested under _agent-docs is refused as orchestrator-only.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "/^_agent-docs\\/[^/]+\\.md$/",
+    "new": "/^_agent-docs\\/.+\\.md$/"
+  },
+  {
+    "id": "D307",
+    "defect": "An orchestrator-only folder named in another case is claimable.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "const path = comparable(repoPath);",
+    "new": "const path = repoPath;"
+  },
+  {
+    "id": "D308",
+    "defect": "A path sharing only a name prefix with an orchestrator-only folder is refused.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "inner.startsWith(`${outer}/`)",
+    "new": "inner.startsWith(outer)"
+  },
+  {
+    "id": "D309",
+    "defect": "The lane holding a grant still cannot claim a file beneath it.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "!granted.some((grant) => covers(grant, comparable(path))),",
+    "new": "true,"
+  },
+  {
+    "id": "D310",
+    "defect": "Any lane can claim a granted file while another lane holds the grant.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "const granted = listGrants(dir, owner.lane).map((g) => comparable(g.path));",
+    "new": "const granted = listGrants(dir).map((g) => comparable(g.path));"
+  },
+  {
+    "id": "D311",
+    "defect": "A grant opens every orchestrator-only file, not just the paths it names.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "covers(grant, comparable(path))",
+    "new": "grant.length > 0"
+  },
+  {
+    "id": "D312",
+    "defect": "A folder is granted while another lane holds a file inside it.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "const overlaps = (a, b) => covers(a, b) || covers(b, a);",
+    "new": "const overlaps = (a, b) => covers(a, b);"
+  },
+  {
+    "id": "D313",
+    "defect": "The orchestrator-only rules folder ignores the flow config's rules_dir.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "  \"rules_dir\",\n",
+    "new": ""
+  },
+  {
+    "id": "D314",
+    "defect": "A lane can release another lane's claim.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "else if (!any && existing.lane !== lane) outcome.refused.push(path);",
+    "new": "else if (false) outcome.refused.push(path);"
+  },
+  {
+    "id": "D315",
+    "defect": "Releasing a lane's claims with no path releases every lane's claims.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "for (const record of list(dir, lane)) {",
+    "new": "for (const record of list(dir)) {"
+  },
+  {
+    "id": "D316",
+    "defect": "A lane re-claiming its own path is reported as a conflict with itself.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "if (existing.lane === owner.lane) return { status: \"held\" };",
+    "new": "if (false) return { status: \"held\" };"
+  },
+  {
+    "id": "D317",
+    "defect": "A path outside the repository is accepted as a repo path.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "rel.startsWith(\"../\") || ",
+    "new": ""
+  },
+  {
+    "id": "D318",
+    "defect": "A directory is claimed as if it were a file, silently covering none of its files.",
+    "file": "scripts/lib/orchestration/claims-cli.mjs",
+    "old": "?.isDirectory()) {",
+    "new": "?.isFile()) {"
+  },
+  {
+    "id": "D319",
+    "defect": "An unreadable, mid-write claim is treated as the caller's own.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "if (existing.lane === owner.lane) return { status: \"held\" };",
+    "new": "if (existing.lane === owner.lane || !existing.thread) return { status: \"held\" };"
+  },
+  {
+    "id": "D320",
+    "defect": "Staging one lane also stages another lane's claimed files.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "...listClaims(claimsDir, lane).map(",
+    "new": "...listClaims(claimsDir).map("
+  },
+  {
+    "id": "D321",
+    "defect": "An unmatched hunk substring still stages the rest of the lane.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "if (plan.errors.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D322",
+    "defect": "A hunk spec stages every hunk of the file, including another lane's.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "l.slice(1).includes(spec.substring)",
+    "new": "l.length > 0"
+  },
+  {
+    "id": "D323",
+    "defect": "A selected hunk keeps a new-side offset that counts an unselected hunk above it.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "const header = `@@ ${oldText} +${rangeText(newStart, newCount)} @@${rest}`;",
+    "new": "const header = h.header;"
+  },
+  {
+    "id": "D324",
+    "defect": "A dry run stages the lane.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "if (dryRun) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D325",
+    "defect": "An --also path with nothing to stage is silently accepted.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "errors.push(`${w.path}: --also names a file with no change to stage`);",
+    "new": "plan.unchanged.push(w.path);"
+  },
+  {
+    "id": "D326",
+    "defect": "A bracketed path is read as a glob and stages a different file.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "[\"--literal-pathspecs\", \"-c\", \"core.quotepath=false\", ...args],",
+    "new": "[\"-c\", \"core.quotepath=false\", ...args],"
+  },
+  {
+    "id": "D327",
+    "defect": "A hunk on an unmodified file is refused without saying the file has no change.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "if (diff.trim() === \"\") {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D328",
+    "defect": "A new untracked --also file is left out of the index.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "else plan.whole.push(change);",
+    "new": "else if (change.xy !== \"??\") plan.whole.push(change);"
+  },
+  {
+    "id": "D329",
+    "defect": "A sprint file edit skips the sprint key gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "watches: [\"sprints_dir\", \"sprint_status\"],",
+    "new": "watches: [\"sprint_status\"],"
+  },
+  {
+    "id": "D330",
+    "defect": "A folder sharing only a name prefix with a watched folder fires its gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "return watched.dir ? p.startsWith(`${w}/`) : p === w;",
+    "new": "return watched.dir ? p.startsWith(w) : p === w;"
+  },
+  {
+    "id": "D331",
+    "defect": "A file sharing only a name prefix with a watched file fires its gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "return watched.dir ? p.startsWith(`${w}/`) : p === w;",
+    "new": "return watched.dir ? p.startsWith(`${w}/`) : p.startsWith(w);"
+  },
+  {
+    "id": "D332",
+    "defect": "A watched path named in another case fires no gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "const normalize = (s) => s.replace(/\\\\/g, \"/\").toLowerCase();",
+    "new": "const normalize = (s) => s.replace(/\\\\/g, \"/\");"
+  },
+  {
+    "id": "D333",
+    "defect": "A file the session only read counts as one it changed.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "if (!WRITING_TOOLS.has(node.name)) return;",
+    "new": "if (false) return;"
+  },
+  {
+    "id": "D334",
+    "defect": "An unreadable session scope reads as an empty one, so the hook goes silent.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "return sawToolUse ? named : null;",
+    "new": "return named;"
+  },
+  {
+    "id": "D335",
+    "defect": "Another session's dirty doc is gated as if this session changed it.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "if (named === null) return paths;",
+    "new": "if (named !== undefined) return paths;"
+  },
+  {
+    "id": "D336",
+    "defect": "A doc changed only by a subagent escapes the gates.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "if (name.endsWith(\".jsonl\")) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D337",
+    "defect": "A failing gate on a modified doc lets the stop through.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "if (failure !== null) failures.push(",
+    "new": "if (false) failures.push("
+  },
+  {
+    "id": "D338",
+    "defect": "A new untracked doc is never gated.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "\"--untracked-files=all\",",
+    "new": "\"--untracked-files=no\","
+  },
+  {
+    "id": "D339",
+    "defect": "The hook blocks again after already blocking once, looping on a failure.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "if (input.stop_hook_active) return { code: 0, err: \"\" };",
+    "new": "if (false) return { code: 0, err: \"\" };"
+  },
+  {
+    "id": "D340",
+    "defect": "A subagent's sidechain usage is reported as the session's context.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "if (entry.isSidechain === true) continue;",
+    "new": "if (false) continue;"
+  },
+  {
+    "id": "D341",
+    "defect": "Cache-read tokens are left out of the context count.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "(u.cache_read_input_tokens || 0) +",
+    "new": ""
+  },
+  {
+    "id": "D342",
+    "defect": "The handoff warning waits past the 60% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "export const HANDOFF_PERCENT = 60;",
+    "new": "export const HANDOFF_PERCENT = 65;"
+  },
+  {
+    "id": "D343",
+    "defect": "A subagent's tool call gets the parent's handoff warning.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "if (payload.agent_id) return null;",
+    "new": "if (false) return null;"
+  },
+  {
+    "id": "D344",
+    "defect": "A rate-limit cache older than a day is reported as current.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "if (now - statSync(file).mtimeMs > STALE_CACHE_MS) return null;",
+    "new": "if (false) return null;"
+  },
+  {
+    "id": "D345",
+    "defect": "The compact reminder points somewhere other than the handoff doc.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "export const HANDOFF_DOC = \"_agent-docs/handoff.md\";",
+    "new": "export const HANDOFF_DOC = \"_agent-docs/next-session.md\";"
+  },
+  {
+    "id": "D346",
+    "defect": "The prompt header drops context use when the payload omits it.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "return used == null ? null : formatContext(used);",
+    "new": "return null;"
+  },
+  {
+    "id": "D347",
+    "defect": "A file is granted while another lane holds its folder.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "const overlaps = (a, b) => covers(a, b) || covers(b, a);",
+    "new": "const overlaps = (a, b) => covers(b, a);"
+  },
+  {
+    "id": "D348",
+    "defect": "A grant that conflicts on one path still grants the others.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "if (conflicts.length > 0) return { ok: false, ...EMPTY, conflicts };",
+    "new": "if (false) return { ok: false, ...EMPTY, conflicts };"
+  },
+  {
+    "id": "D349",
+    "defect": "A path any lane may claim is granted, hiding a mistaken grant.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": ".filter((path) => classifyPath(rules, path) === PATH_CLASS.CLAIMABLE)",
+    "new": ".filter(() => false)"
+  },
+  {
+    "id": "D350",
+    "defect": "The rules, checklist, sprints, and sprint status are claimable without a grant.",
+    "file": "scripts/lib/orchestration/paths.mjs",
+    "old": "      ...fromConfig,\n",
+    "new": ""
+  },
+  {
+    "id": "D351",
+    "defect": "grant-end with no path ends none of the lane's grants.",
+    "file": "scripts/lib/orchestration/claims.mjs",
+    "old": "removeRecords(dir, listGrants, grantFileFor, who, repoPaths)",
+    "new": "removeRecords(dir, listClaims, grantFileFor, who, repoPaths)"
+  },
+  {
+    "id": "D352",
+    "defect": "The command line refuses to grant a folder, as it does for a claim.",
+    "file": "scripts/lib/orchestration/claims-cli.mjs",
+    "old": "const paths = repoPaths(ctx.root, args.positional, { files: false });",
+    "new": "const paths = repoPaths(ctx.root, args.positional);"
+  },
+  {
+    "id": "D353",
+    "defect": "An AGENTS.md edit skips the rule hygiene gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "      \"AGENTS.md\",\n",
+    "new": ""
+  },
+  {
+    "id": "D354",
+    "defect": "A rules folder edit skips the rule hygiene gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "      \"rules_dir\",\n",
+    "new": ""
+  },
+  {
+    "id": "D355",
+    "defect": "A literal folder watch matches only the folder itself, so a nested skill skips its gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "dir: key.endsWith(\"/\")",
+    "new": "dir: false"
+  },
+  {
+    "id": "D356",
+    "defect": "A project context edit skips the rule hygiene gate.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "      \"project_context\",\n",
+    "new": ""
+  },
+  {
+    "id": "D357",
+    "defect": "The doc-integrity entry drops the blocking exit code, so a failed gate lets the stop through.",
+    "file": ".claude/hooks/doc-integrity.cjs",
+    "old": "process.exitCode = code;",
+    "new": "process.exitCode = 0;"
+  },
+  {
+    "id": "D358",
+    "defect": "The doc-integrity entry blocks without telling the model which gate failed.",
+    "file": ".claude/hooks/doc-integrity.cjs",
+    "old": "if (result.err) process.stderr.write(result.err);",
+    "new": ""
+  },
+  {
+    "id": "D359",
+    "defect": "The doc-integrity entry ignores its stdin, so it blocks the same stop forever.",
+    "file": ".claude/hooks/doc-integrity.cjs",
+    "old": "const input = readInput();",
+    "new": "const input = {};"
+  },
+  {
+    "id": "D360",
+    "defect": "A doc-integrity hook error blocks the stop instead of failing open.",
+    "file": ".claude/hooks/doc-integrity.cjs",
+    "old": "    return 0;\n",
+    "new": "    return 2;\n"
+  },
+  {
+    "id": "D361",
+    "defect": "The handoff warning is labeled for the wrong event, so the harness drops it.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "if (warning) emit(\"PostToolUse\", warning);",
+    "new": "if (warning) emit(\"UserPromptSubmit\", warning);"
+  },
+  {
+    "id": "D362",
+    "defect": "The prompt header is labeled for the wrong event, so the harness drops it.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "emit(\"UserPromptSubmit\", gauge.promptHeader(",
+    "new": "emit(\"PostToolUse\", gauge.promptHeader("
+  },
+  {
+    "id": "D363",
+    "defect": "The compact reminder is labeled for the wrong event, so the harness drops it.",
+    "file": ".claude/hooks/compact-reminder.cjs",
+    "old": "hookEventName: \"SessionStart\",",
+    "new": "hookEventName: \"UserPromptSubmit\","
+  },
+  {
+    "id": "D364",
+    "defect": "A hook command names an entry that does not exist, as a Fleet Cooling .js name would.",
+    "file": ".claude/settings.json",
+    "old": "doc-integrity.cjs",
+    "new": "doc-integrity.js"
+  },
+  {
+    "id": "D365",
+    "defect": "A hook runs in the default shell, where PowerShell leaves $CLAUDE_PROJECT_DIR unexpanded.",
+    "file": ".claude/settings.json",
+    "old": "\"shell\": \"bash\",\n            \"timeout\": 150",
+    "new": "\"timeout\": 150"
+  },
+  {
+    "id": "D366",
+    "defect": "The handoff reminder fires on startup instead of after a compaction.",
+    "file": ".claude/settings.json",
+    "old": "\"matcher\": \"compact\"",
+    "new": "\"matcher\": \"startup\""
+  },
+  {
+    "id": "D367",
+    "defect": "The doc gates can outlast the Stop hook's timeout, so the harness kills the hook and the stop passes.",
+    "file": "scripts/lib/orchestration/doc-integrity.mjs",
+    "old": "export const GATE_TIMEOUT_MS = 30_000;",
+    "new": "export const GATE_TIMEOUT_MS = 40_000;"
+  }
+]

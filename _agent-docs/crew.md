@@ -17,6 +17,10 @@ Every lane shares one checkout, so the lane file `_agent-docs/.scratch/lanes/<gr
 - **Re-check when your approach changes.** A new route that touches a file the first one did not is the moment this is easiest to skip.
 - **Never edit a project-wide file** unless the dispatch grants it by path: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `docs/`, `_agent-docs/*.md`, `.claude/skills/`, the root `package.json`, `bun.lock`, `bunfig.toml`, `.oxlintrc.json`, `tsconfig.base.json`, the root `vitest.config.ts`, and `.github/`. Report the exact text or dependency you need, and the orchestrator applies it.
 
+## Worktree lanes
+
+If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. Your lane file still lives in the main checkout's `_agent-docs/.scratch/lanes/`, at the absolute path your dispatch gives, so that the intersection check sees every tree. If you are the lane's review, run `bun run check` in your tree at the end and report its exit code, test counts, and window. Never commit, merge, or push; the orchestrator lands the branch.
+
 ## Gates
 
 Run the targeted gates for what you touched, and read their exit codes:
