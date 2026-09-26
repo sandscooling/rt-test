@@ -1,11 +1,18 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
 /** Written to `PRAGMA user_version`. A change to the tables below raises it and ships the opener a migration from the previous version, since the opener refuses every other version. */
-export const STORE_SCHEMA_VERSION = 1;
+export const STORE_SCHEMA_VERSION = 2;
+/** The one older schema version the opener migrates to `STORE_SCHEMA_VERSION` through `STORE_MIGRATION`. */
+export const MIGRATED_SCHEMA_VERSION = 1;
 export const STORE_FILE_NAME = "store.sqlite";
 
 export const FINGERPRINT_DIGEST = "digest";
 export const NOT_FINGERPRINTED = "not-fingerprinted";
+
+export const FORCE_STOPPED = 1;
+export const NOT_FORCE_STOPPED = 0;
+/** Last in `runs`, so a new store and a migrated one hold the same columns in the same order. */
+const FORCE_STOPPED_COLUMN = `force_stopped INTEGER CHECK (force_stopped IN (${NOT_FORCE_STOPPED}, ${FORCE_STOPPED}))`;
 
 /** A NULL column is a value the record never held. JSON columns hold arrays and objects the record carries whole. */
 export const STORE_SCHEMA = `
@@ -30,6 +37,7 @@ CREATE TABLE runs (
   unhandled_errors TEXT,
   typecheck_modules TEXT,
   unsupported_projects TEXT,
+  ${FORCE_STOPPED_COLUMN},
   CHECK ((fingerprint_kind = '${FINGERPRINT_DIGEST}') = (fingerprint_digest IS NOT NULL AND fingerprint_digest <> ''))
 ) STRICT;
 CREATE INDEX runs_by_worktree ON runs (project_identity, worktree_identity, sequence);
@@ -105,4 +113,11 @@ CREATE TABLE discovered_tests (
   PRIMARY KEY (discovery_sequence, workspace_index, test_index),
   FOREIGN KEY (discovery_sequence, workspace_index) REFERENCES discovery_workspaces (discovery_sequence, workspace_index)
 ) STRICT;
+`;
+
+/** Brings a store at `MIGRATED_SCHEMA_VERSION` to `STORE_SCHEMA_VERSION`. That version's code never force-stopped a run, so each of its `ran` runs was not force-stopped. */
+export const STORE_MIGRATION = `
+ALTER TABLE runs ADD COLUMN ${FORCE_STOPPED_COLUMN};
+UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';
+PRAGMA user_version = ${STORE_SCHEMA_VERSION};
 `;

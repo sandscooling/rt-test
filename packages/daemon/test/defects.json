@@ -192,8 +192,8 @@
     "id": "D1050",
     "defect": "Discovery collects with Vitest's default collect, which on 5.x parses statically and lists a parameterized test as one unformatted test.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": ": await instance.collectTests(specifications);",
-    "new": ": await instance.collect();"
+    "old": "instance.collectTests(specifications),",
+    "new": "instance.collect(),"
   },
   {
     "id": "D1051",
@@ -220,15 +220,15 @@
     "id": "D1054",
     "defect": "Discovery runs the tests it lists on Vitest 5, executing test bodies and hooks.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": ": await instance.collectTests(specifications);",
-    "new": ": await instance.runTestSpecifications(specifications);"
+    "old": "instance.collectTests(specifications),",
+    "new": "instance.runTestSpecifications(specifications),"
   },
   {
     "id": "D1055",
     "defect": "Discovery runs the tests it lists on Vitest 4.1, executing test bodies and hooks.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": ": await instance.collectTests(specifications);",
-    "new": ": await instance.runTestSpecifications(specifications);"
+    "old": "instance.collectTests(specifications),",
+    "new": "instance.runTestSpecifications(specifications),"
   },
   {
     "id": "D1056",
@@ -569,8 +569,8 @@
   {
     "id": "D1180",
     "defect": "An abort as Vitest starts the run is issued at once and dropped by Vitest's cancel reset, so the run completes as if never interrupted.",
-    "file": "packages/daemon/src/vitest/run-workspace.ts",
-    "old": "      if (this.queued) this.cancel();",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "      if (this.ready) this.cancel();",
     "new": "      this.cancel();"
   },
   {
@@ -590,9 +590,9 @@
   {
     "id": "D1183",
     "defect": "An abort that arrives before the first module is queued is never issued, so every test runs to its outcome.",
-    "file": "packages/daemon/src/vitest/run-workspace.ts",
-    "old": "    if (this.signal.aborted) this.cancel();",
-    "new": ""
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "    if (!this.signal.aborted) return;\n    this.cancel();",
+    "new": "    if (!this.signal.aborted) return;"
   },
   {
     "id": "D1184",
@@ -611,14 +611,14 @@
   {
     "id": "D1186",
     "defect": "A run is recorded interrupted whenever its signal aborted, even after Vitest ended the run.",
-    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
     "old": "    return this.endReason === INTERRUPTED_END_REASON",
     "new": "    return this.signal.aborted"
   },
   {
     "id": "D1187",
     "defect": "Only the daemon's own cancel marks a run interrupted, so a run Vitest stopped under the consumer's bail reads as completed.",
-    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
     "old": "    return this.endReason === INTERRUPTED_END_REASON",
     "new": "    return this.cancelled !== undefined"
   },
@@ -723,7 +723,7 @@
   {
     "id": "D1208",
     "defect": "An abort withheld until the first queued module, in a run where Vitest never queues one, leaves the run completed.",
-    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
     "old": " || withheldAbort",
     "new": ""
   },
@@ -1076,5 +1076,425 @@
     "file": "packages/daemon/src/store/write-discovery.ts",
     "old": "        error: entry.error,\n        closeError: entry.closeError ?? null,",
     "new": "        error: entry.error,\n        closeError: null,"
+  },
+  {
+    "id": "D1276",
+    "defect": "A run is stored not force-stopped whatever it recorded, so a force-stopped run reads back as one whose afterAll hooks ran.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "    forceStopped: run.forceStopped ? FORCE_STOPPED : NOT_FORCE_STOPPED,",
+    "new": "    forceStopped: NOT_FORCE_STOPPED,"
+  },
+  {
+    "id": "D1277",
+    "defect": "A stored run that was not force-stopped reads back force-stopped.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "  if (mark === NOT_FORCE_STOPPED) return false;",
+    "new": "  if (mark === NOT_FORCE_STOPPED) return true;"
+  },
+  {
+    "id": "D1284",
+    "defect": "A ran run with no recorded force-stop fact is coerced to not force-stopped rather than refused.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "  const mark = integer(row, \"force_stopped\");",
+    "new": "  const mark = Number(row[\"force_stopped\"]);"
+  },
+  {
+    "id": "D1278",
+    "defect": "The migration adds the force-stop column but never marks the version-1 ran runs, so each reads back unreadable.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';\n",
+    "new": ""
+  },
+  {
+    "id": "D1279",
+    "defect": "The opener refuses a version-1 store as an older schema instead of migrating it.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  if (isMigratable(header)) return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D1280",
+    "defect": "The migration leaves the header at version 1, so the migrated store still claims the old schema.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "\nPRAGMA user_version = ${STORE_SCHEMA_VERSION};",
+    "new": ""
+  },
+  {
+    "id": "D1281",
+    "defect": "The migration marks every run not force-stopped, giving runs that never loaded their workspace a force-stop value they never held.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": " WHERE status = 'ran';",
+    "new": ";"
+  },
+  {
+    "id": "D1282",
+    "defect": "An opener that read the version-1 header before another opener migrated the file migrates it again and fails on the column that already exists.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    if (!isMigratable(checkedHeader(database, file))) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D1283",
+    "defect": "The opener migrates an RT Test store of any schema version up to 1, so a version-0 store is changed rather than refused.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  return header.userVersion === MIGRATED_SCHEMA_VERSION;",
+    "new": "  return header.userVersion <= MIGRATED_SCHEMA_VERSION;"
+  },
+  {
+    "id": "D1285",
+    "defect": "The Vitest adapter version stays 1, so a run stored under update none looks current beside runs stored when missing snapshots were written.",
+    "file": "packages/daemon/src/vitest/adapter-version.ts",
+    "old": "export const VITEST_ADAPTER_VERSION = 2;",
+    "new": "export const VITEST_ADAPTER_VERSION = 1;"
+  },
+  {
+    "id": "D1286",
+    "defect": "The Vitest adapter version stays 1, so a discovery stored under the new overrides looks current beside ones stored before them.",
+    "file": "packages/daemon/src/vitest/adapter-version.ts",
+    "old": "export const VITEST_ADAPTER_VERSION = 2;",
+    "new": "export const VITEST_ADAPTER_VERSION = 1;"
+  },
+  {
+    "id": "D1287",
+    "defect": "A .mts config is not read as ESM by its extension, so in a package with no type it goes to the bundle loader, which writes node_modules/.vite-temp.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "new Set([\".mts\", \".mjs\"])",
+    "new": "new Set([\".mjs\"])"
+  },
+  {
+    "id": "D1288",
+    "defect": "A .cts config is not read as CommonJS by its extension, so in a package of type module it goes to the runner, which cannot load CommonJS.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "new Set([\".cts\", \".cjs\"])",
+    "new": "new Set([\".cjs\"])"
+  },
+  {
+    "id": "D1289",
+    "defect": "A .js config is never read as ESM, so in a package of type module it goes to the bundle loader, which writes node_modules/.vite-temp.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "  return nearestPackageType(dirname(file)) === ESM_PACKAGE_TYPE;",
+    "new": "  return false;"
+  },
+  {
+    "id": "D1290",
+    "defect": "A .js config in a package with no type is read as ESM, so it goes to the runner, which cannot load CommonJS.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "  return nearestPackageType(dirname(file)) === ESM_PACKAGE_TYPE;",
+    "new": "  return nearestPackageType(dirname(file)) !== \"commonjs\";"
+  },
+  {
+    "id": "D1291",
+    "defect": "A package.json that does not parse ends the search as a package with no type, where Vite passes over it to the next one up.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "  } catch {\n    return { found: false };",
+    "new": "  } catch {\n    return { found: true, type: undefined };"
+  },
+  {
+    "id": "D1292",
+    "defect": "A nearest package.json with no type is passed over for an ancestor's type, where Vite lets the nearest one decide.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "    if (manifest.found) return manifest.type;",
+    "new": "    if (manifest.found && manifest.type !== undefined) return manifest.type;"
+  },
+  {
+    "id": "D1293",
+    "defect": "A vite.config file is chosen over a vitest.config file, the reverse of Vitest's own lookup.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "const CONFIG_FILES = [...VITEST_CONFIG_FILES, ...VITE_CONFIG_FILES];",
+    "new": "const CONFIG_FILES = [...VITE_CONFIG_FILES, ...VITEST_CONFIG_FILES];"
+  },
+  {
+    "id": "D1294",
+    "defect": "A workspace outside the consumer root is dropped with no notRead entry, so its pattern silently finds nothing.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "      if (refusal !== undefined)\n        notRead.push({ source: pattern, reason: refusal });\n",
+    "new": ""
+  },
+  {
+    "id": "D1295",
+    "defect": "The outside check compares lexical paths, so a link inside the root that leads out is listed and loaded.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  const real = realPath(directory);\n  if (!real.ok) {\n    return `${directory} ${real.reason}, so it could not be checked",
+    "new": "  const real: RealPath = { ok: true, path: directory };\n  if (!real.ok) {\n    return `${directory} ${real.reason}, so it could not be checked"
+  },
+  {
+    "id": "D1296",
+    "defect": "Every directory reached through a link is refused as outside the root, even one whose real path lies inside it.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  const outside =\n",
+    "new": "  const outside =\n    real.path !== directory ||\n"
+  },
+  {
+    "id": "D1297",
+    "defect": "Duplicates are keyed on the workspace path, so two entries reaching one directory are both listed and it loads twice.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  const key = real.ok ? real.path : directory;",
+    "new": "  const key = path;"
+  },
+  {
+    "id": "D1298",
+    "defect": "A later entry resolving to a listed directory is dropped with no notRead entry.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "      notRead.push({ source: path, reason: duplicate });\n",
+    "new": ""
+  },
+  {
+    "id": "D1299",
+    "defect": "The consumer root is checked after the pattern entries, so a link back to it is kept and the root itself is reported as the duplicate.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    consumerRoot,\n    ...workspaceDirectories(consumerRoot, notRead),",
+    "new": "    ...workspaceDirectories(consumerRoot, notRead),\n    consumerRoot,"
+  },
+  {
+    "id": "D1300",
+    "defect": "A discovery whose signal aborted before its turn still loads its first workspace's config before rejecting.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "  signal.throwIfAborted();\n  const { workspaces, notRead }",
+    "new": "  const { workspaces, notRead }"
+  },
+  {
+    "id": "D1301",
+    "defect": "A discovery aborted mid-collection goes on to load the next workspace and resolves with a result instead of rejecting.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    discoveries.push(await discoverWorkspace(workspace, signal));\n    signal.throwIfAborted();",
+    "new": "    discoveries.push(await discoverWorkspace(workspace, signal));"
+  },
+  {
+    "id": "D1302",
+    "defect": "Discovery never marks collection ready for its withheld first cancel, so an abort mid-collection lets Vitest collect every remaining module.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "      setImmediate(() => this.markReady());\n",
+    "new": ""
+  },
+  {
+    "id": "D1304",
+    "defect": "On Vitest 4.1, discovery never marks collection ready for its withheld first cancel, so an abort mid-collection lets Vitest collect every remaining module.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "      setImmediate(() => this.markReady());\n",
+    "new": ""
+  },
+  {
+    "id": "D1303",
+    "defect": "An aborted discovery rejects as soon as its signal aborts, while the Vitest instance is still open and the host still holds the workspace's environment and exit code.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "  return queueSessionJob(() => discoverAll(consumerRoot, signal));",
+    "new": "  const job = queueSessionJob(() => discoverAll(consumerRoot, signal));\n  return new Promise((resolve, reject) => {\n    signal.addEventListener(\"abort\", () => reject(signal.reason), { once: true });\n    job.then(resolve, reject);\n  });"
+  },
+  {
+    "id": "D1305",
+    "defect": "Every run that loaded its workspace records Vitest as force-stopped, even one that completed.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    forceStopped: interruption.forceStopped(),",
+    "new": "    forceStopped: true,"
+  },
+  {
+    "id": "D1306",
+    "defect": "An abort mid-run force-stops Vitest at once rather than after the grace, skipping the project's afterAll hooks for a run that would have ended in time.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "      if (this.ready) this.cancel();",
+    "new": "      if (this.ready) this.cancel();\n      this.graceElapsed = true;\n      this.forceStopIfDue();"
+  },
+  {
+    "id": "D1307",
+    "defect": "A run aborted while its workspace loaded, which issued no cancel at all, records Vitest as force-stopped.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "      forceStopped: false,\n      ...nothingRan(\"interrupted\", modules),",
+    "new": "      forceStopped: true,\n      ...nothingRan(\"interrupted\", modules),"
+  },
+  {
+    "id": "D1308",
+    "defect": "The loader choice is inverted on a run, so an ESM config goes through the bundle loader and leaves node_modules/.vite-temp behind.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    : { config: config.file, configLoader: config.loader };",
+    "new": "    : { config: config.file, configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\" };"
+  },
+  {
+    "id": "D1309",
+    "defect": "Vitest 4.1's results cache is left on, so a run writes its results under node_modules/.vite/vitest.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    cache: RESULTS_CACHE_OFF,\n",
+    "new": ""
+  },
+  {
+    "id": "D1310",
+    "defect": "Vitest's results cache is left on, so a run writes its results under node_modules/.vite/vitest.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    cache: RESULTS_CACHE_OFF,\n",
+    "new": ""
+  },
+  {
+    "id": "D1311",
+    "defect": "The module cache is not turned off in the experimental spelling Vitest 4.1 reads, so a run with it on writes node_modules/.experimental-vitest-cache.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "            fsModuleCache: MODULE_CACHE_OFF,\n",
+    "new": ""
+  },
+  {
+    "id": "D1312",
+    "defect": "The loader choice is inverted, so a config Vite treats as ESM goes through the bundle loader and leaves node_modules/.vite-temp behind.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    : { config: config.file, configLoader: config.loader };",
+    "new": "    : { config: config.file, configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\" };"
+  },
+  {
+    "id": "D1313",
+    "defect": "The loader choice is inverted, so a CommonJS config goes through the runner, which cannot load it, and the workspace fails.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    : { config: config.file, configLoader: config.loader };",
+    "new": "    : { config: config.file, configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\" };"
+  },
+  {
+    "id": "D1314",
+    "defect": "The module cache is not turned off in the top-level spelling Vitest 5 reads, so a job with it on writes node_modules/.vitest-cache.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "      ? { fsModuleCache: MODULE_CACHE_OFF }",
+    "new": "      ? {}"
+  },
+  {
+    "id": "D1315",
+    "defect": "The chosen config file and loader are never passed, so Vitest loads an ESM config through Vite's default bundle loader and leaves node_modules/.vite-temp behind.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "      ...configOptions(workspace),\n",
+    "new": ""
+  },
+  {
+    "id": "D1316",
+    "defect": "Snapshot update is set to new, so a snapshot with none stored is written and recorded passed rather than failed.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "const SNAPSHOT_UPDATE_NONE = \"none\";",
+    "new": "const SNAPSHOT_UPDATE_NONE = \"new\";"
+  },
+  {
+    "id": "D1317",
+    "defect": "On Vitest 4.1, snapshot update is left to the consumer's update: true, so every snapshot test is rewritten and recorded passed.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    update: SNAPSHOT_UPDATE_NONE,\n",
+    "new": ""
+  },
+  {
+    "id": "D1318",
+    "defect": "The force-stop grace is 1 second rather than 10, so a run or discovery that would end cleanly within 10 seconds of a stop is force-stopped and skips its afterAll hooks.",
+    "file": "packages/daemon/src/vitest/force-stop.ts",
+    "old": "export const FORCE_STOP_GRACE_MS = 10_000;",
+    "new": "export const FORCE_STOP_GRACE_MS = 1_000;"
+  },
+  {
+    "id": "D1319",
+    "defect": "The grace timer passes without issuing the second cancel, so on Vitest 5's forks pool a run stuck in a synchronous loop is never force-stopped.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "        this.graceElapsed = true;\n        this.forceStopIfDue();",
+    "new": "        this.graceElapsed = true;"
+  },
+  {
+    "id": "D1320",
+    "defect": "The grace timer passes without issuing the second cancel, so on Vitest 5's threads pool a run stuck in a synchronous loop is never force-stopped.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "        this.graceElapsed = true;\n        this.forceStopIfDue();",
+    "new": "        this.graceElapsed = true;"
+  },
+  {
+    "id": "D1321",
+    "defect": "The grace timer passes without issuing the second cancel, so on Vitest 4.1's forks pool a run stuck in a synchronous loop is never force-stopped.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "        this.graceElapsed = true;\n        this.forceStopIfDue();",
+    "new": "        this.graceElapsed = true;"
+  },
+  {
+    "id": "D1322",
+    "defect": "The grace timer passes without issuing the second cancel, so on Vitest 4.1's threads pool a run stuck in a synchronous loop is never force-stopped.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "        this.graceElapsed = true;\n        this.forceStopIfDue();",
+    "new": "        this.graceElapsed = true;"
+  },
+  {
+    "id": "D1323",
+    "defect": "The grace timer passes without issuing the second cancel, so on Vitest 5's forks pool a discovery stuck loading a looping module is never force-stopped.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "        this.graceElapsed = true;\n        this.forceStopIfDue();",
+    "new": "        this.graceElapsed = true;"
+  },
+  {
+    "id": "D1324",
+    "defect": "The grace timer passes without issuing the second cancel, so on Vitest 4.1's threads pool a discovery stuck loading a looping module is never force-stopped.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "        this.graceElapsed = true;\n        this.forceStopIfDue();",
+    "new": "        this.graceElapsed = true;"
+  },
+  {
+    "id": "D1327",
+    "defect": "The migration restamps every version-1 run with the current adapter version, so results recorded before update none read back as current.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';",
+    "new": "UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';\nUPDATE runs SET adapter_version = 2;"
+  },
+  {
+    "id": "D1328",
+    "defect": "A nearest package.json that starts with a byte order mark fails to parse and is passed over, so an ESM .js config in a package of type module goes to the bundle loader, which writes node_modules/.vite-temp.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "      text.startsWith(BYTE_ORDER_MARK)\n        ? text.slice(BYTE_ORDER_MARK.length)\n        : text,",
+    "new": "      text,"
+  },
+  {
+    "id": "D1329",
+    "defect": "A nearest package.json holding null is read as a package with no type, where Vite passes over it to the next one up.",
+    "file": "packages/daemon/src/vitest/config-loader.ts",
+    "old": "    if (manifest === null) return { found: false };",
+    "new": "    if (manifest === null) return { found: true, type: undefined };"
+  },
+  {
+    "id": "D1330",
+    "defect": "Every pattern through .. is refused, so a pattern that leaves the root and comes back into it is not listed.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "      const refusal = outsideRootReason(realRoot, directory);",
+    "new": "      const refusal = pattern.startsWith(\"..\") ? \"outside\" : outsideRootReason(realRoot, directory);"
+  },
+  {
+    "id": "D1325",
+    "defect": "A run aborted before Vitest queued its first module, and still unqueued when the grace passes, gets its withheld first cancel at the queue but never the force-stop.",
+    "file": "packages/daemon/src/vitest/run-interruption.ts",
+    "old": "    this.cancel();\n    this.forceStopIfDue();",
+    "new": "    this.cancel();"
+  },
+  {
+    "id": "D1331",
+    "defect": "Snapshot saving is left to Vitest, so on Vitest 5 under update none a CRLF snapshot file holding an unchecked entry is rewritten on every run.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  guardSnapshots(instance);\n",
+    "new": ""
+  },
+  {
+    "id": "D1332",
+    "defect": "Snapshot saving is left to Vitest, so on Vitest 4.1 under update none a CRLF snapshot file holding an unchecked entry is rewritten on every run.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  guardSnapshots(instance);\n",
+    "new": ""
+  },
+  {
+    "id": "D1333",
+    "defect": "The snapshot guard reaches only the first project, so on Vitest 5's forks pool another project's snapshot file is rewritten.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  for (const project of instance.projects) {",
+    "new": "  for (const project of instance.projects.slice(0, 1)) {"
+  },
+  {
+    "id": "D1334",
+    "defect": "The snapshot guard reaches only the first project, so on Vitest 5's threads pool another project's snapshot file is rewritten.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  for (const project of instance.projects) {",
+    "new": "  for (const project of instance.projects.slice(0, 1)) {"
+  },
+  {
+    "id": "D1335",
+    "defect": "The snapshot guard reaches only the first project, so on Vitest 4.1's forks pool another project's snapshot file is rewritten.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  for (const project of instance.projects) {",
+    "new": "  for (const project of instance.projects.slice(0, 1)) {"
+  },
+  {
+    "id": "D1336",
+    "defect": "The snapshot guard reaches only the first project, so on Vitest 4.1's threads pool another project's snapshot file is rewritten.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  for (const project of instance.projects) {",
+    "new": "  for (const project of instance.projects.slice(0, 1)) {"
   }
 ]

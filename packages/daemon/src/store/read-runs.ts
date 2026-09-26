@@ -28,6 +28,7 @@ import {
   type Members,
   type Row,
 } from "./columns.js";
+import { FORCE_STOPPED, NOT_FORCE_STOPPED } from "./schema.js";
 import {
   fingerprintFromColumns,
   requireScope,
@@ -66,7 +67,7 @@ const NOTHING_RAN_REASONS: Members<NothingRanReason> = {
 const RUN_COLUMNS = `sequence, run_id, project_identity, worktree_identity, fingerprint_kind,
   fingerprint_digest, adapter_version, status, workspace_path, workspace_directory, vitest_version,
   unsupported_vitest, error, execution, nothing_ran, cancel_error, close_error, unhandled_errors,
-  typecheck_modules, unsupported_projects`;
+  typecheck_modules, unsupported_projects, force_stopped`;
 const MODULE_COLUMNS =
   "m.run_sequence, m.module_index, m.project_name, m.module_path, m.state, m.errors";
 const TEST_COLUMNS = `t.run_sequence, t.module_index, t.workspace_path, t.project_name, t.module_path,
@@ -196,6 +197,7 @@ function ranRun(
     workspace,
     vitestVersion: text(row, "vitest_version"),
     execution: member(RUN_EXECUTIONS, text(row, "execution"), "runs.execution"),
+    forceStopped: forceStopped(row),
     modules,
     typecheckModules: arrayOf(json(row, "typecheck_modules"), moduleReport),
     unsupportedProjects: arrayOf(
@@ -215,6 +217,13 @@ function ranRun(
     ...(cancelError === undefined ? {} : { cancelError }),
     ...closeError(row),
   };
+}
+
+function forceStopped(row: Row): boolean {
+  const mark = integer(row, "force_stopped");
+  if (mark === FORCE_STOPPED) return true;
+  if (mark === NOT_FORCE_STOPPED) return false;
+  throw unreadable("runs.force_stopped", mark);
 }
 
 function recordedModules(children: RunChildren): RecordedModule[] {

@@ -9,6 +9,7 @@ import type {
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
 import { identifiedTestColumns } from "./columns.js";
 import { selectRun } from "./read-runs.js";
+import { FORCE_STOPPED, NOT_FORCE_STOPPED } from "./schema.js";
 import {
   fingerprintColumns,
   requireBindings,
@@ -32,6 +33,7 @@ interface RunColumns {
   readonly unhandledErrors: string | null;
   readonly typecheckModules: string | null;
   readonly unsupportedProjects: string | null;
+  readonly forceStopped: number | null;
 }
 
 interface ChildStatements {
@@ -50,13 +52,15 @@ const NO_RUN_COLUMNS: RunColumns = {
   unhandledErrors: null,
   typecheckModules: null,
   unsupportedProjects: null,
+  forceStopped: null,
 };
 
 const INSERT_RUN = `INSERT INTO runs (
   run_id, project_identity, worktree_identity, fingerprint_kind, fingerprint_digest, adapter_version,
   status, workspace_path, workspace_directory, vitest_version, unsupported_vitest, error, execution,
-  nothing_ran, cancel_error, close_error, unhandled_errors, typecheck_modules, unsupported_projects
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  nothing_ran, cancel_error, close_error, unhandled_errors, typecheck_modules, unsupported_projects,
+  force_stopped
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 const INSERT_MODULE = `INSERT INTO run_modules (
   run_sequence, module_index, project_name, module_path, state, errors
 ) VALUES (?, ?, ?, ?, ?, ?)`;
@@ -122,6 +126,7 @@ function insertRun(database: DatabaseSync, stored: StoredRun): void {
       columns.unhandledErrors,
       columns.typecheckModules,
       columns.unsupportedProjects,
+      columns.forceStopped,
     );
   if (run.status !== "ran") return;
   insertModules(
@@ -166,6 +171,7 @@ function ranColumns(run: RanRun): RunColumns {
     unhandledErrors: JSON.stringify(run.unhandledErrors),
     typecheckModules: JSON.stringify(run.typecheckModules),
     unsupportedProjects: JSON.stringify(run.unsupportedProjects),
+    forceStopped: run.forceStopped ? FORCE_STOPPED : NOT_FORCE_STOPPED,
   };
 }
 

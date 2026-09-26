@@ -1,7 +1,7 @@
-import type { Reporter, TestRunEndReason, Vitest } from "vitest/node";
 import { errorText } from "./error-text.js";
 import type { VitestWorkspace } from "./find-workspaces.js";
 import type { ModuleReport } from "./module-tests.js";
+import { RunInterruption } from "./run-interruption.js";
 import {
   notRunModules,
   nothingRanReason,
@@ -30,6 +30,8 @@ export type WorkspaceRun =
       readonly unhandledErrors: readonly string[];
       /** Present exactly when no test was recorded passed or failed. */
       readonly nothingRan?: NothingRanReason;
+      /** Whether the second cancel, which force-stops Vitest's workers and skips the project's `afterAll` hooks and teardown, was issued before the run ended. */
+      readonly forceStopped: boolean;
       readonly cancelError?: string;
       readonly closeError?: string;
     }
@@ -55,11 +57,6 @@ type RanWorkspace = Omit<
   Extract<WorkspaceRun, { status: "ran" }>,
   "status" | "workspace" | "vitestVersion" | "closeError"
 >;
-
-/** The reason Vitest's own CLI gives a user-initiated cancel; `test-failure` is its `bail`. */
-const INTERRUPT_REASON: Parameters<Vitest["cancelCurrentRun"]>[0] =
-  "keyboard-input";
-const INTERRUPTED_END_REASON: TestRunEndReason = "interrupted";
 
 /** Runs the workspace's tests, so it executes project code: call only for a started, trusted project. */
 export function runWorkspace(
@@ -98,6 +95,7 @@ async function runSession(
       execution: "interrupted",
       modules,
       unhandledErrors: [],
+      forceStopped: false,
       ...nothingRan("interrupted", modules),
     };
   }
@@ -107,10 +105,11 @@ async function runSession(
       execution: "completed",
       modules: [],
       unhandledErrors: [],
+      forceStopped: false,
       ...nothingRan("completed", []),
     };
   }
-  const { testModules, unhandledErrors } = await interruption.during(
+  const { testModules, unhandledErrors } = await interruption.duringRun(
     instance,
     () => instance.runTestSpecifications(specifications),
   );
@@ -128,6 +127,7 @@ async function runSession(
     modules,
     unhandledErrors: unhandledErrors.map(errorText),
     ...nothingRan(execution, modules),
+    forceStopped: interruption.forceStopped(),
     ...(cancelError === undefined ? {} : { cancelError }),
   };
 }
@@ -138,74 +138,4 @@ function nothingRan(
 ): { nothingRan?: NothingRanReason } {
   const reason = nothingRanReason(execution, modules);
   return reason === undefined ? {} : { nothingRan: reason };
-}
-
-/**
- * Vitest resets its cancel state as a run starts and drops a cancel issued before that, so an abort that arrives
- * before the first module is queued is issued at that point. A second cancel would make Vitest force-stop its
- * workers and skip the project's teardown, so at most one is issued.
- */
-class RunInterruption implements Reporter {
-  readonly signal: AbortSignal;
-  private instance: Vitest | undefined;
-  private queued = false;
-  private cancelled: Promise<string | undefined> | undefined;
-  private abortedDuringRun = false;
-  private endReason: TestRunEndReason | undefined;
-
-  constructor(signal: AbortSignal) {
-    this.signal = signal;
-  }
-
-  async during<T>(instance: Vitest, run: () => Promise<T>): Promise<T> {
-    this.instance = instance;
-    const onAbort = (): void => {
-      if (this.endReason === undefined) this.abortedDuringRun = true;
-      if (this.queued) this.cancel();
-    };
-    this.signal.addEventListener("abort", onAbort, { once: true });
-    try {
-      return await run();
-    } finally {
-      this.signal.removeEventListener("abort", onAbort);
-      this.instance = undefined;
-    }
-  }
-
-  onTestModuleQueued(): void {
-    if (this.queued) return;
-    this.queued = true;
-    if (this.signal.aborted) this.cancel();
-  }
-
-  onTestRunEnd(
-    _testModules: unknown,
-    _unhandledErrors: unknown,
-    reason: TestRunEndReason,
-  ): void {
-    this.endReason = reason;
-  }
-
-  /**
-   * Vitest ends a run it cancelled, for this signal or the consumer's `bail`, with reason `interrupted`. A run in
-   * which Vitest never queued a module ends without the withheld cancel ever being issued.
-   */
-  execution(): RunExecution {
-    const withheldAbort = this.abortedDuringRun && this.cancelled === undefined;
-    return this.endReason === INTERRUPTED_END_REASON || withheldAbort
-      ? "interrupted"
-      : "completed";
-  }
-
-  cancelError(): Promise<string | undefined> {
-    return this.cancelled ?? Promise.resolve(undefined);
-  }
-
-  /** `cancelCurrentRun` waits for the run, so a reporter hook that awaited it would never return. */
-  private cancel(): void {
-    if (this.instance === undefined || this.cancelled !== undefined) return;
-    this.cancelled = this.instance
-      .cancelCurrentRun(INTERRUPT_REASON)
-      .then(() => undefined, errorText);
-  }
 }

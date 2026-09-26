@@ -14,6 +14,7 @@ import {
   type FailedModule,
   type ModuleReport,
 } from "./module-tests.js";
+import { RunInterruption } from "./run-interruption.js";
 import {
   inWorkspaceSession,
   queueSessionJob,
@@ -67,37 +68,57 @@ interface CollectedWorkspace {
 const UNCOLLECTED_MODULE_ERROR =
   "Vitest returned no collection result for this module; see the workspace's unhandled errors";
 
-/** Loads each workspace's Vitest config and imports its test files: call only for a started, trusted project. */
-export function discoverTests(consumerRoot: string): Promise<TestDiscovery> {
-  return queueSessionJob(() => discoverAll(consumerRoot));
+/**
+ * Loads each workspace's Vitest config and imports its test files: call only for a started, trusted project. Once
+ * the signal aborts it loads no further workspace and rejects with the signal's reason, after the Vitest instance
+ * it opened has closed and the host is restored.
+ */
+export function discoverTests(
+  consumerRoot: string,
+  signal: AbortSignal,
+): Promise<TestDiscovery> {
+  return queueSessionJob(() => discoverAll(consumerRoot, signal));
 }
 
-async function discoverAll(consumerRoot: string): Promise<TestDiscovery> {
+async function discoverAll(
+  consumerRoot: string,
+  signal: AbortSignal,
+): Promise<TestDiscovery> {
+  signal.throwIfAborted();
   const { workspaces, notRead } = findVitestWorkspaces(consumerRoot);
   const discoveries: WorkspaceDiscovery[] = [];
   for (const workspace of workspaces) {
-    discoveries.push(await discoverWorkspace(workspace));
+    discoveries.push(await discoverWorkspace(workspace, signal));
+    signal.throwIfAborted();
   }
   return { workspaces: discoveries, notRead };
 }
 
 async function discoverWorkspace(
   workspace: VitestWorkspace,
+  signal: AbortSignal,
 ): Promise<WorkspaceDiscovery> {
-  const result = await inWorkspaceSession(workspace, [], collectWorkspace);
+  const result = await inWorkspaceSession(workspace, [], (session) =>
+    collectWorkspace(session, new RunInterruption(signal)),
+  );
   if (result.status !== "loaded") return { ...result, workspace };
   const { value, ...loaded } = result;
   return { ...loaded, status: "discovered", workspace, ...value };
 }
 
+/** An abort before collection starts fails the step, and the caller rejects once the session has closed. */
 async function collectWorkspace(
   session: WorkspaceSession,
+  interruption: RunInterruption,
 ): Promise<CollectedWorkspace> {
   const { instance, specifications } = session;
+  interruption.signal.throwIfAborted();
   const { testModules, unhandledErrors } =
     specifications.length === 0
       ? { testModules: [], unhandledErrors: [] }
-      : await instance.collectTests(specifications);
+      : await interruption.duringCollect(instance, () =>
+          instance.collectTests(specifications),
+        );
   const report = {
     tests: [] as DiscoveredTest[],
     failedModules: [] as FailedModule[],

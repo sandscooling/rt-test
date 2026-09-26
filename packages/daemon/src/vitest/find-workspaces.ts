@@ -1,12 +1,20 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { errorText } from "./error-text.js";
 
 const CONFIG_EXTENSIONS = [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"];
-const VITEST_CONFIG_FILES = CONFIG_EXTENSIONS.map(
+export const VITEST_CONFIG_FILES = CONFIG_EXTENSIONS.map(
   (ext) => `vitest.config${ext}`,
 );
-const VITE_CONFIG_FILES = CONFIG_EXTENSIONS.map((ext) => `vite.config${ext}`);
+export const VITE_CONFIG_FILES = CONFIG_EXTENSIONS.map(
+  (ext) => `vite.config${ext}`,
+);
 const VITEST_PACKAGE = "vitest";
 const VITEST_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"];
 const WORKSPACES_FIELD = "workspaces";
@@ -18,6 +26,7 @@ const CHILDREN_SUFFIX = "/*";
 const NEGATION_PREFIX = "!";
 const WILDCARD = "*";
 const ROOT_PATH = ".";
+const PARENT_SEGMENT = "..";
 
 export interface VitestWorkspace {
   /** Relative to the consumer root, `/`-separated, `.` for the root. */
@@ -36,6 +45,10 @@ export interface WorkspaceListing {
   readonly notRead: readonly UnreadWorkspaceSource[];
 }
 
+type RealPath =
+  | { readonly ok: true; readonly path: string }
+  | { readonly ok: false; readonly reason: string };
+
 type JsonRead =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly reason: string };
@@ -53,14 +66,35 @@ export function findVitestWorkspaces(consumerRoot: string): WorkspaceListing {
     ...workspaceDirectories(consumerRoot, notRead),
   ];
   const workspaces = new Map<string, VitestWorkspace>();
+  const listedByRealPath = new Map<string, string>();
   for (const directory of candidates) {
     const path = workspacePath(consumerRoot, directory);
     if (workspaces.has(path)) continue;
-    if (holdsVitestConfig(directory, path, notRead)) {
-      workspaces.set(path, { path, directory });
+    if (!holdsVitestConfig(directory, path, notRead)) continue;
+    const duplicate = duplicateReason(listedByRealPath, directory, path);
+    if (duplicate !== undefined) {
+      notRead.push({ source: path, reason: duplicate });
+      continue;
     }
+    workspaces.set(path, { path, directory });
   }
   return { workspaces: [...workspaces.values()], notRead };
+}
+
+/** Records the workspace under its real path, or names the workspace listed first for that directory, so no directory loads twice. */
+function duplicateReason(
+  listedByRealPath: Map<string, string>,
+  directory: string,
+  path: string,
+): string | undefined {
+  const real = realPath(directory);
+  const key = real.ok ? real.path : directory;
+  const listed = listedByRealPath.get(key);
+  if (listed === undefined) {
+    listedByRealPath.set(key, path);
+    return undefined;
+  }
+  return `resolves to ${key}, the directory of workspace ${listed}, which is listed in its place`;
 }
 
 function workspaceDirectories(
@@ -68,7 +102,49 @@ function workspaceDirectories(
   notRead: UnreadWorkspaceSource[],
 ): string[] {
   const patterns = workspacePatterns(root, notRead);
-  return patterns.flatMap((pattern) => expandPattern(root, pattern, notRead));
+  if (patterns.length === 0) return [];
+  const realRoot = realPath(root);
+  return patterns.flatMap((pattern) =>
+    expandPattern(root, pattern, notRead).filter((directory) => {
+      const refusal = outsideRootReason(realRoot, directory);
+      if (refusal !== undefined)
+        notRead.push({ source: pattern, reason: refusal });
+      return refusal === undefined;
+    }),
+  );
+}
+
+/** `..` or a link can carry a pattern's directory out of the consumer root, and only the root is the project that was started. */
+function outsideRootReason(
+  realRoot: RealPath,
+  directory: string,
+): string | undefined {
+  if (!realRoot.ok) {
+    return `the consumer root ${realRoot.reason}, so ${directory} could not be checked to lie inside it and was not searched`;
+  }
+  const real = realPath(directory);
+  if (!real.ok) {
+    return `${directory} ${real.reason}, so it could not be checked to lie inside the consumer root and was not searched`;
+  }
+  const path = relative(realRoot.path, real.path);
+  const outside =
+    path === PARENT_SEGMENT ||
+    path.startsWith(`${PARENT_SEGMENT}${sep}`) ||
+    isAbsolute(path);
+  return outside
+    ? `${directory} resolves to ${real.path}, outside the consumer root ${realRoot.path}, so it was not searched`
+    : undefined;
+}
+
+function realPath(path: string): RealPath {
+  try {
+    return { ok: true, path: realpathSync.native(path) };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `cannot resolve its real path: ${errorText(error)}`,
+    };
+  }
 }
 
 function workspacePatterns(

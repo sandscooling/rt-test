@@ -1,9 +1,13 @@
 import type {
+  CliOptions,
   Reporter,
   TestProject,
   TestSpecification,
   Vitest,
 } from "vitest/node";
+import { extname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { workspaceConfig } from "./config-loader.js";
 import { errorText } from "./error-text.js";
 import type { VitestWorkspace } from "./find-workspaces.js";
 import {
@@ -55,6 +59,21 @@ const BROWSER_MODE_REASON = "browser mode is not supported";
 const TEST_NODE_ENV = "test";
 const TYPECHECK_POOL = "typescript";
 
+/** Each forced over the workspace's root config. On 4.1 a project config that sets the module cache itself keeps it. */
+const COVERAGE_OFF = { enabled: false };
+const SNAPSHOT_UPDATE_NONE = "none";
+const RESULTS_CACHE_OFF = false;
+const MODULE_CACHE_OFF = false;
+/** From this major Vitest reads the module cache flag at the top level and deprecates the `experimental` spelling 4.1 reads. */
+const TOP_LEVEL_MODULE_CACHE_MAJOR = 5;
+/** Built beside this module, so it shares its extension: `.ts` run from source, `.js` from `dist`. */
+const SNAPSHOT_GUARD_FILE = fileURLToPath(
+  new URL(
+    `./snapshot-guard${extname(fileURLToPath(import.meta.url))}`,
+    import.meta.url,
+  ),
+);
+
 let sessionQueue: Promise<unknown> = Promise.resolve();
 
 /** Restoring the host env and exit code after each session is only sound while one job holds Vitest at a time. */
@@ -84,6 +103,8 @@ export async function inWorkspaceSession<T>(
       reporters: [...reporters],
       api: false,
       ui: false,
+      ...noWriteOptions(vitest.version),
+      ...configOptions(workspace),
     });
     const session = await openSession(instance, workspace);
     result = {
@@ -103,11 +124,35 @@ export async function inWorkspaceSession<T>(
   return closeError === undefined ? result : { ...result, closeError };
 }
 
+function noWriteOptions(vitestVersion: string): CliOptions {
+  return {
+    coverage: COVERAGE_OFF,
+    update: SNAPSHOT_UPDATE_NONE,
+    cache: RESULTS_CACHE_OFF,
+    ...(Number.parseInt(vitestVersion, 10) >= TOP_LEVEL_MODULE_CACHE_MAJOR
+      ? { fsModuleCache: MODULE_CACHE_OFF }
+      : {
+          experimental: {
+            fsModuleCache: MODULE_CACHE_OFF,
+          } as NonNullable<CliOptions["experimental"]>,
+        }),
+  };
+}
+
+/** Naming the file Vitest would find anyway makes the file loaded and the loader chosen for it one decision. */
+function configOptions(workspace: VitestWorkspace): CliOptions {
+  const config = workspaceConfig(workspace.directory);
+  return config === undefined
+    ? {}
+    : { config: config.file, configLoader: config.loader };
+}
+
 async function openSession(
   instance: Vitest,
   workspace: VitestWorkspace,
 ): Promise<WorkspaceSession> {
   const locate = moduleLocator(workspace);
+  guardSnapshots(instance);
   const resolved = (await instance.getRelevantTestSpecifications()).filter(
     (specification: TestSpecification) =>
       !usesBrowserMode(specification.project),
@@ -132,6 +177,13 @@ async function openSession(
         reason: BROWSER_MODE_REASON,
       })),
   };
+}
+
+/** Setup files are per project and no option overrides them, so each resolved project gets the guard first. */
+function guardSnapshots(instance: Vitest): void {
+  for (const project of instance.projects) {
+    project.config.setupFiles.unshift(SNAPSHOT_GUARD_FILE);
+  }
 }
 
 /** Vitest writes a workspace's env and defines into `process.env` and sets `process.exitCode`. */

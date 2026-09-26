@@ -6,8 +6,10 @@ import type { WorkspaceRun } from "../vitest/run-workspace.js";
 import { readLatestDiscovery } from "./read-discovery.js";
 import { readRun, readRuns } from "./read-runs.js";
 import {
+  MIGRATED_SCHEMA_VERSION,
   STORE_APPLICATION_ID,
   STORE_FILE_NAME,
+  STORE_MIGRATION,
   STORE_SCHEMA,
   STORE_SCHEMA_VERSION,
 } from "./schema.js";
@@ -53,7 +55,7 @@ const SELECT_HEADER = `SELECT
   (SELECT user_version FROM pragma_user_version) AS user_version,
   (SELECT count(*) FROM sqlite_schema) AS schema_objects`;
 
-/** Creates the state directory and a new store in it when none exists; refuses, unchanged, a file it cannot read as one. */
+/** Creates the state directory and a new store in it when none exists, and migrates a store of the previous schema version; refuses, unchanged, a file it cannot read as one. */
 export function openStore(stateDirectory: string): RtTestStore {
   mkdirSync(stateDirectory, { recursive: true });
   const file = join(stateDirectory, STORE_FILE_NAME);
@@ -63,6 +65,7 @@ export function openStore(stateDirectory: string): RtTestStore {
     const header = checkedHeader(database, file);
     database.exec("PRAGMA journal_mode = WAL");
     if (isNew(header)) createSchema(database, file);
+    if (isMigratable(header)) migrateSchema(database, file);
   } catch (error) {
     database.close();
     throw error;
@@ -77,6 +80,14 @@ function createSchema(database: DatabaseSync, file: string): void {
     database.exec(STORE_SCHEMA);
     database.exec(`PRAGMA application_id = ${STORE_APPLICATION_ID}`);
     database.exec(`PRAGMA user_version = ${STORE_SCHEMA_VERSION}`);
+  });
+}
+
+/** Re-reads the header under the write lock, so of two openers of one old store only the first migrates it. */
+function migrateSchema(database: DatabaseSync, file: string): void {
+  inWriteTransaction(database, () => {
+    if (!isMigratable(checkedHeader(database, file))) return;
+    database.exec(STORE_MIGRATION);
   });
 }
 
@@ -117,10 +128,16 @@ function refusalReason(header: StoreHeader): string | undefined {
   if (header.userVersion > STORE_SCHEMA_VERSION) {
     return "it was written by a newer RT Test";
   }
+  if (isMigratable(header)) return undefined;
   if (header.userVersion < STORE_SCHEMA_VERSION) {
     return "its schema version is not one this RT Test reads";
   }
   return undefined;
+}
+
+/** Called only once the application id is known to be RT Test's. */
+function isMigratable(header: StoreHeader): boolean {
+  return header.userVersion === MIGRATED_SCHEMA_VERSION;
 }
 
 function isNew(header: StoreHeader): boolean {

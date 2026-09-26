@@ -38,6 +38,10 @@ _Avoid_: cancelled run
 A run stopped before it finished, so each test it had not finished gets no outcome from it.
 _Avoid_: cancelled run, aborted run
 
+**Force-stopped run**:
+An interrupted run whose Vitest workers were stopped without waiting, because the grace period after the interrupt passed with the run still going, so the project's `afterAll` hooks and teardown did not run.
+_Avoid_: killed run
+
 **Crashed module**:
 A test module whose worker exited during a run, so none of its tests gets an outcome from that run.
 _Avoid_: failed module

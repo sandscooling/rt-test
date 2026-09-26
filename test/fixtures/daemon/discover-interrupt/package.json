@@ -1,0 +1,6 @@
+{
+  "name": "discover-interrupt",
+  "workspaces": [
+    "packages/*"
+  ]
+}

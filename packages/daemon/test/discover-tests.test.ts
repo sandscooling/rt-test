@@ -1,5 +1,13 @@
-import { mkdirSync, readdirSync, symlinkSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   discoverTests,
@@ -7,26 +15,33 @@ import {
   type TestDiscovery,
   type WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
-import type {
-  RecordedModule,
-  RecordedTest,
-  TestRunState,
-} from "../src/vitest/run-states.js";
-import {
-  runWorkspace,
-  type WorkspaceRun,
-} from "../src/vitest/run-workspace.js";
+import type { RecordedTest } from "../src/vitest/run-states.js";
+import { queueSessionJob } from "../src/vitest/workspace-session.js";
 import {
   copyFixture,
   fakeVitest,
+  finished,
+  inConsumerCopy,
   inTempDir,
+  INTERRUPTED,
   linkVitest,
+  ranRun,
+  RUN_HOOK,
+  runHooks,
+  runState,
+  runSummary,
+  settledRun,
+  waitUntil,
+  withPool,
+  type Pool,
+  type RunResult,
   type VitestInstall,
 } from "./harness.js";
 
 const DISCOVERY_TIMEOUT_MS = 60_000;
 const MARKER_PREFIX = "ran-";
 const FIXTURE_ENV_KEYS = ["RT_FIXTURE_DEFINE", "RT_FIXTURE_ENV"] as const;
+const NEVER_ABORTED = new AbortController().signal;
 
 interface ConsumerRun {
   readonly discovery: TestDiscovery | { thrown: string };
@@ -46,9 +61,9 @@ function discoverConsumer(install: VitestInstall): Promise<ConsumerRun> {
     linkVitest(dir, install);
     fakeVitest(join(dir, "packages/old"), "3.2.4");
     const exitCodeBefore = process.exitCode;
-    const discovery = await discoverTests(dir).catch((error: unknown) => ({
-      thrown: String(error),
-    }));
+    const discovery = await discoverTests(dir, NEVER_ABORTED).catch(
+      (error: unknown) => ({ thrown: String(error) }),
+    );
     return {
       discovery,
       markers: readdirSync(join(dir, "unit")).filter((name) =>
@@ -62,27 +77,11 @@ function discoverConsumer(install: VitestInstall): Promise<ConsumerRun> {
   return run;
 }
 
-function inConsumerCopy<T>(
-  fixture: string,
-  install: VitestInstall,
-  body: (root: string) => Promise<T>,
-  throughLink = false,
-): Promise<T> {
-  return inTempDir(async (dir) => {
-    const real = join(dir, "real");
-    mkdirSync(real);
-    copyFixture(fixture, real);
-    linkVitest(real, install);
-    const root = throughLink ? join(dir, "link") : real;
-    if (throughLink) symlinkSync(real, root, "junction");
-    return body(root);
-  });
-}
-
 function settledDiscovery(
   root: string,
+  signal: AbortSignal = NEVER_ABORTED,
 ): Promise<TestDiscovery | { thrown: string }> {
-  return discoverTests(root).catch((error: unknown) => ({
+  return discoverTests(root, signal).catch((error: unknown) => ({
     thrown: String(error),
   }));
 }
@@ -104,20 +103,6 @@ function restoreEnv(
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   });
-}
-
-/** Polls until `ready` holds or `settled` resolves, whichever comes first. */
-async function waitUntil(
-  ready: () => boolean,
-  settled: Promise<unknown>,
-): Promise<void> {
-  let done = false;
-  void settled.then(() => {
-    done = true;
-  });
-  while (!ready() && !done) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
 }
 
 function discoveredField<K extends "unhandledErrors" | "failedModules">(
@@ -679,17 +664,11 @@ describe("errors and lost modules during collection", () => {
   );
 });
 
-type RunResult = WorkspaceRun | { thrown: string };
-/** A promise returned for run-interrupt's `configure` or `running:<test>`, or run-unqueued's `global-setup`, holds that fixture until it settles. */
-type RunHook = (event: string) => Promise<void> | undefined;
-
 interface FixtureRun {
   readonly run: RunResult;
   readonly exitCode: { before: unknown; after: unknown };
 }
 
-/** The run-interrupt fixture's config reports its run events to this global. */
-const RUN_HOOK = Symbol.for("rt-test.fixture.run-hook");
 /** The running test's annotation, which Vitest reports straight from the worker rather than in a throttled task update. */
 const MID_RUN_EVENT = "running:running at abort";
 const NOTHING_RAN_WORKSPACES = [
@@ -702,20 +681,6 @@ const NOTHING_RAN_WORKSPACES = [
 ] as const;
 
 const fixtureRuns = new Map<string, Promise<FixtureRun>>();
-
-function runHooks(): Record<symbol, RunHook | undefined> {
-  return globalThis as unknown as Record<symbol, RunHook | undefined>;
-}
-
-function settledRun(
-  directory: string,
-  signal: AbortSignal = new AbortController().signal,
-  path = ".",
-): Promise<RunResult> {
-  return runWorkspace({ path, directory }, signal).catch((error: unknown) => ({
-    thrown: String(error),
-  }));
-}
 
 /** Runs a fixture once per install and abort point, aborting when its run hook reports `abortOn`. */
 function runFixture(
@@ -782,54 +747,10 @@ function runConsumerWorkspace(
   });
 }
 
-function ranRun(
-  run: RunResult,
-): Extract<WorkspaceRun, { status: "ran" }> | undefined {
-  return "status" in run && run.status === "ran" ? run : undefined;
-}
-
-function finished(outcome: string, errors: readonly unknown[] = []): unknown {
-  return { execution: "finished", outcome, errors };
-}
-
-const INTERRUPTED = { execution: "interrupted" };
-
-function runState(test: RecordedTest): TestRunState {
-  return test.execution === "finished"
-    ? { execution: test.execution, outcome: test.outcome, errors: test.errors }
-    : { execution: test.execution };
-}
-
 function recordedTests(run: RunResult): readonly RecordedTest[] {
   return (ranRun(run)?.modules ?? []).flatMap((module) =>
     module.state === "ran" ? module.tests : [],
   );
-}
-
-/** A ran module as its tests' states by name; any other module as its state. */
-function moduleSummary(module: RecordedModule): unknown {
-  return module.state === "ran"
-    ? Object.fromEntries(
-        module.tests.map((test) => [
-          test.identity.namePath.at(-1),
-          runState(test),
-        ]),
-      )
-    : module.state;
-}
-
-function runSummary(run: RunResult): unknown {
-  const recorded = ranRun(run);
-  if (recorded === undefined) return run;
-  return {
-    execution: recorded.execution,
-    modules: Object.fromEntries(
-      recorded.modules.map((module) => [
-        module.modulePath,
-        moduleSummary(module),
-      ]),
-    ),
-  };
 }
 
 function recordedModule(run: RunResult, modulePath: string): unknown {
@@ -1471,6 +1392,561 @@ describe("runs over workspaces discovery cannot run", () => {
         unsupported: ["br (chromium)"],
         modules: [["node", "ran"]],
       });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+const ABORT_REASON = new Error("stop requested");
+const ABORTED = { thrown: "Error: stop requested" };
+
+interface InterruptedDiscovery {
+  readonly discovery: ConsumerRun["discovery"];
+  /** The host's state when the discovery settled. */
+  readonly atSettle: {
+    readonly env: string | undefined;
+    readonly exitCode: unknown;
+  };
+  readonly exitCodeBefore: unknown;
+  readonly laterModuleCollected: boolean;
+  readonly furtherWorkspaceLoaded: boolean;
+}
+
+const interruptedDiscoveries = new Map<
+  VitestInstall,
+  Promise<InterruptedDiscovery>
+>();
+
+/** Discovers the discover-interrupt fixture, aborting while its first workspace's first module holds collection open. */
+function discoverInterrupted(
+  install: VitestInstall,
+): Promise<InterruptedDiscovery> {
+  const cached = interruptedDiscoveries.get(install);
+  if (cached !== undefined) return cached;
+  const started = inConsumerCopy(
+    "discover-interrupt",
+    install,
+    async (root) => {
+      const held = join(root, "packages/a");
+      const controller = new AbortController();
+      const exitCodeBefore = process.exitCode;
+      let atSettle: InterruptedDiscovery["atSettle"] = {
+        env: "never settled",
+        exitCode: undefined,
+      };
+      const settled = settledDiscovery(root, controller.signal).then(
+        (discovery) => {
+          atSettle = {
+            env: process.env["RT_FIXTURE_ENV"],
+            exitCode: process.exitCode,
+          };
+          return discovery;
+        },
+      );
+      try {
+        await waitUntil(() => existsSync(join(held, "collecting")), settled);
+        controller.abort(ABORT_REASON);
+      } finally {
+        writeFileSync(join(held, "release"), "");
+      }
+      const discovery = await settled;
+      await queueSessionJob(() => Promise.resolve());
+      return {
+        discovery,
+        atSettle,
+        exitCodeBefore,
+        laterModuleCollected: existsSync(join(held, "later-collected")),
+        furtherWorkspaceLoaded: existsSync(join(root, "packages/b/loaded")),
+      };
+    },
+  );
+  interruptedDiscoveries.set(install, started);
+  return started;
+}
+
+describe("interrupting a discovery", () => {
+  it(
+    "D1300: a discovery aborted before its turn loads no workspace and rejects with the signal's reason",
+    async () => {
+      const outcome = await inConsumerCopy(
+        "discover-interrupt",
+        "vitest",
+        async (root) => ({
+          discovery: await settledDiscovery(
+            root,
+            AbortSignal.abort(ABORT_REASON),
+          ),
+          loaded: ["packages/a", "packages/b"].filter((path) =>
+            existsSync(join(root, path, "loaded")),
+          ),
+        }),
+      );
+      expect(outcome).toEqual({ discovery: ABORTED, loaded: [] });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1301: a discovery aborted mid-collection loads no further workspace and rejects with the signal's reason",
+    async () => {
+      const { discovery, furtherWorkspaceLoaded } =
+        await discoverInterrupted("vitest");
+      expect({ discovery, furtherWorkspaceLoaded }).toEqual({
+        discovery: ABORTED,
+        furtherWorkspaceLoaded: false,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1302: an abort while a module holds collection open interrupts the collection, so no later module is collected",
+    async () => {
+      expect((await discoverInterrupted("vitest")).laterModuleCollected).toBe(
+        false,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1304: on Vitest 4.1, an abort while a module holds collection open interrupts the collection, so no later module is collected",
+    async () => {
+      expect((await discoverInterrupted("vitest-4")).laterModuleCollected).toBe(
+        false,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1303: an aborted discovery rejects only once the host's environment and exit code are restored",
+    async () => {
+      const { atSettle, exitCodeBefore } = await discoverInterrupted("vitest");
+      expect({
+        env: atSettle.env,
+        exitCodeRestored: atSettle.exitCode === exitCodeBefore,
+      }).toEqual({ env: undefined, exitCodeRestored: true });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+describe("recording whether a run was force-stopped", () => {
+  it(
+    "D1305: a run that completed records that Vitest was not force-stopped",
+    async () => {
+      const run = await runOf("run", "vitest");
+      expect(ranRun(run)?.forceStopped ?? run).toBe(false);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1307: a run aborted while its workspace loads records that Vitest was not force-stopped",
+    async () => {
+      const run = await runOf("run-interrupt", "vitest", "configure");
+      expect(ranRun(run)?.forceStopped ?? run).toBe(false);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1306: a run aborted mid-test that ends within the grace is not force-stopped and its afterAll runs",
+    async () => {
+      const outcome = await inConsumerCopy(
+        "force-stop",
+        "vitest",
+        async (root) => {
+          const directory = join(root, "graceful");
+          const controller = new AbortController();
+          const run = settledRun(directory, controller.signal);
+          try {
+            await waitUntil(() => existsSync(join(directory, "holding")), run);
+            controller.abort();
+          } finally {
+            writeFileSync(join(directory, "release"), "");
+          }
+          const recorded = ranRun(await run);
+          return recorded === undefined
+            ? await run
+            : {
+                execution: recorded.execution,
+                forceStopped: recorded.forceStopped,
+                afterAllRan: existsSync(join(directory, "after-all-ran")),
+              };
+        },
+      );
+      expect(outcome).toEqual({
+        execution: "interrupted",
+        forceStopped: false,
+        afterAllRan: true,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+type ConfigFormat = "esm" | "cjs";
+type Job = "run" | "discovery";
+
+interface NoWritesJob {
+  readonly status: unknown;
+  readonly changes: readonly string[];
+  readonly outcomes: unknown;
+}
+
+const noWritesJobs = new Map<string, Promise<NoWritesJob>>();
+
+/** Every file (by content hash), directory and link under `root`, without following a link. */
+function treeState(
+  root: string,
+  relative = "",
+  state = new Map<string, string>(),
+): Map<string, string> {
+  for (const name of readdirSync(join(root, relative))) {
+    const path = relative === "" ? name : `${relative}/${name}`;
+    const stat = lstatSync(join(root, path));
+    if (stat.isSymbolicLink()) {
+      state.set(path, "link");
+    } else if (stat.isDirectory()) {
+      state.set(`${path}/`, "directory");
+      treeState(root, path, state);
+    } else {
+      state.set(
+        path,
+        createHash("sha256")
+          .update(readFileSync(join(root, path)))
+          .digest("hex"),
+      );
+    }
+  }
+  return state;
+}
+
+function treeChanges(
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>,
+): string[] {
+  const changes: string[] = [];
+  for (const [path, entry] of after) {
+    if (!before.has(path)) changes.push(`added ${path}`);
+    else if (before.get(path) !== entry) changes.push(`changed ${path}`);
+  }
+  for (const path of before.keys()) {
+    if (!after.has(path)) changes.push(`removed ${path}`);
+  }
+  return changes.sort();
+}
+
+function snapshotOutcomes(run: RunResult): unknown {
+  return Object.fromEntries(
+    recordedTests(run).map((test) => [
+      test.identity.namePath.at(-1),
+      test.execution === "finished" ? test.outcome : test.execution,
+    ]),
+  );
+}
+
+const SNAPSHOT_HEADER =
+  "// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html";
+const CRLF = "\r\n";
+
+/**
+ * A snapshot file with CRLF line endings, which Vitest does not write itself, so under update `none` a file that also
+ * holds an unchecked entry is one Vitest would rewrite. Written by the test, so git's newline conversion cannot undo it.
+ */
+function writeCrlfSnapshotFile(
+  file: string,
+  entries: Readonly<Record<string, string>>,
+): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const lines = Object.entries(entries).flatMap(([key, value]) => [
+    `exports[\`${key}\`] = \`${value}\`;`,
+    "",
+  ]);
+  writeFileSync(file, [SNAPSHOT_HEADER, "", ...lines].join(CRLF));
+}
+
+/** Runs or discovers a no-writes consumer once per install, format and job, under UPDATE_SNAPSHOT=all. */
+function noWritesJob(
+  install: VitestInstall,
+  format: ConfigFormat,
+  job: Job,
+): Promise<NoWritesJob> {
+  const key = JSON.stringify([install, format, job]);
+  const cached = noWritesJobs.get(key);
+  if (cached !== undefined) return cached;
+  const started = inConsumerCopy(
+    `no-writes/${format}`,
+    install,
+    async (root) => {
+      writeCrlfSnapshotFile(join(root, "__snapshots__/snap.test.mjs.snap"), {
+        "file snapshot mismatch 1": '"stored"',
+        "no test checks this 1": '"unchecked"',
+      });
+      const before = treeState(root);
+      const saved = process.env["UPDATE_SNAPSHOT"];
+      process.env["UPDATE_SNAPSHOT"] = "all";
+      try {
+        if (job === "run") {
+          const run = await settledRun(root);
+          return {
+            status: "status" in run ? run.status : run,
+            changes: treeChanges(before, treeState(root)),
+            outcomes: snapshotOutcomes(run),
+          };
+        }
+        const discovery = await settledDiscovery(root);
+        const entry = workspace(discovery, ".");
+        return {
+          status:
+            entry !== undefined && "status" in entry ? entry.status : entry,
+          changes: treeChanges(before, treeState(root)),
+          outcomes: testsOf(discovery, ".").map(lastName),
+        };
+      } finally {
+        restoreEnv(["UPDATE_SNAPSHOT"], [saved]);
+      }
+    },
+  );
+  noWritesJobs.set(key, started);
+  return started;
+}
+
+async function statusAndChanges(
+  install: VitestInstall,
+  format: ConfigFormat,
+  job: Job,
+): Promise<unknown> {
+  const { status, changes } = await noWritesJob(install, format, job);
+  return { status, changes };
+}
+
+const SNAPSHOTS_CHECKED_ONLY = {
+  "file snapshot": "failed",
+  "file snapshot mismatch": "failed",
+  "inline snapshot": "failed",
+  plain: "passed",
+};
+
+describe("leaving the consumer's tree as it was found", () => {
+  it(
+    "D1308: a run on Vitest 5 over an ESM config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest", "esm", "run")).toEqual({
+        status: "ran",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1309: a run on Vitest 4.1 over an ESM config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest-4", "esm", "run")).toEqual({
+        status: "ran",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1310: a run on Vitest 5 over a CommonJS config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest", "cjs", "run")).toEqual({
+        status: "ran",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1311: a run on Vitest 4.1 over a CommonJS config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest-4", "cjs", "run")).toEqual({
+        status: "ran",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1312: a discovery on Vitest 5 over an ESM config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest", "esm", "discovery")).toEqual({
+        status: "discovered",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1313: a discovery on Vitest 4.1 over a CommonJS config loads it and writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest-4", "cjs", "discovery")).toEqual({
+        status: "discovered",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1314: a discovery on Vitest 5 over a CommonJS config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest", "cjs", "discovery")).toEqual({
+        status: "discovered",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1315: a discovery on Vitest 4.1 over an ESM config writes nothing under the consumer",
+    async () => {
+      expect(await statusAndChanges("vitest-4", "esm", "discovery")).toEqual({
+        status: "discovered",
+        changes: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+describe("checking snapshots only against those stored", () => {
+  it(
+    "D1316: on Vitest 5, a snapshot with none stored and a mismatched one record failed while a plain test passes",
+    async () => {
+      expect((await noWritesJob("vitest", "esm", "run")).outcomes).toEqual(
+        SNAPSHOTS_CHECKED_ONLY,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1317: on Vitest 4.1, a snapshot with none stored and a mismatched one record failed while a plain test passes",
+    async () => {
+      expect((await noWritesJob("vitest-4", "cjs", "run")).outcomes).toEqual(
+        SNAPSHOTS_CHECKED_ONLY,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+function snapshotFileChanges(job: NoWritesJob): readonly string[] {
+  return job.changes.filter((change) => change.includes("__snapshots__"));
+}
+
+describe("leaving a snapshot file Vitest would rewrite as it was found", () => {
+  it(
+    "D1331: on Vitest 5, a CRLF snapshot file holding an unchecked entry is not rewritten by a run",
+    async () => {
+      expect(
+        snapshotFileChanges(await noWritesJob("vitest", "esm", "run")),
+      ).toEqual([]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1332: on Vitest 4.1, a CRLF snapshot file holding an unchecked entry is not rewritten by a run",
+    async () => {
+      expect(
+        snapshotFileChanges(await noWritesJob("vitest-4", "cjs", "run")),
+      ).toEqual([]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+const STORED_AND_UNCHECKED = {
+  "stored 1": '"stored"',
+  "gone 1": '"gone"',
+};
+
+/** Runs the snapshot-projects workspace, whose two projects each hold a CRLF snapshot file with an unchecked entry. */
+function snapshotProjectsRun(
+  install: VitestInstall,
+  pool: Pool,
+): Promise<unknown> {
+  return inConsumerCopy("snapshot-projects", install, (root) =>
+    withPool(pool, async () => {
+      writeCrlfSnapshotFile(
+        join(root, "own/__snapshots__/snap.test.mjs.snap"),
+        STORED_AND_UNCHECKED,
+      );
+      writeCrlfSnapshotFile(
+        join(root, "custom/__custom__/snap.test.mjs.snap"),
+        STORED_AND_UNCHECKED,
+      );
+      const before = treeState(root);
+      const run = await settledRun(root);
+      return {
+        status: "status" in run ? run.status : run,
+        changes: treeChanges(before, treeState(root)),
+        stored: Object.fromEntries(
+          recordedTests(run).map((test) => [
+            test.identity.projectName,
+            test.execution === "finished" ? test.outcome : test.execution,
+          ]),
+        ),
+      };
+    }),
+  );
+}
+
+const PROJECTS_UNWRITTEN = {
+  status: "ran",
+  changes: [],
+  stored: { own: "passed", custom: "passed" },
+};
+
+describe("leaving every project's snapshot files as they were found", () => {
+  it(
+    "D1333: on Vitest 5's forks pool, no project's snapshot file is rewritten and each stored snapshot is still read",
+    async () => {
+      expect(await snapshotProjectsRun("vitest", "forks")).toEqual(
+        PROJECTS_UNWRITTEN,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1334: on Vitest 5's threads pool, no project's snapshot file is rewritten and each stored snapshot is still read",
+    async () => {
+      expect(await snapshotProjectsRun("vitest", "threads")).toEqual(
+        PROJECTS_UNWRITTEN,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1335: on Vitest 4.1's forks pool, no project's snapshot file is rewritten and each stored snapshot is still read",
+    async () => {
+      expect(await snapshotProjectsRun("vitest-4", "forks")).toEqual(
+        PROJECTS_UNWRITTEN,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1336: on Vitest 4.1's threads pool, no project's snapshot file is rewritten and each stored snapshot is still read",
+    async () => {
+      expect(await snapshotProjectsRun("vitest-4", "threads")).toEqual(
+        PROJECTS_UNWRITTEN,
+      );
     },
     DISCOVERY_TIMEOUT_MS,
   );

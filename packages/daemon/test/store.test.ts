@@ -20,6 +20,7 @@ import { openStore, type RtTestStore } from "../src/store/open-store.js";
 import {
   STORE_APPLICATION_ID,
   STORE_FILE_NAME,
+  STORE_MIGRATION,
   STORE_SCHEMA,
   STORE_SCHEMA_VERSION,
 } from "../src/store/schema.js";
@@ -45,24 +46,24 @@ const OPENED = "opened";
 const SCHEMA_HOLD_MS = 1000;
 const WORKER_START_TIMEOUT_MS = 10_000;
 
-/** Opens the file as the store's opener does, creates the schema in one held transaction, flags that it holds it, then commits after a pause. */
-const CREATE_SCHEMA_WORKER = `
+/** Opens the file as the store's opener does, runs `sql` in one held write transaction, flags that it holds it, then commits after a pause. */
+const HELD_WRITE_WORKER = `
 const { DatabaseSync } = require("node:sqlite");
 const { workerData } = require("node:worker_threads");
-const { file, schema, applicationId, schemaVersion, created, holdMs } = workerData;
+const { file, sql, held, holdMs } = workerData;
 const database = new DatabaseSync(file);
 database.exec("PRAGMA busy_timeout = 10000");
 database.exec("PRAGMA journal_mode = WAL");
 database.exec("BEGIN IMMEDIATE");
-database.exec(schema);
-database.exec("PRAGMA application_id = " + applicationId);
-database.exec("PRAGMA user_version = " + schemaVersion);
-Atomics.store(created, 0, 1);
-Atomics.notify(created, 0);
-Atomics.wait(created, 0, 1, holdMs);
+database.exec(sql);
+Atomics.store(held, 0, 1);
+Atomics.notify(held, 0);
+Atomics.wait(held, 0, 1, holdMs);
 database.exec("COMMIT");
 database.close();
 `;
+/** The schema version before runs recorded whether Vitest was force-stopped. */
+const FORCE_STOP_UNAWARE_VERSION = 1;
 
 const WORKTREE_A: StoreScope = {
   projectIdentity: "/work/shop/.git",
@@ -190,6 +191,7 @@ const RAN_RUN: RanRun = {
     { projectName: "browser", reason: "browser mode is not supported" },
   ],
   unhandledErrors: ["Error: leaked timer"],
+  forceStopped: true,
   cancelError: "Error: cancel failed",
   closeError: "Error: close timed out",
 };
@@ -219,6 +221,7 @@ const NOTHING_RAN_RUN: RanRun = {
   unsupportedProjects: [],
   unhandledErrors: [],
   nothingRan: "every-test-skipped",
+  forceStopped: false,
 };
 const UNSUPPORTED_RUN: WorkspaceRun = {
   status: "unsupported",
@@ -475,6 +478,66 @@ function refusalFacts(
       `expected application id ${RT_TEST_APPLICATION_ID} and schema version ${STORE_SCHEMA_VERSION}`,
     ),
   };
+}
+
+/** Runs `body` while a worker holds a write transaction of `sql` open on the file, and waits for the worker to commit. */
+async function whileWriteHeld<T>(
+  file: string,
+  sql: string,
+  body: () => T,
+): Promise<{ held: boolean; result: T; exitCode: number }> {
+  const held = new Int32Array(new SharedArrayBuffer(4));
+  const worker = new Worker(HELD_WRITE_WORKER, {
+    eval: true,
+    workerData: { file, sql, held, holdMs: SCHEMA_HOLD_MS },
+  });
+  const exited = once(worker, "exit");
+  const holding =
+    Atomics.wait(held, 0, 0, WORKER_START_TIMEOUT_MS) !== "timed-out";
+  const result = body();
+  const [exitCode] = (await exited) as [number];
+  return { held: holding, result, exitCode };
+}
+
+/** Writes the runs through a store, then takes the file back to the schema version before the force-stop column, as the migration's inverse. */
+function writeForceStopUnawareStore(
+  stateDirectory: string,
+  runs: readonly WorkspaceRun[],
+  userVersion = FORCE_STOP_UNAWARE_VERSION,
+): string {
+  withOpenStore(stateDirectory, (store) => {
+    for (const run of runs) store.writeRun(bound(WORKTREE_A), run);
+  });
+  const file = join(stateDirectory, STORE_FILE_NAME);
+  withRawDatabase(file, (database) => {
+    database.exec("ALTER TABLE runs DROP COLUMN force_stopped");
+    database.exec(`PRAGMA user_version = ${userVersion}`);
+  });
+  return file;
+}
+
+/** A store in the default state directory of a fresh consumer root, written at the schema version before the force-stop column. */
+function inForceStopUnawareStore<T>(
+  runs: readonly WorkspaceRun[],
+  body: (stateDirectory: string, file: string) => T,
+): Promise<Settled<T>> {
+  return inTempDir((dir) =>
+    settle(() => {
+      const stateDirectory = defaultStateDirectory(dir);
+      return body(
+        stateDirectory,
+        writeForceStopUnawareStore(stateDirectory, runs),
+      );
+    }),
+  );
+}
+
+function schemaVersionOf(file: string): unknown {
+  return withRawDatabase(
+    file,
+    (database) =>
+      database.prepare("PRAGMA user_version").get()?.["user_version"],
+  );
 }
 
 function otherSqliteDatabase(userVersion: number): (file: string) => void {
@@ -1138,27 +1201,173 @@ describe("the store's files and schema", () => {
     const outcome = await inTempDir(async (dir) => {
       const stateDirectory = defaultStateDirectory(dir);
       mkdirSync(stateDirectory);
-      const created = new Int32Array(new SharedArrayBuffer(4));
-      const worker = new Worker(CREATE_SCHEMA_WORKER, {
-        eval: true,
-        workerData: {
-          file: join(stateDirectory, STORE_FILE_NAME),
-          schema: STORE_SCHEMA,
-          applicationId: STORE_APPLICATION_ID,
-          schemaVersion: STORE_SCHEMA_VERSION,
-          created,
-          holdMs: SCHEMA_HOLD_MS,
-        },
-      });
-      const exited = once(worker, "exit");
-      const held =
-        Atomics.wait(created, 0, 0, WORKER_START_TIMEOUT_MS) !== "timed-out";
-      const runs = settle(() =>
-        withOpenStore(stateDirectory, (store) => runsOf(store, WORKTREE_A)),
+      const { held, result, exitCode } = await whileWriteHeld(
+        join(stateDirectory, STORE_FILE_NAME),
+        `${STORE_SCHEMA}
+PRAGMA application_id = ${STORE_APPLICATION_ID};
+PRAGMA user_version = ${STORE_SCHEMA_VERSION};`,
+        () =>
+          settle(() =>
+            withOpenStore(stateDirectory, (store) => runsOf(store, WORKTREE_A)),
+          ),
       );
-      const [exitCode] = (await exited) as [number];
-      return { held, runs, exitCode };
+      return { held, runs: result, exitCode };
     });
     expect(outcome).toStrictEqual({ held: true, runs: [], exitCode: 0 });
+  });
+});
+
+describe("recording whether Vitest was force-stopped", () => {
+  it("D1276: a force-stopped run reads back force-stopped", async () => {
+    const forceStopped = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), { ...RAN_RUN, forceStopped: true });
+      const [run] = runsOf(store, WORKTREE_A);
+      return run?.status === "ran" ? run.forceStopped : run;
+    });
+    expect(forceStopped).toBe(true);
+  });
+
+  it("D1277: a run that was not force-stopped reads back not force-stopped", async () => {
+    const forceStopped = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), { ...RAN_RUN, forceStopped: false });
+      const [run] = runsOf(store, WORKTREE_A);
+      return run?.status === "ran" ? run.forceStopped : run;
+    });
+    expect(forceStopped).toBe(false);
+  });
+
+  it("D1284: a ran run with no recorded force-stop fact is refused as unreadable, never read as not force-stopped", async () => {
+    const reason = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      withRawDatabase(store.file, (database) => {
+        database.exec("UPDATE runs SET force_stopped = NULL");
+      });
+      return rejection(settle(() => runsOf(store, WORKTREE_A)));
+    });
+    expect(reason).toContain("unreadable force_stopped: null");
+  });
+});
+
+describe("opening a store written before the force-stop field", () => {
+  it("D1278: each ran run reads back not force-stopped and every other run unchanged", async () => {
+    const runs = await inForceStopUnawareStore(
+      [RAN_RUN, BEFORE_LOAD_RUN],
+      (stateDirectory) =>
+        withOpenStore(stateDirectory, (store) => runsOf(store, WORKTREE_A)),
+    );
+    expect(runs).toStrictEqual([
+      { ...RAN_RUN, forceStopped: false },
+      BEFORE_LOAD_RUN,
+    ]);
+  });
+
+  it("D1279: the store opens rather than being refused", async () => {
+    const opened = await inForceStopUnawareStore([RAN_RUN], openRefusal);
+    expect(opened).toBe(OPENED);
+  });
+
+  it("D1280: the store is at schema version 2 once opened", async () => {
+    const version = await inForceStopUnawareStore(
+      [RAN_RUN],
+      (stateDirectory, file) => {
+        openStore(stateDirectory).close();
+        return schemaVersionOf(file);
+      },
+    );
+    expect(version).toBe(2);
+  });
+
+  it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
+    const rows = await inForceStopUnawareStore(
+      [RAN_RUN, BEFORE_LOAD_RUN, FAILED_RUN],
+      (stateDirectory, file) => {
+        openStore(stateDirectory).close();
+        return withRawDatabase(file, (database) =>
+          database
+            .prepare("SELECT status, force_stopped FROM runs ORDER BY sequence")
+            .all()
+            .map((row) => ({ ...row })),
+        );
+      },
+    );
+    expect(rows).toStrictEqual([
+      { status: "ran", force_stopped: 0 },
+      { status: "interrupted-before-load", force_stopped: null },
+      { status: "failed", force_stopped: null },
+    ]);
+  });
+
+  it("D1282: a store opened while another opener migrates the same file does not migrate it again", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const stateDirectory = defaultStateDirectory(dir);
+      const file = writeForceStopUnawareStore(stateDirectory, [RAN_RUN]);
+      return whileWriteHeld(file, STORE_MIGRATION, () =>
+        settle(() =>
+          withOpenStore(stateDirectory, (store) => runsOf(store, WORKTREE_A)),
+        ),
+      );
+    });
+    expect(outcome).toStrictEqual({
+      held: true,
+      result: [{ ...RAN_RUN, forceStopped: false }],
+      exitCode: 0,
+    });
+  });
+
+  it("D1283: an RT Test store at a schema version older than 1 is still refused and left unchanged", async () => {
+    const refusal = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeForceStopUnawareStore(stateDirectory, [RAN_RUN], 0);
+        const before = fileDigest(file);
+        const reason = openRefusal(stateDirectory);
+        return {
+          namesFound: reason.includes(
+            `found application id ${RT_TEST_APPLICATION_ID} and schema version 0`,
+          ),
+          unchanged: fileDigest(file) === before,
+        };
+      }),
+    );
+    expect(refusal).toStrictEqual({ namesFound: true, unchanged: true });
+  });
+
+  it("D1327: runs and discoveries recorded under adapter version 1 keep that version through the migration", async () => {
+    const versions = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        withOpenStore(stateDirectory, (store) => {
+          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+        });
+        const file = writeForceStopUnawareStore(stateDirectory, [RAN_RUN]);
+        withRawDatabase(file, (database) => {
+          database.exec("UPDATE runs SET adapter_version = 1");
+          database.exec("UPDATE discoveries SET adapter_version = 1");
+        });
+        return withOpenStore(stateDirectory, (store) => ({
+          run: store.readRuns(WORKTREE_A)[0]?.adapterVersion,
+          discovery: store.readLatestDiscovery(WORKTREE_A)?.adapterVersion,
+        }));
+      }),
+    );
+    expect(versions).toStrictEqual({ run: 1, discovery: 1 });
+  });
+});
+
+describe("the adapter version a stored record carries", () => {
+  it("D1285: a stored run carries Vitest adapter version 2", async () => {
+    const version = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+      return store.readRuns(WORKTREE_A)[0]?.adapterVersion;
+    });
+    expect(version).toBe(2);
+  });
+
+  it("D1286: a stored discovery carries Vitest adapter version 2", async () => {
+    const version = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      return store.readLatestDiscovery(WORKTREE_A)?.adapterVersion;
+    });
+    expect(version).toBe(2);
   });
 });
