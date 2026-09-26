@@ -59,7 +59,7 @@ owner or your dispatch gave on this change with its source and time, or `(none r
 **Bind `{{pending_siblings}}`, the unbuilt work bearing on this change, in two halves:**
 
 - **By sprint**, ticket mode only: every other ticket in this sprint not `done`, with its one-line scope.
-- **By file**, every mode: `node scripts/list-unbuilt-work.mjs <changed paths>`, every ticket not `done` in any
+- **By file**, every mode: `node scripts/list-unbuilt-work.mjs <changed paths>`, with `--except <the ticket's id>` in ticket mode, every other ticket not `done` in any
   sprint that names a changed file or a folder holding one.
 
 Bind the union, each entry with its ticket id, state, scope line and the file it names; say `(none)` aloud when
@@ -371,7 +371,7 @@ under a lane report the path for the orchestrator to delete.
 - **Rule proposals**: apply each by `{cfg.rule_maintenance_guide}`, with its lint-hardening candidate check. Ask
   the orchestrator for each new id; under a lane, report the exact rule text.
 - **Reconcile unbuilt work** against what this change did. Re-run
-  `node scripts/list-unbuilt-work.mjs <changed paths>` first, since the fix round moved files, and read each hit's
+  `node scripts/list-unbuilt-work.mjs <changed paths>` first (with `--except <the ticket's id>` in ticket mode), since the fix round moved files, and read each hit's
   ticket file or sprint section. Ask only what the diff can answer: did this change already do the ticket's work,
   remove its subject, or move ground under a criterion? Act by state: amend a `backlog` or `ready-for-dev` ticket
   in place (under a lane, report the exact edit); surface an `in-progress` one to the owner; leave `review` and

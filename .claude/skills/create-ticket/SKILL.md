@@ -78,7 +78,7 @@ as `{{sprint_context}}`.
 
 **Bind `{{pending_siblings}}`**: every ticket not `done` in this sprint, plus every ticket not `done` in any
 sprint whose section or ticket file names one of this ticket's target files or a folder holding one:
-`node scripts/list-unbuilt-work.mjs <each file in {{files_to_modify}} and {{files_to_create}}>`. It searches both
+`node scripts/list-unbuilt-work.mjs --except {{sprint_num}}.{{ticket_num}} <each file in {{files_to_modify}} and {{files_to_create}}>`, which leaves out this ticket's own entry. It searches both
 homes, since a drafted ticket file names paths its one-line sprint scope does not, and prints each hit under the
 ticket heading or ticket file that holds it, with its state from `{cfg.sprint_status}`. Re-run it whenever the
 file list widens.
@@ -154,7 +154,8 @@ write instruction ("that comment cites the function by line range") is as danger
 Cite a site by name once you have opened it; the line number is the part that rots.
 
 **Absorb every production file discovery named** that is not already in `{{files_to_modify}}`, after checking
-it against `{{pending_siblings}}`.
+it against `{{pending_siblings}}`. A new workspace, or a new dependency of one, also changes `bun.lock` and
+the root `package.json` where it adds a workspace: list both.
 
 **Render the requirements index**: `node scripts/requirements-index.mjs` → `{{requirements_index}}`. Map each
 criterion to a requirement at Step 5 against it, and cite only ids it printed.
@@ -178,7 +179,8 @@ planned ticket already owns. For each proposed piece, say whether an unbuilt tic
 **Novelty is a separate axis that splitting does not reduce**: a new dependency, a major version bump, or the
 first call in this repository to a third-party API. Read `GATES.md` § Novelty.
 
-Recompute both counts whenever a later step adds files.
+Recompute both counts whenever a later step adds files. A recount asks the owner again only when it crosses a
+limit the owner has not yet answered; otherwise report the new counts in one line.
 
 ## 5. Write the ticket
 
@@ -234,8 +236,8 @@ Output: `Draft saved to {{ticket_file}}.`
 ### 6a. Settle facts
 
 Every Unverified Assumptions row is a candidate. Climb the cheapest rung first: installed source under
-`node_modules` (`.d.ts`, then `.js`), then the planning docs, then the smallest real exercise in
-`_agent-docs/.scratch/`. A row earns a spike only when its answer would flip a criterion, add or remove a
+`node_modules` (`.d.ts`, then `.js`), then the planning docs, then the smallest real exercise, placed by
+`{cfg.code_change_standards}` § Third-Party Semantics Verification. A row earns a spike only when its answer would flip a criterion, add or remove a
 task, move a REUSE to a CREATE, or change a stated bound. Timebox about ten minutes and name what you did not
 reach. For each fact settled, record it in Dev Notes with the observed output and the command or source
 location that produced it, delete the row, and fix what the ticket drafted against the old belief →

@@ -45,6 +45,8 @@ Yours to hold:
 
 Before you read a field off a library result, implement a callback the library invokes, or rely on the library cleaning up for you, confirm what it does in the installed source (P10): the `.d.ts` first, then the `.js`.
 
+**A probe runs where the code under test resolves the package.** A script that exercises a third-party package resolves it from its own folder upward, so a probe under `_agent-docs/.scratch/` loads the root's copy. To test the version a workspace uses, put the probe inside that workspace, and delete it when the question is settled.
+
 **Why it is a gate.** Verification is otherwise triggered by the compiler: a wrong assumption that produces a type error gets investigated, and one that compiles ships. Self-review cannot catch a belief you still hold, so code that typechecks and passes its own review can still be wrong about the library.
 
 **Check for each of the four shapes by name:**

@@ -65,7 +65,8 @@ An error confined to a test file is not yours to fix: list the file under `#### 
 Every inline fix gets this review now and a full `review-changes` later; they find different things. State
 `Fix touches <n> file(s): <files>`, then read `{cfg.adversarial_review_prompt}` and follow it. Substitute its
 slots with literals: the files to review are `{{files_changed}}`, never a list discovered from git, which
-carries other sessions' work; the project patterns are `{{project_patterns}}`.
+carries other sessions' work; the project patterns are `{{project_patterns}}`; the ticket rulings are
+`{{owner_decisions}}` plus the owner ruling that started this change.
 
 Fix every in-scope finding. For an out-of-scope finding, fix it by default; ask the owner via
 `AskUserQuestion` only for a real fork (two valid designs, a cross-cutting change), recording the fork, your

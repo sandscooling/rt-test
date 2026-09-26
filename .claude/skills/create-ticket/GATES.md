@@ -6,9 +6,10 @@ Each fires on a trigger from `SKILL.md`. Read only the section whose trigger fir
 
 Trigger: the owner chose **Split** at the sizing gate.
 
-Output `Ticket will be split. No ticket file has been created yet.` Then ask in prose, since the answer is a
-description: _Describe how to split this ticket: for each part, a short title and the criteria that belong to
-it._
+Output `Ticket will be split. No ticket file has been created yet.` When Step 4 proposed the parts the owner
+chose **Split** against, those parts are the split: restate them, each with its title and criteria, and go
+on. Otherwise ask in prose, since the answer is a description: _Describe how to split this ticket: for each
+part, a short title and the criteria that belong to it._
 
 **Split by outcome, never by layer.** "All the store changes, then all the CLI" produces parts whose criteria
 state mechanisms, because no outcome is reachable until the last part lands. Each part carries at least one

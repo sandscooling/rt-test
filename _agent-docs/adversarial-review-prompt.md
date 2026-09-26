@@ -6,7 +6,7 @@ The canonical prompt for the hostile, file-scoped review sub-agent. `dev-ticket`
 
 - **Scope it to the files the change modified** by passing the explicit list. Never let the reviewer discover changed files through git: the working tree carries other sessions' changes.
 - **Spawn** a `general-purpose` agent with `run_in_background: false`, and bind the report it sends back.
-- **Substitute both slots with literals before sending**: `{{files_to_review}}` with the changed-file list, and `{{project_patterns}}` with the expanded project-context rules the workflow loaded.
+- **Substitute every slot with literals before sending**: `{{files_to_review}}` with the changed-file list, `{{project_patterns}}` with the expanded project-context rules the workflow loaded, and `{{ticket_rulings}}` with the owner rulings the change was built on, verbatim, or `none`.
 
 **Delivery contract.** The prompt requires `SendMessage` to `"main"` as the agent's last action, so the findings arrive as a message even when a final assistant message is lost. If the agent idles with no report, message it to resend the complete report. Never re-run it, and never read silence as "no findings".
 
@@ -22,6 +22,10 @@ which is running its own work on it; your findings table is the only thing it wa
 
 Project-specific patterns (INTENTIONAL, do not report these as defects):
 {{project_patterns}}
+
+Owner rulings this change was built on (DECIDED, do not report these as defects; report code that
+contradicts one):
+{{ticket_rulings}}
 
 Review ONLY these files (read the full contents of each):
 {{files_to_review}}

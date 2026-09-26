@@ -83,15 +83,16 @@ Rule ids only, expanded the same way as the checklist rules.
 
 <!--
 create-ticket fills this block and dev-ticket parses it. area names each workspace or root tooling area
-the ticket touches (packages/core, apps/<name>, scripts, lint, test).
+the ticket touches (packages/core, apps/<name>, scripts, lint, test). Write each file list as a block list,
+one `- <path>` per line.
 -->
 
 ```yaml
 area:
 is_consolidation: false
 sizing_ac_count:
-files_to_modify: []
-files_to_create: []
+files_to_modify:
+files_to_create:
 ```
 
 ## Dev Agent Record

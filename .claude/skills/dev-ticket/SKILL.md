@@ -38,8 +38,8 @@ Optional input: a ticket path or key (`3.2`, `3-2`, `3-2b`), which overrides sel
 - **A question only the ticket's author can settle goes to that session first.** Steps 4 and 5a surface these.
   The author is the session your dispatch names, or your lane's `create` member in `session_list`. Wake it with
   `session_wake` on its threadId, never its name, putting your own threadId in the message so the reply comes
-  back to you. The reply arrives as a new turn, so ask, say what you wait on, and stop. With no author session,
-  ask the owner.
+  back to you. Ask, say what you wait on, then keep working every task the answer cannot change; end the turn
+  only when nothing else remains, since the reply arrives as a new turn. With no author session, ask the owner.
 - **When you delegate, four things never leave this loop**: the ticket file, the task list, the contract layer
   every delegated task calls, and every validation gate. `IMPL-AGENTS.md` owns the rest.
 - **Bounded decisions go through `AskUserQuestion`; open-ended ones stay in prose.**
@@ -75,7 +75,7 @@ Parse by exact heading:
 
 **Bind `{{pending_siblings}}` in two halves.** From the status file: every other ticket in this sprint not
 `done`, each with its one-line scope from `{cfg.sprints_dir}/sprint-<N>-*.md`. Then
-`node scripts/list-unbuilt-work.mjs <every file in files_to_modify and files_to_create>`: every ticket not
+`node scripts/list-unbuilt-work.mjs --except <this ticket's id> <every file in files_to_modify and files_to_create>`: every other ticket not
 `done` in any sprint whose ticket file or sprint section names one of those files or a folder holding one. Bind the union.
 
 **Mid-sprint, the code is not the design**: it lacks what pending siblings add and still carries what they
@@ -117,7 +117,9 @@ Write each outcome in the resolution block beneath the table, with the `file:lin
 
 - **CONFIRMED**: proceed, citing the source.
 - **FALSE**: stop and re-plan before writing code. Correct every task, Dev Note and criterion that rested on it,
-  and say what changed.
+  and say what changed. When the re-plan swaps a mechanism the ticket chose, you propose the replacement with
+  the evidence; one that changes shipped behavior goes to the author as a question before code, and one that
+  changes only the code is yours to record and build.
 - **UNRESOLVABLE**: say so, implement the path that fails safest, and flag it for review. Silence is never a
   confirmation.
 
@@ -167,8 +169,8 @@ without its Take and Ignore captions reads as a whole design, and you build the 
 
 **Some tasks cannot close alone.** A required field added to a shared type or a renamed export leaves the tree
 uncompilable until every site is updated, so tasks split across a contract, its producers and its consumers
-form one typecheck-atomic unit: implement the group, gate it once, then mark each task in it. Say which you
-grouped and why; the test is whether the tree compiles with one done and the other not.
+form one typecheck-atomic unit: implement the group, gate it once, then mark every task in it with one `Edit`
+and a `TaskUpdate` each. Say which you grouped and why; the test is whether the tree compiles with one done and the other not.
 
 **When Step 5b delegated**, this loop is what you run for wave 0 and for every task that comes back
 `UNAPPLIED`; `IMPL-AGENTS.md`'s wave gate replaces the per-task typecheck and size gates for the rest.
@@ -227,7 +229,8 @@ implementer's order:
    naming the guarantee, for `create-tests`. Step 8 marks the criteria; this step builds the evidence.
 4. **Adversarial review.** Read `{cfg.adversarial_review_prompt}` and follow it: it owns the spawn, the prompt,
    the delivery and the triage. Its files to review are `{{files_changed}}`, never a list from git, which holds
-   other sessions' work; its project patterns are `{{project_context_rules}}`. Then run
+   other sessions' work; its project patterns are `{{project_context_rules}}`; its ticket rulings are every owner ruling and grill
+   resolution the ticket records, verbatim, or `none`. Then run
    § Post-Fix Re-Validation, whose implementer arm is lint and typecheck. A self-review is no substitute: if the
    spawn cannot run, say so and name the skipped gate.
 5. **Literal check** by § Pre-Done Literal Check over `{{files_changed}}`.

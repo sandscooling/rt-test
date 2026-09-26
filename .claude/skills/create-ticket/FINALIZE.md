@@ -5,7 +5,7 @@ lane, a write to a file your dispatch did not grant is a report of the exact tex
 
 **Execution metadata.** Fill the ticket's yaml block with `Edit`: `area`, `is_consolidation` (true when the
 tasks replace a pattern across the codebase), `sizing_ac_count`, and `files_to_modify` and `files_to_create`
-as they now stand.
+as they now stand, each a block list with one `- <path>` per line.
 
 **Rule-id markers, compared with the prose.** Add to the markers every rule id the ticket's prose cites that
 neither marker carries, with `fill-ticket.mjs --ids`: a rule a criterion defers to but never binds renders as
@@ -13,8 +13,9 @@ nothing. Then re-run `node scripts/fill-ticket.mjs --check {{ticket_file}}`.
 
 **The sprint file.** Move any criteria still under this ticket's heading into the ticket, leaving the scope
 line and a link to the ticket file, as `{cfg.sprints_dir}/README.md` describes. Correct the scope line only
-where the finished ticket's outcome or scope materially differs; elaboration is not a difference. A decision
-that constrains a sibling ticket goes under that sibling's heading.
+where the finished ticket's outcome or scope materially differs; elaboration is not a difference. Sprint prose that still promises work this ticket settled, such as
+a spike it ran or a question it answered, is rewritten to the settled fact. A decision that constrains a
+sibling ticket goes under that sibling's heading.
 
 **Requirements.** Follow `{cfg.rules_dir}/requirement-markers.md`, which owns the marker grammar:
 
