@@ -666,7 +666,8 @@ describe("errors and lost modules during collection", () => {
 });
 
 type RunResult = WorkspaceRun | { thrown: string };
-type RunHook = (event: string) => void;
+/** A promise returned for `global-setup` holds the run-unqueued fixture's run until it settles. */
+type RunHook = (event: string) => Promise<void> | undefined;
 
 interface FixtureRun {
   readonly run: RunResult;
@@ -1295,15 +1296,29 @@ describe("recording an interrupted run", () => {
     "D1188: overlapping runs leave no workspace's environment values in the host",
     async () => {
       const leftover = await inConsumerCopy(ENV_FIXTURE, "vitest", (envRoot) =>
-        inConsumerCopy("consumer", "vitest", async (otherRoot) => {
-          const first = settledRun(envRoot);
-          await waitUntil(
-            () =>
-              FIXTURE_ENV_KEYS.some((key) => process.env[key] !== undefined),
-            first,
-          );
-          await Promise.all([first, settledRun(otherRoot)]);
-          return FIXTURE_ENV_KEYS.map((key) => process.env[key]);
+        inConsumerCopy("run-unqueued", "vitest", async (gatedRoot) => {
+          let openGate = (): void => undefined;
+          const gate = new Promise<void>((resolve) => {
+            openGate = resolve;
+          });
+          runHooks()[RUN_HOOK] = (event) =>
+            event === "global-setup" ? gate : undefined;
+          try {
+            const first = settledRun(envRoot);
+            await waitUntil(
+              () =>
+                FIXTURE_ENV_KEYS.some((key) => process.env[key] !== undefined),
+              first,
+            );
+            const second = settledRun(gatedRoot);
+            await first;
+            openGate();
+            await second;
+            return FIXTURE_ENV_KEYS.map((key) => process.env[key]);
+          } finally {
+            openGate();
+            delete runHooks()[RUN_HOOK];
+          }
         }),
       );
       expect(leftover).toEqual([undefined, undefined]);
