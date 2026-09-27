@@ -2,6 +2,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { expect } from "vitest";
+import { readNonInputs, testModuleFile } from "../../src/inputs/non-inputs.js";
 import { selectTests } from "../../src/selection/select-tests.js";
 import type {
   DependencyInformation,
@@ -170,8 +171,25 @@ export function selectInTree(
             ],
       ),
       vitestListingNotRead: tree.vitestListingNotRead ?? [],
+      nonInputs: {
+        declaration: readNonInputs(root),
+        protectedTestModules: new Set(listedTestModules(workspaces)),
+      },
     });
   });
+}
+
+/** Each runnable workspace's listed test modules, root-relative, as its discovery would list them. */
+function listedTestModules(
+  workspaces: readonly SelectableWorkspace[],
+): string[] {
+  return workspaces.flatMap(({ workspace, tests }) =>
+    tests.known
+      ? tests.tests.map((test) =>
+          testModuleFile(workspace.path, test.modulePath),
+        )
+      : [],
+  );
 }
 
 /** The selected Vitest workspace paths, or the outcome itself when nothing was selected that way. */

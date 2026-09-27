@@ -72,6 +72,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   begin(): void {
+    this.#protectStoredTestModules();
     this.#parts.inputs.start();
     this.#sequence = this.#startSequence()
       .catch((error: unknown) => {
@@ -115,6 +116,21 @@ export class DaemonLifecycle implements DaemonHandlers {
     return this.#stopping !== undefined;
   }
 
+  /** The first reconciliation leaves out no test module the store's latest discovery, from an earlier life, lists. */
+  #protectStoredTestModules(): void {
+    const { inputs, log } = this.#parts;
+    let stored: TestDiscovery | undefined;
+    try {
+      stored = this.#latestResults().discovery?.discovery;
+    } catch (error) {
+      log.error("reading the latest stored discovery's test modules", error);
+      return;
+    }
+    inputs.protectTestModules(stored).catch((error: unknown) => {
+      log.error("protecting the stored discovery's test modules", error);
+    });
+  }
+
   #latestResults(): LatestResults {
     return this.#parts.store.readLatestResults(this.#parts.scope);
   }
@@ -146,18 +162,15 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#nothingStored(undefined, outcome.reason);
       return;
     }
+    const discovery = outcome.value;
+    const held = await this.#protectDiscovered(discovery, verdict, startedAt);
     if (this.isStopping()) {
       this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);
       return;
     }
-    const discovery = outcome.value;
-    const bindings = this.#bindings("the discovery", verdict, () => {
-      const current = inputs.current();
-      const changed = current.testModuleChangedSince(discovery, startedAt);
-      return changed === undefined
-        ? current.discoveryFingerprint(discovery)
-        : { ok: false, reason: changed };
-    });
+    const bindings = this.#bindings("the discovery", held, () =>
+      inputs.current().discoveryFingerprint(discovery),
+    );
     this.#store("the discovery", undefined, () =>
       this.#parts.store.writeDiscovery(bindings, discovery),
     );
@@ -170,6 +183,30 @@ export class DaemonLifecycle implements DaemonHandlers {
     }
     if (!this.isStopping())
       log.entry("idle: every confirmed workspace has run");
+  }
+
+  /**
+   * Protects the discovery's test modules before its fingerprint is taken, so the stored digest counts them as every
+   * later answer does. A module a pattern covered had no watch through the job, so its time is read before
+   * protection moves it into the inputs; an input event during protection fails the fingerprint, and protection's own
+   * reads do not.
+   */
+  async #protectDiscovered(
+    discovery: TestDiscovery,
+    verdict: JobVerdict,
+    startedAt: number,
+  ): Promise<JobVerdict> {
+    const { inputs } = this.#parts;
+    const unwatched = inputs
+      .current()
+      .testModuleChangedSince(discovery, startedAt);
+    const guard = inputs.beginJob();
+    await inputs.protectTestModules(discovery);
+    const guarded = await inputs.endJob(guard);
+    if (!verdict.fingerprinted) return verdict;
+    if (unwatched !== undefined)
+      return { fingerprinted: false, reason: unwatched };
+    return guarded;
   }
 
   async #run(entry: WorkspaceDiscovery): Promise<void> {

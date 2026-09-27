@@ -1,11 +1,17 @@
 import { posix, win32 } from "node:path";
 import {
   climbsOut,
+  LOCKFILES,
   PACKAGE_JSON,
   ROOT_PATH,
   VITE_CONFIG_FILES,
   VITEST_CONFIG_FILES,
 } from "../vitest/find-workspaces.js";
+import {
+  declaredNonInputs,
+  NON_INPUTS_FILE,
+  type NonInputMatch,
+} from "../inputs/non-inputs.js";
 import { normalizeRelativePath, owningWorkspace } from "./graph-state.js";
 import {
   FALLBACK_SCOPE,
@@ -30,14 +36,6 @@ import {
   type TriggerKind,
 } from "./selection-types.js";
 
-const LOCKFILES = [
-  "bun.lock",
-  "bun.lockb",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "pnpm-lock.yaml",
-  "yarn.lock",
-];
 const CONFIG_FILES = new Set([...VITEST_CONFIG_FILES, ...VITE_CONFIG_FILES]);
 const CHANGE_PATH_SEPARATORS = [posix.sep, win32.sep];
 const WALK_KEY_SEPARATOR = "\0";
@@ -64,6 +62,7 @@ interface SelectionContext {
   readonly usedWidenings: Set<DependencyUncertainty>;
   /** Each walk by its starts, since every changed path in one workspace walks from the same one. */
   readonly walks: Map<string, Map<string, Chain>>;
+  readonly declared: NonInputMatch;
 }
 
 interface PathTrigger {
@@ -150,6 +149,10 @@ function selectionContext(input: SelectionInput): SelectionContext {
     ),
     usedWidenings: new Set(),
     walks: new Map(),
+    declared: declaredNonInputs(
+      input.nonInputs.declaration,
+      input.nonInputs.protectedTestModules,
+    ),
   };
 }
 
@@ -158,6 +161,8 @@ function selectForPath(context: SelectionContext, path: string): PathOutcome {
     path,
     context.input.dependencies.packageWorkspaces,
   )?.path;
+  const pattern = context.declared(path);
+  if (pattern !== undefined) return declaredOutcome(path, owner, pattern);
   const triggers = pathTriggers(context, path, owner);
   const reasons = new Map<string, SelectionReason[]>();
   for (const trigger of triggers) {
@@ -174,6 +179,29 @@ function selectForPath(context: SelectionContext, path: string): PathOutcome {
     report: pathReport(context, path, owner, triggers, reasons),
     reasons,
     fallbacks,
+  };
+}
+
+/** A declared non-input no test reads, so it selects nothing and raises no trigger. */
+function declaredOutcome(
+  path: string,
+  owner: string | undefined,
+  pattern: string,
+): PathOutcome {
+  return {
+    report: {
+      path,
+      owner,
+      triggers: [],
+      selected: [],
+      notRunnable: [],
+      nothingSelected: {
+        kind: NO_SELECTION.declaredNonInput,
+        detail: `${NON_INPUTS_FILE} declares it a non-input through the pattern ${pattern}`,
+      },
+    },
+    reasons: new Map(),
+    fallbacks: [],
   };
 }
 
@@ -236,6 +264,7 @@ function projectWideKinds(
   const kinds: TriggerKind[] = [];
   if (LOCKFILES.includes(name)) kinds.push(TRIGGER.lockfile);
   if (name === PACKAGE_JSON) kinds.push(TRIGGER.manifest);
+  if (path === NON_INPUTS_FILE) kinds.push(TRIGGER.nonInputsFile);
   if (owner === ROOT_PATH && dependencies.packageWorkspaces.length > 1) {
     kinds.push(TRIGGER.rootOwnedPath);
   }

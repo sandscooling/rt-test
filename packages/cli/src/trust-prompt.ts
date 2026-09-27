@@ -1,5 +1,10 @@
 import { createInterface } from "node:readline/promises";
-import type { StartPlan } from "@rt-test/daemon/client";
+import {
+  NON_INPUTS_ABSENT,
+  NON_INPUTS_UNUSABLE,
+  type NonInputsDeclaration,
+  type StartPlan,
+} from "@rt-test/daemon/client";
 import type { CliIo } from "./command.js";
 import { NOT_STARTED, oneLine, type Output } from "./output.js";
 
@@ -29,9 +34,29 @@ export function listing(plan: StartPlan): string[] {
       (workspace, index) =>
         `${INDENT}${(paths[index] ?? "").padEnd(width)}${oneLine(workspace.configFile)}`,
     ),
+    ...nonInputLines(plan.nonInputs),
     EXECUTES_SENTENCE,
     ...unreadWarnings(plan),
   ];
+}
+
+/** The files the consumer declares no test reads, whose edits leave every result as it was. */
+function nonInputLines(declaration: NonInputsDeclaration): string[] {
+  switch (declaration.state) {
+    case NON_INPUTS_ABSENT:
+      return [`Non-inputs: none, since there is no ${declaration.file}`];
+    case NON_INPUTS_UNUSABLE:
+      return [`warning: ${oneLine(declaration.reason)}`];
+    default:
+      return declaration.patterns.length === 0
+        ? [`Non-inputs: none, since ${declaration.file} declares no pattern`]
+        : [
+            `Non-inputs declared in ${declaration.file}, whose edits change no result and select no test:`,
+            ...declaration.patterns.map(
+              (pattern) => `${INDENT}${JSON.stringify(pattern)}`,
+            ),
+          ];
+  }
 }
 
 export function unreadWarnings(plan: StartPlan): string[] {

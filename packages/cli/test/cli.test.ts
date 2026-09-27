@@ -71,6 +71,11 @@ const LISTED_WORKSPACES = [WORKSPACE_A, WORKSPACE_B].map((path) => ({
   configFile: `${path}/vitest.config.mjs`,
 }));
 const DECLINED = "not started: not trusted";
+const NON_INPUTS_FILE = "rt-test.json";
+const UNUSABLE_JSON_REASON =
+  "rt-test.json declares no non-inputs, so every file stays an input: it is not readable JSON (";
+/** How the listing's sentence on what a start executes begins. */
+const EXECUTES_OPENING = "Starting executes";
 /** How the question marks its answers. */
 const QUESTION = /y\/N/;
 const ENTER = "\r";
@@ -235,6 +240,7 @@ async function trustAfter(
     start: { consumerRoot: join(REPO, "consumer"), workspaces: [] },
     stateDirectory: join(REPO, "consumer", ".rt-test"),
     notRead: [],
+    nonInputs: { file: NON_INPUTS_FILE, state: "absent" },
   };
   try {
     return await bounded(
@@ -250,6 +256,34 @@ async function trustAfter(
   } finally {
     session.close();
   }
+}
+
+/** Whether some line `matches` and comes before the listing's sentence on what a start executes. */
+function beforeExecutes(
+  lines: readonly string[],
+): (matches: (line: string) => boolean) => boolean {
+  const executes = lines.findIndex((line) => line.startsWith(EXECUTES_OPENING));
+  return (matches) => {
+    const found = lines.findIndex(matches);
+    return found !== -1 && found < executes;
+  };
+}
+
+/**
+ * Whether a start listing over the daemon fixture shows a line that `matches` before the sentence on what a start
+ * executes, with `rt-test.json` holding `declaration`, or absent when it is undefined.
+ */
+function listedBeforeExecutes(
+  declaration: string | undefined,
+  matches: (line: string) => boolean,
+): Promise<boolean> {
+  return withDaemonConsumer(async (root) => {
+    if (declaration !== undefined) {
+      writeFileSync(join(root, NON_INPUTS_FILE), declaration);
+    }
+    const run = await runCli(["start"], { cwd: root });
+    return beforeExecutes(run.stderr.split("\n"))(matches);
+  });
 }
 
 /** Adds `pattern` to the consumer's `package.json` workspaces, as a project's own manifest could hold it. */
@@ -403,6 +437,107 @@ describe("the listing a start shows before anything executes", () => {
         };
       });
       expect(outcome).toStrictEqual({ forged: 0, escaped: true });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2015: the listing names rt-test.json and each pattern it declares before the sentence saying what starting executes",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root) => {
+        writeFileSync(
+          join(root, NON_INPUTS_FILE),
+          JSON.stringify({ nonInputs: ["docs/**", "*.md"] }),
+        );
+        const run = await runCli(["start"], { cwd: root });
+        const lines = run.stderr.split("\n");
+        const listedFirst = beforeExecutes(lines);
+        return {
+          file: listedFirst((line) => line.includes(NON_INPUTS_FILE)),
+          patterns: ["docs/**", "*.md"].map((pattern) =>
+            listedFirst((line) => line.trim() === JSON.stringify(pattern)),
+          ),
+        };
+      });
+      expect(outcome).toStrictEqual({ file: true, patterns: [true, true] });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2016: start --json carries the declaration under schemaVersion 1",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root) => {
+        writeFileSync(
+          join(root, NON_INPUTS_FILE),
+          JSON.stringify({ nonInputs: ["docs/**"] }),
+        );
+        const document = documentOf(
+          await runCli(["start", "--json"], { cwd: root }),
+        );
+        return {
+          schemaVersion: document["schemaVersion"],
+          nonInputs: document["nonInputs"],
+        };
+      });
+      expect(outcome).toStrictEqual({
+        schemaVersion: 1,
+        nonInputs: {
+          file: NON_INPUTS_FILE,
+          state: "declared",
+          patterns: ["docs/**"],
+        },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2017: the listing gives the reason an rt-test.json that is not valid JSON declares nothing, on a warning line before the sentence saying what starting executes",
+    async () => {
+      const warned = await withDaemonConsumer(async (root) => {
+        writeFileSync(join(root, NON_INPUTS_FILE), "{ not json");
+        const run = await runCli(["start"], { cwd: root });
+        return beforeExecutes(run.stderr.split("\n"))((line) =>
+          line.startsWith(`warning: ${UNUSABLE_JSON_REASON}`),
+        );
+      });
+      expect(warned).toBe(true);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2041: the listing quotes each declared pattern, so a trailing space shows",
+    async () => {
+      const listed = await listedBeforeExecutes(
+        JSON.stringify({ nonInputs: ["docs/a.md "] }),
+        (line) => line.trim() === JSON.stringify("docs/a.md "),
+      );
+      expect(listed).toBe(true);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2042: with no rt-test.json the listing says so before the sentence saying what starting executes",
+    async () => {
+      const listed = await listedBeforeExecutes(undefined, (line) =>
+        line.includes(NON_INPUTS_FILE),
+      );
+      expect(listed).toBe(true);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2043: an rt-test.json declaring no pattern is named in the listing before the sentence saying what starting executes",
+    async () => {
+      const listed = await listedBeforeExecutes(
+        JSON.stringify({ nonInputs: [] }),
+        (line) => line.includes(NON_INPUTS_FILE),
+      );
+      expect(listed).toBe(true);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1493,6 +1628,15 @@ describe("a query", () => {
         { workspacePath: WORKSPACE_B, reason: "cannot be read" },
       ],
     });
+  });
+
+  it("D2018: a human answer prints on a warning line the reason the daemon's rt-test.json cannot be used", () => {
+    const reason =
+      "rt-test.json declares no non-inputs, so every file stays an input: its top level is not a JSON object";
+    const lines = contextLines(humanAnswer({ nonInputsUnusable: reason }));
+    expect(
+      lines.some((line) => /^warning: /i.test(line) && line.includes(reason)),
+    ).toBe(true);
   });
 
   it(

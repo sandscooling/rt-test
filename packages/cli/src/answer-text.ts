@@ -72,6 +72,9 @@ export function contextLines(answer: Answer): string[] {
     ...adapter,
     `Discovery freshness: ${discovery.freshness}`,
     ...inputLines(answer.inputs),
+    ...(answer.nonInputsUnusable === undefined
+      ? []
+      : [`Warning: ${firstLine(answer.nonInputsUnusable)}`]),
     ...(unfingerprinted.length === 0
       ? []
       : [UNFINGERPRINTED_HEADING, ...unfingerprinted]),

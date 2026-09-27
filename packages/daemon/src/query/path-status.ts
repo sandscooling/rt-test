@@ -1,6 +1,6 @@
 import { statSync, type Stats } from "node:fs";
 import { basename, dirname, join, posix } from "node:path";
-import { testModuleFile } from "../inputs/fingerprint.js";
+import { testModuleFile } from "../inputs/non-inputs.js";
 import type { CurrentInputs } from "../inputs/input-tracker.js";
 import type { LatestResults } from "../store/open-store.js";
 import {

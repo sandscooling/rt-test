@@ -1,4 +1,5 @@
 import type { TestIdentity } from "@rt-test/core";
+import type { NonInputsDeclaration } from "../inputs/non-inputs.js";
 import type {
   PackageWorkspace,
   UnreadWorkspaceSource,
@@ -6,7 +7,7 @@ import type {
 } from "../vitest/find-workspaces.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 2;
+export const SELECTION_POLICY_VERSION = 3;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -104,6 +105,7 @@ export const TRIGGER = {
   workspaceConfig: "workspace-config",
   setupFile: "setup-file",
   globalSetupFile: "global-setup-file",
+  nonInputsFile: "non-inputs-file",
 } as const;
 
 export type TriggerKind = (typeof TRIGGER)[keyof typeof TRIGGER];
@@ -119,6 +121,7 @@ export type FallbackScope =
 export const NO_SELECTION = {
   noDependentVitestWorkspace: "no-dependent-vitest-workspace",
   onlyNotRunnable: "only-not-runnable",
+  declaredNonInput: "declared-non-input",
 } as const;
 
 export type NoSelectionKind = (typeof NO_SELECTION)[keyof typeof NO_SELECTION];
@@ -130,13 +133,24 @@ export const SELECTION_STATE = {
 } as const;
 
 export interface SelectionInput {
-  /** Root-relative `/`-separated paths added, edited or deleted. */
+  /**
+   * Root-relative `/`-separated paths of the files added, edited or deleted. A deleted directory is named by the
+   * files it held, since a declared pattern that matches the directory need not match each of them.
+   */
   readonly change: readonly string[];
   readonly dependencies: DependencyInformation;
   readonly workspaces: readonly SelectableWorkspace[];
   readonly notRunnable: readonly NotRunnableWorkspace[];
   /** `findVitestWorkspaces`'s sources not read: a candidate it could not check may be a Vitest workspace. */
   readonly vitestListingNotRead: readonly UnreadWorkspaceSource[];
+  readonly nonInputs: SelectionNonInputs;
+}
+
+/** The consumer's declaration, and the test modules no declared pattern may remove. */
+export interface SelectionNonInputs {
+  readonly declaration: NonInputsDeclaration;
+  /** Root-relative and `/`-separated: every test module the discovery lists, as `discoveredTestModules` gives them. */
+  readonly protectedTestModules: ReadonlySet<string>;
 }
 
 /** One step from a workspace to a dependent of it, through an edge's producer or a widening's cause. */

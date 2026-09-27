@@ -21,9 +21,20 @@ const WORKSPACES_FIELD = "workspaces";
 const WORKSPACE_PACKAGES_FIELD = "packages";
 export const POSIX_SEPARATOR = "/";
 export const PACKAGE_JSON = "package.json";
-const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
+/** The lockfile names of the package managers a consumer may use; each can change every workspace's dependencies. */
+export const LOCKFILES: readonly string[] = [
+  "bun.lock",
+  "bun.lockb",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+];
+export const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
 const CHILDREN_SUFFIX = "/*";
 const NEGATION_PREFIX = "!";
+/** Some Windows editors begin a UTF-8 file with it, and `JSON.parse` refuses it. */
+const BYTE_ORDER_MARK = "﻿";
 const WILDCARD = "*";
 export const ROOT_PATH = ".";
 const PARENT_SEGMENT = "..";
@@ -291,7 +302,11 @@ function dependsOnVitest(manifest: unknown): boolean {
 
 export function readJson(file: string): JsonRead {
   try {
-    return { ok: true, value: JSON.parse(readFileSync(file, "utf8")) };
+    const text = readFileSync(file, "utf8");
+    const json = text.startsWith(BYTE_ORDER_MARK)
+      ? text.slice(BYTE_ORDER_MARK.length)
+      : text;
+    return { ok: true, value: JSON.parse(json) };
   } catch (error) {
     return { ok: false, reason: `cannot read: ${errorText(error)}` };
   }

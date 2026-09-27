@@ -93,7 +93,9 @@ export async function takeInventory(
       ok: true,
       inputs: await hashFiles(
         walk,
-        walk.files.filter((path) => !excluded(path)),
+        walk.files.filter(
+          (path) => !excluded(path) && walk.filter.declares(path) === undefined,
+        ),
       ),
       directories: walk.directories.filter((path) => !excluded(path)),
       ignoredDirectories: walk.directories.filter(excluded),

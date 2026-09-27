@@ -1,6 +1,6 @@
 import type { WatchEventType } from "node:fs";
 import { realpathSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import type { DaemonLog } from "../daemon/daemon-log.js";
 import {
   RECONCILIATION_COMPLETE,
@@ -22,8 +22,13 @@ import {
   workspaceFingerprint,
   type FingerprintResult,
 } from "./fingerprint.js";
-import { gitSources } from "./git-sources.js";
-import { InputFilter } from "./input-filter.js";
+import { DeclaredNonInputs } from "./declared-non-inputs.js";
+import { GitFiles } from "./git-files.js";
+import {
+  absoluteInputPath,
+  InputFilter,
+  liesInsideOnHost,
+} from "./input-filter.js";
 import {
   readEntryDigest,
   takeInventory,
@@ -38,23 +43,16 @@ import {
 } from "./input-jobs.js";
 import { InputState } from "./input-state.js";
 import { InputWatcher } from "./input-watcher.js";
+import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
+import { ReconcileSchedule } from "./reconcile-schedule.js";
 
-/** How long after a reconciliation ends the next one runs, the longest an input change no event reported goes unseen. */
-export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
-/** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
-const LOST_INPUT_SET_RETRY_MS = 10 * 1000;
-const LOST_INPUT_SET_RETRY_REASON =
-  "an input event arrived while the input set could not be established";
 const IGNORE_FILE = ".gitignore";
 const RENAME_EVENT = "rename";
+const CHANGE_EVENT = "change";
+const NON_INPUTS_CHANGED_REASON = `${NON_INPUTS_FILE}, which declares the non-inputs, changed`;
 const FIRST_RECONCILIATION_REASON = "the first reconciliation has not ended";
 const RECONCILING_REASON = "a reconciliation of the inputs is running";
-const PERIODIC_REASON = "the periodic reconciliation";
 const STOPPED_REASON = "the daemon is stopping";
-const GIT_SOURCES_UNREAD =
-  "git's HEAD and ignore-rule files could not be located, so a branch or ignore-rule change is seen only by events and the periodic reconciliation";
-const GIT_FILE_UNWATCHED =
-  "a file whose change can move HEAD or change what git ignores cannot be watched, so such a change is seen only by the periodic reconciliation";
 
 export interface InputTrackerOptions {
   readonly consumerRoot: string;
@@ -68,6 +66,8 @@ export interface CurrentInputs {
   readonly facts: InputFacts;
   /** Why no fingerprint can be computed for any workspace; absent when each is computed on its own. */
   readonly unavailable?: string;
+  /** Why every file stays an input, while `rt-test.json` cannot be used; absent otherwise. */
+  readonly nonInputsUnusable?: string;
   workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
   discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
   /** Why a listed test module no watch covers may have changed at or after `since`, a time in ms; undefined when none did. */
@@ -85,14 +85,19 @@ export interface TrackedInputs {
   current(): CurrentInputs;
   beginJob(): JobMark;
   endJob(mark: JobMark): Promise<JobVerdict>;
+  /**
+   * Protects the test modules `discovery` lists from the declared patterns, in place of the last discovery's, and
+   * resolves once every path whose declared state that change flips has been read.
+   */
+  protectTestModules(discovery: TestDiscovery | undefined): Promise<void>;
   /** Ends the timer, every watch and any git process, and releases every job waiting on the inputs. */
   stop(): Promise<void>;
 }
 
 /**
  * Tracks the consumer's inputs for one daemon life: reads them all in a reconciliation at start, on a watcher
- * failure, a git move or an ignore-rule change, and `RECONCILE_INTERVAL_MS` after the last one ended; between
- * reconciliations, re-reads only the paths events name.
+ * failure, a git move, an ignore-rule change or a change to `rt-test.json`, and `RECONCILE_INTERVAL_MS` after the
+ * last one ended; between reconciliations, re-reads only the paths events name. A declared non-input is never an input.
  */
 export class InputTracker implements TrackedInputs {
   readonly #root: string;
@@ -104,30 +109,35 @@ export class InputTracker implements TrackedInputs {
   readonly #jobs = new JobWindows();
   readonly #ledger = new EventLedger(() => this.#reconciling);
   readonly #queue = new Map<string, WatchEventType>();
+  /** Queued only because protection changed whether they count, so reading them marks no job; an event clears one. */
+  readonly #quiet = new Set<string>();
+  readonly #declared: DeclaredNonInputs;
+  /** `rt-test.json` at the consumer root, which is never an input and whose change reconciles every one. */
+  readonly #declarationFile: string;
+  readonly #git: GitFiles;
+  readonly #schedule = new ReconcileSchedule((reason) =>
+    this.#requestReconciliation(reason),
+  );
   #filter: InputFilter | undefined;
-  #gitUnread: readonly string[] = [];
-  /** What of git's HEAD and ignore-rule files the last reconciliation could not locate or watch. */
-  #gitFilesUnread: readonly string[] = [];
   #started = false;
   #reconciling = false;
   #reconcileRequested = false;
-  /** Whether an event has already brought the next reconciliation forward since the last one ended. */
-  #retryArmed = false;
   #reconciliation: Promise<void> = Promise.resolve();
   #processing: Promise<void> | undefined;
   #inFlight = 0;
   #establishFailure: string | undefined;
   #watchFailure: string | undefined;
   #lastReconciledAt: string | undefined;
-  #timer: NodeJS.Timeout | undefined;
   #stopped = false;
   readonly #firstReconciled: Promise<void>;
   #markFirstReconciled: () => void = () => undefined;
 
   constructor({ consumerRoot, exclusions, log }: InputTrackerOptions) {
     this.#root = realpathSync.native(consumerRoot);
-    this.#exclusions = exclusions;
+    this.#declarationFile = join(this.#root, NON_INPUTS_FILE);
+    this.#exclusions = [...exclusions, this.#declarationFile];
     this.#log = log;
+    this.#declared = new DeclaredNonInputs(this.#root, log);
     this.#state = new InputState(this.#root);
     this.#firstReconciled = new Promise((resolve) => {
       this.#markFirstReconciled = resolve;
@@ -141,6 +151,7 @@ export class InputTracker implements TrackedInputs {
       failed: (reason) => this.#watchFailed(reason),
       cannotWatch: (reason) => this.#cannotWatch(reason),
     });
+    this.#git = new GitFiles(this.#root, this.#watcher, log);
   }
 
   start(): void {
@@ -169,17 +180,21 @@ export class InputTracker implements TrackedInputs {
           ? { state: WATCHER_HEALTHY }
           : { state: WATCHER_UNHEALTHY, reason: this.#watchFailure },
       pendingChanges: this.#pending(),
-      gitUnread: this.#gitUnread,
+      gitUnread: this.#git.unread,
     };
   }
 
   current(): CurrentInputs {
     const unavailable = this.#unavailableReason();
     const facts = this.facts();
+    const unusable = this.#declared.unusable;
+    const declaration =
+      unusable === undefined ? {} : { nonInputsUnusable: unusable };
     if (unavailable !== undefined) {
       const none: FingerprintResult = { ok: false, reason: unavailable };
       return {
         facts,
+        ...declaration,
         unavailable,
         workspaceFingerprint: () => none,
         discoveryFingerprint: () => none,
@@ -190,6 +205,7 @@ export class InputTracker implements TrackedInputs {
     const reads = new SnapshotReads(project.root);
     return {
       facts,
+      ...declaration,
       workspaceFingerprint: (entry) =>
         workspaceFingerprint(project, entry, reads),
       discoveryFingerprint: (discovery) =>
@@ -209,10 +225,30 @@ export class InputTracker implements TrackedInputs {
     return this.#jobs.close(mark, this.#unavailableReason());
   }
 
+  /** Reads only the paths whose declared state the change flips, after any reconciliation running has ended. */
+  async protectTestModules(
+    discovery: TestDiscovery | undefined,
+  ): Promise<void> {
+    const flipped = this.#declared.protect(
+      discovery === undefined ? [] : discoveredTestModules(discovery),
+    );
+    if (flipped.length === 0 || !this.#started || this.#stopped) return;
+    for (const path of flipped) {
+      const absolute = absoluteInputPath(this.#root, path);
+      if (!this.#queue.has(absolute)) {
+        this.#quiet.add(absolute);
+        this.#queue.set(absolute, CHANGE_EVENT);
+      }
+      this.#ledger.accept();
+    }
+    this.#processQueue();
+    await this.#ledger.waitForRead();
+  }
+
   async stop(): Promise<void> {
     if (this.#stopped) return;
     this.#stopped = true;
-    clearTimeout(this.#timer);
+    this.#schedule.clear();
     this.#abort.abort();
     this.#watcher.close();
     this.#ledger.releaseAll();
@@ -221,14 +257,24 @@ export class InputTracker implements TrackedInputs {
   }
 
   #changed(path: string, kind: WatchEventType): void {
-    if (this.#stopped || this.#filter?.excludes(path) === true) return;
-    if (this.#queue.get(path) !== RENAME_EVENT) this.#queue.set(path, kind);
-    this.#ledger.accept();
+    if (this.#stopped) return;
+    if (liesInsideOnHost(this.#declarationFile, path)) {
+      this.#requestReconciliation(NON_INPUTS_CHANGED_REASON);
+      return;
+    }
+    if (this.#filter?.excludes(path) === true) return;
     if (basename(path) === IGNORE_FILE) {
       this.#requestReconciliation(
         `the ignore rules in ${this.#label(path)} changed`,
       );
     }
+    const knownDirectory = this.#state.hasDirectory(path);
+    if (this.#declared.namesFile(this.#label(path), path, knownDirectory)) {
+      return;
+    }
+    this.#quiet.delete(path);
+    if (this.#queue.get(path) !== RENAME_EVENT) this.#queue.set(path, kind);
+    this.#ledger.accept();
     this.#processQueue();
   }
 
@@ -270,85 +316,37 @@ export class InputTracker implements TrackedInputs {
         this.#inputSetLost(`the reconciliation failed: ${errorText(error)}`);
         this.#lastReconciledAt = new Date().toISOString();
       }
+      this.#declared.report();
     }
     this.#reconciling = false;
     if (this.#stopped) return;
     this.#markFirstReconciled();
-    this.#armPeriodicReconciliation();
+    this.#schedule.periodic();
     this.#processQueue();
     this.#ledger.notify();
   }
 
-  /** Timed from the end of the last reconciliation, so one that outlasts the interval never runs back to back. */
-  #armPeriodicReconciliation(): void {
-    this.#retryArmed = false;
-    this.#armReconciliation(RECONCILE_INTERVAL_MS, PERIODIC_REASON);
-  }
-
-  /**
-   * An event while the input set cannot be established may report its cause fixed, so it brings the next
-   * reconciliation forward to `LOST_INPUT_SET_RETRY_MS` after the last one ended.
-   */
   #retryLostInputSet(): void {
-    if (this.#reconciling || this.#retryArmed) return;
-    if (this.#establishFailure === undefined) return;
-    this.#retryArmed = true;
-    const endedAt = Date.parse(this.#lastReconciledAt ?? "") || 0;
-    this.#armReconciliation(
-      Math.max(0, endedAt + LOST_INPUT_SET_RETRY_MS - Date.now()),
-      LOST_INPUT_SET_RETRY_REASON,
-    );
-  }
-
-  #armReconciliation(delayMs: number, reason: string): void {
-    clearTimeout(this.#timer);
-    this.#timer = setTimeout(
-      () => this.#requestReconciliation(reason),
-      delayMs,
-    );
-    this.#timer.unref();
+    if (this.#reconciling || this.#establishFailure === undefined) return;
+    this.#schedule.retryLostInputSet(this.#lastReconciledAt);
   }
 
   async #reconcileOnce(): Promise<void> {
     const signal = this.#abort.signal;
     this.#watcher.clearFailures();
-    const known = this.#filter?.nestedRepositories ?? [];
-    await this.#watchGitFiles(known, signal);
-    const filter = await InputFilter.open(this.#root, this.#exclusions, signal);
-    const inventory = await takeInventory(this.#scope(filter), this.#root);
-    if (!sameMembers(known, filter.nestedRepositories)) {
-      await this.#watchGitFiles(filter.nestedRepositories, signal);
-    }
-    this.#filter = filter;
-    this.#reportGitUnread(filter);
-    this.#settleReconciliation(inventory);
-  }
-
-  /** Locates git's HEAD and ignore-rule files for `nestedRepositories` and watches them in place of the last ones. */
-  async #watchGitFiles(
-    nestedRepositories: readonly string[],
-    signal: AbortSignal,
-  ): Promise<void> {
-    const sources = await gitSources(this.#root, nestedRepositories, signal);
-    const unwatched = this.#watcher.watchGitFiles(
-      sources.ok ? sources.files : [],
+    await this.#git.watch(this.#filter?.nestedRepositories ?? [], signal);
+    this.#declared.read();
+    const filter = await InputFilter.open(
+      this.#root,
+      this.#exclusions,
+      this.#declared.match,
+      signal,
     );
-    const unlocated = sources.ok ? sources.unread : [sources.reason];
-    this.#gitFilesUnread = [
-      ...unwatched.map((reason) => `${GIT_FILE_UNWATCHED}: ${reason}`),
-      ...unlocated.map((reason) => `${GIT_SOURCES_UNREAD}: ${reason}`),
-    ];
-  }
-
-  /** Logs git's unread reasons when they differ from the last reconciliation's, not on every one. */
-  #reportGitUnread(filter: InputFilter): void {
-    const unread = [...filter.unread, ...this.#gitFilesUnread];
-    const changed =
-      unread.length !== this.#gitUnread.length ||
-      unread.some((reason, index) => reason !== this.#gitUnread[index]);
-    this.#gitUnread = unread;
-    if (!changed) return;
-    for (const reason of unread) this.#log.entry(`warning: ${reason}`);
+    const inventory = await takeInventory(this.#scope(filter), this.#root);
+    await this.#git.follow(filter.nestedRepositories, signal);
+    this.#filter = filter;
+    this.#git.report(filter);
+    this.#settleReconciliation(inventory);
   }
 
   #settleReconciliation(inventory: InventoryResult): void {
@@ -427,7 +425,7 @@ export class InputTracker implements TrackedInputs {
       .filter((path) => !this.#isKnown(path) && filter.needsCheck(path));
     if (unknown.length > 0) {
       await filter.check(unknown, this.#abort.signal);
-      this.#reportGitUnread(filter);
+      this.#git.report(filter);
     }
     for (const [path, kind] of batch) {
       if (filter.excludes(path)) continue;
@@ -441,21 +439,19 @@ export class InputTracker implements TrackedInputs {
     kind: WatchEventType,
   ): Promise<void> {
     const relative = relativePosixPath(this.#root, path);
+    const record = this.#quiet.delete(path)
+      ? () => undefined
+      : (changed: readonly string[]) => this.#recordAll(changed);
     const entry = await readEntryDigest(path, this.#abort.signal);
     switch (entry.kind) {
       case "absent": {
         const wasDirectory = this.#state.hasDirectory(path);
-        this.#recordAll(this.#state.remove(relative, path));
+        record(this.#state.remove(relative, path));
         if (wasDirectory) this.#watcher.dropDirectory(path);
         return;
       }
       case "input":
-        if (this.#state.hasDirectory(path)) {
-          this.#recordAll(this.#state.remove(relative, path));
-          this.#watcher.dropDirectory(path);
-        }
-        this.#state.set(relative, entry.digest);
-        this.#jobs.record(relative);
+        this.#readFile(filter, path, entry.digest, record);
         return;
       case "directory":
         if (this.#state.hasDirectory(path) && kind !== RENAME_EVENT) return;
@@ -465,6 +461,26 @@ export class InputTracker implements TrackedInputs {
         this.#inputSetLost(`${relative} cannot be read: ${entry.reason}`);
         return;
     }
+  }
+
+  /** A file that replaced a directory drops what the directory held; a declared file is not an input. */
+  #readFile(
+    filter: InputFilter,
+    path: string,
+    digest: string,
+    record: (changed: readonly string[]) => void,
+  ): void {
+    const relative = relativePosixPath(this.#root, path);
+    if (this.#state.hasDirectory(path)) {
+      this.#recordAll(this.#state.remove(relative, path));
+      this.#watcher.dropDirectory(path);
+    }
+    if (filter.declares(path) !== undefined) {
+      record(this.#state.remove(relative, path));
+      return;
+    }
+    this.#state.set(relative, digest);
+    record([relative]);
   }
 
   /**
@@ -549,16 +565,4 @@ export class InputTracker implements TrackedInputs {
   #label(path: string): string {
     return relativePosixPath(this.#root, path);
   }
-}
-
-function sameMembers(
-  first: readonly string[],
-  second: readonly string[],
-): boolean {
-  const members = new Set(first);
-  const others = new Set(second);
-  return (
-    members.size === others.size &&
-    [...others].every((member) => members.has(member))
-  );
 }
