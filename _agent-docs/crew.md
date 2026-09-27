@@ -51,6 +51,8 @@ When your role's work is done, send the orchestrator one message with `session_w
 - every status transition, id request, and exact project-wide text the orchestrator must apply
 - anything you found outside your scope, open questions, and the owner's answers to questions you asked
 
+**Take every time you write, in a report or a record, from `date` run at that moment**, never from memory: a session has no clock between tool calls, so a remembered time drifts ahead.
+
 Then end your turn and stay available: the next role in your lane may send you questions.
 
 ## Context
