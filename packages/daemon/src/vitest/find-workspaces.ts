@@ -154,10 +154,14 @@ function outsideRootReason(
 /** Whether `path` is `directory` or lies beneath it; both absolute. */
 export function liesInside(directory: string, path: string): boolean {
   const fromDirectory = relative(directory, path);
-  return !(
-    fromDirectory === PARENT_SEGMENT ||
-    fromDirectory.startsWith(`${PARENT_SEGMENT}${sep}`) ||
-    isAbsolute(fromDirectory)
+  return !(climbsOut(fromDirectory, sep) || isAbsolute(fromDirectory));
+}
+
+/** Whether a relative path, split by `separator`, climbs above the directory it is relative to. */
+export function climbsOut(relativePath: string, separator: string): boolean {
+  return (
+    relativePath === PARENT_SEGMENT ||
+    relativePath.startsWith(`${PARENT_SEGMENT}${separator}`)
   );
 }
 

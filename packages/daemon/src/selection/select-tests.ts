@@ -1,5 +1,6 @@
 import { posix, win32 } from "node:path";
 import {
+  climbsOut,
   PACKAGE_JSON,
   ROOT_PATH,
   VITE_CONFIG_FILES,
@@ -38,7 +39,7 @@ const LOCKFILES = [
   "yarn.lock",
 ];
 const CONFIG_FILES = new Set([...VITEST_CONFIG_FILES, ...VITE_CONFIG_FILES]);
-const PARENT_SEGMENT = "..";
+const CHANGE_PATH_SEPARATORS = [posix.sep, win32.sep];
 const WALK_KEY_SEPARATOR = "\0";
 
 /** A dependent reached from a workspace, through an edge or a widening that makes it depend on every workspace. */
@@ -105,9 +106,9 @@ function refusalReason(path: string): string | undefined {
   }
   const escapes = [posix.normalize(path), win32.normalize(path)].some(
     (normalized) =>
-      normalized === PARENT_SEGMENT ||
-      normalized.startsWith(`${PARENT_SEGMENT}${posix.sep}`) ||
-      normalized.startsWith(`${PARENT_SEGMENT}${win32.sep}`),
+      CHANGE_PATH_SEPARATORS.some((separator) =>
+        climbsOut(normalized, separator),
+      ),
   );
   return escapes ? `${path} leaves the consumer root` : undefined;
 }

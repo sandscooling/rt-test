@@ -598,8 +598,8 @@
     "id": "D1431",
     "defect": "Only / counts as a separator after .., so ..\\x is selected instead of refused.",
     "file": "packages/daemon/src/selection/select-tests.ts",
-    "old": "      normalized.startsWith(`${PARENT_SEGMENT}${win32.sep}`),",
-    "new": "      false,"
+    "old": "const CHANGE_PATH_SEPARATORS = [posix.sep, win32.sep];",
+    "new": "const CHANGE_PATH_SEPARATORS = [posix.sep];"
   },
   {
     "id": "D1432",
@@ -667,8 +667,8 @@
   {
     "id": "D1518",
     "defect": "A changed path normalizing to exactly .. is not refused.",
-    "file": "packages/daemon/src/selection/select-tests.ts",
-    "old": "      normalized === PARENT_SEGMENT ||\n",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    relativePath === PARENT_SEGMENT ||\n",
     "new": ""
   },
   {

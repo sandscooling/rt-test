@@ -1,5 +1,6 @@
 import { posix, relative, resolve, sep } from "node:path";
 import {
+  climbsOut,
   liesInside,
   POSIX_SEPARATOR,
   realPath,
@@ -16,8 +17,6 @@ import {
 } from "./selection-types.js";
 
 const HOME_PATH_PREFIX = "~/";
-const PARENT_PATH = "..";
-const PARENT_PREFIX = `${PARENT_PATH}${POSIX_SEPARATOR}`;
 const TRAILING_SEPARATORS = /\/+$/;
 
 /** The dependency information while it is built: the listing it reads against and the records it has produced. */
@@ -70,7 +69,7 @@ export function owningWorkspace(
 
 function holdsRelativePath(workspacePath: string, path: string): boolean {
   if (workspacePath === ROOT_PATH) {
-    return path !== PARENT_PATH && !path.startsWith(PARENT_PREFIX);
+    return !climbsOut(path, POSIX_SEPARATOR);
   }
   return (
     path === workspacePath ||
