@@ -30,7 +30,7 @@ P9. **Add dependencies at exact versions at least three days old**: Add with `bu
 
 P10. **Verify third-party behavior in its installed source**: Read the dependency's `.d.ts`, then its `.js`, under `node_modules/.bun/`, or its official documentation for the installed version, before relying on a behavior. Pin a behavior the product depends on in a test.
 
-P11. **Write repository scripts as dependency-free Node ESM**: Scripts under `scripts/` are plain `.mjs` run with `node`, add no dependency, put shared helpers in `scripts/lib/`, and export their logic as a function a test can call with a root and captured output. Give a module that TypeScript tests import a `.d.mts` beside it.
+P11. **Write repository scripts as dependency-free Node ESM**: Scripts under `scripts/` are plain `.mjs` run with `node`, add no dependency, and import no third-party package except a tool the root already declares that the script exists to drive, loaded by dynamic `import()` on a path that fails open, put shared helpers in `scripts/lib/`, and export their logic as a function a test can call with a root and captured output. Give a module that TypeScript tests import a `.d.mts` beside it.
 
 P12. **Read workflow paths through the flow config**: A script reads every workflow path (tickets, sprints, rule docs, requirements, ADRs) through `scripts/lib/flow-config.mjs`, never a hardcoded string. A new path is a new `_agent-docs/_flow-config.yaml` key.
 

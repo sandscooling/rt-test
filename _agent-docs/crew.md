@@ -18,6 +18,20 @@ Your name is `rt-<lane>-<role>`, and the skill your dispatch names owns your ste
 
 **Never edit an orchestrator-owned file** unless your dispatch grants it and the grant shows in `node scripts/file-claims.mjs grant-status`. Report the exact text or dependency you need, and the orchestrator writes it. Ask for every id (ADR, requirement, rule, sprint, ticket, defect range); never take the next free one.
 
+## Tool calls
+
+A failed tool call costs another full model request, and its error text stays in context for the rest of the session. Make each call right the first time:
+
+- Give Read, Grep, Glob and every file-deleting command an absolute path; a relative one resolves against whatever directory the shell is in.
+- Run Python as `python` or `py`, never `python3`, which resolves to the Microsoft Store placeholder. Repository tooling stays in Node (P11).
+- Write a Bash command longer than a few lines as a script file and run the file. Write content holding backslashes with the Write tool, never a heredoc.
+- Undo your own edits with targeted edits; `git checkout -- <path>` is denied.
+- Read a file over 256 KB with `offset` and `limit`.
+- Give Edit an `old_string` with enough surrounding context to match once.
+- Plan a sentence without the em dash shapes (a mid-clause aside, a reversal, a trailing gloss) rather than writing one and retrying.
+- Keep rule ids and ticket numbers out of code comments, and keep a block comment under the line cap (`rt-test/no-nonlocal-comment`).
+- When a hook denies a call, read the remedy it names and follow it; never retry the same call unchanged.
+
 ## Worktree lanes
 
 If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. Claim from that tree as usual. If you are the lane's review, run `bun run check` in your tree at the end and report its exit code, test counts, and window. Never commit, merge, or push; the orchestrator lands the branch.
@@ -28,7 +42,7 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 
 - tests: `bun x vitest run <paths or pattern>`, and confirm the file count matches what you targeted
 - lint: `bun x oxlint <paths>`
-- format: `bun x prettier --check <paths>` over every file you touched, docs, JSON and tests included, since the gate's first step fails on any one
+- format: `bun x prettier --check <paths>` over every file you changed other than through Edit or Write (a script, a generator, a shell command, a git operation), since the save hook formats only those two tools' saves and the gate's first step fails on any one
 - typecheck: `bun run --filter <workspace> typecheck`, or `bun x tsc --noEmit` for root tooling
 - named defects: `bun run test:defects`, which requires one record per `D###` test in the `defects.json` beside your tests
 
