@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rt-test/core": "workspace:*"
+    "@rt-test/core": "workspace:*",
+    "oxc-parser": "0.151.0"
   }
 }

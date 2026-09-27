@@ -85,6 +85,8 @@ C142. **Leave explicit states on cancellation**: Cancelling or interrupting a ru
 
 C157. **Ignore events from a replaced resource**: A handler bound to a child process, socket or other replaceable resource acts only while that resource is still the current one, so a late exit, error or reply from its predecessor never settles its successor's work.
 
+C158. **Spawn a program from outside the consumer**: A program the daemon or its helpers start runs from a working directory outside the consumer's tree, or by an absolute path, because Windows resolves a bare command name in the child's working directory before `PATH`, so a same-named executable the project commits would run instead.
+
 ## Backend independence
 
 C143. **Keep the daemon and store backend-free**: The daemon, state store and core packages import no backend adapter or backend SDK; adapters plug in through the adapter interface.

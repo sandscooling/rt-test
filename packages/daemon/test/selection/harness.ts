@@ -1,6 +1,7 @@
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
+import { expect } from "vitest";
 import { selectTests } from "../../src/selection/select-tests.js";
 import type {
   DependencyInformation,
@@ -39,6 +40,8 @@ export interface TreeCase {
   readonly throughLink?: boolean | undefined;
   /** Directory links inside the tree, each path to its target, both root-relative. */
   readonly links?: Readonly<Record<string, string>>;
+  /** Runs on the written tree before selection reads it, given the root selection sees. */
+  readonly prepare?: (root: string) => void;
 }
 
 export type Settled<T> = T | { thrown: string };
@@ -103,7 +106,10 @@ function inTree<T>(
     }
     const root = tree.throughLink === true ? join(dir, "link") : real;
     if (tree.throughLink === true) symlinkSync(real, root, "junction");
-    return settle(() => body(root));
+    return settle(() => {
+      tree.prepare?.(root);
+      return body(root);
+    });
   });
 }
 
@@ -128,6 +134,16 @@ export function graphInTree(
   tree: TreeCase,
 ): Promise<Settled<DependencyInformation>> {
   return inTree(tree, (root) => runnable(root, tree).information);
+}
+
+/** Builds the dependency information over the tree, then hands `inspect` the root and that information before the tree is removed. */
+export function inspectTree<T>(
+  tree: TreeCase,
+  inspect: (root: string, information: DependencyInformation) => T,
+): Promise<Settled<T>> {
+  return inTree(tree, (root) =>
+    inspect(root, runnable(root, tree).information),
+  );
 }
 
 /** Lists, builds and selects over the tree as the daemon's caller will: not-runnable workspaces passed with their reason. */
@@ -165,6 +181,115 @@ export function selectedPaths(
   return "workspaces" in outcome
     ? outcome.workspaces.map(({ path }) => path)
     : outcome;
+}
+
+export const APP = "packages/app";
+
+export function pkg(
+  name: string,
+  fields: Readonly<Record<string, unknown>> = {},
+): string {
+  return manifest({ name, ...fields });
+}
+
+/** `packages/<name>/package.json` named `@x/<name>` for each name. */
+export function plainPackages(...names: string[]): Record<string, string> {
+  return Object.fromEntries(
+    names.map((name) => [`packages/${name}/package.json`, pkg(`@x/${name}`)]),
+  );
+}
+
+export interface AppCase {
+  readonly app?: Readonly<Record<string, unknown>>;
+  readonly root?: Readonly<Record<string, unknown>>;
+  readonly files?: Readonly<Record<string, string>>;
+  readonly vitest?: Omit<TreeWorkspace, "path">;
+  readonly change: string;
+  readonly throughLink?: boolean;
+  readonly links?: Readonly<Record<string, string>>;
+}
+
+/** A consumer whose only Vitest workspace is `packages/app`, beside plain packages `b` and `c`. */
+export function appTree({
+  app = {},
+  root = {},
+  files = {},
+  vitest = {},
+}: AppCase): TreeCase {
+  return {
+    files: {
+      "package.json": rootManifest(root),
+      "packages/app/package.json": pkg("@x/app", app),
+      ...plainPackages("b", "c"),
+      ...files,
+    },
+    workspaces: [{ path: APP, ...vitest }],
+  };
+}
+
+/** The dependency information over the app tree holding `files`, with any other tree options. */
+export function scanApp(
+  files: Readonly<Record<string, string>>,
+  options: Pick<AppCase, "app" | "root"> &
+    Omit<TreeCase, "files" | "workspaces"> = {},
+): Promise<Settled<DependencyInformation>> {
+  const { app, root, ...tree } = options;
+  return graphInTree({
+    ...appTree({
+      files,
+      change: "",
+      ...(app && { app }),
+      ...(root && { root }),
+    }),
+    ...tree,
+  });
+}
+
+/** The app's edges as `<producer> <dependency>`, sorted. */
+export function appEdges(
+  information: Settled<DependencyInformation>,
+): string[] | Settled<DependencyInformation> {
+  return "edges" in information
+    ? information.edges
+        .filter(({ dependent }) => dependent === APP)
+        .map(({ producer, dependency }) => `${producer} ${dependency}`)
+        .sort()
+    : information;
+}
+
+/** The app's widenings, each as its kind and cause. */
+export function appWidenings(
+  information: Settled<DependencyInformation>,
+): { kind: string; cause: string }[] | Settled<DependencyInformation> {
+  return "uncertainties" in information
+    ? information.uncertainties
+        .filter(({ dependent }) => dependent === APP)
+        .map(({ kind, cause }) => ({ kind, cause }))
+    : information;
+}
+
+/** The app's edges beside its widening kinds, for a defect that could move either. */
+export function appScan(
+  information: Settled<DependencyInformation>,
+):
+  | { edges: string[] | Settled<DependencyInformation>; widenings: string[] }
+  | Settled<DependencyInformation> {
+  return "edges" in information
+    ? {
+        edges: appEdges(information),
+        widenings: information.uncertainties
+          .filter(({ dependent }) => dependent === APP)
+          .map(({ kind }) => kind),
+      }
+    : information;
+}
+
+/** The one widening of the app a test expects: its kind, and a cause naming `path`. */
+export function widenedAt(
+  kind: string,
+  path: string,
+): { kind: string; cause: unknown }[] {
+  return [{ kind, cause: expect.stringContaining(path) }];
 }
 
 /** Each selected workspace's reasons as `via` chains, by workspace path. */
