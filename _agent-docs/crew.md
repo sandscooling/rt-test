@@ -32,6 +32,16 @@ A failed tool call costs another full model request, and its error text stays in
 - Keep rule ids and ticket numbers out of code comments, and keep a block comment under the line cap (`rt-test/no-nonlocal-comment`).
 - When a hook denies a call, read the remedy it names and follow it; never retry the same call unchanged.
 
+When you drive T3 Code's preview browser:
+
+- Wait with `preview_wait_for` (a locator or text), then run one short `preview_evaluate`. Never poll, sleep or await a long Promise inside an evaluate: the server caps it at 15 s, and a timeout disconnects the browser host for every session for about 20 s.
+- Before clicking anything a menu, dialog or listbox opens, `preview_wait_for` the target; `preview_click` does not wait.
+- Give each locator exactly one visible, enabled match: a `role=...[name=...]` scoped to its container with `>>`, rather than `nth=` or `text=`. An ambiguous or hidden target fails as a bare "click failed".
+- Keep a `preview_wait_for` `timeoutMs` at 45000 or less, since any tool call is abandoned at 60 s.
+- Take screenshots with `preview_snapshot` and `save: true`; there is no screenshot tool.
+- After "No preview automation host is available", call `preview_status` once a few seconds later before giving up: the host usually reconnects within about 20 s.
+- Guard an evaluate's expression (for a null `querySelector`, say) and return a diagnostic value: a bare "evaluate failed" usually means your script threw.
+
 ## Worktree lanes
 
 If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. Claim from that tree as usual. If you are the lane's review, run `bun run check` in your tree at the end and report its exit code, test counts, and window. Never commit, merge, or push; the orchestrator lands the branch.
