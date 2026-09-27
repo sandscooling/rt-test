@@ -32,6 +32,12 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 - typecheck: `bun run --filter <workspace> typecheck`, or `bun x tsc --noEmit` for root tooling
 - named defects: `bun run test:defects`, which requires one record per `D###` test in the `defects.json` beside your tests
 
+**A fix round re-proves the defects it can have moved before it reports.** Any round that edits code a defect record anchors in or mutates (a review's fixes, a debt round, a test repair) asks the orchestrator for a slot and runs `bun run test:defects:changed` over its final tree, then reports the result. A fix that silently stops a defect from being detected is otherwise found only by the orchestrator's full check, at the cost of another full run.
+
+**Keep every log of a run until the orchestrator has closed it**, a failed one above all: the log is the only evidence of a failure that does not reproduce.
+
+**Keep WSL work out of `/tmp`.** The WSL VM shuts down when idle and clears `/tmp` on its next boot, which deletes a clone or a log mid-run. Use a folder under `~/`, or the worktree's `_agent-docs/.scratch/` through `/mnt/c`, and never run an install from WSL inside a Windows checkout.
+
 **A red in a file your lane has not claimed is not yours**: report it with the output rather than fixing it, since another lane may be mid-edit. `node scripts/file-claims.mjs list` names the lane that holds it.
 
 Do not start watchers, daemons, or dev servers. Run anything long in the background with its output redirected to a file unpiped, and read its exit code from the file.
@@ -51,6 +57,7 @@ When your role's work is done, send the orchestrator one message with `session_w
 - the named defects you added and whether `test:defects` detected them
 - every status transition, id request, and exact project-wide text the orchestrator must apply
 - anything you found outside your scope, open questions, and the owner's answers to questions you asked
+- an UNVERIFIED list: every criterion or proof not yet run on both Windows and Linux, each with the exact command that would run it, or "none"
 
 **Take every time you write, in a report or a record, from the `[YYYY-MM-DD HH:MM Day]` stamp the prompt-context hook adds after your latest tool call**, or from `date` run at that moment when no tool call has run since, never from memory: a remembered time drifts ahead.
 
