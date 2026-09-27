@@ -16,8 +16,10 @@ import {
   type WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
 import type { RecordedTest } from "../src/vitest/run-states.js";
+import { runWorkspace } from "../src/vitest/run-workspace.js";
 import { queueSessionJob } from "../src/vitest/workspace-session.js";
 import {
+  confirmEvery,
   copyFixture,
   fakeVitest,
   finished,
@@ -61,9 +63,10 @@ function discoverConsumer(install: VitestInstall): Promise<ConsumerRun> {
     linkVitest(dir, install);
     fakeVitest(join(dir, "packages/old"), "3.2.4");
     const exitCodeBefore = process.exitCode;
-    const discovery = await discoverTests(dir, NEVER_ABORTED).catch(
-      (error: unknown) => ({ thrown: String(error) }),
-    );
+    const discovery = await discoverTests(
+      confirmEvery(dir),
+      NEVER_ABORTED,
+    ).catch((error: unknown) => ({ thrown: String(error) }));
     return {
       discovery,
       markers: readdirSync(join(dir, "unit")).filter((name) =>
@@ -81,7 +84,7 @@ function settledDiscovery(
   root: string,
   signal: AbortSignal = NEVER_ABORTED,
 ): Promise<TestDiscovery | { thrown: string }> {
-  return discoverTests(root, signal).catch((error: unknown) => ({
+  return discoverTests(confirmEvery(root), signal).catch((error: unknown) => ({
     thrown: String(error),
   }));
 }
@@ -1947,6 +1950,202 @@ describe("leaving every project's snapshot files as they were found", () => {
       expect(await snapshotProjectsRun("vitest-4", "threads")).toEqual(
         PROJECTS_UNWRITTEN,
       );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+/** The `confirmed` fixture's workspace the user was shown, with the config file shown for it. */
+const SHOWN = "packages/shown";
+const SHOWN_START_ENTRY = {
+  path: SHOWN,
+  configFile: "packages/shown/vitest.config.mjs",
+};
+/** Vitest looks for a `.ts` config before a `.mjs` one, so adding one changes the config a load would choose. */
+const ADDED_CONFIG = `${SHOWN}/vitest.config.ts`;
+const ADDED_CONFIG_SOURCE = `import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./added-loaded", import.meta.url), "");\nexport default {};\n`;
+const LOAD_MARKERS = ["added-loaded", "loaded"];
+
+/** Adds a config to the shown workspace after the prompt, as a user or a branch switch could. */
+function addConfigAfterPrompt(root: string): void {
+  writeFileSync(join(root, ADDED_CONFIG), ADDED_CONFIG_SOURCE);
+}
+
+/** The markers the shown workspace's configs leave when loaded. */
+function shownLoads(root: string): string[] {
+  return LOAD_MARKERS.filter((marker) => existsSync(join(root, SHOWN, marker)));
+}
+
+function discoverShownOnly(
+  root: string,
+): Promise<TestDiscovery | { thrown: string }> {
+  return discoverTests(
+    { consumerRoot: root, workspaces: [SHOWN_START_ENTRY] },
+    NEVER_ABORTED,
+  ).catch((error: unknown) => ({ thrown: String(error) }));
+}
+
+/** A workspace's discovery as its status and reason. */
+function statusOf(
+  discovery: TestDiscovery | { thrown: string },
+  path: string,
+): unknown {
+  if (!("workspaces" in discovery)) return discovery;
+  const entry = discovery.workspaces.find(
+    (candidate) => candidate.workspace.path === path,
+  );
+  if (entry === undefined) return entry;
+  return entry.status === "not-confirmed"
+    ? { status: entry.status, reason: entry.reason }
+    : { status: entry.status };
+}
+
+describe("loading only what the user confirmed at start", () => {
+  it(
+    "D1477: a workspace missing from the confirmed start is listed as not confirmed at start, and its config is never loaded",
+    async () => {
+      const outcome = await inConsumerCopy(
+        "confirmed",
+        "vitest",
+        async (root) => {
+          const discovery = await discoverShownOnly(root);
+          return {
+            unshown: statusOf(discovery, "packages/unshown"),
+            loaded: existsSync(join(root, "packages/unshown/loaded")),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        unshown: { status: "not-confirmed", reason: "not confirmed at start" },
+        loaded: false,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1535: a confirmed entry whose config file is written root-relative with / is discovered and loaded",
+    async () => {
+      const outcome = await inConsumerCopy(
+        "confirmed",
+        "vitest",
+        async (root) => {
+          const discovery = await discoverShownOnly(root);
+          return {
+            shown: statusOf(discovery, SHOWN),
+            loaded: shownLoads(root),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        shown: { status: "discovered" },
+        loaded: ["loaded"],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1478: a discovery loads nothing from a confirmed workspace whose chosen config changed after the prompt",
+    async () => {
+      const outcome = await inConsumerCopy(
+        "confirmed",
+        "vitest",
+        async (root) => {
+          addConfigAfterPrompt(root);
+          const discovery = await discoverShownOnly(root);
+          return {
+            shown: statusOf(discovery, SHOWN),
+            loaded: shownLoads(root),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        shown: { status: "not-confirmed", reason: "not confirmed at start" },
+        loaded: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1479: a run whose chosen config changed after the prompt loads nothing and says its config is no longer the one confirmed",
+    async () => {
+      const outcome = await inConsumerCopy(
+        "confirmed",
+        "vitest",
+        async (root) => {
+          addConfigAfterPrompt(root);
+          const run: RunResult = await runWorkspace(
+            { path: SHOWN, directory: join(root, SHOWN) },
+            SHOWN_START_ENTRY.configFile,
+            NEVER_ABORTED,
+          ).catch((error: unknown) => ({ thrown: String(error) }));
+          return {
+            run:
+              "status" in run
+                ? {
+                    status: run.status,
+                    reason: "reason" in run ? run.reason : undefined,
+                  }
+                : run,
+            loaded: shownLoads(root),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        run: {
+          status: "not-confirmed",
+          reason: "its config file is no longer the one confirmed at start",
+        },
+        loaded: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+interface WorkspaceBRun {
+  readonly run: RunResult;
+  readonly before: string;
+  readonly after: string;
+}
+
+/** Runs the `cwd` fixture's `packages/b`, and reports the host's working directory before and after the run. */
+function runInWorkspaceB(): Promise<WorkspaceBRun> {
+  return inConsumerCopy("cwd", "vitest", async (root) => {
+    const before = process.cwd();
+    try {
+      const run = await settledRun(
+        join(root, "packages/b"),
+        undefined,
+        "packages/b",
+      );
+      return { run, before, after: process.cwd() };
+    } finally {
+      process.chdir(before);
+    }
+  });
+}
+
+describe("the working directory of a workspace's discovery and run", () => {
+  it(
+    "D1480: a workspace's tests run with the workspace's own directory as the working directory",
+    async () => {
+      const { run } = await runInWorkspaceB();
+      const states = ranRun(run)?.modules.flatMap((module): unknown[] =>
+        module.state === "ran" ? module.tests.map(runState) : [module.state],
+      );
+      expect(states ?? run).toStrictEqual([finished("passed")]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D1481: the host's working directory is restored once the run has ended",
+    async () => {
+      const { before, after } = await runInWorkspaceB();
+      expect(after).toBe(before);
     },
     DISCOVERY_TIMEOUT_MS,
   );

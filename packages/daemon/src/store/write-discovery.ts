@@ -165,6 +165,8 @@ function workspaceColumns(entry: WorkspaceDiscovery): WorkspaceColumns {
         error: entry.error,
         closeError: entry.closeError ?? null,
       };
+    case "not-confirmed":
+      return { ...NO_WORKSPACE_COLUMNS, error: entry.reason };
   }
 }
 

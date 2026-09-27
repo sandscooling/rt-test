@@ -1,0 +1,310 @@
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection, createServer, type Socket } from "node:net";
+import { createInterface } from "node:readline";
+import { join } from "node:path";
+import {
+  startDaemon,
+  stopDaemon,
+  type ConfirmedStart,
+  type DaemonIdentity,
+} from "../src/client.js";
+import type { DaemonLog } from "../src/daemon/daemon-log.js";
+import { isRunning } from "../src/daemon/runtime-directory.js";
+import { openStore } from "../src/store/open-store.js";
+import { consumerIdentity } from "../src/store/consumer-identity.js";
+import { inConsumerCopy, inTempDir } from "./harness.js";
+
+/** What `RawConnection.next` resolves with once the daemon has closed the connection. */
+export const CLOSED = "closed";
+
+type Line = Readonly<Record<string, unknown>>;
+
+/** A client that writes raw text, as a client of another protocol version or a broken one would, and reads each line back. */
+export class RawConnection {
+  readonly #socket: Socket;
+  readonly #lines: string[] = [];
+  readonly #waiting: ((line: string) => void)[] = [];
+  #closed = false;
+
+  private constructor(socket: Socket) {
+    this.#socket = socket;
+    const reader = createInterface({ input: socket });
+    reader.on("line", (line) => this.#deliver(line));
+    reader.on("close", () => {
+      this.#closed = true;
+      for (const wake of this.#waiting.splice(0)) wake(CLOSED);
+    });
+    socket.on("error", () => undefined);
+  }
+
+  static open(path: string): Promise<RawConnection> {
+    return new Promise((resolve, reject) => {
+      const socket = createConnection(path);
+      socket.once("connect", () => resolve(new RawConnection(socket)));
+      socket.once("error", reject);
+    });
+  }
+
+  send(text: string): void {
+    this.#socket.write(text);
+  }
+
+  sendLine(message: object): void {
+    this.send(`${JSON.stringify(message)}\n`);
+  }
+
+  /** The next line the daemon sent, parsed, or `CLOSED` once it has closed the connection. */
+  async next(): Promise<Line | typeof CLOSED> {
+    const text = await this.#nextText();
+    return text === CLOSED ? CLOSED : (JSON.parse(text) as Line);
+  }
+
+  close(): void {
+    this.#socket.destroy();
+  }
+
+  #nextText(): Promise<string> {
+    const queued = this.#lines.shift();
+    if (queued !== undefined) return Promise.resolve(queued);
+    if (this.#closed) return Promise.resolve(CLOSED);
+    return new Promise((resolve) => this.#waiting.push(resolve));
+  }
+
+  #deliver(line: string): void {
+    const wake = this.#waiting.shift();
+    if (wake === undefined) this.#lines.push(line);
+    else wake(line);
+  }
+}
+
+/** Opens a connection, hands it to `body`, and closes it however `body` ends. */
+export async function withConnection<T>(
+  path: string,
+  body: (connection: RawConnection) => Promise<T>,
+): Promise<T> {
+  const connection = await RawConnection.open(path);
+  try {
+    return await body(connection);
+  } finally {
+    connection.close();
+  }
+}
+
+const WINDOWS = "win32";
+const TEST_PIPE_PREFIX = "\\\\.\\pipe\\rt-test-test-";
+const TEST_SOCKET_NAME = "test.sock";
+
+/** Serves `onConnection` on an endpoint of its own, a named pipe on Windows and a socket in a temp dir elsewhere. */
+export async function withTestEndpoint<T>(
+  onConnection: (socket: Socket) => void,
+  body: (path: string) => Promise<T>,
+): Promise<T> {
+  return inTempDir(async (dir) => {
+    const path =
+      process.platform === WINDOWS
+        ? `${TEST_PIPE_PREFIX}${randomUUID()}`
+        : join(dir, TEST_SOCKET_NAME);
+    const sockets = new Set<Socket>();
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+      onConnection(socket);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(path, resolve);
+    });
+    try {
+      return await body(path);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+}
+
+/** A daemon log that keeps its entries in memory. */
+export interface MemoryLog extends DaemonLog {
+  readonly entries: string[];
+}
+
+export function memoryLog(): MemoryLog {
+  const entries: string[] = [];
+  return {
+    file: "memory.log",
+    entries,
+    entry(message: string) {
+      entries.push(message);
+    },
+    error(context: string, error: unknown) {
+      entries.push(`error: ${context}: ${String(error)}`);
+    },
+  };
+}
+
+/** A test that starts a real daemon waits for its Node processes, its Vitest runs and its stop. */
+export const DAEMON_TEST_TIMEOUT_MS = 120_000;
+/** Covers a daemon's startup and its stop, each under 25 s, with room for a loaded machine. */
+export const DAEMON_WAIT_MS = 60_000;
+const POLL_MS = 25;
+
+export const DAEMON_FIXTURE = "daemon-lifecycle";
+export const WORKSPACE_A = "packages/a";
+export const WORKSPACE_B = "packages/b";
+/** The files each workspace of the daemon fixture writes holding the id of the executor process that ran it. */
+const EXECUTOR_PID_FILES = [
+  "packages/a/executor-pids",
+  "packages/a/collecting",
+  "packages/a/holding",
+  "packages/a/stuck",
+  "packages/b/executor-pids",
+];
+
+export type Settled<T> = T | { thrown: string };
+
+export function settled<T>(work: Promise<T>): Promise<Settled<T>> {
+  return work.catch((error: unknown) => ({
+    thrown: error instanceof Error ? error.message : String(error),
+  }));
+}
+
+/** Polls until `ready` holds or `boundMs` passes, and says whether it held. */
+export async function eventually(
+  ready: () => boolean | Promise<boolean>,
+  boundMs: number = DAEMON_WAIT_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + boundMs;
+  for (;;) {
+    if (await ready()) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((wake) => setTimeout(wake, POLL_MS));
+  }
+}
+
+/** The daemon fixture's `packages/a` file `name`, which the fixture reads as a hold point or writes as a marker. */
+export function fixtureFile(root: string, name: string): string {
+  return join(root, WORKSPACE_A, name);
+}
+
+export function holdAt(root: string, hold: string): void {
+  writeFileSync(fixtureFile(root, hold), "");
+}
+
+/** Every executor process id the fixture recorded. */
+export function executorPids(root: string): number[] {
+  return EXECUTOR_PID_FILES.flatMap((name) => {
+    const file = join(root, name);
+    if (!existsSync(file)) return [];
+    return readFileSync(file, "utf8")
+      .split("\n")
+      .filter((line) => line !== "")
+      .map(Number);
+  });
+}
+
+/** The start a user confirms with no workspace: the daemon serves and discovers, and loads no Vitest. */
+export function confirmNothing(consumerRoot: string): ConfirmedStart {
+  return { consumerRoot, workspaces: [] };
+}
+
+export function trustedStart(
+  start: ConfirmedStart,
+  stateDirectory?: string,
+): Promise<DaemonIdentity> {
+  return startDaemon({
+    trusted: true,
+    start,
+    ...(stateDirectory === undefined ? {} : { stateDirectory }),
+  });
+}
+
+/** The daemon's log entries, without their timestamps. */
+export function logEntries(logFile: string): string[] {
+  if (!existsSync(logFile)) return [];
+  return readFileSync(logFile, "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => line.slice(line.indexOf(" ") + 1));
+}
+
+export function logged(logFile: string, prefix: string): boolean {
+  return logEntries(logFile).some((entry) => entry.startsWith(prefix));
+}
+
+/** The log entry the daemon writes once every confirmed workspace has run. */
+export const IDLE_ENTRY = "idle: every confirmed workspace has run";
+
+/** Each run stored for the worktree at `consumerRoot`, as its workspace and how it ended. */
+export function storedRuns(
+  stateDirectory: string,
+  consumerRoot: string,
+): string[][] {
+  const store = openStore(stateDirectory);
+  try {
+    return store
+      .readRuns(consumerIdentity(consumerRoot))
+      .map(({ run }) => [
+        run.workspace.path,
+        run.status === "ran" ? run.execution : run.status,
+      ]);
+  } finally {
+    store.close();
+  }
+}
+
+function end(pid: number): void {
+  if (!isRunning(pid)) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // It exited between the check and the kill.
+  }
+}
+
+/**
+ * Hands `body` the consumer roots and a set to add each daemon's process id to, then ends every daemon and executor
+ * however `body` ends: executors first, so no stop waits on a stuck job, then a stop, then a kill.
+ */
+export async function withDaemons<T>(
+  roots: readonly string[],
+  body: (pids: Set<number>) => Promise<T>,
+): Promise<T> {
+  const pids = new Set<number>();
+  let result: T;
+  try {
+    result = await body(pids);
+  } catch (error) {
+    await endDaemons(roots, pids);
+    throw error;
+  }
+  const alive = await endDaemons(roots, pids);
+  if (alive.length > 0) {
+    throw new Error(
+      `A daemon or executor process was still running after the test ended it: ${alive.join(", ")}`,
+    );
+  }
+  return result;
+}
+
+/** Ends every daemon and executor of `roots`, and returns the ids of any process still running after the wait. */
+async function endDaemons(
+  roots: readonly string[],
+  pids: ReadonlySet<number>,
+): Promise<number[]> {
+  for (const pid of roots.flatMap(executorPids)) end(pid);
+  for (const root of roots) await stopDaemon(root).catch(() => undefined);
+  const recorded = [...pids, ...roots.flatMap(executorPids)];
+  for (const pid of recorded) end(pid);
+  await eventually(() => recorded.every((pid) => !isRunning(pid)));
+  return recorded.filter((pid) => isRunning(pid));
+}
+
+/** Copies the daemon fixture into a temp consumer with Vitest linked, and ends its daemon however `body` ends. */
+export function withDaemonConsumer<T>(
+  body: (root: string, pids: Set<number>) => Promise<T>,
+): Promise<T> {
+  return inConsumerCopy(DAEMON_FIXTURE, "vitest", (root) =>
+    withDaemons([root], (pids) => body(root, pids)),
+  );
+}

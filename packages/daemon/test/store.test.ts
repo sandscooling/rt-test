@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { describe, expect, it } from "vitest";
@@ -34,7 +34,7 @@ import type { TestDiscovery } from "../src/vitest/discover-tests.js";
 import type { VitestWorkspace } from "../src/vitest/find-workspaces.js";
 import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
-import { inTempDir, settle } from "./harness.js";
+import { inTempDir, linkedWorktree, mainCheckout, settle } from "./harness.js";
 
 type Settled<T> = T | { thrown: string };
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
@@ -404,30 +404,6 @@ function observedModule(
 
 function posix(path: string): string {
   return path.split(sep).join("/");
-}
-
-function mainCheckout(dir: string): string {
-  const main = join(dir, "main");
-  mkdirSync(join(main, ".git"), { recursive: true });
-  return main;
-}
-
-/** A worktree the way `git worktree add` lays it out, its `.git` file naming its git directory as `gitdir` spells it. */
-function linkedWorktree(
-  main: string,
-  name: string,
-  gitdir: (worktreeGitDirectory: string) => string,
-): string {
-  const worktreeGitDirectory = join(main, ".git", "worktrees", name);
-  mkdirSync(worktreeGitDirectory, { recursive: true });
-  writeFileSync(join(worktreeGitDirectory, "commondir"), "../..\n");
-  const root = join(dirname(main), name);
-  mkdirSync(root);
-  writeFileSync(
-    join(root, ".git"),
-    `gitdir: ${gitdir(worktreeGitDirectory)}\n`,
-  );
-  return root;
 }
 
 function fileDigest(file: string): string {
@@ -841,6 +817,24 @@ describe("storing a discovery", () => {
       return store.readLatestDiscovery(WORKTREE_A)?.discovery.workspaces;
     });
     expect(workspaces).toStrictEqual(DISCOVERY_WITHOUT_TESTS.workspaces);
+  });
+
+  it("D1482: a workspace not confirmed at start reads back as not confirmed, with its reason", async () => {
+    const notConfirmed: TestDiscovery = {
+      workspaces: [
+        {
+          status: "not-confirmed",
+          workspace: WORKSPACE,
+          reason: "not confirmed at start",
+        },
+      ],
+      notRead: [],
+    };
+    const discovery = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), notConfirmed);
+      return store.readLatestDiscovery(WORKTREE_A)?.discovery;
+    });
+    expect(discovery).toStrictEqual(notConfirmed);
   });
 
   it("D1235: the latest discovery is the one stored last", async () => {
@@ -1355,19 +1349,19 @@ describe("opening a store written before the force-stop field", () => {
 });
 
 describe("the adapter version a stored record carries", () => {
-  it("D1285: a stored run carries Vitest adapter version 2", async () => {
+  it("D1285: a stored run carries Vitest adapter version 3", async () => {
     const version = await inStore((store) => {
       store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
       return store.readRuns(WORKTREE_A)[0]?.adapterVersion;
     });
-    expect(version).toBe(2);
+    expect(version).toBe(3);
   });
 
-  it("D1286: a stored discovery carries Vitest adapter version 2", async () => {
+  it("D1286: a stored discovery carries Vitest adapter version 3", async () => {
     const version = await inStore((store) => {
       store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
       return store.readLatestDiscovery(WORKTREE_A)?.adapterVersion;
     });
-    expect(version).toBe(2);
+    expect(version).toBe(3);
   });
 });

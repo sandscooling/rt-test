@@ -7,7 +7,7 @@ import type {
 } from "vitest/node";
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { workspaceConfig } from "./config-loader.js";
+import { confirmedConfig } from "./confirmed-start.js";
 import { errorText } from "./error-text.js";
 import type { VitestWorkspace } from "./find-workspaces.js";
 import {
@@ -47,6 +47,8 @@ type SessionResult<T> =
       readonly closeError?: string;
     }
   | { readonly status: "unsupported"; readonly vitest: UnsupportedVitest }
+  /** The workspace's config file is no longer the one confirmed at start, so nothing was loaded. */
+  | { readonly status: "not-confirmed" }
   | {
       readonly status: "failed";
       readonly vitestVersion: string;
@@ -86,9 +88,12 @@ export function queueSessionJob<T>(job: () => Promise<T>): Promise<T> {
 /** Loads the workspace's Vitest config and imports its test files: call only for a started, trusted project. */
 export async function inWorkspaceSession<T>(
   workspace: VitestWorkspace,
+  confirmedConfigFile: string,
   reporters: readonly Reporter[],
   step: (session: WorkspaceSession) => Promise<T>,
 ): Promise<SessionResult<T>> {
+  const config = confirmedConfig(workspace, confirmedConfigFile);
+  if (config === undefined) return { status: "not-confirmed" };
   const vitest = resolveWorkspaceVitest(workspace.directory);
   if (!vitest.supported) return { status: "unsupported", vitest };
   const restoreHost = captureHostState();
@@ -96,6 +101,7 @@ export async function inWorkspaceSession<T>(
   let instance: Vitest | undefined;
   let result: SessionResult<T>;
   try {
+    process.chdir(workspace.directory);
     const { createVitest } = await importVitestNode(vitest);
     instance = await createVitest("test", {
       root: workspace.directory,
@@ -104,7 +110,8 @@ export async function inWorkspaceSession<T>(
       api: false,
       ui: false,
       ...noWriteOptions(vitest.major),
-      ...configOptions(workspace),
+      config: config.file,
+      configLoader: config.loader,
     });
     const session = await openSession(instance, workspace);
     result = {
@@ -137,14 +144,6 @@ function noWriteOptions(vitestMajor: number): CliOptions {
           } as NonNullable<CliOptions["experimental"]>,
         }),
   };
-}
-
-/** Naming the file Vitest would find anyway makes the file loaded and the loader chosen for it one decision. */
-function configOptions(workspace: VitestWorkspace): CliOptions {
-  const config = workspaceConfig(workspace.directory);
-  return config === undefined
-    ? {}
-    : { config: config.file, configLoader: config.loader };
 }
 
 async function openSession(
@@ -186,16 +185,21 @@ function guardSnapshots(instance: Vitest): void {
   }
 }
 
-/** Vitest writes a workspace's env and defines into `process.env` and sets `process.exitCode`. */
+/**
+ * Vitest writes a workspace's env and defines into `process.env` and sets `process.exitCode`, and the session runs
+ * in the workspace's directory, as the workspace's own `vitest` does.
+ */
 function captureHostState(): () => void {
   const exitCode = process.exitCode;
   const env = { ...process.env };
+  const cwd = process.cwd();
   return () => {
     for (const key of Object.keys(process.env)) {
       if (!Object.hasOwn(env, key)) delete process.env[key];
     }
     Object.assign(process.env, env);
     process.exitCode = exitCode;
+    process.chdir(cwd);
   };
 }
 

@@ -1,5 +1,6 @@
 import type { IdentifiedTest } from "@rt-test/core";
 import type { TestCase, TestModule } from "vitest/node";
+import { confirmedEntry, type ConfirmedStart } from "./confirmed-start.js";
 import { errorText } from "./error-text.js";
 import {
   findVitestWorkspaces,
@@ -50,6 +51,12 @@ export type WorkspaceDiscovery =
       readonly vitestVersion: string;
       readonly error: string;
       readonly closeError?: string;
+    }
+  | {
+      /** Not in the confirmed start, or its config file is not the one confirmed, so nothing was loaded. */
+      readonly status: "not-confirmed";
+      readonly workspace: VitestWorkspace;
+      readonly reason: string;
     };
 
 export interface TestDiscovery {
@@ -67,40 +74,55 @@ interface CollectedWorkspace {
 
 const UNCOLLECTED_MODULE_ERROR =
   "Vitest returned no collection result for this module; see the workspace's unhandled errors";
+export const NOT_CONFIRMED_REASON = "not confirmed at start";
 
 /**
- * Loads each workspace's Vitest config and imports its test files: call only for a started, trusted project. Once
- * the signal aborts it loads no further workspace and rejects with the signal's reason, after the Vitest instance
- * it opened has closed and the host is restored.
+ * Loads the Vitest config and imports the test files of each workspace the start confirmed, and of no other: call
+ * only for a started, trusted project. Once the signal aborts it loads no further workspace and rejects with the
+ * signal's reason, after the Vitest instance it opened has closed and the host is restored.
  */
 export function discoverTests(
-  consumerRoot: string,
+  start: ConfirmedStart,
   signal: AbortSignal,
 ): Promise<TestDiscovery> {
-  return queueSessionJob(() => discoverAll(consumerRoot, signal));
+  return queueSessionJob(() => discoverAll(start, signal));
 }
 
 async function discoverAll(
-  consumerRoot: string,
+  start: ConfirmedStart,
   signal: AbortSignal,
 ): Promise<TestDiscovery> {
   signal.throwIfAborted();
-  const { workspaces, notRead } = findVitestWorkspaces(consumerRoot);
+  const { workspaces, notRead } = findVitestWorkspaces(start.consumerRoot);
   const discoveries: WorkspaceDiscovery[] = [];
   for (const workspace of workspaces) {
-    discoveries.push(await discoverWorkspace(workspace, signal));
+    const confirmed = confirmedEntry(start, workspace);
+    discoveries.push(
+      confirmed === undefined
+        ? notConfirmed(workspace)
+        : await discoverWorkspace(workspace, confirmed.configFile, signal),
+    );
     signal.throwIfAborted();
   }
   return { workspaces: discoveries, notRead };
 }
 
+function notConfirmed(workspace: VitestWorkspace): WorkspaceDiscovery {
+  return { status: "not-confirmed", workspace, reason: NOT_CONFIRMED_REASON };
+}
+
 async function discoverWorkspace(
   workspace: VitestWorkspace,
+  confirmedConfigFile: string,
   signal: AbortSignal,
 ): Promise<WorkspaceDiscovery> {
-  const result = await inWorkspaceSession(workspace, [], (session) =>
-    collectWorkspace(session, new RunInterruption(signal)),
+  const result = await inWorkspaceSession(
+    workspace,
+    confirmedConfigFile,
+    [],
+    (session) => collectWorkspace(session, new RunInterruption(signal)),
   );
+  if (result.status === "not-confirmed") return notConfirmed(workspace);
   if (result.status !== "loaded") return { ...result, workspace };
   const { value, ...loaded } = result;
   return { ...loaded, status: "discovered", workspace, ...value };

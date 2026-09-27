@@ -53,16 +53,27 @@ export type WorkspaceRun =
       readonly workspace: VitestWorkspace;
     };
 
+/** A run that loaded nothing because its workspace no longer matched the start the user confirmed; it is never stored. */
+export interface NotConfirmedRun {
+  readonly status: "not-confirmed";
+  readonly workspace: VitestWorkspace;
+  readonly reason: string;
+}
+
 type RanWorkspace = Omit<
   Extract<WorkspaceRun, { status: "ran" }>,
   "status" | "workspace" | "vitestVersion" | "closeError"
 >;
 
-/** Runs the workspace's tests, so it executes project code: call only for a started, trusted project. */
+export const CONFIG_NOT_CONFIRMED_REASON =
+  "its config file is no longer the one confirmed at start";
+
+/** Runs the workspace's tests through its confirmed config file, so it executes project code: call only for a started, trusted project. */
 export function runWorkspace(
   workspace: VitestWorkspace,
+  confirmedConfigFile: string,
   signal: AbortSignal,
-): Promise<WorkspaceRun> {
+): Promise<WorkspaceRun | NotConfirmedRun> {
   return queueSessionJob(async () => {
     if (signal.aborted) {
       return { status: "interrupted-before-load", workspace };
@@ -70,9 +81,13 @@ export function runWorkspace(
     const interruption = new RunInterruption(signal);
     const result = await inWorkspaceSession(
       workspace,
+      confirmedConfigFile,
       [interruption],
       (session) => runSession(session, interruption),
     );
+    if (result.status === "not-confirmed") {
+      return { ...result, workspace, reason: CONFIG_NOT_CONFIRMED_REASON };
+    }
     if (result.status !== "loaded") return { ...result, workspace };
     const { value, ...loaded } = result;
     return { ...loaded, status: "ran", workspace, ...value };

@@ -4,7 +4,7 @@ Test execution and falsification for Vitest projects, taken off coding agents.
 
 Coding agents spend most of their time running and falsifying the tests they write. RT Test is meant to do that work for them: a local daemon runs each edit's tests and proves them against their named defects, and agents query the answers instead of running anything. It answers three questions: does the code pass, are the results still current, and have the tests shown that they detect their intended defects?
 
-**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, and a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, and stores runs and discoveries in a local `node:sqlite` store, but has no caller until the daemon start is built. It does not yet run a daemon, watch a project's inputs, build a dependency graph, falsify defects, or expose a product CLI. It is not published to npm.
+**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, and a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, which a programmatic client starts and stops but no CLI calls yet. It does not yet watch a project's inputs, build a dependency graph, falsify defects, or expose a product CLI. It is not published to npm.
 
 ## Intended experience
 
@@ -19,7 +19,7 @@ These are planned capabilities. See the [plan](docs/plan.md) and [milestones](do
 
 ## Develop
 
-Use Node 22.13+ within the supported Node 22, 24, or 26+ release lines, and Bun 1.3.14 for dependency installation and project scripts. The future consumer integration should not require Bun.
+Use Node 22.18+ within the supported Node 22, 24, or 26+ release lines (the daemon's tests start it from its TypeScript source, which needs Node's type stripping; consumers need only Node 22.13+), and Bun 1.3.14 for dependency installation and project scripts. The future consumer integration should not require Bun.
 
 ```sh
 bun install --frozen-lockfile

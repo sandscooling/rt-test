@@ -1142,17 +1142,17 @@
   },
   {
     "id": "D1285",
-    "defect": "The Vitest adapter version stays 1, so a run stored under update none looks current beside runs stored when missing snapshots were written.",
+    "defect": "The Vitest adapter version stays 2, so a run stored once runs were bound to the confirmed start looks current beside runs stored before it.",
     "file": "packages/daemon/src/vitest/adapter-version.ts",
-    "old": "export const VITEST_ADAPTER_VERSION = 2;",
-    "new": "export const VITEST_ADAPTER_VERSION = 1;"
+    "old": "export const VITEST_ADAPTER_VERSION = 3;",
+    "new": "export const VITEST_ADAPTER_VERSION = 2;"
   },
   {
     "id": "D1286",
-    "defect": "The Vitest adapter version stays 1, so a discovery stored under the new overrides looks current beside ones stored before them.",
+    "defect": "The Vitest adapter version stays 2, so a discovery that can list a workspace as not confirmed at start looks current beside ones stored before that status existed.",
     "file": "packages/daemon/src/vitest/adapter-version.ts",
-    "old": "export const VITEST_ADAPTER_VERSION = 2;",
-    "new": "export const VITEST_ADAPTER_VERSION = 1;"
+    "old": "export const VITEST_ADAPTER_VERSION = 3;",
+    "new": "export const VITEST_ADAPTER_VERSION = 2;"
   },
   {
     "id": "D1287",
@@ -1256,8 +1256,8 @@
     "id": "D1301",
     "defect": "A discovery aborted mid-collection goes on to load the next workspace and resolves with a result instead of rejecting.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "    discoveries.push(await discoverWorkspace(workspace, signal));\n    signal.throwIfAborted();",
-    "new": "    discoveries.push(await discoverWorkspace(workspace, signal));"
+    "old": "        : await discoverWorkspace(workspace, confirmed.configFile, signal),\n    );\n    signal.throwIfAborted();",
+    "new": "        : await discoverWorkspace(workspace, confirmed.configFile, signal),\n    );"
   },
   {
     "id": "D1302",
@@ -1277,8 +1277,8 @@
     "id": "D1303",
     "defect": "An aborted discovery rejects as soon as its signal aborts, while the Vitest instance is still open and the host still holds the workspace's environment and exit code.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "  return queueSessionJob(() => discoverAll(consumerRoot, signal));",
-    "new": "  const job = queueSessionJob(() => discoverAll(consumerRoot, signal));\n  return new Promise((resolve, reject) => {\n    signal.addEventListener(\"abort\", () => reject(signal.reason), { once: true });\n    job.then(resolve, reject);\n  });"
+    "old": "  return queueSessionJob(() => discoverAll(start, signal));",
+    "new": "  const job = queueSessionJob(() => discoverAll(start, signal));\n  return new Promise((resolve, reject) => {\n    signal.addEventListener(\"abort\", () => reject(signal.reason), { once: true });\n    job.then(resolve, reject);\n  });"
   },
   {
     "id": "D1305",
@@ -1305,8 +1305,8 @@
     "id": "D1308",
     "defect": "The loader choice is inverted on a run, so an ESM config goes through the bundle loader and leaves node_modules/.vite-temp behind.",
     "file": "packages/daemon/src/vitest/workspace-session.ts",
-    "old": "    : { config: config.file, configLoader: config.loader };",
-    "new": "    : { config: config.file, configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\" };"
+    "old": "      configLoader: config.loader,",
+    "new": "      configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\","
   },
   {
     "id": "D1309",
@@ -1333,15 +1333,15 @@
     "id": "D1312",
     "defect": "The loader choice is inverted, so a config Vite treats as ESM goes through the bundle loader and leaves node_modules/.vite-temp behind.",
     "file": "packages/daemon/src/vitest/workspace-session.ts",
-    "old": "    : { config: config.file, configLoader: config.loader };",
-    "new": "    : { config: config.file, configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\" };"
+    "old": "      configLoader: config.loader,",
+    "new": "      configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\","
   },
   {
     "id": "D1313",
     "defect": "The loader choice is inverted, so a CommonJS config goes through the runner, which cannot load it, and the workspace fails.",
     "file": "packages/daemon/src/vitest/workspace-session.ts",
-    "old": "    : { config: config.file, configLoader: config.loader };",
-    "new": "    : { config: config.file, configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\" };"
+    "old": "      configLoader: config.loader,",
+    "new": "      configLoader: config.loader === \"runner\" ? \"bundle\" : \"runner\","
   },
   {
     "id": "D1314",
@@ -1354,7 +1354,7 @@
     "id": "D1315",
     "defect": "The chosen config file and loader are never passed, so Vitest loads an ESM config through Vite's default bundle loader and leaves node_modules/.vite-temp behind.",
     "file": "packages/daemon/src/vitest/workspace-session.ts",
-    "old": "      ...configOptions(workspace),\n",
+    "old": "      config: config.file,\n      configLoader: config.loader,\n",
     "new": ""
   },
   {
@@ -1496,5 +1496,551 @@
     "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "  for (const project of instance.projects) {",
     "new": "  for (const project of instance.projects.slice(0, 1)) {"
+  },
+  {
+    "id": "D1436",
+    "defect": "The part of a line that ends a chunk is dropped, so a request split across two chunks arrives as its tail alone.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "    this.#append(chunk.subarray(start), lines);\n    return lines;",
+    "new": "    return lines;"
+  },
+  {
+    "id": "D1437",
+    "defect": "Each chunk of a line is decoded on its own, so a character whose UTF-8 bytes straddle two chunks is garbled.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "      text: Buffer.concat(this.#parts).toString(\"utf8\"),",
+    "new": "      text: this.#parts.map((part) => part.toString(\"utf8\")).join(\"\"),"
+  },
+  {
+    "id": "D1438",
+    "defect": "The decoder keeps discarding after an overlong line ends, so every later line on that connection is lost.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "      this.#discarding = false;\n      return;",
+    "new": "      return;"
+  },
+  {
+    "id": "D1439",
+    "defect": "A line of exactly the 1 MiB limit is reported as too long.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "    if (this.#size + part.length > MAX_LINE_BYTES) {",
+    "new": "    if (this.#size + part.length >= MAX_LINE_BYTES) {"
+  },
+  {
+    "id": "D1440",
+    "defect": "A stopping daemon answers another request as unknown instead of saying it is stopping.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (handlers.isStopping()) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1441",
+    "defect": "The response bound is no longer than the store's busy timeout, so a status held behind another worktree's store write reads as no answer.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "const STORE_WAITS_PER_RESPONSE = 2;",
+    "new": "const STORE_WAITS_PER_RESPONSE = 1;"
+  },
+  {
+    "id": "D1442",
+    "defect": "The executor bound leaves Vitest's force-stop no margin, so a job that force-stops in time is killed and stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-jobs.ts",
+    "old": "const EXECUTOR_MARGIN_MS = 5_000;",
+    "new": "const EXECUTOR_MARGIN_MS = 0;"
+  },
+  {
+    "id": "D1443",
+    "defect": "The stop deadline leaves out the store's busy timeout, so a stop whose last run waits on another worktree's write is reported as not finishing.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  EXECUTOR_BOUND_MS + BUSY_TIMEOUT_MS + STOP_MARGIN_MS;",
+    "new": "  EXECUTOR_BOUND_MS + STOP_MARGIN_MS;"
+  },
+  {
+    "id": "D1444",
+    "defect": "A line that is not JSON closes the connection, so the client's next request goes unanswered.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    send(socket, error(\"invalid-json\", `the line is ${parsed.reason}`));",
+    "new": "    send(socket, error(\"invalid-json\", `the line is ${parsed.reason}`));\n    socket.end();"
+  },
+  {
+    "id": "D1445",
+    "defect": "A request before the hello is answered, so a client of another protocol version reads a reply shaped for this one.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (connection.state === \"awaiting-hello\") {",
+    "new": "  if (connection.state === \"never\") {"
+  },
+  {
+    "id": "D1446",
+    "defect": "An unknown request is answered with a status instead of an unknown-request error.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (message[\"type\"] === STATUS_TYPE) {",
+    "new": "  if (message[\"type\"] !== HELLO_TYPE) {"
+  },
+  {
+    "id": "D1447",
+    "defect": "A line past the limit is reported as invalid JSON, not as too long.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  const parsed = line.tooLong ? undefined : parseLine(line.text);",
+    "new": "  const parsed = line.tooLong ? parseLine(\"\") : parseLine(line.text);"
+  },
+  {
+    "id": "D1448",
+    "defect": "The daemon greets a connection before it has sent anything, so a read-only client of another user receives data.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      serve(socket, handlers, log);",
+    "new": "      socket.write(encodeLine({ type: \"greeting\" }));\n      serve(socket, handlers, log);"
+  },
+  {
+    "id": "D1449",
+    "defect": "A connection whose hello was refused for another version still answers requests other than the stop.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (connection.state === \"mismatched\") {",
+    "new": "  if (connection.state === \"never\") {"
+  },
+  {
+    "id": "D1450",
+    "defect": "A stop sent while a stop is under way is not acknowledged, so a second stopDaemon rejects instead of joining the first.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (parsed?.ok === true && isStopRequest(parsed.message)) {",
+    "new": "  if (parsed?.ok === true && isStopRequest(parsed.message) && !handlers.isStopping()) {"
+  },
+  {
+    "id": "D1451",
+    "defect": "The start sequence runs the workspaces in an order other than the discovery's.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    for (const entry of discovery.workspaces) {",
+    "new": "    for (const entry of [...discovery.workspaces].reverse()) {"
+  },
+  {
+    "id": "D1452",
+    "defect": "A workspace whose discovery failed or was unsupported is skipped, so no run record says it could not run.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      if (entry.status === \"not-confirmed\") continue;",
+    "new": "      if (entry.status !== \"discovered\") continue;"
+  },
+  {
+    "id": "D1453",
+    "defect": "The daemon stores its records under a fingerprint, so a result whose inputs were never fingerprinted can read as current.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      inputFingerprint: { kind: NOT_FINGERPRINTED },",
+    "new": "      inputFingerprint: { kind: \"digest\", digest: \"unknown\" },"
+  },
+  {
+    "id": "D1454",
+    "defect": "The activity is not set to running when a run starts, so status names no workspace while one runs.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#activity = { state: \"running\", workspacePath: workspace.path };",
+    "new": ""
+  },
+  {
+    "id": "D1455",
+    "defect": "The activity is left at the last job when the start sequence ends, so a daemon whose discovery stored nothing reads as discovering forever.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        this.#activity = { state: \"idle\" };",
+    "new": "        this.#activity = { ...this.#activity };"
+  },
+  {
+    "id": "D1456",
+    "defect": "A discovery that ended with nothing stored is not listed, so an idle daemon reads as a complete start.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      this.#nothingStored(undefined, outcome.reason);",
+    "new": ""
+  },
+  {
+    "id": "D1457",
+    "defect": "A failed store write ends the start sequence, so the workspaces after it never run.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      this.#nothingStored(workspacePath, `the store write failed`);\n      return false;",
+    "new": "      throw error;"
+  },
+  {
+    "id": "D1458",
+    "defect": "A run that loaded nothing because its config changed is handed to the store instead of being listed with its reason.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (run.status === \"not-confirmed\") {",
+    "new": "    if (run.status === \"never\") {"
+  },
+  {
+    "id": "D1459",
+    "defect": "A stop does not abort the job in progress, so it waits out a run to its end.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    executor.abort();",
+    "new": ""
+  },
+  {
+    "id": "D1460",
+    "defect": "The workspaces not yet run when the stop arrives are still run.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      if (this.isStopping()) break;",
+    "new": ""
+  },
+  {
+    "id": "D1461",
+    "defect": "A run that ends after the stop arrived is dropped instead of stored.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const run = outcome.value;",
+    "new": "    const run = outcome.value;\n    if (this.isStopping()) return;"
+  },
+  {
+    "id": "D1462",
+    "defect": "The stop closes the store without waiting for the run in progress, so that run's write fails and it is lost.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await this.#sequence;",
+    "new": ""
+  },
+  {
+    "id": "D1463",
+    "defect": "A stop during a stop starts a second stop sequence instead of joining the first.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#stopping ??= this.#stopSequence().finally(() => this.#markStopped());",
+    "new": "    this.#stopping = this.#stopSequence().finally(() => this.#markStopped());"
+  },
+  {
+    "id": "D1464",
+    "defect": "A confirmed workspace the daemon no longer finds goes unmentioned in the log.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#logMissingConfirmed(discovery);",
+    "new": ""
+  },
+  {
+    "id": "D1465",
+    "defect": "A discovery that returns after the stop arrived is stored.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return;",
+    "new": ""
+  },
+  {
+    "id": "D1466",
+    "defect": "A runtime directory other users can enter is accepted, so another user can reach the socket.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "    if ((stats.mode & GROUP_AND_OTHER_BITS) !== 0) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D1467",
+    "defect": "The owner's own permission bits are counted as open to others, so a mode 700 runtime directory is refused.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "const GROUP_AND_OTHER_BITS = 0o077;",
+    "new": "const GROUP_AND_OTHER_BITS = 0o777;"
+  },
+  {
+    "id": "D1468",
+    "defect": "A runtime directory owned by another user is accepted, so that user's socket could answer in the daemon's place.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "    if (stats.uid !== process.getuid?.()) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D1469",
+    "defect": "A runtime directory that is a symbolic link is not refused as one.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "    if (stats.isSymbolicLink()) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D1470",
+    "defect": "A client connects through a runtime directory other users can enter, where another user's socket could answer.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  const refusal = runtimeDirectoryRefusal(location.runtimeDirectory, false);",
+    "new": "  const refusal = undefined;"
+  },
+  {
+    "id": "D1471",
+    "defect": "A socket path one byte past the 108-byte limit is accepted, so a Node that truncates it listens on a shortened path.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  if (bytes > MAX_SOCKET_PATH_BYTES) {",
+    "new": "  if (bytes > MAX_SOCKET_PATH_BYTES + 1) {"
+  },
+  {
+    "id": "D1472",
+    "defect": "A socket path of exactly 108 bytes is refused, though it listens and connects.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  if (bytes > MAX_SOCKET_PATH_BYTES) {",
+    "new": "  if (bytes >= MAX_SOCKET_PATH_BYTES) {"
+  },
+  {
+    "id": "D1473",
+    "defect": "A lock held by a running start is taken over, so two starts can each unlink the other's live socket.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "  if (holder !== undefined && isRunning(holder)) {",
+    "new": "  if (holder !== undefined && false) {"
+  },
+  {
+    "id": "D1474",
+    "defect": "A lock left by a start that was killed is never taken over, so no daemon can start for that worktree again.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "  if (holder !== undefined) removeStaleLock(file, holder);",
+    "new": ""
+  },
+  {
+    "id": "D1475",
+    "defect": "A lock that names no process is read as a dead holder's and taken over.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "    return Number.isInteger(pid) ? pid : undefined;",
+    "new": "    return Number.isInteger(pid) ? pid : 0;"
+  },
+  {
+    "id": "D1476",
+    "defect": "Releasing a lock removes it even after another start has taken it.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "      if (readHolder(file) === process.pid) removeIfPresent(file);",
+    "new": "      removeIfPresent(file);"
+  },
+  {
+    "id": "D1477",
+    "defect": "A workspace missing from the confirmed start is loaded through the config it holds now.",
+    "file": "packages/daemon/src/vitest/confirmed-start.ts",
+    "old": "  return start.workspaces.find((entry) => entry.path === workspace.path);",
+    "new": "  return start.workspaces.find((entry) => entry.path === workspace.path) ?? { path: workspace.path, configFile: chosenConfigFile(workspace) ?? \"\" };"
+  },
+  {
+    "id": "D1478",
+    "defect": "A confirmed workspace is loaded through whatever config it holds now, so a config added after the prompt executes.",
+    "file": "packages/daemon/src/vitest/confirmed-start.ts",
+    "old": "  return rootRelative(workspace, config) === confirmedConfigFile\n    ? config\n    : undefined;",
+    "new": "  return config;"
+  },
+  {
+    "id": "D1479",
+    "defect": "A run that loaded nothing because its config changed carries no reason, so status and the log cannot say why.",
+    "file": "packages/daemon/src/vitest/run-workspace.ts",
+    "old": "    if (result.status === \"not-confirmed\") {",
+    "new": "    if (result.status === \"never\") {"
+  },
+  {
+    "id": "D1480",
+    "defect": "A workspace's run keeps the daemon's working directory, so a test that resolves paths against process.cwd() sees the consumer root.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    process.chdir(workspace.directory);",
+    "new": ""
+  },
+  {
+    "id": "D1481",
+    "defect": "The host's working directory is left in the last workspace after its run.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    process.chdir(cwd);",
+    "new": ""
+  },
+  {
+    "id": "D1483",
+    "defect": "A status request with no daemon serving the worktree resolves with nothing instead of rejecting.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "    throw new Error(`No daemon serves the worktree at ${consumerRoot}.`);\n  }\n  return status;",
+    "new": "  }\n  return status;"
+  },
+  {
+    "id": "D1484",
+    "defect": "A stop with no daemon serving the worktree rejects without naming the consumer root.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "      ? `No daemon serves the worktree at ${consumerRoot}.`",
+    "new": "      ? \"No daemon serves this worktree.\""
+  },
+  {
+    "id": "D1485",
+    "defect": "The client's module graph loads the store, so the CLI loads node:sqlite before any start.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "import { spawn, type ChildProcess } from \"node:child_process\";",
+    "new": "import \"./store/open-store.js\";\nimport { spawn, type ChildProcess } from \"node:child_process\";"
+  },
+  {
+    "id": "D1486",
+    "defect": "A start that does not state the project is trusted still spawns a daemon that executes the project.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  if ((options as { trusted?: unknown }).trusted !== true) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1487",
+    "defect": "The default state directory is the consumer root itself rather than .rt-test under it.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot),",
+    "new": "    options.stateDirectory ?? start.consumerRoot,"
+  },
+  {
+    "id": "D1488",
+    "defect": "A relative state directory is passed on unresolved, so the daemon resolves it against the consumer root instead of the caller's working directory.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  const stateDirectory = resolve(\n    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot),\n  );",
+    "new": "  const stateDirectory =\n    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot);"
+  },
+  {
+    "id": "D1489",
+    "defect": "The daemon reports that it serves only once its start sequence has ended, so a start waits out the whole discovery and every run.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "  lifecycle.begin();\n  void report({ type: SERVING_TYPE, pid: process.pid });",
+    "new": "  lifecycle.begin();\n  while (lifecycle.status().activity.state !== \"idle\") {\n    await new Promise((wake) => setTimeout(wake, 10));\n  }\n  void report({ type: SERVING_TYPE, pid: process.pid });"
+  },
+  {
+    "id": "D1490",
+    "defect": "The starter keeps a reference to the daemon's process, so the CLI that started it never exits.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "    child.unref();",
+    "new": ""
+  },
+  {
+    "id": "D1491",
+    "defect": "A stop resolves on the acknowledgement, while the daemon's process is still running.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "    if (!running && !(await endpointAnswers(path))) return;",
+    "new": "    return;"
+  },
+  {
+    "id": "D1492",
+    "defect": "The executor does not pass a stop on to the job in progress, so a run at the stop is killed at the executor bound and stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "    current?.abort(new Error(STOP_REASON));",
+    "new": ""
+  },
+  {
+    "id": "D1493",
+    "defect": "A job stuck past the executor bound after a stop is never ended, so the daemon never exits.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      this.#boundPassed = true;\n      child.kill(KILL_SIGNAL);",
+    "new": "      this.#boundPassed = true;"
+  },
+  {
+    "id": "D1494",
+    "defect": "Discovery runs in the daemon's own process, so a synchronous loop in a global setup stops the daemon answering status.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    const reply = await this.#job({ type: \"discover\", start });",
+    "new": "    const reply = {\n      type: \"discovered\" as const,\n      discovery: await (\n        await import(\"../vitest/discover-tests.js\")\n      ).discoverTests(start, new AbortController().signal),\n    };"
+  },
+  {
+    "id": "D1495",
+    "defect": "An executor that exits during a job is kept as the executor, so every later job is sent to a dead process and stores nothing.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (this.#child !== child) return;\n    this.#child = undefined;\n    const settle = this.#settle;",
+    "new": "    if (this.#child !== child) return;\n    const settle = this.#settle;"
+  },
+  {
+    "id": "D1496",
+    "defect": "The executor ignores the loss of its channel to the daemon, so a daemon killed without a stop leaves Vitest running.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "process.on(\"disconnect\", () => {",
+    "new": "process.on(\"disconnect-never\", () => {"
+  },
+  {
+    "id": "D1497",
+    "defect": "The daemon has no SIGTERM handler, so a SIGTERM does not stop it as a stop request does.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "  for (const signal of STOP_SIGNALS) process.on(signal, () => lifecycle.stop());",
+    "new": ""
+  },
+  {
+    "id": "D1498",
+    "defect": "A second start does not ask the running daemon first, so its refusal cannot name that daemon's process.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  if (status === undefined) return;",
+    "new": "  return;"
+  },
+  {
+    "id": "D1500",
+    "defect": "The daemon stores its records under the project's identity for the worktree's, so two worktrees on one state directory read back each other's runs.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      ...parts.scope,",
+    "new": "      ...parts.scope,\n      worktreeIdentity: parts.scope.projectIdentity,"
+  },
+  {
+    "id": "D1501",
+    "defect": "The daemon accepts a stop only after a hello, so a client of another protocol version cannot stop it.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (parsed?.ok === true && isStopRequest(parsed.message)) {",
+    "new": "  if (connection.state === \"ready\" && parsed?.ok === true && isStopRequest(parsed.message)) {"
+  },
+  {
+    "id": "D1502",
+    "defect": "A connection whose hello was refused for another version is closed on the stop, so that client cannot stop the daemon.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (parsed?.ok === true && isStopRequest(parsed.message)) {",
+    "new": "  if (connection.state !== \"mismatched\" && parsed?.ok === true && isStopRequest(parsed.message)) {"
+  },
+  {
+    "id": "D1503",
+    "defect": "A start that meets a daemon of another protocol version does not read the mismatch error, so it neither names that daemon's version nor says it can be stopped.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "    answer[\"type\"] === ERROR_TYPE &&",
+    "new": "    answer[\"type\"] === \"never\" &&"
+  },
+  {
+    "id": "D1504",
+    "defect": "The log's start entry names only the process, not the consumer root, state directory and protocol version.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "    `start: consumer root ${consumerRoot}, state directory ${stateDirectory}, process ${process.pid}, protocol version ${PROTOCOL_VERSION}`,",
+    "new": "    `start: process ${process.pid}`,"
+  },
+  {
+    "id": "D1531",
+    "defect": "A start that finds its endpoint path held by a stale socket file never removes it, so no daemon starts for that worktree again after a kill.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  if (holder === \"stale-file\") await held.removeStale(path);",
+    "new": ""
+  },
+  {
+    "id": "D1532",
+    "defect": "A refused connection to the endpoint is read as nothing there, so a stale socket file is never unlinked.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  return code === \"ECONNREFUSED\" ? \"stale-file\" : \"gone\";",
+    "new": "  return \"gone\";"
+  },
+  {
+    "id": "D1533",
+    "defect": "A relative XDG_RUNTIME_DIR is used as the runtime directory, so a client and a daemon whose working directories differ look for the socket in different places.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  if (configured !== undefined && isAbsolute(configured)) return configured;",
+    "new": "  if (configured !== undefined && configured !== \"\") return configured;"
+  },
+  {
+    "id": "D1534",
+    "defect": "A first startup message that is not a confirmed start crashes the daemon with a raw TypeError instead of a refusal naming the message.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "  if (typeof message !== \"object\" || message === null) return false;",
+    "new": "  return true;"
+  },
+  {
+    "id": "D1535",
+    "defect": "A confirmed start whose config file is written root-relative with /, as 1.3c will send it, is read as not confirmed, so the workspace never runs.",
+    "file": "packages/daemon/src/vitest/confirmed-start.ts",
+    "old": "  return posix.join(workspace.path, basename(config.file));",
+    "new": "  return basename(config.file);"
+  },
+  {
+    "id": "D1536",
+    "defect": "A runtime directory path that is a regular file is accepted.",
+    "file": "packages/daemon/src/daemon/runtime-directory.ts",
+    "old": "    if (!stats.isDirectory()) return `${directory} is not a directory`;",
+    "new": ""
+  },
+  {
+    "id": "D1537",
+    "defect": "A stop resolves while the endpoint still accepts connections, because another listener took it after the daemon exited.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "    if (!running && !(await endpointAnswers(path))) return;",
+    "new": "    if (!running) return;"
+  },
+  {
+    "id": "D1538",
+    "defect": "A workspace the discovery lists as not confirmed is run, or listed as unstored.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      if (entry.status === \"not-confirmed\") continue;",
+    "new": ""
+  },
+  {
+    "id": "D1539",
+    "defect": "A request after the hello that carries no protocol version is answered.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (message[\"protocolVersion\"] !== PROTOCOL_VERSION) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1540",
+    "defect": "A client that stops reading holds the stop past the close grace.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "        setTimeout(() => socket.destroy(), CLOSE_GRACE_MS).unref();",
+    "new": ""
+  },
+  {
+    "id": "D1482",
+    "defect": "The discovery reader drops a not-confirmed workspace's reason, so a stored discovery no longer says why the workspace was not loaded.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "      return { status, workspace, reason: text(row, \"error\") };",
+    "new": "      return { status, workspace, reason: \"\" };"
   }
 ]

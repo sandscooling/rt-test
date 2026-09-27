@@ -5,6 +5,8 @@ export const STORE_SCHEMA_VERSION = 2;
 /** The one older schema version the opener migrates to `STORE_SCHEMA_VERSION` through `STORE_MIGRATION`. */
 export const MIGRATED_SCHEMA_VERSION = 1;
 export const STORE_FILE_NAME = "store.sqlite";
+/** How long a write waits for another process's write on the same file before it fails whole. */
+export const BUSY_TIMEOUT_MS = 5000;
 
 export const FINGERPRINT_DIGEST = "digest";
 export const NOT_FINGERPRINTED = "not-fingerprinted";

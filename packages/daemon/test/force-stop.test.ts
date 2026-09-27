@@ -6,6 +6,7 @@ import {
   type TestDiscovery,
 } from "../src/vitest/discover-tests.js";
 import {
+  confirmEvery,
   inConsumerCopy,
   INTERRUPTED,
   ranRun,
@@ -84,9 +85,9 @@ function stuckDiscovery(install: VitestInstall, pool: Pool): Promise<unknown> {
       const directory = join(root, "collect");
       const controller = new AbortController();
       const discovery: Promise<TestDiscovery | { thrown: string }> =
-        discoverTests(directory, controller.signal).catch((error: unknown) => ({
-          thrown: String(error),
-        }));
+        discoverTests(confirmEvery(directory), controller.signal).catch(
+          (error: unknown) => ({ thrown: String(error) }),
+        );
       await waitUntil(
         () => existsSync(join(directory, "collecting")),
         discovery,

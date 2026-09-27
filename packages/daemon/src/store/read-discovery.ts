@@ -150,6 +150,8 @@ function workspaceDiscovery(
         error: text(row, "error"),
         ...closeError(row),
       };
+    case "not-confirmed":
+      return { status, workspace, reason: text(row, "error") };
     default:
       throw unreadable("discovery_workspaces.status", status);
   }

@@ -1,0 +1,408 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { closeSync, mkdirSync, openSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  consumerIdentity,
+  defaultStateDirectory,
+} from "./store/consumer-identity.js";
+import { BUSY_TIMEOUT_MS } from "./store/schema.js";
+import type { StoreScope } from "./store/stored-records.js";
+import type { ConfirmedStart } from "./vitest/confirmed-start.js";
+import { errorText } from "./vitest/error-text.js";
+import { DaemonConnection } from "./daemon/daemon-connection.js";
+import { daemonLogFile } from "./daemon/daemon-log.js";
+import { clientEndpoint } from "./daemon/endpoint.js";
+import { daemonEntryPoint } from "./daemon/entry-point.js";
+import { EXECUTOR_BOUND_MS } from "./daemon/executor-jobs.js";
+import { isRunning } from "./daemon/runtime-directory.js";
+import {
+  ERROR_TYPE,
+  HELLO_TYPE,
+  PROTOCOL_VERSION,
+  REFUSED_TYPE,
+  SERVING_TYPE,
+  START_TYPE,
+  STATUS_TYPE,
+  STOP_REQUEST,
+  STOPPING_TYPE,
+  VERSION_MISMATCH_CODE,
+  type DaemonIdentity,
+  type StartupReport,
+  type StartupRequest,
+  type StatusResponse,
+} from "./daemon/protocol.js";
+
+export type {
+  ConfirmedStart,
+  ConfirmedWorkspace,
+} from "./vitest/confirmed-start.js";
+export {
+  PROTOCOL_VERSION,
+  type DaemonActivity,
+  type DaemonIdentity,
+  type StatusResponse,
+  type UnstoredJob,
+} from "./daemon/protocol.js";
+
+export interface StartDaemonOptions {
+  /** The caller states that the user trusts this project to execute: only an explicit, confirmed start sets it. */
+  readonly trusted: true;
+  /** The consumer root and each workspace, with its config file, that the user was shown and confirmed. */
+  readonly start: ConfirmedStart;
+  /** Defaults to `.rt-test` under the consumer root; a relative path resolves against the working directory. */
+  readonly stateDirectory?: string;
+}
+
+const DAEMON_ENTRY = "daemon-main";
+const APPEND_FLAG = "a";
+/** `openStore` may wait out the busy timeout on each of its header read, journal switch, schema creation and migration. */
+const STARTUP_STORE_WAITS = 4;
+/** Covers starting Node and taking the endpoint. */
+const STARTUP_MARGIN_MS = 5_000;
+export const STARTUP_DEADLINE_MS =
+  STARTUP_STORE_WAITS * BUSY_TIMEOUT_MS + STARTUP_MARGIN_MS;
+/** Covers closing the store and the endpoint after the executor has ended. */
+const STOP_MARGIN_MS = 5_000;
+/** A stopping daemon waits out the executor bound, then one store write, then closes. */
+export const STOP_DEADLINE_MS =
+  EXECUTOR_BOUND_MS + BUSY_TIMEOUT_MS + STOP_MARGIN_MS;
+const STOP_POLL_MS = 100;
+
+type Message = Readonly<Record<string, unknown>>;
+
+/**
+ * Starts the worktree's daemon, which executes the project's tests: call only after the user confirmed the start.
+ * Resolves once the daemon answers on its endpoint, before its discovery has finished.
+ */
+export async function startDaemon(
+  options: StartDaemonOptions,
+): Promise<DaemonIdentity> {
+  const start: ConfirmedStart = {
+    ...options.start,
+    consumerRoot: resolve(options.start.consumerRoot),
+  };
+  if ((options as { trusted?: unknown }).trusted !== true) {
+    throw new Error(
+      `Refusing to start a daemon for ${start.consumerRoot}: the caller did not state that the project is trusted.`,
+    );
+  }
+  const scope = consumerIdentity(start.consumerRoot);
+  const path = endpointPath(start.consumerRoot, scope, "start");
+  await refuseRunningDaemon(start.consumerRoot, path);
+  const stateDirectory = resolve(
+    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot),
+  );
+  mkdirSync(stateDirectory, { recursive: true });
+  const logFile = daemonLogFile(stateDirectory, scope.worktreeIdentity);
+  const child = spawnDaemon(start.consumerRoot, stateDirectory, logFile);
+  try {
+    return await startedDaemon(child, start, path, logFile);
+  } catch (error) {
+    abandon(child);
+    throw error;
+  }
+}
+
+async function startedDaemon(
+  child: ChildProcess,
+  start: ConfirmedStart,
+  path: string,
+  logFile: string,
+): Promise<DaemonIdentity> {
+  const deadline = Date.now() + STARTUP_DEADLINE_MS;
+  const request: StartupRequest = { type: START_TYPE, start };
+  child.send(request);
+  const report = await startupReport(child, logFile, deadline);
+  if (report.type === REFUSED_TYPE) {
+    throw new Error(
+      `The daemon for ${start.consumerRoot} refused to start: ${report.reason}. See ${logFile}.`,
+    );
+  }
+  const status = await beforeDeadline(
+    askStatus(start.consumerRoot, path),
+    deadline,
+    `the daemon, process ${report.pid}, did not answer its status within ${STARTUP_DEADLINE_MS} ms of its start; see ${logFile}`,
+  );
+  if (status.pid !== report.pid) {
+    throw new Error(
+      `The daemon for ${start.consumerRoot} reported its start as process ${report.pid}, but process ${status.pid} answered on its endpoint. See ${logFile}.`,
+    );
+  }
+  return identityOf(status);
+}
+
+/** A start that failed after the spawn leaves nothing running, since its caller is told nothing started. */
+function abandon(child: ChildProcess): void {
+  if (child.connected) child.disconnect();
+  if (child.exitCode === null && child.signalCode === null) child.kill();
+}
+
+/** The worktree's daemon's status; rejects, naming the consumer root, when no daemon serves it. */
+export async function daemonStatus(
+  consumerRoot: string,
+): Promise<StatusResponse> {
+  const scope = consumerIdentity(consumerRoot);
+  return askStatus(consumerRoot, endpointPath(consumerRoot, scope, "query"));
+}
+
+/**
+ * Stops the worktree's daemon, of any protocol version, and resolves once its process has exited and its endpoint
+ * accepts no connection. A stop already under way is joined.
+ */
+export async function stopDaemon(consumerRoot: string): Promise<void> {
+  const scope = consumerIdentity(consumerRoot);
+  const path = endpointPath(consumerRoot, scope, "stop");
+  const connection = await connect(consumerRoot, path);
+  let answer: Message;
+  try {
+    answer = await connection.request(STOP_REQUEST);
+  } finally {
+    connection.close();
+  }
+  if (answer["type"] !== STOPPING_TYPE || typeof answer["pid"] !== "number") {
+    throw new Error(
+      `The daemon for ${consumerRoot} did not acknowledge the stop: ${JSON.stringify(answer)}`,
+    );
+  }
+  await waitForExit(
+    consumerRoot,
+    path,
+    answer["pid"],
+    typeof answer["logFile"] === "string" ? answer["logFile"] : undefined,
+  );
+}
+
+function endpointPath(
+  consumerRoot: string,
+  scope: StoreScope,
+  action: "start" | "query" | "stop",
+): string {
+  const location = clientEndpoint(scope.worktreeIdentity);
+  if (location.ok) return location.path;
+  const verb = action === "start" ? "start" : "reach";
+  throw new Error(
+    `Cannot ${verb} a daemon for ${consumerRoot}: ${location.reason}.`,
+  );
+}
+
+async function connect(
+  consumerRoot: string,
+  path: string,
+): Promise<DaemonConnection> {
+  const connected = await DaemonConnection.open(path);
+  if (connected.ok) return connected.connection;
+  throw new Error(
+    connected.nothingListens
+      ? `No daemon serves the worktree at ${consumerRoot}.`
+      : `Cannot reach the daemon for ${consumerRoot}: ${connected.reason}.`,
+  );
+}
+
+async function askStatus(
+  consumerRoot: string,
+  path: string,
+): Promise<StatusResponse> {
+  const status = await statusIfServing(consumerRoot, path);
+  if (status === undefined) {
+    throw new Error(`No daemon serves the worktree at ${consumerRoot}.`);
+  }
+  return status;
+}
+
+/** Undefined when nothing listens on the endpoint. */
+async function statusIfServing(
+  consumerRoot: string,
+  path: string,
+): Promise<StatusResponse | undefined> {
+  const connected = await DaemonConnection.open(path);
+  if (!connected.ok) {
+    if (connected.nothingListens) return undefined;
+    throw new Error(
+      `Cannot reach the daemon for ${consumerRoot}: ${connected.reason}.`,
+    );
+  }
+  const { connection } = connected;
+  try {
+    requireAnswer(
+      consumerRoot,
+      await connection.request({
+        type: HELLO_TYPE,
+        protocolVersion: PROTOCOL_VERSION,
+      }),
+      HELLO_TYPE,
+    );
+    const status = await connection.request({
+      type: STATUS_TYPE,
+      protocolVersion: PROTOCOL_VERSION,
+    });
+    requireAnswer(consumerRoot, status, STATUS_TYPE);
+    return status as unknown as StatusResponse;
+  } finally {
+    connection.close();
+  }
+}
+
+/** A version mismatch names the daemon's process and version, and says it can be stopped. */
+function requireAnswer(
+  consumerRoot: string,
+  answer: Message,
+  type: string,
+): void {
+  if (answer["type"] === type) return;
+  if (
+    answer["type"] === ERROR_TYPE &&
+    answer["code"] === VERSION_MISMATCH_CODE
+  ) {
+    throw new Error(
+      `The daemon for ${consumerRoot}, process ${String(answer["pid"])}, speaks protocol version ${String(answer["protocolVersion"])}, not ${PROTOCOL_VERSION}. It can be stopped with stopDaemon.`,
+    );
+  }
+  throw new Error(
+    `The daemon for ${consumerRoot} answered a ${type} request with ${JSON.stringify(answer)}`,
+  );
+}
+
+async function refuseRunningDaemon(
+  consumerRoot: string,
+  path: string,
+): Promise<void> {
+  let status: StatusResponse | undefined;
+  try {
+    status = await statusIfServing(consumerRoot, path);
+  } catch (error) {
+    throw new Error(
+      `Refusing to start a second daemon for ${consumerRoot}: ${errorText(error)}`,
+      { cause: error },
+    );
+  }
+  if (status === undefined) return;
+  throw new Error(
+    `A daemon, process ${status.pid}, already serves the worktree at ${consumerRoot}.`,
+  );
+}
+
+function spawnDaemon(
+  consumerRoot: string,
+  stateDirectory: string,
+  logFile: string,
+): ChildProcess {
+  const entry = daemonEntryPoint(DAEMON_ENTRY);
+  const log = openSync(logFile, APPEND_FLAG);
+  try {
+    return spawn(
+      process.execPath,
+      [...entry.execArgv, entry.file, consumerRoot, stateDirectory],
+      {
+        cwd: consumerRoot,
+        detached: true,
+        stdio: ["ignore", log, log, "ipc"],
+        windowsHide: true,
+      },
+    );
+  } finally {
+    closeSync(log);
+  }
+}
+
+/** The daemon's one startup report, after which the daemon lives on without its starter. */
+function startupReport(
+  child: ChildProcess,
+  logFile: string,
+  deadline: number,
+): Promise<StartupReport> {
+  const report = new Promise<StartupReport>((resolveReport, reject) => {
+    child.once("message", (message: unknown) => {
+      if (isStartupReport(message)) {
+        resolveReport(message);
+        return;
+      }
+      reject(
+        new Error(
+          `The daemon sent a startup report the client cannot read: ${JSON.stringify(message)}. See ${logFile}.`,
+        ),
+      );
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      reject(
+        new Error(
+          `The daemon exited before reporting its start (${signal === null ? `exit code ${code}` : `signal ${signal}`}). See ${logFile}.`,
+        ),
+      );
+    });
+  });
+  return beforeDeadline(
+    report,
+    deadline,
+    `the daemon, process ${child.pid}, did not report its start within ${STARTUP_DEADLINE_MS} ms; see ${logFile}`,
+  ).finally(() => {
+    child.removeAllListeners();
+    child.unref();
+  });
+}
+
+function isStartupReport(message: unknown): message is StartupReport {
+  if (typeof message !== "object" || message === null) return false;
+  const report = message as Message;
+  return report["type"] === SERVING_TYPE
+    ? typeof report["pid"] === "number"
+    : report["type"] === REFUSED_TYPE && typeof report["reason"] === "string";
+}
+
+async function beforeDeadline<T>(
+  work: Promise<T>,
+  deadline: number,
+  reason: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Timed out: ${reason}.`)),
+      Math.max(0, deadline - Date.now()),
+    );
+  });
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForExit(
+  consumerRoot: string,
+  path: string,
+  pid: number,
+  logFile: string | undefined,
+): Promise<void> {
+  const deadline = Date.now() + STOP_DEADLINE_MS;
+  let running = true;
+  while (Date.now() < deadline) {
+    running = isRunning(pid);
+    if (!running && !(await endpointAnswers(path))) return;
+    await new Promise((wake) => setTimeout(wake, STOP_POLL_MS));
+  }
+  const pending = running
+    ? `process ${pid} had not exited`
+    : `process ${pid} exited, but its endpoint ${path} still accepts connections, so another daemon may have started there`;
+  throw new Error(
+    `The daemon for ${consumerRoot} did not finish stopping within ${STOP_DEADLINE_MS} ms of acknowledging the stop: ${pending}.${logFile === undefined ? "" : ` See ${logFile}.`}`,
+  );
+}
+
+async function endpointAnswers(path: string): Promise<boolean> {
+  const connected = await DaemonConnection.open(path);
+  if (connected.ok) connected.connection.close();
+  return connected.ok;
+}
+
+function identityOf(status: StatusResponse): DaemonIdentity {
+  return {
+    pid: status.pid,
+    consumerRoot: status.consumerRoot,
+    projectIdentity: status.projectIdentity,
+    worktreeIdentity: status.worktreeIdentity,
+    stateDirectory: status.stateDirectory,
+    logFile: status.logFile,
+    protocolVersion: status.protocolVersion,
+  };
+}

@@ -94,7 +94,7 @@ C104. **Fail a failure-path test through an explicit mock**: A failure path is t
 
 C105. **Control time explicitly**: A time-dependent test uses `vi.useFakeTimers()` and `vi.advanceTimersByTimeAsync()`, never a real wait. A refreshed-timestamp assertion advances the clock and asserts strictly greater.
 
-C106. **Clean up temporary state in the test body**: A test that creates a temporary directory, file or process removes it in a `finally` inside the same test.
+C106. **Clean up temporary state in the test body**: A test that creates a temporary directory, file or process removes it in a `finally` inside the same test. The cleanup never swallows a failure: a cleanup error fails a test whose body passed, never masks the error of one whose body failed, and nothing the run created outlives it.
 
 C107. **Drive a CLI through its exit code and streams**: A script test asserts the exit code and the stdout or stderr content a user sees, not an internal helper alone.
 

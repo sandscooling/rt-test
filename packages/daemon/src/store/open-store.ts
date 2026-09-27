@@ -6,6 +6,7 @@ import type { WorkspaceRun } from "../vitest/run-workspace.js";
 import { readLatestDiscovery } from "./read-discovery.js";
 import { readRun, readRuns } from "./read-runs.js";
 import {
+  BUSY_TIMEOUT_MS,
   MIGRATED_SCHEMA_VERSION,
   STORE_APPLICATION_ID,
   STORE_FILE_NAME,
@@ -43,8 +44,6 @@ interface StoreHeader {
   readonly schemaObjects: number;
 }
 
-/** How long a write waits for another process's write on the same file before it fails whole. */
-const BUSY_TIMEOUT_MS = 5000;
 const SQLITE_NOT_A_DATABASE = 26;
 /** What SQLite reads for an application id or user version nothing has set. */
 const UNSET_HEADER_VALUE = 0;

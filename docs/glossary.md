@@ -26,6 +26,14 @@ _Avoid_: target, host project
 The local process that alone executes a started consumer's tests and answers queries about them.
 _Avoid_: server, watcher
 
+**Executor process**:
+The daemon's child process that alone hosts Vitest, one discovery or run at a time.
+_Avoid_: worker, runner
+
+**Confirmed start**:
+The consumer root and each Vitest workspace, with the config file shown for it, that the user confirmed before a start. The daemon loads nothing outside it.
+_Avoid_: trusted list, allowlist
+
 **Input fingerprint**:
 A digest of every input that can change a test's result.
 _Avoid_: hash, cache key

@@ -83,6 +83,8 @@ C141. **Preserve a failed run's output and exit status**: A runner wrapper keeps
 
 C142. **Leave explicit states on cancellation**: Cancelling or interrupting a run leaves each affected test interrupted or stale, never at its previous outcome as if current.
 
+C157. **Ignore events from a replaced resource**: A handler bound to a child process, socket or other replaceable resource acts only while that resource is still the current one, so a late exit, error or reply from its predecessor never settles its successor's work.
+
 ## Backend independence
 
 C143. **Keep the daemon and store backend-free**: The daemon, state store and core packages import no backend adapter or backend SDK; adapters plug in through the adapter interface.

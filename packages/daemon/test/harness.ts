@@ -1,23 +1,34 @@
 import {
+  appendFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { expect, inject } from "vitest";
+import {
+  HELD_DIRECTORIES_FILE,
+  HELD_RECORD_SEPARATOR,
+  removeDirectory,
+} from "./temp-root.js";
 import type {
   RecordedModule,
   RecordedTest,
   TestRunState,
 } from "../src/vitest/run-states.js";
 import {
+  chosenConfigFile,
+  type ConfirmedStart,
+} from "../src/vitest/confirmed-start.js";
+import { findVitestWorkspaces } from "../src/vitest/find-workspaces.js";
+import {
   runWorkspace,
+  type NotConfirmedRun,
   type WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
 
@@ -29,21 +40,88 @@ export type VitestInstall = "vitest" | "vitest-4";
 
 const repoRequire = createRequire(join(REPO, "package.json"));
 
+const CASE_PREFIX = "case-";
+
+/** The run's temp parent, which the daemon project's global teardown removes. */
+function runTempRoot(): string {
+  const root = inject("rtTestDaemonTempRoot");
+  if (root === undefined) {
+    throw new Error(
+      "The daemon tests' global setup did not provide a temp root; run them through the daemon project's Vitest config.",
+    );
+  }
+  return root;
+}
+
+/**
+ * Hands `body` a fresh directory and removes it after. A directory a live process still holds on Windows is recorded
+ * for the global teardown, which warns when it is free by the end of the run and fails the run when it is not, so the
+ * test's own assertion still decides the test. A failing body keeps its own error.
+ */
 export async function inTempDir<T>(
   body: (dir: string) => T | Promise<T>,
 ): Promise<T> {
-  const dir = realpathSync.native(
-    mkdtempSync(join(tmpdir(), "rt-test-daemon-")),
-  );
+  const root = runTempRoot();
+  const test = expect.getState().currentTestName ?? "outside a test";
+  const dir = realpathSync.native(mkdtempSync(join(root, CASE_PREFIX)));
+  let result: T;
   try {
-    return await body(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    result = await body(dir);
+  } catch (error) {
+    await removeTempDir(root, dir, test, false);
+    throw error;
   }
+  await removeTempDir(root, dir, test, true);
+  return result;
+}
+
+async function removeTempDir(
+  root: string,
+  dir: string,
+  test: string,
+  rethrow: boolean,
+): Promise<void> {
+  let removed: boolean;
+  try {
+    removed = await removeDirectory(dir);
+  } catch (error) {
+    if (rethrow) throw error;
+    removed = false;
+  }
+  if (removed) return;
+  appendFileSync(
+    join(root, HELD_DIRECTORIES_FILE),
+    `${dir}${HELD_RECORD_SEPARATOR}${test}\n`,
+  );
 }
 
 export function copyFixture(name: string, dir: string): void {
   cpSync(join(FIXTURES, name), dir, { recursive: true });
+}
+
+/** A main checkout of a git repository, as far as identity reads it: a directory holding `.git`. */
+export function mainCheckout(dir: string): string {
+  const main = join(dir, "main");
+  mkdirSync(join(main, ".git"), { recursive: true });
+  return main;
+}
+
+/** A worktree the way `git worktree add` lays it out, its `.git` file naming its git directory as `gitdir` spells it. */
+export function linkedWorktree(
+  main: string,
+  name: string,
+  gitdir: (worktreeGitDirectory: string) => string,
+): string {
+  const worktreeGitDirectory = join(main, ".git", "worktrees", name);
+  mkdirSync(worktreeGitDirectory, { recursive: true });
+  writeFileSync(join(worktreeGitDirectory, "commondir"), "../..\n");
+  const root = join(dirname(main), name);
+  mkdirSync(root);
+  writeFileSync(
+    join(root, ".git"),
+    `gitdir: ${gitdir(worktreeGitDirectory)}\n`,
+  );
+  return root;
 }
 
 /** Makes `vitest` resolve from `dir` to one of the repository's installs, through a directory link. */
@@ -137,16 +215,33 @@ export function runHooks(): Record<symbol, RunHook | undefined> {
   return globalThis as unknown as Record<symbol, RunHook | undefined>;
 }
 
-export type RunResult = WorkspaceRun | { thrown: string };
+/** The start a user makes after confirming every workspace listed under `consumerRoot`, each with its config file. */
+export function confirmEvery(consumerRoot: string): ConfirmedStart {
+  return {
+    consumerRoot,
+    workspaces: findVitestWorkspaces(consumerRoot).workspaces.map(
+      (workspace) => ({
+        path: workspace.path,
+        configFile: chosenConfigFile(workspace) ?? "",
+      }),
+    ),
+  };
+}
 
+export type RunResult = WorkspaceRun | NotConfirmedRun | { thrown: string };
+
+/** Runs the workspace through the config file it holds now, as a start confirmed just before the run would. */
 export function settledRun(
   directory: string,
   signal: AbortSignal = new AbortController().signal,
   path = ".",
 ): Promise<RunResult> {
-  return runWorkspace({ path, directory }, signal).catch((error: unknown) => ({
-    thrown: String(error),
-  }));
+  const workspace = { path, directory };
+  return runWorkspace(
+    workspace,
+    chosenConfigFile(workspace) ?? "",
+    signal,
+  ).catch((error: unknown) => ({ thrown: String(error) }));
 }
 
 export function ranRun(
