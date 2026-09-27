@@ -9,6 +9,14 @@ export function errorText(error: unknown): string {
   return errorLines(error, new Set(), 0).join(`\n${NESTED_INDENT}`);
 }
 
+/** How a child process ended: by its exit code, or by the signal that ended it. */
+export function exitText(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+): string {
+  return signal === null ? `exit code ${code}` : `signal ${signal}`;
+}
+
 function errorLines(
   error: unknown,
   seen: Set<object>,

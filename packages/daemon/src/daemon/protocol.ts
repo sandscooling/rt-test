@@ -183,8 +183,11 @@ export function encodeLine(message: object): string {
   return `${JSON.stringify(message)}${LINE_END}`;
 }
 
+/** A decoded protocol line: one JSON object, whose fields a reader checks before trusting them. */
+export type ProtocolMessage = Readonly<Record<string, unknown>>;
+
 export type ParsedLine =
-  | { readonly ok: true; readonly message: Readonly<Record<string, unknown>> }
+  | { readonly ok: true; readonly message: ProtocolMessage }
   | { readonly ok: false; readonly reason: string };
 
 /** A line holding one JSON object, or why it does not. */
@@ -201,12 +204,10 @@ export function parseLine(text: string): ParsedLine {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { ok: false, reason: "not a JSON object" };
   }
-  return { ok: true, message: value as Readonly<Record<string, unknown>> };
+  return { ok: true, message: value as ProtocolMessage };
 }
 
-export function isStopRequest(
-  message: Readonly<Record<string, unknown>>,
-): boolean {
+export function isStopRequest(message: ProtocolMessage): boolean {
   return message["type"] === STOP_TYPE;
 }
 

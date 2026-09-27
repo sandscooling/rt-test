@@ -4,10 +4,9 @@ import {
   encodeLine,
   LineDecoder,
   parseLine,
+  type ProtocolMessage,
   RESPONSE_BOUND_MS,
 } from "./protocol.js";
-
-type Message = Readonly<Record<string, unknown>>;
 
 /** The connection errors that mean nothing listens on the endpoint: no pipe or socket file, or a stale Linux one. */
 const NOTHING_LISTENS = new Set(["ENOENT", "ECONNREFUSED"]);
@@ -64,7 +63,7 @@ export class DaemonConnection {
   }
 
   /** Sends one message and resolves with the daemon's answer, rejecting when none arrives within the response bound. */
-  async request(message: object): Promise<Message> {
+  async request(message: object): Promise<ProtocolMessage> {
     this.#socket.write(encodeLine(message));
     const line = await this.#nextLine();
     const parsed = parseLine(line);

@@ -17,6 +17,7 @@ import {
   type DecodedLine,
   type ErrorCode,
   type ErrorResponse,
+  type ProtocolMessage,
   type HelloResponse,
   type StatusResponse,
   type StopAcknowledgement,
@@ -42,8 +43,6 @@ type ConnectionState = "awaiting-hello" | "ready" | "mismatched";
 
 /** How long a closing connection may take to flush before it is dropped, so a client that stops reading cannot hold the stop. */
 const CLOSE_GRACE_MS = 1_000;
-
-type Message = Readonly<Record<string, unknown>>;
 
 /** Writes to a connection only in answer to a line it sent, so a client that cannot write receives nothing. */
 export function connectionServer(
@@ -127,7 +126,7 @@ function answer(
 
 function hello(
   socket: Socket,
-  message: Message,
+  message: ProtocolMessage,
   handlers: DaemonHandlers,
 ): ConnectionState {
   const clientVersion = message["protocolVersion"];
@@ -153,7 +152,7 @@ function hello(
 }
 
 function versionedAnswer(
-  message: Message,
+  message: ProtocolMessage,
   handlers: DaemonHandlers,
 ): StatusResponse | ErrorResponse {
   if (message["protocolVersion"] !== PROTOCOL_VERSION) {

@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
-import { errorText } from "../vitest/error-text.js";
+import { errorText, exitText } from "../vitest/error-text.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
@@ -175,8 +175,4 @@ function failureReason(reply: JobReply): string {
     default:
       return `the executor answered the job with a ${reply.type} reply, which belongs to another kind of job`;
   }
-}
-
-function exitText(code: number | null, signal: NodeJS.Signals | null): string {
-  return signal === null ? `exit code ${code}` : `signal ${signal}`;
 }

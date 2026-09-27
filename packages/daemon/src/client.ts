@@ -8,7 +8,7 @@ import {
 import { BUSY_TIMEOUT_MS } from "./store/schema.js";
 import type { StoreScope } from "./store/stored-records.js";
 import type { ConfirmedStart } from "./vitest/confirmed-start.js";
-import { errorText } from "./vitest/error-text.js";
+import { errorText, exitText } from "./vitest/error-text.js";
 import { DaemonConnection } from "./daemon/daemon-connection.js";
 import { daemonLogFile } from "./daemon/daemon-log.js";
 import { clientEndpoint } from "./daemon/endpoint.js";
@@ -28,6 +28,7 @@ import {
   VERSION_MISMATCH_CODE,
   type DaemonIdentity,
   type StartupReport,
+  type ProtocolMessage,
   type StartupRequest,
   type StatusResponse,
 } from "./daemon/protocol.js";
@@ -67,8 +68,6 @@ const STOP_MARGIN_MS = 5_000;
 export const STOP_DEADLINE_MS =
   EXECUTOR_BOUND_MS + BUSY_TIMEOUT_MS + STOP_MARGIN_MS;
 const STOP_POLL_MS = 100;
-
-type Message = Readonly<Record<string, unknown>>;
 
 /**
  * Starts the worktree's daemon, which executes the project's tests: call only after the user confirmed the start.
@@ -153,7 +152,7 @@ export async function stopDaemon(consumerRoot: string): Promise<void> {
   const scope = consumerIdentity(consumerRoot);
   const path = endpointPath(consumerRoot, scope, "stop");
   const connection = await connect(consumerRoot, path);
-  let answer: Message;
+  let answer: ProtocolMessage;
   try {
     answer = await connection.request(STOP_REQUEST);
   } finally {
@@ -245,7 +244,7 @@ async function statusIfServing(
 /** A version mismatch names the daemon's process and version, and says it can be stopped. */
 function requireAnswer(
   consumerRoot: string,
-  answer: Message,
+  answer: ProtocolMessage,
   type: string,
 ): void {
   if (answer["type"] === type) return;
@@ -326,7 +325,7 @@ function startupReport(
     child.once("exit", (code, signal) => {
       reject(
         new Error(
-          `The daemon exited before reporting its start (${signal === null ? `exit code ${code}` : `signal ${signal}`}). See ${logFile}.`,
+          `The daemon exited before reporting its start (${exitText(code, signal)}). See ${logFile}.`,
         ),
       );
     });
@@ -343,7 +342,7 @@ function startupReport(
 
 function isStartupReport(message: unknown): message is StartupReport {
   if (typeof message !== "object" || message === null) return false;
-  const report = message as Message;
+  const report = message as ProtocolMessage;
   return report["type"] === SERVING_TYPE
     ? typeof report["pid"] === "number"
     : report["type"] === REFUSED_TYPE && typeof report["reason"] === "string";
