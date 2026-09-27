@@ -31,6 +31,10 @@ A failed tool call costs another full model request, and its error text stays in
 - Plan a sentence without the em dash shapes (a mid-clause aside, a reversal, a trailing gloss) rather than writing one and retrying.
 - Keep rule ids and ticket numbers out of code comments, and keep a block comment under the line cap (`rt-test/no-nonlocal-comment`).
 - When a hook denies a call, read the remedy it names and follow it; never retry the same call unchanged.
+- End a probe or search chain with `; true`, or print `$?` yourself: a `grep` that finds nothing exits 1 and fails the whole call.
+- Check that a file exists before chaining reads on it.
+- In PowerShell, put a node script holding backslashes or quotes in a file rather than `node -e`, write a git exclude pathspec as `':(exclude)path'`, and use `Select-Object -Last N` for `tail`. Git Bash has no `rev`, and `pkill` is off limits.
+- Make an edit with the Edit tool rather than an inline script: a script that misses its anchor fails the call.
 
 When you drive T3 Code's preview browser:
 
@@ -39,7 +43,7 @@ When you drive T3 Code's preview browser:
 - Give each locator exactly one visible, enabled match: a `role=...[name=...]` scoped to its container with `>>`, rather than `nth=` or `text=`. An ambiguous or hidden target fails as a bare "click failed".
 - Keep a `preview_wait_for` `timeoutMs` at 45000 or less, since any tool call is abandoned at 60 s.
 - Take screenshots with `preview_snapshot` and `save: true`; there is no screenshot tool.
-- After "No preview automation host is available", call `preview_status` once a few seconds later before giving up: the host usually reconnects within about 20 s.
+- After "No preview automation host is available", wait about 20 s, since that is how long the host takes to reconnect, then call `preview_status` once before giving up.
 - Guard an evaluate's expression (for a null `querySelector`, say) and return a diagnostic value: a bare "evaluate failed" usually means your script threw.
 
 ## Worktree lanes
