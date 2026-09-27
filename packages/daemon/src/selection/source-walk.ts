@@ -29,7 +29,7 @@ const PLUGIN_FORMAT_EXTENSIONS = [".vue", ".svelte", ".astro", ".mdx"];
 const GIT_DIRECTORY = ".git";
 /** Directory names no walk enters, wherever they lie. */
 export const SKIPPED_DIRECTORIES = ["node_modules", GIT_DIRECTORY];
-const CONFIG_FILE_NAME = /^(?:ts|js)config.*\.json$/;
+export const CONFIG_FILE_NAME = /^(?:ts|js)config.*\.json$/;
 
 export interface WalkUncertainty {
   readonly kind: UncertaintyKind;

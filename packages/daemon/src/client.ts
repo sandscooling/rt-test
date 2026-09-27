@@ -38,6 +38,11 @@ import {
 
 export { queryPathStatus, querySummary } from "./query-client.js";
 export { startPlan, type StartPlan } from "./start-plan.js";
+export {
+  NON_INPUTS_ABSENT,
+  NON_INPUTS_UNUSABLE,
+  type NonInputsDeclaration,
+} from "./inputs/non-inputs.js";
 export type {
   ConfirmedStart,
   ConfirmedWorkspace,

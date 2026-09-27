@@ -1,4 +1,8 @@
 import { resolve } from "node:path";
+import {
+  readNonInputs,
+  type NonInputsDeclaration,
+} from "./inputs/non-inputs.js";
 import { defaultStateDirectory } from "./store/consumer-identity.js";
 import {
   chosenConfigFile,
@@ -17,6 +21,8 @@ export interface StartPlan {
   /** Absolute. */
   readonly stateDirectory: string;
   readonly notRead: readonly UnreadWorkspaceSource[];
+  /** As read at plan time; the daemon reads it again at every full reconciliation. */
+  readonly nonInputs: NonInputsDeclaration;
 }
 
 const NO_CONFIG_FILE_REASON =
@@ -43,6 +49,7 @@ export function startPlan(
     start: { consumerRoot: root, workspaces },
     stateDirectory: resolvedStateDirectory(root, stateDirectory),
     notRead,
+    nonInputs: readNonInputs(root),
   };
 }
 

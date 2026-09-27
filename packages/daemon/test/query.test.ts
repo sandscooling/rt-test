@@ -731,6 +731,25 @@ describe("each test's freshness, beside its state", () => {
     });
   });
 
+  it("D2019: while the daemon's rt-test.json cannot be used, a summary and a path status each carry the reason", async () => {
+    const reason =
+      "rt-test.json declares no non-inputs, so every file stays an input: its top level is not a JSON object";
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+      [],
+      { ...settled({}), nonInputsUnusable: reason },
+    );
+    const pathStatus = await statusIn(
+      WORKSPACE_A,
+      (answer) => ("noAnswer" in answer ? answer : answer.nonInputsUnusable),
+      { ...settled({}), nonInputsUnusable: reason },
+    );
+    expect({
+      summary: summary.nonInputsUnusable,
+      pathStatus,
+    }).toStrictEqual({ summary: reason, pathStatus: reason });
+  });
+
   it("D1939: while no fingerprint can be computed, no workspace is listed as unfingerprinted on its own", () => {
     const summary = summaryOf(
       storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),

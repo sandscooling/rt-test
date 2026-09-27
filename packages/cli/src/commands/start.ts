@@ -137,6 +137,7 @@ function planFields(plan: StartPlan): Fields {
     stateDirectory: plan.stateDirectory,
     workspaces: plan.start.workspaces,
     notRead: plan.notRead,
+    nonInputs: plan.nonInputs,
   };
 }
 

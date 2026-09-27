@@ -131,6 +131,9 @@ export function queryBasis(
       inputs: inputs.facts,
       unfingerprintedWorkspaces:
         inputs.unavailable === undefined ? unfingerprinted(fingerprints) : [],
+      ...(inputs.nonInputsUnusable === undefined
+        ? {}
+        : { nonInputsUnusable: inputs.nonInputsUnusable }),
       activity: daemon.activity,
       unstoredJobs: daemon.unstoredJobs,
     },

@@ -1,5 +1,13 @@
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import {
+  mkdirSync,
+  utimesSync,
+  watch,
+  writeFileSync,
+  type PathLike,
+  type WatchListener,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import type { Executor, JobOutcome } from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
 import type { DaemonIdentity } from "../src/daemon/protocol.js";
@@ -9,9 +17,10 @@ import {
   type JobMark,
   type JobVerdict,
 } from "../src/inputs/input-jobs.js";
-import type {
-  CurrentInputs,
-  TrackedInputs,
+import {
+  InputTracker,
+  type CurrentInputs,
+  type TrackedInputs,
 } from "../src/inputs/input-tracker.js";
 import type { InputFacts } from "../src/query/answer.js";
 import {
@@ -35,8 +44,22 @@ import type {
   NotConfirmedRun,
   WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
-import { memoryLog, type MemoryLog } from "./daemon-harness.js";
-import { inTempDir, within } from "./harness.js";
+import {
+  DAEMON_TEST_TIMEOUT_MS,
+  IDLE_ENTRY,
+  eventually,
+  memoryLog,
+  type MemoryLog,
+} from "./daemon-harness.js";
+import { inTempDir, settle, within } from "./harness.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, watch: vi.fn<typeof actual.watch>(actual.watch) };
+});
+
+const { watch: realWatch } =
+  await vi.importActual<typeof import("node:fs")>("node:fs");
 
 const SCOPE: StoreScope = {
   projectIdentity: "/consumer/.git",
@@ -57,6 +80,8 @@ const CONFIG_NOT_CONFIRMED =
 /** Longer than a stop of the scripted daemon takes, and short enough that a stop that never ends fails the test. */
 const STOP_BOUND_MS = 2000;
 const DISCOVERY_DIGEST = "discovery-digest";
+/** A declared file written after an edit; once the tracker has handled its event, it has handled the edit's. */
+const SENTINEL = "z.md";
 const FINGERPRINTED: JobVerdict = { fingerprinted: true };
 const SETTLED_INPUTS: InputFacts = {
   revision: 1,
@@ -258,12 +283,28 @@ class RecordingStore implements RtTestStore {
   }
 }
 
+/** A recording store whose first read of the latest results throws, as a locked database would. */
+class FirstReadFailingStore extends RecordingStore {
+  #failed = false;
+
+  override readLatestResults(scope: StoreScope): LatestResults {
+    if (!this.#failed) {
+      this.#failed = true;
+      throw new Error("database is locked");
+    }
+    return super.readLatestResults(scope);
+  }
+}
+
 interface InputsScript {
   /** Keeps the first reconciliation running until the test resolves `reconciled`. */
   readonly heldReconciliation?: boolean;
   /** Keeps every job's end waiting on the inputs until the inputs stop. */
   readonly heldJobEnds?: boolean;
-  /** Each job's verdict, in the order the jobs end; a job past the list is fingerprinted. */
+  /**
+   * Each job's verdict, in the order the jobs end: the discovery, the guard around its protection, then each run. A
+   * job past the list is fingerprinted.
+   */
   readonly verdicts?: readonly JobVerdict[];
   /** A workspace's current fingerprint, asked at its run's start and again at its end. */
   readonly fingerprintOf?: (workspacePath: string) => FingerprintResult;
@@ -275,6 +316,8 @@ interface InputsScript {
 class StandInInputs implements TrackedInputs {
   starts = 0;
   stops = 0;
+  /** The discovery each protection was given, in call order. */
+  readonly protected: (TestDiscovery | undefined)[] = [];
   readonly reconciled = new Deferred<void>();
   readonly #released = new Deferred<void>();
   readonly #script: InputsScript;
@@ -316,6 +359,11 @@ class StandInInputs implements TrackedInputs {
   async endJob(): Promise<JobVerdict> {
     if (this.#script.heldJobEnds === true) await this.#released.promise;
     return this.#verdicts.shift() ?? FINGERPRINTED;
+  }
+
+  protectTestModules(discovery: TestDiscovery | undefined): Promise<void> {
+    this.protected.push(discovery);
+    return Promise.resolve();
   }
 
   stop(): Promise<void> {
@@ -380,6 +428,137 @@ function scripted(script: InputsScript): Daemon {
     IDENTITY,
     new StandInInputs(script),
   );
+}
+
+/** Runs `during` inside the discovery's job, as an edit while Vitest collects would, and ends the job once it settles. */
+class EditingExecutor extends ScriptedExecutor {
+  readonly #during: () => Promise<unknown>;
+
+  constructor(found: TestDiscovery, during: () => Promise<unknown>) {
+    super({ ended: true, value: found });
+    this.#during = during;
+  }
+
+  override async discover(): Promise<JobOutcome<TestDiscovery>> {
+    await this.#during();
+    return super.discover();
+  }
+}
+
+/**
+ * A tracker whose first reconciliation counts as ended only once the paths it left unread are read. On Windows its own
+ * listing of a directory raises an event, which would leave the discovery's job unsettled when it starts.
+ */
+class SettledTracker extends InputTracker {
+  override async firstReconciled(): Promise<void> {
+    await super.firstReconciled();
+    const deadline = Date.now() + STOP_BOUND_MS;
+    while (this.facts().pendingChanges > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+}
+
+/**
+ * Inside the discovery's job, given the test module's path and the name of each watch event the tracker has handled,
+ * in order; resolves whether the hold it waited for was reached.
+ */
+type DuringDiscovery = (
+  module: string,
+  handled: readonly string[],
+) => Promise<boolean>;
+
+interface DeclaredModuleStart {
+  readonly held: boolean;
+  readonly idle: boolean;
+  readonly discoveryFreshness: unknown;
+  readonly storedFingerprint: string | undefined;
+}
+
+/**
+ * Runs the start sequence to idle with a real input tracker and store, over a consumer whose `rt-test.json` declares
+ * `src/**` and whose one workspace, the root, lists the test module `src/a.test.ts`, last modified an hour ago.
+ * Every watch the tracker opens is real; each event's name is recorded once the tracker's listener has returned.
+ */
+async function declaredModuleStart(
+  dir: string,
+  during: DuringDiscovery = () => Promise.resolve(true),
+): Promise<DeclaredModuleStart> {
+  const root = join(dir, "consumer");
+  const module = join(root, "src", "a.test.ts");
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(
+    join(root, "rt-test.json"),
+    JSON.stringify({ nonInputs: ["src/**"] }),
+  );
+  writeFileSync(module, "it('t', () => {});\n");
+  const anHourAgo = new Date(Date.now() - 3_600_000);
+  // The access time stays current, as the discovery's own read leaves it: Windows raises a change event for a read that
+  // updates an access time over an hour old, which would count against the job like an edit.
+  utimesSync(module, new Date(), anHourAgo);
+  const found = discovery({
+    ...discovered("."),
+    workspace: { path: ".", directory: root },
+    tests: [
+      {
+        identity: {
+          workspacePath: ".",
+          projectName: "unit",
+          modulePath: "src/a.test.ts",
+          namePath: ["t"],
+          occurrence: 0,
+        },
+        isDuplicate: false,
+        mode: "run",
+      },
+    ],
+  });
+  const handled: string[] = [];
+  vi.mocked(watch).mockImplementation(((
+    path: PathLike,
+    options: { recursive?: boolean },
+    listener: WatchListener<string>,
+  ) =>
+    realWatch(path, options, (kind, name) => {
+      listener(kind, name);
+      handled.push(String(name));
+    })) as typeof watch);
+  let held = false;
+  const log = memoryLog();
+  const store = openStore(join(dir, "state"));
+  const lifecycle = new DaemonLifecycle({
+    identity: { ...IDENTITY, consumerRoot: root },
+    scope: SCOPE,
+    start: confirmed("."),
+    store,
+    log,
+    executor: new EditingExecutor(found, async () => {
+      held = await during(module, handled);
+    }) as unknown as Executor,
+    inputs: new SettledTracker({
+      consumerRoot: root,
+      exclusions: [],
+      log: memoryLog(),
+    }),
+    closeEndpoint: () => Promise.resolve(),
+  });
+  try {
+    lifecycle.begin();
+    const idle = await eventually(() => log.entries.includes(IDLE_ENTRY));
+    const answer = lifecycle.summary();
+    return {
+      held,
+      idle,
+      discoveryFreshness:
+        "discovery" in answer ? answer.discovery.freshness : answer,
+      storedFingerprint:
+        store.readLatestDiscovery(SCOPE)?.inputFingerprint.kind,
+    };
+  } finally {
+    lifecycle.stop();
+    await lifecycle.stopped();
+    vi.mocked(watch).mockReset();
+  }
 }
 
 async function flush(): Promise<void> {
@@ -489,7 +668,11 @@ describe("the start sequence", () => {
     const reason = "its inputs changed while it ran: packages/a/src/a.ts";
     const { store, log } = await begun(
       scripted({
-        verdicts: [FINGERPRINTED, { fingerprinted: false, reason }],
+        verdicts: [
+          FINGERPRINTED,
+          FINGERPRINTED,
+          { fingerprinted: false, reason },
+        ],
       }),
     );
     expect({
@@ -622,6 +805,97 @@ describe("the start sequence", () => {
     }).toStrictEqual({ runs: ["a"], unstored: [] });
   });
 });
+
+describe(
+  "protecting the discovery's test modules",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D1987: a discovery whose test module a declared pattern covers reads current once the start sequence ends", async () => {
+      const outcome = await inTempDir((dir) => declaredModuleStart(dir));
+      expect(outcome).toStrictEqual({
+        held: true,
+        idle: true,
+        discoveryFreshness: "current",
+        storedFingerprint: "digest",
+      });
+    });
+
+    it("D1988: a declared test module edited during the discovery's job leaves the discovery stored not fingerprinted", async () => {
+      const outcome = await inTempDir((dir) =>
+        declaredModuleStart(dir, (module, handled) => {
+          writeFileSync(module, "it('t', () => {});\n// an edit\n");
+          // The access time stays current for the reason the helper gives; only the modification time moves ahead.
+          utimesSync(module, new Date(), new Date(Date.now() + 60_000));
+          // One watch covers both files and reports in order, so the job ends only after the edit's events were dropped.
+          writeFileSync(join(dirname(module), SENTINEL), "a sentinel\n");
+          return eventually(() =>
+            handled.some((name) => basename(name) === SENTINEL),
+          );
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        held: true,
+        idle: true,
+        discoveryFreshness: "unknown",
+        storedFingerprint: "not-fingerprinted",
+      });
+    });
+
+    it("D1989: an input event while the discovery's test modules are protected leaves the discovery stored not fingerprinted", async () => {
+      const reason = "its inputs changed while it ran: packages/a/src/a.ts";
+      const { store } = await begun(
+        scripted({
+          verdicts: [FINGERPRINTED, { fingerprinted: false, reason }],
+        }),
+      );
+      expect(store.discoveryFingerprints).toStrictEqual([
+        { kind: "not-fingerprinted" },
+      ]);
+    });
+
+    it("D1990: the test modules of the discovery an earlier life stored are protected before the new discovery's", async () => {
+      const earlier = discovery(discoveredWithTest("old"));
+      const store = new RecordingStore();
+      store.discoveries.push(earlier);
+      const { inputs } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          store,
+        ),
+      );
+      expect(inputs.protected).toStrictEqual([
+        earlier,
+        discovery(discovered("a")),
+      ]);
+    });
+
+    it("D2052: a store whose read of the earlier life's discovery throws still lets begin return and the start sequence reach idle, with the error logged", async () => {
+      const started = daemon(
+        confirmed("a"),
+        new ScriptedExecutor({
+          ended: true,
+          value: discovery(discovered("a")),
+        }),
+        new FirstReadFailingStore(),
+      );
+      const begin = settle(() => started.lifecycle.begin());
+      await flush();
+      expect({
+        returned: begin === undefined,
+        logged: started.log.entries.some((entry) =>
+          entry.startsWith(
+            "error: reading the latest stored discovery's test modules",
+          ),
+        ),
+        idle: started.log.entries.includes(IDLE_ENTRY),
+      }).toStrictEqual({ returned: true, logged: true, idle: true });
+    });
+  },
+);
 
 describe("the activity and the jobs that stored nothing", () => {
   it("D1454: while a run is in progress, the activity names its workspace", async () => {

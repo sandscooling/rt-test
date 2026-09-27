@@ -639,6 +639,126 @@ describe("the selection policy version", () => {
   });
 });
 
+describe("declared non-inputs", () => {
+  const DECLARATION = "rt-test.json";
+
+  function declaring(...patterns: string[]): Record<string, string> {
+    return { [DECLARATION]: JSON.stringify({ nonInputs: patterns }) };
+  }
+
+  /** The path reports for `change` with `pattern` declared, and with no `rt-test.json`. */
+  async function pathReports(pattern: string, change: readonly string[]) {
+    const reports = (outcome: Settled<SelectionOutcome>) =>
+      from(outcome, ({ paths }) => paths);
+    return {
+      declared: reports(
+        await select({ ...THREE_APPS, files: declaring(pattern) }, change),
+      ),
+      undeclared: reports(await select(THREE_APPS, change)),
+    };
+  }
+
+  /** The project-wide fallbacks a change to `rt-test.json` raised. */
+  function declarationFallbacks(outcome: Settled<SelectionOutcome>) {
+    return from(outcome, ({ fallbacks }) =>
+      fallbacks.filter(({ trigger }) => trigger === "non-inputs-file"),
+    );
+  }
+
+  const DECLARATION_FALLBACK = [
+    {
+      path: DECLARATION,
+      trigger: "non-inputs-file",
+      scope: "project",
+      workspaces: ["packages/app1", "packages/app2", "packages/app3"],
+    },
+  ];
+
+  it("D2009: a changed path a declared pattern matches selects nothing, raises no trigger, and says rt-test.json declares it through that pattern", async () => {
+    const outcome = await select({ ...THREE_APPS, files: declaring("*.md") }, [
+      "README.md",
+    ]);
+    expect(
+      from(outcome, ({ paths, workspaces }) => ({
+        selected: workspaces.map(({ path }) => path),
+        triggers: paths[0]?.triggers,
+        kind: paths[0]?.nothingSelected?.kind,
+        namesFile: paths[0]?.nothingSelected?.detail.includes(DECLARATION),
+        namesPattern: paths[0]?.nothingSelected?.detail.includes("*.md"),
+      })),
+    ).toEqual({
+      selected: [],
+      triggers: [],
+      kind: "declared-non-input",
+      namesFile: true,
+      namesPattern: true,
+    });
+  });
+
+  it("D2010: a test module the discovery lists selects its workspace though a declared pattern matches it, and an unlisted file beside it selects nothing", async () => {
+    const outcome = await select(
+      { vitest: { app: {} }, files: declaring("packages/app/**") },
+      ["packages/app/unit.test.ts", "packages/app/src/x.ts"],
+    );
+    expect(
+      from(outcome, ({ paths }) =>
+        paths.map(({ selected }) => selected.map(({ workspace }) => workspace)),
+      ),
+    ).toEqual([["packages/app"], []]);
+  });
+
+  it("D2011: a manifest, a lockfile and a Vitest config file select as they do with no rt-test.json, though a declared pattern matches each", async () => {
+    const change = [
+      "packages/lib/package.json",
+      "packages/lib/yarn.lock",
+      "packages/lib/vitest.config.ts",
+    ];
+    const { declared, undeclared } = await pathReports("**", change);
+    expect(declared).toEqual(undeclared);
+  });
+
+  it("D2045: a Vite config file selects as it does with no rt-test.json, though a declared pattern matches it", async () => {
+    const { declared, undeclared } = await pathReports("**", [
+      "packages/lib/vite.config.ts",
+    ]);
+    expect(declared).toEqual(undeclared);
+  });
+
+  it("D2046: pnpm-workspace.yaml selects as it does with no rt-test.json, though a declared pattern matches it", async () => {
+    const { declared, undeclared } = await pathReports("*.yaml", [
+      "pnpm-workspace.yaml",
+    ]);
+    expect(declared).toEqual(undeclared);
+  });
+
+  it("D2012: a change to rt-test.json is a project-wide fallback with its own trigger", async () => {
+    expect(
+      declarationFallbacks(
+        await select({ ...THREE_APPS, files: declaring("docs/**") }, [
+          DECLARATION,
+        ]),
+      ),
+    ).toEqual(DECLARATION_FALLBACK);
+  });
+
+  it("D2013: a change to rt-test.json is still that fallback when a declared pattern matches its name", async () => {
+    expect(
+      declarationFallbacks(
+        await select({ ...THREE_APPS, files: declaring("**") }, [DECLARATION]),
+      ),
+    ).toEqual(DECLARATION_FALLBACK);
+  });
+
+  it("D2014: a selection carries policy version 3", async () => {
+    const outcome = await select({ vitest: { app: {} } }, [
+      "packages/app/src/x.ts",
+    ]);
+    expect("policyVersion" in outcome ? outcome.policyVersion : outcome).toBe(
+      3,
+    );
+  });
+});
+
 describe("changed paths outside the consumer root", () => {
   function refusal(outcome: Settled<SelectionOutcome>) {
     return "reason" in outcome

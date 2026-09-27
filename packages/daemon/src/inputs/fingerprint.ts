@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { posix } from "node:path";
 import { SELECTION_POLICY_VERSION } from "../selection/selection-types.js";
 import { VITEST_ADAPTER_VERSION } from "../vitest/adapter-version.js";
 import type {
@@ -15,6 +14,7 @@ import {
   DIGEST_ENCODING,
   type InputDigests,
 } from "./input-inventory.js";
+import { discoveredTestModules, workspaceTestModules } from "./non-inputs.js";
 
 const ENTRY_SEPARATOR = "\n";
 const MISSING_CODE = "ENOENT";
@@ -109,7 +109,7 @@ export function workspaceFingerprint(
   reads = new SnapshotReads(project.root),
 ): FingerprintResult {
   const { vitestVersion } = reads;
-  const inputs = workspaceInputs(project, listedTestModules(entry));
+  const inputs = workspaceInputs(project, workspaceTestModules(entry));
   const modules = unselectedModuleDigests(inputs, reads);
   if (!modules.ok) return modules;
   return {
@@ -130,10 +130,7 @@ export function discoveryFingerprint(
   reads = new SnapshotReads(project.root),
 ): FingerprintResult {
   const { vitestVersion } = reads;
-  const inputs = workspaceInputs(
-    project,
-    discovery.workspaces.flatMap(listedTestModules),
-  );
+  const inputs = workspaceInputs(project, discoveredTestModules(discovery));
   const modules = unselectedModuleDigests(inputs, reads);
   if (!modules.ok) return modules;
   return {
@@ -148,28 +145,6 @@ export function discoveryFingerprint(
       ]),
     }),
   };
-}
-
-/** A test module's path relative to the consumer root; its module path is relative to its workspace's directory. */
-export function testModuleFile(
-  workspacePath: string,
-  modulePath: string,
-): string {
-  return posix.normalize(posix.join(workspacePath, modulePath));
-}
-
-function listedTestModules(entry: WorkspaceDiscovery): string[] {
-  if (entry.status !== "discovered") return [];
-  const modulePaths = [
-    ...entry.tests.map((test) => test.identity.modulePath),
-    ...entry.failedModules.map((module) => module.modulePath),
-    ...entry.typecheckModules.map((module) => module.modulePath),
-  ];
-  return [
-    ...new Set(
-      modulePaths.map((path) => testModuleFile(entry.workspace.path, path)),
-    ),
-  ];
 }
 
 type ModuleDigests =
@@ -221,10 +196,7 @@ export function testModuleChangedSince(
   discovery: TestDiscovery,
   since: number,
 ): string | undefined {
-  const inputs = workspaceInputs(
-    project,
-    discovery.workspaces.flatMap(listedTestModules),
-  );
+  const inputs = workspaceInputs(project, discoveredTestModules(discovery));
   for (const path of inputs.testModules) {
     if (inputs.selected.digests.has(path)) continue;
     const modified = modifiedAt(absoluteInputPath(project.root, path));

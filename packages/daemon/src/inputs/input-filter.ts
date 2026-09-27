@@ -1,5 +1,15 @@
 import { realpathSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from "node:path";
+import { WINDOWS } from "../daemon/endpoint.js";
 import {
   readCheckedIgnored,
   readIgnoredPaths,
@@ -14,6 +24,7 @@ import {
   POSIX_SEPARATOR,
   relativePosixPath,
 } from "../vitest/find-workspaces.js";
+import type { NonInputMatch } from "./non-inputs.js";
 
 const UNREAD_IGNORED_PREFIX =
   "git's ignored paths could not be read, so every file there counts as an input";
@@ -21,8 +32,9 @@ const UNREAD_IGNORED_PREFIX =
 /**
  * Decides which paths under the consumer root are inputs. A path is excluded when a segment of it is a skipped
  * directory name, when it is or lies under one of the exclusions, or when git ignores it or a directory above it.
- * One filter serves one reconciliation: git's listing is read when it opens, and a path created later is asked
- * about through `check`.
+ * A file is also not an input when `declares` names the pattern that makes it a declared non-input. One filter
+ * serves one reconciliation: git's listing is read when it opens, and a path created later is asked about through
+ * `check`.
  */
 export class InputFilter {
   readonly #root: string;
@@ -35,19 +47,29 @@ export class InputFilter {
   /** Repositories whose listing failed, asked about once per filter. */
   readonly #failed = new Set<string>();
   readonly #unread = new Set<string>();
+  readonly #declared: NonInputMatch;
 
-  private constructor(root: string, exclusions: readonly string[]) {
+  private constructor(
+    root: string,
+    exclusions: readonly string[],
+    declared: NonInputMatch,
+  ) {
     this.#root = root;
     this.#exclusions = exclusions.map(canonicalPath);
+    this.#declared = declared;
   }
 
-  /** `root` is the consumer root's real path; `exclusions` are absolute paths, each excluded with all it holds. */
+  /**
+   * `root` is the consumer root's real path; `exclusions` are absolute paths, each excluded with all it holds;
+   * `declared` names the consumer's declared non-inputs, as it stands whenever it is asked.
+   */
   static async open(
     root: string,
     exclusions: readonly string[],
+    declared: NonInputMatch,
     signal: AbortSignal,
   ): Promise<InputFilter> {
-    const filter = new InputFilter(root, exclusions);
+    const filter = new InputFilter(root, exclusions, declared);
     if (enclosingRepository(root) !== undefined) {
       await filter.#addRepository(root, signal);
     }
@@ -83,10 +105,20 @@ export class InputFilter {
     ) {
       return true;
     }
-    if (this.#exclusions.some((excluded) => liesInside(excluded, path))) {
+    if (this.#exclusions.some((excluded) => liesInsideOnHost(excluded, path))) {
       return true;
     }
     return this.#isIgnored(path);
+  }
+
+  /**
+   * The pattern that makes the file at `path` a declared non-input. A directory a pattern matches is still walked
+   * and watched, since a file the declaration may not remove can lie under it.
+   */
+  declares(path: string): string | undefined {
+    const fromRoot = relative(this.#root, path);
+    if (fromRoot === "" || climbsOut(fromRoot, sep)) return undefined;
+    return this.#declared(fromRoot.split(sep).join(POSIX_SEPARATOR));
   }
 
   /** Whether git must be asked about `path` before it counts: it lies in a repository whose listing predates it. */
@@ -205,6 +237,18 @@ function canonicalPath(path: string): string {
       missing.unshift(basename(current));
     }
   }
+}
+
+/**
+ * Whether `path` is `directory` or lies under it, compared as the host's file system compares: case folded on
+ * Windows. The path module is chosen at call time, so the exclusions and the `rt-test.json` trigger agree.
+ */
+export function liesInsideOnHost(directory: string, path: string): boolean {
+  const host = process.platform === WINDOWS ? win32 : posix;
+  const fromDirectory = host.relative(directory, path);
+  return !(
+    climbsOut(fromDirectory, host.sep) || host.isAbsolute(fromDirectory)
+  );
 }
 
 /** The absolute path of a root-relative input path. */

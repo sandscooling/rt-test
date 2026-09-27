@@ -194,6 +194,8 @@ export interface AnswerContext {
   readonly inputs: InputFacts;
   /** Only those whose own inputs failed; `inputs` says when none can be computed. */
   readonly unfingerprintedWorkspaces: readonly UnfingerprintedWorkspace[];
+  /** Why every file stays an input, present only while the daemon's `rt-test.json` cannot be used. */
+  readonly nonInputsUnusable?: string;
   readonly activity: DaemonActivity;
   readonly unstoredJobs: readonly UnstoredJob[];
 }

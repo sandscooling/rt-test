@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -29,11 +30,17 @@ import {
 import { gitSources } from "../src/inputs/git-sources.js";
 import { readEntryDigest } from "../src/inputs/input-inventory.js";
 import { InputTracker } from "../src/inputs/input-tracker.js";
+import {
+  declaredNonInputs,
+  readNonInputs,
+  type NonInputsDeclaration,
+} from "../src/inputs/non-inputs.js";
 import { readCheckedIgnored } from "../src/selection/git-ignored.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
+import { readJson } from "../src/vitest/find-workspaces.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
   eventually,
@@ -47,6 +54,7 @@ import {
   inTempDir,
   onPlatform,
   runTempRoot,
+  settle,
   within,
 } from "./harness.js";
 
@@ -71,6 +79,15 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: vi.fn<typeof actual.homedir>(actual.homedir) };
 });
 
+vi.mock("../src/vitest/find-workspaces.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/vitest/find-workspaces.js")>();
+  return {
+    ...actual,
+    readJson: vi.fn<typeof actual.readJson>(actual.readJson),
+  };
+});
+
 vi.mock("../src/selection/git-ignored.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../src/selection/git-ignored.js")>();
@@ -84,6 +101,9 @@ vi.mock("../src/selection/git-ignored.js", async (importOriginal) => {
 
 const { watch: realWatch } =
   await vi.importActual<typeof import("node:fs")>("node:fs");
+const { readJson: realReadJson } = await vi.importActual<
+  typeof import("../src/vitest/find-workspaces.js")
+>("../src/vitest/find-workspaces.js");
 
 const ROOT_WORKSPACE = ".";
 const STATE_DIRECTORY = ".rt-test";
@@ -101,6 +121,11 @@ const PERIODIC_STARTED =
 const LOST_INPUT_SET_RETRY = 10_000;
 const LOST_INPUT_SET_RETRY_STARTED =
   "input reconciliation started: an input event arrived while the input set could not be established";
+const DECLARATION_FILE = "rt-test.json";
+const DECLARATION_CHANGED_STARTED =
+  "input reconciliation started: rt-test.json, which declares the non-inputs, changed";
+const UNUSABLE_JSON_REASON =
+  "rt-test.json declares no non-inputs, so every file stays an input: it is not readable JSON (";
 const TRACKER_MODULE = new URL(
   "../src/inputs/input-tracker.ts",
   import.meta.url,
@@ -461,6 +486,70 @@ async function withFakeTimeouts<T>(body: () => Promise<T>): Promise<T> {
   } finally {
     vi.useRealTimers();
   }
+}
+
+/** The text of an `rt-test.json` declaring `patterns`. */
+function declaring(...patterns: string[]): string {
+  return JSON.stringify({ nonInputs: patterns });
+}
+
+/** The root workspace's discovery, listing `testModules`. */
+function discoveryListing(
+  root: string,
+  testModules: readonly string[],
+): TestDiscovery {
+  return { workspaces: [workspaceAt(root, testModules)], notRead: [] };
+}
+
+/** Runs `write`, then says whether a reconciliation ended after it, once the paths it left unread are read. */
+async function reconciledAfter(
+  tracker: InputTracker,
+  write: () => void,
+): Promise<boolean> {
+  const last = tracker.facts().lastReconciledAt;
+  write();
+  const reconciled = await eventually(() => {
+    const facts = tracker.facts();
+    return (
+      facts.lastReconciledAt !== last &&
+      facts.reconciliation.state === "complete"
+    );
+  }, SETTLE_MS);
+  await drained(tracker);
+  return reconciled;
+}
+
+/** For each path, the pattern that makes it a declared non-input under `patterns`, protecting no test module. */
+function matchedBy(
+  patterns: readonly string[],
+  paths: readonly string[],
+): (string | undefined)[] {
+  const match = declaredNonInputs(
+    { file: DECLARATION_FILE, state: "declared", patterns },
+    new Set(),
+  );
+  return paths.map((path) => match(path));
+}
+
+/** What the reader makes of a consumer root whose `rt-test.json` holds `text`, or what it threw. */
+function declarationIn(
+  text: string,
+): Promise<NonInputsDeclaration | { thrown: string }> {
+  return inTempDir((root) => {
+    writeFileSync(join(root, DECLARATION_FILE), text);
+    return settle(() => readNonInputs(root));
+  });
+}
+
+/** The state of the declaration the reader makes of `text`, or what it threw. */
+async function declarationStateIn(text: string): Promise<string> {
+  const declaration = await declarationIn(text);
+  return "state" in declaration ? declaration.state : declaration.thrown;
+}
+
+/** `count` distinct patterns, each a valid one. */
+function patternList(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `docs/${index}.md`);
 }
 
 /** The key the environment holds the executable search path under, which Windows spells `Path`. */
@@ -1526,5 +1615,388 @@ describe("the git files a reconciliation watches", () => {
       }
     });
     expect(outcome).toStrictEqual({ config: true, xdg: true });
+  });
+});
+
+describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
+  it("D1991: a job open while a declared test module is protected stays fingerprinted, and the protection raises the input revision", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("src/**"),
+        "src/a.test.ts": "it('t', () => {});\n",
+        "b.ts": "",
+      });
+      return tracking(root, async ({ tracker }) => {
+        const revision = tracker.facts().revision;
+        const mark = tracker.beginJob();
+        await tracker.protectTestModules(
+          discoveryListing(root, ["src/a.test.ts"]),
+        );
+        const verdict = await tracker.endJob(mark);
+        return {
+          fingerprinted: verdict.fingerprinted,
+          revisionRose: tracker.facts().revision > revision,
+        };
+      });
+    });
+    expect(outcome).toStrictEqual({ fingerprinted: true, revisionRose: true });
+  });
+
+  it("D1992: a protected test module the next discovery no longer lists is a declared non-input again", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("src/**"),
+        "src/a.test.ts": "it('t', () => {});\n",
+        "b.ts": "",
+      });
+      return tracking(root, async (tracked) => {
+        const before = tracked.fingerprint();
+        await tracked.tracker.protectTestModules(
+          discoveryListing(root, ["src/a.test.ts"]),
+        );
+        const whileProtected = tracked.fingerprint();
+        await tracked.tracker.protectTestModules(discoveryListing(root, []));
+        return {
+          protectionMoved: whileProtected !== before,
+          restored: tracked.fingerprint() === before,
+        };
+      });
+    });
+    expect(outcome).toStrictEqual({ protectionMoved: true, restored: true });
+  });
+
+  it("D1993: writing rt-test.json takes the file it declares out of the inputs, and deleting it puts the file back", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, { "README.md": "# a\n", "src/a.ts": "" });
+      return tracking(root, async (tracked) => {
+        const before = tracked.fingerprint();
+        writeFileSync(join(root, DECLARATION_FILE), declaring("README.md"));
+        const declared = await movesFrom(tracked, before);
+        const whileDeclared = tracked.fingerprint();
+        rmSync(join(root, DECLARATION_FILE));
+        await movesFrom(tracked, whileDeclared);
+        return { declared, restored: tracked.fingerprint() === before };
+      });
+    });
+    expect(outcome).toStrictEqual({ declared: true, restored: true });
+  });
+
+  it("D1994: an edit to rt-test.json that declares the same patterns leaves the fingerprint as it was once its reconciliation ends", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("README.md"),
+        "README.md": "# a\n",
+        "src/a.ts": "",
+      });
+      return tracking(root, async ({ tracker, fingerprint }) => {
+        const before = fingerprint();
+        const reconciled = await reconciledAfter(tracker, () =>
+          writeFileSync(
+            join(root, DECLARATION_FILE),
+            JSON.stringify({ nonInputs: ["README.md"] }, null, 2),
+          ),
+        );
+        return { reconciled, unchanged: fingerprint() === before };
+      });
+    });
+    expect(outcome).toStrictEqual({ reconciled: true, unchanged: true });
+  });
+
+  it("D1995: an edit to a declared file leaves the fingerprint as it was", async () => {
+    const unchanged = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/a.md": "# a\n",
+        "src/a.ts": "",
+      });
+      return tracking(root, (tracked) =>
+        leavesFingerprint(tracked, root, () =>
+          appendFileSync(join(root, "docs/a.md"), "more\n"),
+        ),
+      );
+    });
+    expect(unchanged).toBe(true);
+  });
+
+  it("D1996: the first reconciliation counts neither a declared file nor rt-test.json among the inputs", async () => {
+    const ended = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/a.md": "",
+        "src/a.ts": "",
+      });
+      const log = memoryLog();
+      return tracking(
+        root,
+        async () =>
+          log.entries.filter((entry) =>
+            entry.startsWith("input reconciliation ended"),
+          ),
+        { log },
+      );
+    });
+    expect(ended).toStrictEqual([
+      "input reconciliation ended: 1 inputs, 0 changed, revision 0",
+    ]);
+  });
+
+  it("D1997: the declaration is logged after the first reconciliation and after one that finds it changed, and not after one that finds it the same", async () => {
+    const logged = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/a.md": "",
+        "src/a.ts": "",
+      });
+      const log = memoryLog();
+      return tracking(
+        root,
+        async ({ tracker }) => {
+          await reconciledAfter(tracker, () =>
+            writeFileSync(
+              join(root, DECLARATION_FILE),
+              JSON.stringify({ nonInputs: ["docs/**"] }, null, 2),
+            ),
+          );
+          await reconciledAfter(tracker, () =>
+            writeFileSync(
+              join(root, DECLARATION_FILE),
+              declaring("docs/**", "*.md"),
+            ),
+          );
+          return log.entries.filter((entry) => entry.startsWith("non-inputs"));
+        },
+        { log },
+      );
+    });
+    expect(logged).toStrictEqual([
+      'non-inputs in effect from rt-test.json: "docs/**"',
+      'non-inputs in effect from rt-test.json: "docs/**", "*.md"',
+    ]);
+  });
+
+  it("D1998: while rt-test.json is not valid JSON, the current inputs carry the reason every file stays an input", async () => {
+    const carried = await inTempDir((root) => {
+      writeTree(root, { [DECLARATION_FILE]: "{ not json", "src/a.ts": "" });
+      return tracking(
+        root,
+        async ({ tracker }) =>
+          tracker
+            .current()
+            .nonInputsUnusable?.startsWith(UNUSABLE_JSON_REASON) === true,
+      );
+    });
+    expect(carried).toBe(true);
+  });
+
+  it("D1999: an rt-test.json deleted between the reader's check that it exists and its read declares nothing, with no reason", async () => {
+    const declaration = await inTempDir((root) => {
+      writeFileSync(join(root, DECLARATION_FILE), declaring("docs/**"));
+      vi.mocked(readJson).mockImplementationOnce((file) => {
+        rmSync(file);
+        return realReadJson(file);
+      });
+      try {
+        return readNonInputs(root);
+      } finally {
+        vi.mocked(readJson).mockReset();
+      }
+    });
+    expect(declaration).toStrictEqual({
+      file: DECLARATION_FILE,
+      state: "absent",
+    });
+  });
+
+  it("D2008: with process.platform read as win32, an event naming RT-Test.json, rt-test.json in another case, starts a reconciliation", async () => {
+    const started = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const log = memoryLog();
+      const { listeners, paths } = capturingWatches();
+      try {
+        return await onPlatform("win32", () =>
+          tracking(
+            root,
+            async () => {
+              listeners[paths.indexOf(realpathSync.native(root))]?.(
+                "change",
+                "RT-Test.json",
+              );
+              return eventually(
+                () => log.entries.includes(DECLARATION_CHANGED_STARTED),
+                SETTLE_MS,
+              );
+            },
+            { log },
+          ),
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(started).toBe(true);
+  });
+
+  it("D2044: once an rt-test.json that was not valid JSON is fixed and a reconciliation ends, the current inputs carry no reason", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: "{ not json",
+        "README.md": "",
+        "src/a.ts": "",
+      });
+      return tracking(root, async ({ tracker }) => {
+        const before =
+          tracker
+            .current()
+            .nonInputsUnusable?.startsWith(UNUSABLE_JSON_REASON) === true;
+        const reconciled = await reconciledAfter(tracker, () =>
+          writeFileSync(join(root, DECLARATION_FILE), declaring("README.md")),
+        );
+        return {
+          before,
+          reconciled,
+          after: tracker.current().nonInputsUnusable,
+        };
+      });
+    });
+    expect(outcome).toStrictEqual({
+      before: true,
+      reconciled: true,
+      after: undefined,
+    });
+  });
+
+  it("D2050: with process.platform read as linux, over the inotify model, a package.json created in a new directory a declared pattern matches is an input, and so is its edit", async () => {
+    const outcome = await inTempDir(async (root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/a.md": "",
+        "src/a.ts": "",
+      });
+      vi.mocked(watch).mockImplementation(inotifyModel);
+      try {
+        return await onPlatform("linux", () =>
+          tracking(root, async (tracked) => {
+            const before = tracked.fingerprint();
+            writeTree(root, { "docs/pkg/package.json": "{}" });
+            const created = await movesFrom(tracked, before);
+            const afterCreate = tracked.fingerprint();
+            appendFileSync(join(root, "docs/pkg/package.json"), "\n");
+            return { created, edited: await movesFrom(tracked, afterCreate) };
+          }),
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(outcome).toStrictEqual({ created: true, edited: true });
+  });
+
+  it("D2051: moving a directory a declared pattern matches out of the root removes the package.json it held from the inputs", async () => {
+    const moved = await inTempDir(async (root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/pkg/package.json": "{}",
+        "src/a.ts": "",
+      });
+      const outside = `${root}-moved`;
+      try {
+        return await tracking(root, async (tracked) => {
+          const before = tracked.fingerprint();
+          renameSync(join(root, "docs/pkg"), outside);
+          return movesFrom(tracked, before);
+        });
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+    expect(moved).toBe(true);
+  });
+});
+
+describe("the declared patterns", () => {
+  it("D2040: an rt-test.json saved with a UTF-8 byte-order mark declares its patterns", async () => {
+    expect(await declarationIn(`﻿${declaring("docs/**")}`)).toStrictEqual({
+      file: DECLARATION_FILE,
+      state: "declared",
+      patterns: ["docs/**"],
+    });
+  });
+
+  it("D2047: a tsconfig file stays an input though a declared pattern matches it", () => {
+    expect(
+      matchedBy(
+        ["**/*.json"],
+        ["packages/lib/tsconfig.base.json", "packages/lib/data.json"],
+      ),
+    ).toStrictEqual([undefined, "**/*.json"]);
+  });
+
+  it("D2048: a jsconfig file stays an input though a declared pattern matches it", () => {
+    expect(
+      matchedBy(["**/*.json"], ["jsconfig.json", "data.json"]),
+    ).toStrictEqual([undefined, "**/*.json"]);
+  });
+
+  it("D2049: a trailing ** or * also matches nothing, so docs/** matches docs and README* matches README", () => {
+    expect(matchedBy(["docs/**", "README*"], ["docs", "README"])).toStrictEqual(
+      ["docs/**", "README*"],
+    );
+  });
+
+  it("D2000: ? matches exactly one character of a name", () => {
+    expect(
+      matchedBy(["docs/?.md"], ["docs/a.md", "docs/ab.md", "docs/.md"]),
+    ).toStrictEqual(["docs/?.md", undefined, undefined]);
+  });
+
+  it("D2001: a pattern matches a path only in its own case", () => {
+    expect(matchedBy(["docs/**"], ["docs/a.md", "Docs/a.md"])).toStrictEqual([
+      "docs/**",
+      undefined,
+    ]);
+  });
+
+  it("D2002: * matches within one path segment and never across a /", () => {
+    expect(matchedBy(["docs/*"], ["docs/a.md", "docs/a/b.md"])).toStrictEqual([
+      "docs/*",
+      undefined,
+    ]);
+  });
+
+  it("D2003: rt-test.json may declare 256 patterns, and one declaring 257 declares nothing", async () => {
+    const states = {
+      atBound: await declarationStateIn(declaring(...patternList(256))),
+      overBound: await declarationStateIn(declaring(...patternList(257))),
+    };
+    expect(states).toStrictEqual({
+      atBound: "declared",
+      overBound: "unusable",
+    });
+  });
+
+  it("D2004: a pattern with a .. segment makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaring("docs/../src/**"))).toBe(
+      "unusable",
+    );
+  });
+
+  it("D2005: a pattern using ** inside a segment makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaring("docs/a**"))).toBe("unusable");
+  });
+
+  it("D2006: a pattern beginning with ! makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaring("!docs/**"))).toBe("unusable");
+  });
+
+  it("D2007: a nonInputs array holding a number makes the declaration unusable", async () => {
+    expect(
+      await declarationStateIn(JSON.stringify({ nonInputs: ["docs/**", 3] })),
+    ).toBe("unusable");
+  });
+
+  it("D2021: an rt-test.json whose top level is an array makes the declaration unusable", async () => {
+    expect(await declarationStateIn(JSON.stringify(["docs/**"]))).toBe(
+      "unusable",
+    );
   });
 });

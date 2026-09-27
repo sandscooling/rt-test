@@ -411,5 +411,54 @@
     "file": "packages/cli/src/answer-text.ts",
     "old": "  delete fields[\"protocolVersion\"];",
     "new": "  delete fields[\"protocolVersion\"];\n  delete fields[\"inputs\"];"
+  },
+  {
+    "id": "D2015",
+    "defect": "The start listing leaves out the declaration, so the consumer trusts a start without seeing which files it declares no test reads.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "    ...nonInputLines(plan.nonInputs),\n",
+    "new": ""
+  },
+  {
+    "id": "D2016",
+    "defect": "start --json leaves out the declaration.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "    nonInputs: plan.nonInputs,\n",
+    "new": ""
+  },
+  {
+    "id": "D2017",
+    "defect": "The start listing says nothing when rt-test.json cannot be used, so a consumer trusts a start believing their declaration applies.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "      return [`warning: ${oneLine(declaration.reason)}`];",
+    "new": "      return [];"
+  },
+  {
+    "id": "D2018",
+    "defect": "A human summary or status never prints why the daemon's rt-test.json cannot be used.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    ...(answer.nonInputsUnusable === undefined\n      ? []\n      : [`Warning: ${firstLine(answer.nonInputsUnusable)}`]),\n",
+    "new": ""
+  },
+  {
+    "id": "D2041",
+    "defect": "The listing prints a pattern bare, so a pattern with a trailing space reads exactly as the pattern without it.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "              (pattern) => `${INDENT}${JSON.stringify(pattern)}`,",
+    "new": "              (pattern) => `${INDENT}${oneLine(pattern)}`,"
+  },
+  {
+    "id": "D2042",
+    "defect": "With no rt-test.json the listing says nothing about non-inputs, though the start plan must say none exists.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "      return [`Non-inputs: none, since there is no ${declaration.file}`];",
+    "new": "      return [];"
+  },
+  {
+    "id": "D2043",
+    "defect": "An rt-test.json declaring no pattern leaves no non-inputs line in the listing.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "        ? [`Non-inputs: none, since ${declaration.file} declares no pattern`]",
+    "new": "        ? []"
   }
 ]

@@ -2662,7 +2662,7 @@
   {
     "id": "D1825",
     "defect": "A module path holding .. is joined without normalizing, so its test never lies under the folder it is in.",
-    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
     "old": "  return posix.normalize(posix.join(workspacePath, modulePath));",
     "new": "  return `${workspacePath}/${modulePath}`;"
   },
@@ -2894,8 +2894,8 @@
     "id": "D1879",
     "defect": "A discovery is stored under its digest although a listed test module no watch covers may have changed while it ran.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      return changed === undefined\n        ? current.discoveryFingerprint(discovery)",
-    "new": "      return true\n        ? current.discoveryFingerprint(discovery)"
+    "old": "    if (unwatched !== undefined)\n      return { fingerprinted: false, reason: unwatched };\n",
+    "new": ""
   },
   {
     "id": "D1880",
@@ -2957,7 +2957,7 @@
     "id": "D1888",
     "defect": "An event naming an edited input is read but its new digest is never kept, so the fingerprint and the revision stay as they were.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "      this.#state.set(relative, entry.digest);\n",
+    "old": "    this.#state.set(relative, digest);\n",
     "new": ""
   },
   {
@@ -3075,7 +3075,7 @@
   {
     "id": "D1907",
     "defect": "The periodic reconciliation runs 10 minutes after the last one ended, not 5, doubling how long an unreported change goes unseen.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/reconcile-schedule.ts",
     "old": "export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;",
     "new": "export const RECONCILE_INTERVAL_MS = 10 * 60 * 1000;"
   },
@@ -3300,7 +3300,7 @@
     "id": "D1960",
     "defect": "A check-ignore that fails for a path created after a reconciliation is never named in git's unread reasons or the log, though the path counts as an input.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "      await filter.check(unknown, this.#abort.signal);\n      this.#reportGitUnread(filter);\n",
+    "old": "      await filter.check(unknown, this.#abort.signal);\n      this.#git.report(filter);\n",
     "new": "      await filter.check(unknown, this.#abort.signal);\n"
   },
   {
@@ -3313,7 +3313,7 @@
   {
     "id": "D1962",
     "defect": "After a reconciliation that could not establish the input set, an event starts the next one at once, ignoring the 10 s back-off, so a continuous writer re-walks the tree back to back.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/reconcile-schedule.ts",
     "old": "      Math.max(0, endedAt + LOST_INPUT_SET_RETRY_MS - Date.now()),",
     "new": "      Math.min(0, endedAt + LOST_INPUT_SET_RETRY_MS - Date.now()),"
   },
@@ -3337,5 +3337,229 @@
     "file": "packages/daemon/src/inputs/input-filter.ts",
     "old": "    for (const failed of this.#failed) {\n      if (\n        liesInside(failed, path) &&\n        (found === undefined || liesInside(found, failed))\n      ) {\n        return undefined;\n      }\n    }\n    return found;",
     "new": "    return found;"
+  },
+  {
+    "id": "D1987",
+    "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return;\n    }\n    const bindings = this.#bindings(\"the discovery\", held, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n",
+    "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return;\n    }\n"
+  },
+  {
+    "id": "D1988",
+    "defect": "The check for test modules no watch covered runs after protection has moved them into the inputs, so a declared module edited during the discovery's job is skipped and the discovery is stored under a digest.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    await inputs.protectTestModules(discovery);\n",
+    "new": "    const guard = inputs.beginJob();\n    await inputs.protectTestModules(discovery);\n    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n"
+  },
+  {
+    "id": "D1989",
+    "defect": "The verdict of the job window around protection is dropped, so an input event while the discovery's test modules are protected leaves the discovery stored under a digest.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return guarded;",
+    "new": "    return verdict;"
+  },
+  {
+    "id": "D1990",
+    "defect": "The start sequence never protects the test modules of the discovery an earlier life stored, so the first reconciliation leaves a declared test module out of the inputs.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#protectStoredTestModules();\n    this.#parts.inputs.start();",
+    "new": "    this.#parts.inputs.start();"
+  },
+  {
+    "id": "D1991",
+    "defect": "Protection's own reads of the paths it moves into the inputs are recorded against every open job, so the discovery's guard window is never fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    const record = this.#quiet.delete(path)\n      ? () => undefined\n",
+    "new": "    const record = false\n      ? () => undefined\n"
+  },
+  {
+    "id": "D1992",
+    "defect": "A file read after it became a declared non-input is kept in the input set, so a test module the next discovery no longer lists stays an input.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (filter.declares(path) !== undefined) {\n      record(this.#state.remove(relative, path));\n      return;\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D1993",
+    "defect": "An event naming rt-test.json starts no reconciliation, so a new or deleted declaration is not applied until something else reconciles.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#requestReconciliation(NON_INPUTS_CHANGED_REASON);\n",
+    "new": ""
+  },
+  {
+    "id": "D1994",
+    "defect": "rt-test.json is not on the tracker's exclusions, so it is itself an input and a reformatting edit that declares the same patterns changes every fingerprint.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#exclusions = [...exclusions, this.#declarationFile];",
+    "new": "    this.#exclusions = [...exclusions];"
+  },
+  {
+    "id": "D1995",
+    "defect": "A reconciliation never reads rt-test.json, so a declared file stays an input and its edit changes the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#declared.read();\n",
+    "new": ""
+  },
+  {
+    "id": "D1996",
+    "defect": "The inventory keeps declared files among the inputs a reconciliation reads.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "          (path) => !excluded(path) && walk.filter.declares(path) === undefined,",
+    "new": "          (path) => !excluded(path),"
+  },
+  {
+    "id": "D1997",
+    "defect": "The declaration is logged after every reconciliation, not only after one that finds it different from the one in effect.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "      sameDeclaration(this.#logged, declaration)",
+    "new": "      false"
+  },
+  {
+    "id": "D1998",
+    "defect": "The current inputs drop the reason an unusable rt-test.json declares nothing, so no answer can carry it.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      facts,\n      ...declaration,\n      workspaceFingerprint: (entry) =>",
+    "new": "      facts,\n      workspaceFingerprint: (entry) =>"
+  },
+  {
+    "id": "D1999",
+    "defect": "An rt-test.json deleted between the existence check and the read is reported as unusable, with a reason, rather than as absent.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    return after === true\n",
+    "new": "    return true\n"
+  },
+  {
+    "id": "D2000",
+    "defect": "? matches only a literal question mark, so a pattern using it matches no file.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    (wanted, character) => wanted === ANY_CHARACTER || wanted === character,",
+    "new": "    (wanted, character) => wanted === character,"
+  },
+  {
+    "id": "D2001",
+    "defect": "A pattern's plain segment matches a path segment in any case, so docs/** makes Docs/a.md a declared non-input.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    return pattern === name;",
+    "new": "    return pattern.toLowerCase() === name.toLowerCase();"
+  },
+  {
+    "id": "D2002",
+    "defect": "A segment that is exactly * matches any number of segments, as ** does, so docs/* declares files in docs' subdirectories.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  return matchesSequence(pattern, path, GLOBSTAR, matchesSegment);",
+    "new": "  return matchesSequence(pattern, path, ANY_RUN, matchesSegment);"
+  },
+  {
+    "id": "D2003",
+    "defect": "The pattern bound refuses a declaration holding exactly 256 patterns.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  if (patterns.length > MAX_NON_INPUT_PATTERNS) {",
+    "new": "  if (patterns.length >= MAX_NON_INPUT_PATTERNS) {"
+  },
+  {
+    "id": "D2004",
+    "defect": "A pattern with a .. segment is accepted.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "const INVALID_SEGMENTS = [\"\", \".\", \"..\"];",
+    "new": "const INVALID_SEGMENTS = [\"\", \".\"];"
+  },
+  {
+    "id": "D2005",
+    "defect": "A pattern using ** inside a segment is accepted.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "      (segment) => segment !== GLOBSTAR && segment.includes(GLOBSTAR),",
+    "new": "      (segment) => segment === \"\","
+  },
+  {
+    "id": "D2006",
+    "defect": "A pattern beginning with ! is accepted, and reads as a plain name rather than the negation a consumer may mean.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "\"}\", \"!\"];",
+    "new": "\"}\"];"
+  },
+  {
+    "id": "D2007",
+    "defect": "A nonInputs array holding a non-string is not refused, so reading the declaration throws rather than declaring nothing with the reason.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    !Array.isArray(patterns) ||\n    !patterns.every((pattern) => typeof pattern === \"string\")\n",
+    "new": "    !Array.isArray(patterns)\n"
+  },
+  {
+    "id": "D2008",
+    "defect": "The tracker compares an event's path to rt-test.json exactly, while the exclusion folds case on Windows, so an event naming RT-Test.json is dropped with no reconciliation.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (liesInsideOnHost(this.#declarationFile, path)) {",
+    "new": "    if (path === this.#declarationFile) {"
+  },
+  {
+    "id": "D2019",
+    "defect": "A summary and a path status drop the reason the daemon's rt-test.json cannot be used, so a consumer reads every declared file staling results with no explanation.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      ...(inputs.nonInputsUnusable === undefined\n        ? {}\n        : { nonInputsUnusable: inputs.nonInputsUnusable }),\n",
+    "new": ""
+  },
+  {
+    "id": "D2021",
+    "defect": "An rt-test.json whose top level is an array is read as an object declaring no pattern, rather than as unusable.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {",
+    "new": "  if (typeof value !== \"object\" || value === null) {"
+  },
+  {
+    "id": "D2040",
+    "defect": "An rt-test.json saved with a UTF-8 byte-order mark is read as not valid JSON, so it declares nothing and every declared file stays an input.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    const json = text.startsWith(BYTE_ORDER_MARK)",
+    "new": "    const json = false"
+  },
+  {
+    "id": "D2044",
+    "defect": "Once an unusable rt-test.json is fixed and a reconciliation ends, the declaration in effect stays the unusable one, so answers still carry the old reason.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    this.#declaration = readNonInputs(this.#root);",
+    "new": "    this.#declaration =\n      this.#declaration?.state === NON_INPUTS_UNUSABLE\n        ? this.#declaration\n        : readNonInputs(this.#root);"
+  },
+  {
+    "id": "D2047",
+    "defect": "A tsconfig*.json file is not protected, so **/*.json makes an edit that changes import resolution a declared non-input.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "      TYPESCRIPT_CONFIG_NAME.test(posix.basename(path)) ||\n",
+    "new": ""
+  },
+  {
+    "id": "D2048",
+    "defect": "A jsconfig*.json file is not protected, so **/*.json makes it a declared non-input.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "      TYPESCRIPT_CONFIG_NAME.test(posix.basename(path)) ||",
+    "new": "      /^tsconfig.*\\.json$/.test(posix.basename(path)) ||"
+  },
+  {
+    "id": "D2049",
+    "defect": "A trailing ** or * fails to match nothing at the end, so docs/** does not declare a file named docs and README* does not declare README.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  while (pattern[patternIndex] === run) patternIndex += 1;\n",
+    "new": ""
+  },
+  {
+    "id": "D2050",
+    "defect": "An event for a new directory a declared pattern matches is dropped, so on Linux a package.json created inside it is never watched or read and its edits stale nothing until the periodic reconciliation.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "        lstatSync(absolutePath, { throwIfNoEntry: false })?.isDirectory() !==\n        true\n",
+    "new": "        true\n"
+  },
+  {
+    "id": "D2051",
+    "defect": "An event for a known directory a declared pattern matches is dropped, so moving a directory holding a package.json out of the root leaves that input in the set.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    const knownDirectory = this.#state.hasDirectory(path);",
+    "new": "    const knownDirectory = false;"
+  },
+  {
+    "id": "D2052",
+    "defect": "A throwing read of the earlier life's stored discovery escapes begin, so the daemon never runs its start sequence.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    let stored: TestDiscovery | undefined;\n    try {\n      stored = this.#latestResults().discovery?.discovery;\n    } catch (error) {\n      log.error(\"reading the latest stored discovery's test modules\", error);\n      return;\n    }\n",
+    "new": "    const stored = this.#latestResults().discovery?.discovery;\n"
   }
 ]
