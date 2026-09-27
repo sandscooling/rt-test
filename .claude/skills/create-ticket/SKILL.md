@@ -59,6 +59,8 @@ ticket uses these two limits.
 - **A claim about third-party behavior you did not read in installed source is a question** for
   `## Unverified Assumptions`, never an acceptance criterion.
 - **Never restate a figure another doc owns.** Cite the rule, requirement or ADR that holds it.
+- **An example the owner gives is one case until the owner calls it a pattern.** Before a criterion, sweep
+  or rule treats it as a class, ask whether it stands for one, and scope the text to the answer.
 - **Spawned agents only read and report.** You perform every file write.
 - **Bounded decisions go through `AskUserQuestion`; open-ended ones stay in prose.**
 

@@ -35,6 +35,8 @@ Substitute every `{cfg.KEY}` and `{{variable}}` with its literal value before it
   proposal may be granted `{cfg.requirements}`, `{cfg.adr_dir}` and `{cfg.glossary}`.
 - **Real fixes only.** A comment documenting a problem, a TODO or a note for later is not a fix. When you
   cannot resolve something, present it for triage.
+- **An example the owner gives is one case until the owner calls it a pattern.** Before a criterion, sweep
+  or rule treats it as a class, ask whether it stands for one, and scope the text to the answer.
 - **Reuse before creating** (`{cfg.code_change_standards}` § Universal gates).
 - **Rule edits follow `{cfg.rule_maintenance_guide}`**, including its lint-hardening candidate check. Record
   each rule the owner keeps as a manual gate in `{{lint_hardening_candidates}}`.
