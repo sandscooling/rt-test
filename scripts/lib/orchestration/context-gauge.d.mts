@@ -20,10 +20,6 @@ export interface GaugePayload {
   };
 }
 
-export declare const CONTEXT_WINDOW: number;
-export declare const HANDOFF_PERCENT: number;
-export declare const HANDOFF_DOC: string;
-export declare const ORCHESTRATOR_STATE: string;
 export declare function lastUsage(text: string): number | null;
 export declare function usedTokens(transcriptPath: unknown): number | null;
 export declare function formatContext(used: number, max?: number): string;
@@ -31,9 +27,6 @@ export declare function limitsFromCache(
   home: string,
   now?: number,
 ): RateLimits | null;
-export declare function rateLimitParts(
-  limits: RateLimits | null | undefined,
-): string[];
 export declare function promptHeader(
   payload: GaugePayload,
   options: { readonly now?: Date; readonly home: string },

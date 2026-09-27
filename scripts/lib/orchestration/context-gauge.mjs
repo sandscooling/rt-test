@@ -12,10 +12,10 @@ import { join } from "node:path";
 
 // Pinned, not detected: hook payloads carry no model, and a 1M-context model records the same
 // model name as its 200k variant. Change it by hand if the session model changes.
-export const CONTEXT_WINDOW = 1_000_000;
-export const HANDOFF_PERCENT = 60;
-export const HANDOFF_DOC = "_agent-docs/handoff.md";
-export const ORCHESTRATOR_STATE = "_agent-docs/.scratch/orchestrator-state.md";
+const CONTEXT_WINDOW = 1_000_000;
+const HANDOFF_PERCENT = 60;
+const HANDOFF_DOC = "_agent-docs/handoff.md";
+const ORCHESTRATOR_STATE = "_agent-docs/.scratch/orchestrator-state.md";
 
 const ORCHESTRATOR_HANDOFF_PERCENT = 75;
 const LOWEST_HANDOFF_PERCENT = Math.min(
@@ -124,7 +124,7 @@ export function limitsFromCache(home, now = Date.now()) {
   }
 }
 
-export function rateLimitParts(limits) {
+function rateLimitParts(limits) {
   if (!limits) return [];
   const part = (label, win) => {
     if (!win || win.used_percentage == null) return null;

@@ -304,8 +304,8 @@
     "id": "D345",
     "defect": "The compact reminder points somewhere other than the handoff doc.",
     "file": "scripts/lib/orchestration/context-gauge.mjs",
-    "old": "export const HANDOFF_DOC = \"_agent-docs/handoff.md\";",
-    "new": "export const HANDOFF_DOC = \"_agent-docs/next-session.md\";"
+    "old": "const HANDOFF_DOC = \"_agent-docs/handoff.md\";",
+    "new": "const HANDOFF_DOC = \"_agent-docs/next-session.md\";"
   },
   {
     "id": "D346",
@@ -570,8 +570,8 @@
     "id": "D1929",
     "defect": "The handoff warning waits past the 60% line.",
     "file": "scripts/lib/orchestration/context-gauge.mjs",
-    "old": "export const HANDOFF_PERCENT = 60;",
-    "new": "export const HANDOFF_PERCENT = 65;"
+    "old": "const HANDOFF_PERCENT = 60;",
+    "new": "const HANDOFF_PERCENT = 65;"
   },
   {
     "id": "D1930",
