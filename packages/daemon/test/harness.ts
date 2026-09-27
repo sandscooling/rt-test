@@ -42,12 +42,12 @@ const repoRequire = createRequire(join(REPO, "package.json"));
 
 const CASE_PREFIX = "case-";
 
-/** The run's temp parent, which the daemon project's global teardown removes. */
-function runTempRoot(): string {
+/** The run's temp parent, which the global teardown removes and where the run records what it starts. */
+export function runTempRoot(): string {
   const root = inject("rtTestDaemonTempRoot");
   if (root === undefined) {
     throw new Error(
-      "The daemon tests' global setup did not provide a temp root; run them through the daemon project's Vitest config.",
+      "No global setup provided a temp root; run daemon tests through a Vitest project whose global setup is packages/daemon/test/temp-root.ts.",
     );
   }
   return root;

@@ -8,21 +8,11 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { isInside } from "../paths.mjs";
+import { isRunning } from "../processes.mjs";
 
 const RUN_PREFIX = "rt-test-verify-defects-";
 const RUN_NAME = new RegExp(`^${RUN_PREFIX}(\\d+)-`);
-const PROBE_SIGNAL = 0;
-const NO_SUCH_PROCESS = "ESRCH";
 const NOT_FOUND = "ENOENT";
-
-function isRunning(pid) {
-  try {
-    process.kill(pid, PROBE_SIGNAL);
-    return true;
-  } catch (error) {
-    return error.code !== NO_SUCH_PROCESS;
-  }
-}
 
 // Windows reports the temp directory by its 8.3 short name, and Vitest given a
 // short-name root intermittently collects no test file at all.

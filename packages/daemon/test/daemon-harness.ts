@@ -3,9 +3,9 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { inject } from "vitest";
 import { LONGEST_TEST_TIMEOUT_MS } from "../../../test/scripts/longest-test-timeout.mjs";
 import {
+  endProcess,
   recordStarted,
   removeKeyFile,
 } from "../../../test/scripts/run-cleanup.mjs";
@@ -31,7 +31,7 @@ import {
   consumerIdentity,
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
-import { inConsumerCopy, inTempDir } from "./harness.js";
+import { inConsumerCopy, inTempDir, runTempRoot } from "./harness.js";
 
 /** What `RawConnection.next` resolves with once the daemon has closed the connection. */
 export const CLOSED = "closed";
@@ -331,17 +331,6 @@ export function confirmNothing(consumerRoot: string): ConfirmedStart {
   return { consumerRoot, workspaces: [] };
 }
 
-/** The run's temp parent, where the run records what it starts for its watchdog. */
-function runTempRoot(): string {
-  const root = inject("rtTestDaemonTempRoot");
-  if (root === undefined) {
-    throw new Error(
-      "No global setup provided a temp root; run daemon tests through a Vitest project whose global setup is packages/daemon/test/temp-root.ts.",
-    );
-  }
-  return root;
-}
-
 function worktreeIdentityOf(root: string): string | undefined {
   try {
     return consumerIdentity(root).worktreeIdentity;
@@ -450,12 +439,7 @@ export function storedRuns(
 }
 
 function end(pid: number): void {
-  if (!isRunning(pid)) return;
-  try {
-    process.kill(pid, "SIGKILL");
-  } catch {
-    // It exited between the check and the kill.
-  }
+  if (isRunning(pid)) endProcess(pid);
 }
 
 /**
