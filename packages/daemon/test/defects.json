@@ -1837,22 +1837,22 @@
     "id": "D1487",
     "defect": "The default state directory is the consumer root itself rather than .rt-test under it.",
     "file": "packages/daemon/src/client.ts",
-    "old": "    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot),",
-    "new": "    options.stateDirectory ?? start.consumerRoot,"
+    "old": "  const stateDirectory = resolvedStateDirectory(\n    start.consumerRoot,\n    options.stateDirectory,\n  );",
+    "new": "  const stateDirectory = options.stateDirectory ?? start.consumerRoot;"
   },
   {
     "id": "D1488",
     "defect": "A relative state directory is passed on unresolved, so the daemon resolves it against the consumer root instead of the caller's working directory.",
-    "file": "packages/daemon/src/client.ts",
-    "old": "  const stateDirectory = resolve(\n    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot),\n  );",
-    "new": "  const stateDirectory =\n    options.stateDirectory ?? defaultStateDirectory(start.consumerRoot);"
+    "file": "packages/daemon/src/start-plan.ts",
+    "old": "  return resolve(stateDirectory ?? defaultStateDirectory(consumerRoot));",
+    "new": "  return stateDirectory ?? defaultStateDirectory(consumerRoot);"
   },
   {
     "id": "D1489",
     "defect": "The daemon reports that it serves only once its start sequence has ended, so a start waits out the whole discovery and every run.",
     "file": "packages/daemon/src/daemon/daemon-main.ts",
-    "old": "  lifecycle.begin();\n  void report({ type: SERVING_TYPE, pid: process.pid });",
-    "new": "  lifecycle.begin();\n  while (lifecycle.status().activity.state !== \"idle\") {\n    await new Promise((wake) => setTimeout(wake, 10));\n  }\n  void report({ type: SERVING_TYPE, pid: process.pid });"
+    "old": "  if (await startAccepted()) {\n    if (!lifecycle.isStopping()) lifecycle.begin();",
+    "new": "  lifecycle.begin();\n  while (lifecycle.status().activity.state !== \"idle\") {\n    await new Promise((wake) => setTimeout(wake, 10));\n  }\n  if (await startAccepted()) {\n    if (!lifecycle.isStopping()) lifecycle.status();"
   },
   {
     "id": "D1490",
@@ -1970,7 +1970,7 @@
     "id": "D1534",
     "defect": "A first startup message that is not a confirmed start crashes the daemon with a raw TypeError instead of a refusal naming the message.",
     "file": "packages/daemon/src/daemon/daemon-main.ts",
-    "old": "  if (typeof message !== \"object\" || message === null) return false;",
+    "old": "  if (typeof message !== \"object\" || message === null) return false;\n  const { type, start } = message as Partial<StartupRequest>;",
     "new": "  return true;"
   },
   {
@@ -2399,5 +2399,33 @@
     "file": "packages/daemon/src/daemon/endpoint-proof.ts",
     "old": "      );\n    }\n  }\n}\n\n/** A key written after it was moved aside is newer, so it stays. */",
     "new": "      );\n    }\n  } finally {\n    rmSync(aside, { force: true });\n  }\n}\n\n/** A key written after it was moved aside is newer, so it stays. */"
+  },
+  {
+    "id": "D1764",
+    "defect": "The daemon begins its start sequence without the starter's acceptance, so a starter killed after the serving report leaves a daemon running the project's tests while the command reported nothing.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "  if (await startAccepted()) {",
+    "new": "  if ((await startAccepted()) || true) {"
+  },
+  {
+    "id": "D1765",
+    "defect": "Any message after the serving report is taken as the acceptance, so a starter that sends something else still gets a daemon executing.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "  return (message as Partial<StartupAcceptance>).type === BEGIN_TYPE;",
+    "new": "  return true;"
+  },
+  {
+    "id": "D1766",
+    "defect": "A stop that arrives between the serving report and the acceptance is followed by the start sequence, so discovery starts after the stop.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "    if (!lifecycle.isStopping()) lifecycle.begin();",
+    "new": "    lifecycle.begin();"
+  },
+  {
+    "id": "D1767",
+    "defect": "startDaemon never sends the acceptance, so every start resolves as started while the daemon it reports runs nothing.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  await acceptStart(child, report.pid, logFile);\n",
+    "new": ""
   }
 ]

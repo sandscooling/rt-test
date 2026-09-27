@@ -95,11 +95,13 @@ describe("what a job starts ends with the job", () => {
         const stop = await settled(stopDaemon(root));
         const alive = await stillBeating(root);
         for (const pid of alive) process.kill(pid, "SIGKILL");
-        return { stuckWith: stuckWith.length, stop, alive };
+        return { pid: identity.pid, stuckWith: stuckWith.length, stop, alive };
       });
+      const pid = "pid" in outcome ? outcome.pid : Number.NaN;
       expect(outcome).toStrictEqual({
+        pid,
         stuckWith: 1,
-        stop: undefined,
+        stop: { pid },
         alive: [],
       });
     },

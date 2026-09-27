@@ -40,6 +40,7 @@ export const STATUS_TYPE = "status";
 export const START_TYPE = "start";
 export const SERVING_TYPE = "serving";
 export const REFUSED_TYPE = "refused";
+export const BEGIN_TYPE = "begin";
 
 /** Frozen: a fresh random string a client sends, which the daemon's answer must prove with its key. */
 export interface Challenged {
@@ -230,7 +231,15 @@ export interface StartupRequest {
   readonly start: ConfirmedStart;
 }
 
-/** The daemon's one report over the spawn-time channel, before it disconnects it. */
+/** The daemon's one report over the spawn-time channel. */
 export type StartupReport =
   | { readonly type: typeof SERVING_TYPE; readonly pid: number }
   | { readonly type: typeof REFUSED_TYPE; readonly reason: string };
+
+/**
+ * The client's last message over the spawn-time channel, sent once it has proven the serving daemon's status. The
+ * daemon executes nothing before it arrives, and abandons the start when the channel closes first.
+ */
+export interface StartupAcceptance {
+  readonly type: typeof BEGIN_TYPE;
+}

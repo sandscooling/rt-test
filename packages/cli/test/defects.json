@@ -1,0 +1,268 @@
+[
+  {
+    "id": "D1711",
+    "defect": "A relative root or --state-dir resolves against the process's directory instead of the command's, so the listing names a directory the start does not use.",
+    "file": "packages/cli/src/command.ts",
+    "old": "path === undefined ? io.cwd : resolve(io.cwd, path)",
+    "new": "path === undefined ? io.cwd : resolve(path)"
+  },
+  {
+    "id": "D1712",
+    "defect": "With no --state-dir, the state directory is the consumer root itself rather than .rt-test under it.",
+    "file": "packages/daemon/src/start-plan.ts",
+    "old": "return resolve(stateDirectory ?? defaultStateDirectory(consumerRoot));",
+    "new": "return resolve(stateDirectory ?? consumerRoot);"
+  },
+  {
+    "id": "D1713",
+    "defect": "With no root argument, the root is the process's directory instead of the command's current directory.",
+    "file": "packages/cli/src/command.ts",
+    "old": "path === undefined ? io.cwd : resolve(io.cwd, path)",
+    "new": "path === undefined ? process.cwd() : resolve(io.cwd, path)"
+  },
+  {
+    "id": "D1714",
+    "defect": "The listing omits the sentence saying what starting executes beyond the listed configs.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "    EXECUTES_SENTENCE,\n",
+    "new": ""
+  },
+  {
+    "id": "D1715",
+    "defect": "The listing leaves out the workspace sources it could not read.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "    ...unreadWarnings(plan),\n",
+    "new": ""
+  },
+  {
+    "id": "D1716",
+    "defect": "Control characters reach the terminal raw, so a consumer's workspace pattern can move the cursor and rewrite the listing the user confirms.",
+    "file": "packages/cli/src/output.ts",
+    "old": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}]/gu;",
+    "new": "const UNPRINTABLE = /(?!)/gu;"
+  },
+  {
+    "id": "D1717",
+    "defect": "A consumer value keeps its line breaks, so a workspace pattern can print a forged line in the listing.",
+    "file": "packages/cli/src/output.ts",
+    "old": "  return value.replace(UNPRINTABLE, escaped);",
+    "new": "  return value;"
+  },
+  {
+    "id": "D1718",
+    "defect": "The answer is not case folded, so YES is read as no.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "YES_ANSWERS.has(answer.trim().toLowerCase())",
+    "new": "YES_ANSWERS.has(answer.trim())"
+  },
+  {
+    "id": "D1719",
+    "defect": "The answer is not trimmed, so a y typed with surrounding spaces is read as no.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "YES_ANSWERS.has(answer.trim().toLowerCase())",
+    "new": "YES_ANSWERS.has(answer.toLowerCase())"
+  },
+  {
+    "id": "D1720",
+    "defect": "Only y is accepted, so yes spelled out is read as no.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "new Set([\"y\", \"yes\"])",
+    "new": "new Set([\"y\"])"
+  },
+  {
+    "id": "D1721",
+    "defect": "Any typed answer is taken as trust, so an answer other than y or yes starts the daemon.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "answer !== undefined && YES_ANSWERS",
+    "new": "answer !== undefined || YES_ANSWERS"
+  },
+  {
+    "id": "D1722",
+    "defect": "The prompt waits only on the question, which never settles when stdin ends, so the start hangs.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "Promise.race([prompt.question(question), closed])",
+    "new": "Promise.race([prompt.question(question)])"
+  },
+  {
+    "id": "D1723",
+    "defect": "The Ctrl-C listener swallows the signal without closing the prompt, so the start hangs at Ctrl-C.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "prompt.on(\"SIGINT\", () => prompt.close());",
+    "new": "prompt.on(\"SIGINT\", () => undefined);"
+  },
+  {
+    "id": "D1724",
+    "defect": "The prompt waits only on the question, which Ctrl-D rejects instead of answering, so Ctrl-D fails the start with an error rather than reading as no.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "Promise.race([prompt.question(question), closed])",
+    "new": "Promise.race([prompt.question(question)])"
+  },
+  {
+    "id": "D1725",
+    "defect": "--trust on a terminal skips the question and starts the daemon.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "if (!(io.stdinIsTerminal && io.stderrIsTerminal)) {",
+    "new": "if (trustFlag || !(io.stdinIsTerminal && io.stderrIsTerminal)) {"
+  },
+  {
+    "id": "D1726",
+    "defect": "A terminal on either stream counts as a terminal, so the question goes to a stderr no one sees.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "if (!(io.stdinIsTerminal && io.stderrIsTerminal)) {",
+    "new": "if (!(io.stdinIsTerminal || io.stderrIsTerminal)) {"
+  },
+  {
+    "id": "D1727",
+    "defect": "Without a terminal, a start is trusted with no --trust.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "return trustFlag\n      ? { trusted: true }",
+    "new": "return true\n      ? { trusted: true }"
+  },
+  {
+    "id": "D1728",
+    "defect": "Trust is read back from the state directory an earlier trusted start left, so a later start without --trust is trusted.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "return trustFlag\n      ? { trusted: true }",
+    "new": "return trustFlag || process.getBuiltinModule(\"node:fs\").existsSync(plan.stateDirectory)\n      ? { trusted: true }"
+  },
+  {
+    "id": "D1729",
+    "defect": "A trusted start's report leaves out the daemon it started.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "{ ...planFields(plan), daemon },",
+    "new": "planFields(plan),"
+  },
+  {
+    "id": "D1730",
+    "defect": "The start re-reads the workspaces after the question, so the daemon loads a workspace the user was never shown.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "      start: plan.start,",
+    "new": "      start: startPlan(plan.start.consumerRoot).start,"
+  },
+  {
+    "id": "D1731",
+    "defect": "A start with a daemon already serving lists and asks before the client refuses it.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "  if (refusal !== undefined) return output.fail(refusal.reason, refusal.fields);\n",
+    "new": ""
+  },
+  {
+    "id": "D1732",
+    "defect": "An endpoint holder the client cannot confirm is taken as nothing listening, so the start goes on to ask.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "    return {\n      reason: `${NOT_STARTED} ${errorText(error)}`,\n      fields: { consumerRoot: root },\n    };",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D1733",
+    "defect": "A daemon that cannot start is reported without the not started: prefix or the plan it would have started.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "    return output.fail(`${NOT_STARTED} ${errorText(error)}`, planFields(plan));",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D1734",
+    "defect": "A root with no Vitest workspace is listed and asked about instead of refused.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "  if (plan.start.workspaces.length === 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1735",
+    "defect": "A stop reports a process other than the daemon that acknowledged the stop.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  return { pid };",
+    "new": "  return { pid: process.pid };"
+  },
+  {
+    "id": "D1736",
+    "defect": "A command's rejection escapes as an uncaught error instead of exit 1 with its reason.",
+    "file": "packages/cli/src/output.ts",
+    "old": "    return output.fail(errorText(error));",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D1737",
+    "defect": "A parseArgs error is not taken as a usage error, so it escapes instead of exiting 2 with the usage.",
+    "file": "packages/cli/src/command.ts",
+    "old": "  return typeof code === \"string\" && code.startsWith(PARSE_ARGS_ERROR_PREFIX);",
+    "new": "  return false;"
+  },
+  {
+    "id": "D1738",
+    "defect": "A second positional is accepted and ignored instead of being a usage error.",
+    "file": "packages/cli/src/command.ts",
+    "old": "if (positionals.length > MAX_ROOT_POSITIONALS) {",
+    "new": "if (positionals.length > MAX_ROOT_POSITIONALS + 1) {"
+  },
+  {
+    "id": "D1739",
+    "defect": "An empty path is accepted and resolves to the current directory, so an unset shell variable puts state into the consumer's tree.",
+    "file": "packages/cli/src/command.ts",
+    "old": "  if (path === \"\") throw new UsageError(`The ${name} path is empty.`);\n",
+    "new": ""
+  },
+  {
+    "id": "D1740",
+    "defect": "The start command imports the daemon's main entry, so the CLI process loads node:sqlite and the daemon's Vitest code.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "import { parseArgs } from \"node:util\";",
+    "new": "import { parseArgs } from \"node:util\";\nimport \"../../../daemon/src/index.js\";"
+  },
+  {
+    "id": "D1741",
+    "defect": "A missing or unknown command exits 2 without printing the usage.",
+    "file": "packages/cli/src/main.ts",
+    "old": "    return usageError(io, problem, COMMANDS);",
+    "new": "    return EXIT_USAGE;"
+  },
+  {
+    "id": "D1742",
+    "defect": "A --json document leaves out the CLI's schema version.",
+    "file": "packages/cli/src/output.ts",
+    "old": "      schemaVersion: CLI_JSON_SCHEMA_VERSION,\n",
+    "new": ""
+  },
+  {
+    "id": "D1743",
+    "defect": "A human-mode success is written to stderr instead of stdout.",
+    "file": "packages/cli/src/output.ts",
+    "old": "    this.io.stdout.write(\n      this.json ? this.#document(true, fields)",
+    "new": "    this.io.stderr.write(\n      this.json ? this.#document(true, fields)"
+  },
+  {
+    "id": "D1744",
+    "defect": "A declined start goes on to start the daemon, which loads the consumer's config.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "  if (!trust.trusted) return output.fail(trust.reason, planFields(plan));\n",
+    "new": ""
+  },
+  {
+    "id": "D1745",
+    "defect": "An empty answer is taken as yes, so a reflexive Enter executes the project.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "YES_ANSWERS.has(answer.trim().toLowerCase())",
+    "new": "(answer.trim() === \"\" || YES_ANSWERS.has(answer.trim().toLowerCase()))"
+  },
+  {
+    "id": "D1768",
+    "defect": "The start passes the daemon only some of the listed workspaces, so a workspace the user confirmed never runs while the report still names it.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "      start: plan.start,",
+    "new": "      start: { ...plan.start, workspaces: plan.start.workspaces.slice(0, 1) },"
+  },
+  {
+    "id": "D1769",
+    "defect": "A human-mode start's success leaves out the daemon's process id.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "`Started the RT Test daemon, process ${daemon.pid}, for",
+    "new": "`Started the RT Test daemon for"
+  },
+  {
+    "id": "D1770",
+    "defect": "stop resolves an explicit relative root against the process's directory instead of the command's.",
+    "file": "packages/cli/src/commands/stop.ts",
+    "old": "absolutePath(io, rootArgument)",
+    "new": "absolutePath({ ...io, cwd: process.cwd() }, rootArgument)"
+  }
+]

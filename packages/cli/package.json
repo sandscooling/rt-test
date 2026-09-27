@@ -1,0 +1,18 @@
+{
+  "name": "rt-test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The RT Test command line: start and stop a trusted project's daemon, with versioned --json output.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "rt-test": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rt-test/daemon": "workspace:*"
+  }
+}

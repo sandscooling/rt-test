@@ -1,4 +1,4 @@
-import { fork, spawn, spawnSync } from "node:child_process";
+import { fork, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,6 +9,7 @@ import {
   stopDaemon,
   type DaemonIdentity,
 } from "../src/client.js";
+import { daemonLogFile } from "../src/daemon/daemon-log.js";
 import type { DaemonKey } from "../src/daemon/endpoint-proof.js";
 import { clientEndpoint, identityHash } from "../src/daemon/endpoint.js";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
@@ -271,7 +272,7 @@ describe("a client with no daemon to talk to", () => {
       expect(outcome).toStrictEqual({
         probed: true,
         waiting: true,
-        stop: undefined,
+        stop: { pid },
       });
     },
     DAEMON_TEST_TIMEOUT_MS,
@@ -501,6 +502,158 @@ describe("starting a daemon", () => {
   );
 });
 
+/** Where a forked daemon writes what the handshake tests read. */
+interface DaemonFiles {
+  readonly logFile: string;
+  readonly lockFile: string;
+}
+
+/**
+ * Forks the daemon over `root` as a starter would, confirming every workspace, and hands `body` the daemon once it
+ * has reported serving, before any acceptance is sent. Resolves with the report instead when it is not serving.
+ */
+async function withServingFork<T>(
+  root: string,
+  pids: Set<number>,
+  body: (daemon: ChildProcess, files: DaemonFiles) => Promise<T>,
+): Promise<T | { report: unknown }> {
+  const stateDirectory = join(root, ".rt-test");
+  mkdirSync(stateDirectory, { recursive: true });
+  const entry = daemonEntryPoint("daemon-main");
+  const daemon = fork(entry.file, [root, stateDirectory], {
+    cwd: root,
+    execArgv: [...entry.execArgv],
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+    windowsHide: true,
+  });
+  if (daemon.pid !== undefined) pids.add(daemon.pid);
+  try {
+    const reported = new Promise<unknown>((resolve) => {
+      daemon.once("message", resolve);
+      daemon.once("exit", () => resolve("exited without a report"));
+    });
+    daemon.send({ type: "start", start: confirmEvery(root) });
+    const report = await reported;
+    if ((report as { type?: unknown } | null)?.type !== "serving") {
+      return { report };
+    }
+    const worktree = consumerIdentity(root).worktreeIdentity;
+    return await body(daemon, {
+      logFile: daemonLogFile(stateDirectory, worktree),
+      lockFile: storeLockOf(stateDirectory, worktree),
+    });
+  } finally {
+    if (daemon.connected) daemon.disconnect();
+  }
+}
+
+function exitedOf(daemon: ChildProcess): Promise<boolean> {
+  return eventually(
+    () => daemon.exitCode !== null || daemon.signalCode !== null,
+  );
+}
+
+/** What a daemon whose start was never accepted leaves: it has exited, ran nothing and holds no lock. */
+function abandonment(exited: boolean, files: DaemonFiles) {
+  const entries = logEntries(files.logFile);
+  return {
+    exited,
+    abandoned: entries.some((entry) => entry.startsWith("start abandoned")),
+    discovered: entries.includes("discovery started"),
+    locked: existsSync(files.lockFile),
+  };
+}
+
+const ABANDONED = {
+  exited: true,
+  abandoned: true,
+  discovered: false,
+  locked: false,
+};
+
+describe("a start its starter never accepted", () => {
+  it(
+    "D1764: a daemon whose startup channel closes after its serving report, with no acceptance, exits having run nothing and holding no lock",
+    async () => {
+      const outcome = await withDaemonConsumer((root, pids) =>
+        withServingFork(root, pids, async (daemon, files) => {
+          daemon.disconnect();
+          return abandonment(await exitedOf(daemon), files);
+        }),
+      );
+      expect(outcome).toStrictEqual(ABANDONED);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1765: a daemon sent anything but the acceptance after its serving report exits having run nothing and holding no lock",
+    async () => {
+      const outcome = await withDaemonConsumer((root, pids) =>
+        withServingFork(root, pids, async (daemon, files) => {
+          daemon.send({ type: "not-begin" });
+          return abandonment(await exitedOf(daemon), files);
+        }),
+      );
+      expect(outcome).toStrictEqual(ABANDONED);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1766: a stop that arrives before the acceptance is not followed by discovery once the acceptance comes",
+    async () => {
+      const outcome = await withDaemonConsumer((root, pids) =>
+        withServingFork(root, pids, async (daemon, files) => {
+          const stop = settled(stopDaemon(root));
+          const requested = await eventually(() =>
+            logged(files.logFile, "stop requested"),
+          );
+          daemon.send({ type: "begin" });
+          const stopped = await stop;
+          return {
+            requested,
+            stopped: !("thrown" in stopped),
+            exited: await exitedOf(daemon),
+            discovered: logEntries(files.logFile).includes("discovery started"),
+          };
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        requested: true,
+        stopped: true,
+        exited: true,
+        discovered: false,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1767: a daemon startDaemon has resolved with keeps running and runs its start sequence to idle, never abandoning the start",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await started(root, pids);
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        return {
+          idle,
+          running: isRunning(identity.pid),
+          abandoned: logged(identity.logFile, "start abandoned"),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        running: true,
+        abandoned: false,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
 describe("stopping a daemon", () => {
   it(
     "D1491: a stop resolves only once the daemon's process has exited and its endpoint accepts no connection",
@@ -510,13 +663,16 @@ describe("stopping a daemon", () => {
         if ("thrown" in identity) return identity;
         const stop = await settled(stopDaemon(root));
         return {
+          pid: identity.pid,
           stop,
           running: isRunning(identity.pid),
           endpointAnswers: !(await gone(identity)) && !isRunning(identity.pid),
         };
       });
+      const pid = "pid" in outcome ? outcome.pid : Number.NaN;
       expect(outcome).toStrictEqual({
-        stop: undefined,
+        pid,
+        stop: { pid },
         running: false,
         endpointAnswers: false,
       });
@@ -550,6 +706,7 @@ describe("stopping a daemon", () => {
         await atHoldPoint(root, "stuck");
         const stop = await settled(stopDaemon(root));
         return {
+          pid: identity.pid,
           stop,
           runs: storedRuns(identity.stateDirectory, root),
           ended: logEntries(identity.logFile).some((entry) =>
@@ -559,7 +716,13 @@ describe("stopping a daemon", () => {
           ),
         };
       });
-      expect(outcome).toStrictEqual({ stop: undefined, runs: [], ended: true });
+      const pid = "pid" in outcome ? outcome.pid : Number.NaN;
+      expect(outcome).toStrictEqual({
+        pid,
+        stop: { pid },
+        runs: [],
+        ended: true,
+      });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -961,7 +1124,7 @@ describe("a process on the endpoint that is not this user's daemon", () => {
         () => settled(stopDaemon(root)),
       ),
     );
-    expect(stop).toBeUndefined();
+    expect(stop).toStrictEqual({ pid });
   });
 });
 

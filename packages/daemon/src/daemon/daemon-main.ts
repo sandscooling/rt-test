@@ -11,10 +11,12 @@ import { Executor } from "./executor.js";
 import { takeLock, type Lock } from "./runtime-directory.js";
 import { DaemonLifecycle } from "./lifecycle.js";
 import {
+  BEGIN_TYPE,
   PROTOCOL_VERSION,
   REFUSED_TYPE,
   SERVING_TYPE,
   START_TYPE,
+  type StartupAcceptance,
   type StartupReport,
   type StartupRequest,
 } from "./protocol.js";
@@ -25,6 +27,8 @@ const REFUSED_EXIT_CODE = 1;
 const STORE_LOCK_PREFIX = "daemon-";
 const STORE_LOCK_EXTENSION = ".lock";
 const STORE_LOCK_HOLDER = "a daemon serving this worktree's store";
+const STARTER_GONE_REASON =
+  "the starter did not accept the start after the daemon reported serving, so nothing was run";
 
 const [consumerRoot, stateDirectory] = process.argv.slice(2);
 
@@ -68,8 +72,13 @@ async function main(): Promise<void> {
   const lifecycle = await serve(request, scope, log, stateDirectory);
   if (lifecycle === undefined) return;
   for (const signal of STOP_SIGNALS) process.on(signal, () => lifecycle.stop());
-  lifecycle.begin();
-  void report({ type: SERVING_TYPE, pid: process.pid });
+  if (await startAccepted()) {
+    if (!lifecycle.isStopping()) lifecycle.begin();
+  } else {
+    log.entry(`start abandoned: ${STARTER_GONE_REASON}`);
+    process.exitCode = REFUSED_EXIT_CODE;
+    lifecycle.stop();
+  }
   await lifecycle.stopped();
   process.exit();
 }
@@ -183,19 +192,55 @@ function isStartupRequest(message: unknown): message is StartupRequest {
   );
 }
 
+function isStartupAcceptance(message: unknown): message is StartupAcceptance {
+  if (typeof message !== "object" || message === null) return false;
+  return (message as Partial<StartupAcceptance>).type === BEGIN_TYPE;
+}
+
 /** The first message on the spawn-time channel; undefined when the channel closed first. */
 function startupRequest(): Promise<unknown> {
-  return new Promise((resolveRequest) => {
+  if (!process.connected) {
+    process.stderr.write(
+      "the daemon was started without its startup channel\n",
+    );
+    process.exitCode = REFUSED_EXIT_CODE;
+    return Promise.resolve(undefined);
+  }
+  return nextMessage();
+}
+
+/**
+ * Reports serving and waits for the starter's acceptance: a sent report proves only that it reached the channel, not
+ * that the starter read it and is still there to report the start.
+ */
+async function startAccepted(): Promise<boolean> {
+  const answer = nextMessage();
+  if (!(await send({ type: SERVING_TYPE, pid: process.pid }))) {
+    closeChannel();
+    return false;
+  }
+  const accepted = isStartupAcceptance(await answer);
+  closeChannel();
+  return accepted;
+}
+
+/** Undefined when the channel closes first. */
+function nextMessage(): Promise<unknown> {
+  return new Promise((settle) => {
     if (!process.connected) {
-      process.stderr.write(
-        "the daemon was started without its startup channel\n",
-      );
-      process.exitCode = REFUSED_EXIT_CODE;
-      resolveRequest(undefined);
+      settle(undefined);
       return;
     }
-    process.once("message", (message: unknown) => resolveRequest(message));
-    process.once("disconnect", () => resolveRequest(undefined));
+    const onMessage = (message: unknown): void => {
+      process.off("disconnect", onDisconnect);
+      settle(message);
+    };
+    const onDisconnect = (): void => {
+      process.off("message", onMessage);
+      settle(undefined);
+    };
+    process.once("message", onMessage);
+    process.once("disconnect", onDisconnect);
   });
 }
 
@@ -205,18 +250,28 @@ function refuse(log: DaemonLog, reason: string): undefined {
   return undefined;
 }
 
-/** Sends the one startup report and closes the channel, so the daemon outlives the process that started it. */
-function report(message: StartupReport): Promise<void> {
-  const refused = message.type === REFUSED_TYPE;
-  if (refused) process.exitCode = REFUSED_EXIT_CODE;
-  if (!process.connected) {
-    if (refused) process.stderr.write(`start refused: ${message.reason}\n`);
-    return Promise.resolve();
+async function report(
+  refusal: Extract<StartupReport, { type: typeof REFUSED_TYPE }>,
+): Promise<void> {
+  process.exitCode = REFUSED_EXIT_CODE;
+  if (!(await send(refusal))) {
+    process.stderr.write(`start refused: ${refusal.reason}\n`);
+  }
+  closeChannel();
+}
+
+/** Resolves whether the message reached the channel. */
+function send(message: StartupReport): Promise<boolean> {
+  const sendMessage = process.send?.bind(process);
+  if (sendMessage === undefined || !process.connected) {
+    return Promise.resolve(false);
   }
   return new Promise((sent) => {
-    process.send?.(message, () => {
-      if (process.connected) process.disconnect();
-      sent();
-    });
+    sendMessage(message, (error: Error | null) => sent(error === null));
   });
+}
+
+/** The daemon outlives the process that started it. */
+function closeChannel(): void {
+  if (process.connected) process.disconnect();
 }
