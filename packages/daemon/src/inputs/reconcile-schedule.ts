@@ -1,5 +1,5 @@
 /** How long after a reconciliation ends the next one runs, the longest an input change no event reported goes unseen. */
-export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 /** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
 const LOST_INPUT_SET_RETRY_MS = 10 * 1000;
 const LOST_INPUT_SET_RETRY_REASON =
