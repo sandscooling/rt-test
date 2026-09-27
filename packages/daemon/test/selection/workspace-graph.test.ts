@@ -1,3 +1,4 @@
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type {
@@ -5,54 +6,29 @@ import type {
   ResolvedAlias,
 } from "../../src/selection/selection-types.js";
 import {
+  APP,
+  appEdges,
+  appScan,
+  appTree,
+  appWidenings,
   graphInTree,
+  inspectTree,
   manifest,
+  pkg,
+  plainPackages,
   reasonVias,
   rootManifest,
+  scanApp,
   selectedPaths,
   selectInTree,
+  widenedAt,
+  type AppCase,
   type Settled,
-  type TreeWorkspace,
 } from "./harness.js";
 
-const APP = "packages/app";
 const B_CHANGE = "packages/b/src/index.ts";
 const C_CHANGE = "packages/c/src/index.ts";
 const UNREAD_PATTERN = "tools/**";
-
-function pkg(name: string, fields: Readonly<Record<string, unknown>> = {}) {
-  return manifest({ name, ...fields });
-}
-
-/** `packages/<name>/package.json` named `@x/<name>` for each name. */
-function plainPackages(...names: string[]): Record<string, string> {
-  return Object.fromEntries(
-    names.map((name) => [`packages/${name}/package.json`, pkg(`@x/${name}`)]),
-  );
-}
-
-interface AppCase {
-  readonly app?: Readonly<Record<string, unknown>>;
-  readonly root?: Readonly<Record<string, unknown>>;
-  readonly files?: Readonly<Record<string, string>>;
-  readonly vitest?: Omit<TreeWorkspace, "path">;
-  readonly change: string;
-  readonly throughLink?: boolean;
-  readonly links?: Readonly<Record<string, string>>;
-}
-
-/** A consumer whose only Vitest workspace is `packages/app`, beside plain packages `b` and `c`. */
-function appTree({ app = {}, root = {}, files = {}, vitest = {} }: AppCase) {
-  return {
-    files: {
-      "package.json": rootManifest(root),
-      "packages/app/package.json": pkg("@x/app", app),
-      ...plainPackages("b", "c"),
-      ...files,
-    },
-    workspaces: [{ path: APP, ...vitest }],
-  };
-}
 
 function selectedFor(scenario: AppCase) {
   return selectInTree({
@@ -598,14 +574,18 @@ describe("config aliases reach every workspace their fixed prefix begins", () =>
 
 describe("local paths through links", () => {
   it("D1515: a local path whose link carries it into another workspace depends on that workspace too", async () => {
+    // The walk's link edge from b to c would select the app through b, so the app's own edges are what is observed.
     expect(
-      await selectedFor({
-        app: { dependencies: { linked: "file:../b/l" } },
-        files: { "packages/c/deep/index.ts": "" },
-        links: { "packages/b/l": "packages/c/deep" },
-        change: C_CHANGE,
-      }),
-    ).toEqual([APP]);
+      appEdges(
+        await scanApp(
+          { "packages/c/deep/index.ts": "" },
+          {
+            app: { dependencies: { linked: "file:../b/l" } },
+            links: { "packages/b/l": "packages/c/deep" },
+          },
+        ),
+      ),
+    ).toEqual(["manifest packages/b", "manifest packages/c"]);
   });
 
   it("D1524: a bare .. dependency points into the parent workspace", async () => {
@@ -643,5 +623,915 @@ describe("root overrides that cannot be resolved widen", () => {
         change: C_CHANGE,
       }),
     ).toEqual([APP]);
+  });
+});
+
+const APP_SOURCE = "packages/app/src/a.ts";
+const APP_TSCONFIG = "packages/app/tsconfig.json";
+const INCOMPLETE_LISTING = { workspaces: ["packages/*", UNREAD_PATTERN] };
+
+describe("relative module specifiers in source files", () => {
+  it("D1581: a static import resolving into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({ [APP_SOURCE]: 'import { x } from "../../b/src/x";\n' }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1582: a re-export from another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({ [APP_SOURCE]: 'export { y } from "../../b/src/y";\n' }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1583: a literal dynamic import() into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const lazy = () => import("../../b/src/lazy");\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1584: a template literal with no substitution is read as a specifier", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            "export const lazy = () => import(`../../b/src/tpl`);\n",
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1585: a require() call into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/src/r.cjs":
+            'module.exports = require("../../b/src/r");\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1586: a require.resolve() call into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/src/r.cjs":
+            'module.exports = require.resolve("../../b/src/r");\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1587: each of vi.mock, vi.doMock, vi.importActual, vi.importMock, vi.unmock and vi.doUnmock names a dependency", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          ...plainPackages("b1", "b2", "b3", "b4", "b5", "b6"),
+          "packages/app/src/a.test.ts": [
+            'vi.mock("../../b1/m");',
+            'vi.doMock("../../b2/m");',
+            'await vi.importActual("../../b3/m");',
+            'await vi.importMock("../../b4/m");',
+            'vi.unmock("../../b5/m");',
+            'vi.doUnmock("../../b6/m");',
+            "",
+          ].join("\n"),
+        }),
+      ),
+    ).toEqual([
+      "relative-import packages/b1",
+      "relative-import packages/b2",
+      "relative-import packages/b3",
+      "relative-import packages/b4",
+      "relative-import packages/b5",
+      "relative-import packages/b6",
+    ]);
+  });
+
+  it("D1588: an import.meta.resolve() call into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const url = import.meta.resolve("../../b/src/r");\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1589: a TypeScript import x = require() declaration names a dependency", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/src/eq.cts":
+            'import m = require("../../b/src/eq");\nexport const n = m;\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1590: a /// <reference path> directive into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            '/// <reference path="../../b/types.d.ts" />\nexport {};\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1591: a reference path and a new URL specifier without ./ resolve beside the file, never as a package name that widens", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          {
+            [APP_SOURCE]: [
+              '/// <reference path="types/env.d.ts" />',
+              'export const f = new URL("assets/f.json", import.meta.url);',
+              "",
+            ].join("\n"),
+          },
+          { root: INCOMPLETE_LISTING },
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D1592: an import.meta.glob pattern depends on every workspace nested under the directory before its first wildcard", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const all = import.meta.glob("../../*/src/*.ts");\n',
+        }),
+      ),
+    ).toEqual([
+      "relative-import .",
+      "relative-import packages/b",
+      "relative-import packages/c",
+    ]);
+  });
+
+  it("D1593: an import.meta.glob pattern depends on the workspace owning the directory before its first wildcard", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const lib = import.meta.glob("../../b/lib/*.ts");\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1594: each pattern of an import.meta.glob array names a dependency", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const both = import.meta.glob(["../../b/*.ts", "../../c/*.ts"]);\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b", "relative-import packages/c"]);
+  });
+
+  it("D1595: a negated import.meta.glob pattern still depends on the workspace it names", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const not = import.meta.glob("!../../c/*.ts");\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/c"]);
+  });
+
+  it("D1596: a new URL(specifier, import.meta.url) into another workspace makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const f = new URL("../../b/assets/f.json", import.meta.url);\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1597: a query suffix on a relative specifier does not change the workspace it resolves into", async () => {
+    expect(
+      appEdges(
+        await scanApp({ [APP_SOURCE]: 'import raw from "../../b?raw";\n' }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1598: a relative specifier resolving outside the consumer root adds no edge", async () => {
+    expect(
+      appEdges(
+        await scanApp({ [APP_SOURCE]: 'import "../../../../outside/x";\n' }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D1654: an absolute specifier inside the consumer root depends on the workspace holding it", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {},
+          {
+            prepare: (root) => {
+              const target = join(root, "packages/b/src/x").replaceAll(
+                "\\",
+                "/",
+              );
+              writeFileSync(
+                join(root, "packages/app/abs.ts"),
+                `import "${target}";\n`,
+              );
+            },
+          },
+        ),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D1599: a selection reason names the relative import, the file and the specifier that chose it", async () => {
+    const outcome = await selectInTree({
+      ...appTree({
+        files: { [APP_SOURCE]: 'import { x } from "../../b/src/x";\n' },
+        change: B_CHANGE,
+      }),
+      change: [B_CHANGE],
+    });
+    expect(
+      "workspaces" in outcome ? outcome.workspaces[0]?.reasons[0] : outcome,
+    ).toMatchObject({
+      steps: [
+        {
+          workspace: APP,
+          via: "relative-import",
+          detail: expect.stringMatching(
+            /packages\/app\/src\/a\.ts.*"\.\.\/\.\.\/b\/src\/x"/,
+          ),
+        },
+      ],
+    });
+  });
+});
+
+describe("bare module specifiers in source files", () => {
+  it("D1600: a bare specifier naming a listed workspace no manifest declares makes the file's workspace depend on it", async () => {
+    expect(
+      appEdges(await scanApp({ [APP_SOURCE]: 'import "@x/b";\n' })),
+    ).toEqual(["bare-import packages/b"]);
+  });
+
+  it("D1601: a scoped bare specifier's package name is its first two segments", async () => {
+    expect(
+      appEdges(await scanApp({ [APP_SOURCE]: 'import "@x/b/sub/deep";\n' })),
+    ).toEqual(["bare-import packages/b"]);
+  });
+
+  it("D1605: a query suffix on a bare specifier does not change the package it names", async () => {
+    expect(
+      appEdges(
+        await scanApp({ [APP_SOURCE]: 'import worker from "@x/b?worker";\n' }),
+      ),
+    ).toEqual(["bare-import packages/b"]);
+  });
+
+  it("D1602: while the listing is incomplete, a bare specifier naming no listed workspace widens, naming the file", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          { [APP_SOURCE]: 'import "left-pad";\n' },
+          { root: INCOMPLETE_LISTING },
+        ),
+      ),
+    ).toEqual(widenedAt("unlisted-package", APP_SOURCE));
+  });
+
+  it("D1603: a URL-scheme specifier is not bare, so it neither adds an edge nor widens while the listing is incomplete", async () => {
+    expect(
+      appScan(
+        await scanApp(
+          { [APP_SOURCE]: 'import "node:fs";\nimport "virtual:mod";\n' },
+          { root: INCOMPLETE_LISTING },
+        ),
+      ),
+    ).toEqual({ edges: [], widenings: [] });
+  });
+
+  it("D1604: a # subpath import is not bare, so it does not widen while the listing is incomplete", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          { [APP_SOURCE]: 'import "#internal/x";\n' },
+          { root: INCOMPLETE_LISTING },
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("tsconfig and jsconfig files", () => {
+  it("D1606: an extends path into another workspace makes the config's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: "../b/tsconfig.base.json" }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D1607: each entry of an extends array names a dependency", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: ["../b/t.json", "../c/t.json"] }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/b", "tsconfig packages/c"]);
+  });
+
+  it("D1608: an extends naming a listed workspace's package makes the config's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: "@x/b/tsconfig.base.json" }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D1609: a references entry's path into another workspace makes the config's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ references: [{ path: "../c" }] }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1617: a jsconfig.json is read like a tsconfig", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/jsconfig.json": manifest({
+            references: [{ path: "../c" }],
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1610: with no baseUrl, a paths target resolves against the config's own directory", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            compilerOptions: { paths: { "@b/*": ["../b/src/*"] } },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D1611: a paths target resolves against the config's own baseUrl", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            compilerOptions: {
+              baseUrl: "..",
+              paths: { "@c": ["c/src/index.ts"] },
+            },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1612: a paths target resolves against a baseUrl inherited through extends", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            extends: "./tsconfig.base.json",
+            compilerOptions: { paths: { "@c": ["c/src/index.ts"] } },
+          }),
+          "packages/app/tsconfig.base.json": manifest({
+            compilerOptions: { baseUrl: ".." },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1613: the baseUrl of a later extends entry overrides an earlier one's", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            extends: ["./one.json", "./two.json"],
+            compilerOptions: { paths: { "@c": ["c/src"] } },
+          }),
+          "packages/app/one.json": manifest({
+            compilerOptions: { baseUrl: "../b" },
+          }),
+          "packages/app/two.json": manifest({
+            compilerOptions: { baseUrl: ".." },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1614: two extends entries sharing one base config are not a cycle, so paths still yields its edge", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            extends: ["./one.json", "./two.json"],
+            compilerOptions: { paths: { "@c": ["../c/src"] } },
+          }),
+          "packages/app/one.json": manifest({ extends: "./base.json" }),
+          "packages/app/two.json": manifest({ extends: "./base.json" }),
+          "packages/app/base.json": manifest({}),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1615: a config with paths whose extends chain cannot be followed widens, naming the config", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            extends: "./missing.json",
+            compilerOptions: { paths: { "@c": ["../c/src"] } },
+          }),
+        }),
+      ),
+    ).toEqual(widenedAt("extends-unfollowed", APP_TSCONFIG));
+  });
+
+  it("D1616: a paths target holding a wildcard depends on every workspace nested under the directory before it", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            compilerOptions: { paths: { "@all/*": ["../*/src"] } },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig .", "tsconfig packages/b", "tsconfig packages/c"]);
+  });
+
+  it("D1622: a references field that is not an array of { path } objects widens, naming the config", async () => {
+    expect(
+      appWidenings(
+        await scanApp({ [APP_TSCONFIG]: manifest({ references: "../c" }) }),
+      ),
+    ).toEqual(widenedAt("malformed-config", APP_TSCONFIG));
+  });
+
+  it("D1623: a config with comments, trailing commas and a closing line comment parses and yields its edge", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          [APP_TSCONFIG]: [
+            "{",
+            "  // project references",
+            '  "references": [{ "path": "../c" },], /* block */',
+            "} // end",
+          ].join("\n"),
+        }),
+      ),
+    ).toEqual({ edges: ["tsconfig packages/c"], widenings: [] });
+  });
+
+  it("D1624: a tsconfig that does not parse widens, naming the file", async () => {
+    expect(
+      appWidenings(await scanApp({ [APP_TSCONFIG]: '{ "references": [ }' })),
+    ).toEqual(widenedAt("unparsed-source", APP_TSCONFIG));
+  });
+});
+
+describe("package.json imports targets", () => {
+  it("D1618: a relative imports target in another workspace makes the manifest's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({}, { app: { imports: { "#b": "../b/src/index.js" } } }),
+      ),
+    ).toEqual(["manifest-imports packages/b"]);
+  });
+
+  it("D1619: an imports target nested under conditions or in an array names a dependency", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {},
+          {
+            app: {
+              imports: {
+                "#c": { node: ["../c/a.js"], default: { import: "../c/b.js" } },
+              },
+            },
+          },
+        ),
+      ),
+    ).toEqual(["manifest-imports packages/c"]);
+  });
+
+  it("D1620: a bare imports target naming a listed workspace makes the manifest's workspace depend on it", async () => {
+    expect(
+      appEdges(
+        await scanApp({}, { app: { imports: { "#b": "@x/b/src/index.js" } } }),
+      ),
+    ).toEqual(["manifest-imports packages/b"]);
+  });
+
+  it("D1621: a URL-scheme imports target does not widen while the listing is incomplete", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          {},
+          { app: { imports: { "#fs": "node:fs" } }, root: INCOMPLETE_LISTING },
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("source files the scan cannot read widen", () => {
+  it("D1625: a source file that does not parse widens, naming the file", async () => {
+    expect(
+      appWidenings(await scanApp({ [APP_SOURCE]: 'import { from "../x";\n' })),
+    ).toEqual(widenedAt("unparsed-source", APP_SOURCE));
+  });
+
+  it("D1626: each .vue, .svelte, .astro and .mdx file widens", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          "packages/app/src/App.vue": "<template />\n",
+          "packages/app/src/S.svelte": "<script></script>\n",
+          "packages/app/src/P.astro": "---\n---\n",
+          "packages/app/src/D.mdx": "# doc\n",
+        }),
+      ),
+    ).toEqual({
+      edges: [],
+      widenings: [
+        "plugin-format-file",
+        "plugin-format-file",
+        "plugin-format-file",
+        "plugin-format-file",
+      ],
+    });
+  });
+
+  it("D1629: a source file nesting brackets 1,001 deep widens before it reaches the parser", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_SOURCE]: `export const x = ${"(".repeat(1001)}0${")".repeat(1001)};\n`,
+        }),
+      ),
+    ).toEqual(widenedAt("unparsed-source", APP_SOURCE));
+  });
+
+  it("D1630: a source file nesting brackets 1,000 deep is parsed and yields its edge", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          [APP_SOURCE]: `import "@x/b";\nexport const x = ${"(".repeat(1000)}0${")".repeat(1000)};\n`,
+        }),
+      ),
+    ).toEqual({ edges: ["bare-import packages/b"], widenings: [] });
+  });
+
+  it("D1631: a source file too deep for the syntax tree walk widens instead of throwing", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_SOURCE]: `export const x = ${"a+".repeat(10_000)}a;\n`,
+        }),
+      ),
+    ).toEqual(widenedAt("unparsed-source", APP_SOURCE));
+  });
+
+  it("D1627: a directory more than 40 levels below its workspace widens, naming the directory", async () => {
+    expect(
+      appWidenings(
+        await scanApp({ [`packages/app/${"d/".repeat(41)}x.ts`]: "" }),
+      ),
+    ).toEqual(
+      widenedAt("walk-bound-reached", `packages/app/${"d/".repeat(40)}d`),
+    );
+  });
+
+  it("D1628: a directory exactly 40 levels below its workspace is walked and yields its edge", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          [`packages/app/${"d/".repeat(40)}x.ts`]: 'import "@x/b";\n',
+        }),
+      ),
+    ).toEqual({ edges: ["bare-import packages/b"], widenings: [] });
+  });
+});
+
+describe("the source files the walk scans", () => {
+  it("D1632: files ending .js, .mjs, .cjs, .jsx, .ts, .mts, .cts, .tsx and .d.ts are each scanned", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          ...plainPackages(
+            "b1",
+            "b2",
+            "b3",
+            "b4",
+            "b5",
+            "b6",
+            "b7",
+            "b8",
+            "b9",
+          ),
+          "packages/app/src/a.js": 'import "@x/b1";\n',
+          "packages/app/src/a.mjs": 'import "@x/b2";\n',
+          "packages/app/src/a.cjs": 'require("@x/b3");\n',
+          "packages/app/src/a.jsx":
+            'import "@x/b4";\nexport const v = <div />;\n',
+          "packages/app/src/a.ts": 'import "@x/b5";\n',
+          "packages/app/src/a.mts": 'import "@x/b6";\n',
+          "packages/app/src/a.cts": 'import m = require("@x/b7");\n',
+          "packages/app/src/a.tsx":
+            'import "@x/b8";\nexport const v = <div />;\n',
+          "packages/app/src/types.d.ts": 'export type { T } from "@x/b9";\n',
+        }),
+      ),
+    ).toEqual([
+      "bare-import packages/b1",
+      "bare-import packages/b2",
+      "bare-import packages/b3",
+      "bare-import packages/b4",
+      "bare-import packages/b5",
+      "bare-import packages/b6",
+      "bare-import packages/b7",
+      "bare-import packages/b8",
+      "bare-import packages/b9",
+    ]);
+  });
+
+  it("D1633: JSX in a .js file parses, so it yields its edge rather than widening", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          "packages/app/src/view.js":
+            'import "@x/b";\nexport const v = <div />;\n',
+        }),
+      ),
+    ).toEqual({ edges: ["bare-import packages/b"], widenings: [] });
+  });
+
+  it("D1634: a top-level return in a .cjs file parses, so it yields its edge rather than widening", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          "packages/app/src/c.cjs":
+            'const b = require("@x/b");\nif (!b) return;\nmodule.exports = b;\n',
+        }),
+      ),
+    ).toEqual({ edges: ["bare-import packages/b"], widenings: [] });
+  });
+
+  it("D1635: a file under node_modules is not scanned", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/node_modules/dep/index.js": 'import "@x/c";\n',
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D1655: a file under .git is not scanned", async () => {
+    expect(
+      appEdges(
+        await scanApp({ "packages/app/.git/hooks/h.js": 'import "@x/c";\n' }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D1636: a nested package workspace's files are scanned as its own, not its parent's", async () => {
+    const sub = "packages/app/sub";
+    expect(
+      appEdges(
+        await scanApp(
+          {
+            [`${sub}/package.json`]: pkg("@x/sub"),
+            [`${sub}/src/a.ts`]: 'import "@x/c";\n',
+          },
+          { root: { workspaces: ["packages/*", sub] } },
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("links the walk meets", () => {
+  it("D1637: a directory link is never walked into, so it yields only its link edge", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          { "packages/c/src/i.ts": 'import "@x/b";\n' },
+          { links: { "packages/app/l": "packages/c/src" } },
+        ),
+      ),
+    ).toEqual(["link packages/c"]);
+  });
+
+  it("D1638: a selection reason names the link that chose it", async () => {
+    const outcome = await selectInTree({
+      ...appTree({ files: { "packages/c/src/i.ts": "" }, change: C_CHANGE }),
+      links: { "packages/app/l": "packages/c/src" },
+      change: [C_CHANGE],
+    });
+    expect(
+      "workspaces" in outcome ? outcome.workspaces[0]?.reasons[0] : outcome,
+    ).toMatchObject({
+      steps: [
+        {
+          workspace: APP,
+          via: "link",
+          detail: expect.stringContaining("packages/app/l"),
+        },
+      ],
+    });
+  });
+
+  it("D1639: a dangling link depends on the workspace its text names, without widening", async () => {
+    expect(
+      appScan(
+        await scanApp(
+          { "packages/c/gone/keep.txt": "" },
+          {
+            links: { "packages/app/l": "packages/c/gone" },
+            prepare: (root) => {
+              rmSync(join(root, "packages/c/gone"), { recursive: true });
+            },
+          },
+        ),
+      ),
+    ).toEqual({ edges: ["link packages/c"], widenings: [] });
+  });
+
+  it("D1640: a link target reached through a linked consumer root is labelled relative to the root", async () => {
+    const information = await scanApp(
+      { "packages/c/deep/index.ts": "" },
+      { links: { "packages/app/l": "packages/c/deep" }, throughLink: true },
+    );
+    expect(
+      "edges" in information
+        ? information.edges
+            .filter(({ dependent }) => dependent === APP)
+            .map(({ detail }) => detail)
+        : information,
+    ).toEqual([expect.stringMatching(/ to packages\/c\/deep$/)]);
+  });
+});
+
+describe("finding dependencies executes nothing", () => {
+  it("D1641: a scan leaves no marker from a source file, a Vitest config or a tsconfig extends target that each write one when run", async () => {
+    const markers = ["marker-source", "marker-config", "marker-extends"];
+    const writer = (marker: string, up: string) =>
+      `require("node:fs").writeFileSync(require("node:path").join(__dirname, "${up}${marker}"), "ran");\n`;
+    const left = await inspectTree(
+      {
+        ...appTree({
+          files: {
+            "packages/app/src/run.cjs": writer("marker-source", "../../../"),
+            "packages/app/vitest.config.cjs": writer("marker-config", "../../"),
+            "packages/app/evil.cjs": writer("marker-extends", "../../"),
+            [APP_TSCONFIG]: manifest({
+              extends: "./evil.cjs",
+              compilerOptions: { paths: { "@c": ["../c/src"] } },
+            }),
+          },
+          change: "",
+        }),
+      },
+      (root) => markers.filter((marker) => existsSync(join(root, marker))),
+    );
+    expect(left).toEqual([]);
+  });
+});
+
+describe("suffixes on specifiers", () => {
+  it("D1666: a hash suffix, like a query suffix, does not change where a bare or relative specifier resolves", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'import a from "@x/b#frag";\nimport c from "../../c#x";\n',
+        }),
+      ),
+    ).toEqual(["bare-import packages/b", "relative-import packages/c"]);
+  });
+
+  it("D1667: a query suffix on a new URL specifier does not change the workspace it resolves into", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]:
+            'export const u = new URL("../../b?url", import.meta.url);\n',
+        }),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+});
+
+describe("configs a tsconfig inherits", () => {
+  it("D1668: a tsconfig.build.json is read like a tsconfig", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/tsconfig.build.json": manifest({
+            references: [{ path: "../c" }],
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1670: a config with no paths of its own takes the paths of a base config it extends", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+          "packages/app/configs/base.json": manifest({
+            compilerOptions: { paths: { "@c": ["../../c/src"] } },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D1671: inherited paths with no baseUrl resolve against the directory of the config that sets them", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+          "packages/app/configs/base.json": manifest({
+            compilerOptions: { paths: { "@b/*": ["../../b/src/*"] } },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D1672: a config with no paths of its own whose extends cannot be read widens, naming the config", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: "./missing.json" }),
+        }),
+      ),
+    ).toEqual(widenedAt("extends-unfollowed", APP_TSCONFIG));
+  });
+
+  it("D1673: a baseUrl that is not a string widens a config with paths, naming the config", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            compilerOptions: { baseUrl: 1, paths: { "@c": ["../c/src"] } },
+          }),
+        }),
+      ),
+    ).toEqual(widenedAt("extends-unfollowed", APP_TSCONFIG));
+  });
+
+  it("D1677: a regular-expression literal the engine cannot build is refused rather than read as null", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_TSCONFIG]: '{ "references": [{ "path": "../c" }], "x": /(/ }',
+        }),
+      ),
+    ).toEqual(widenedAt("unparsed-source", APP_TSCONFIG));
   });
 });

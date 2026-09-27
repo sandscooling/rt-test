@@ -712,5 +712,614 @@
     "file": "packages/daemon/src/selection/package-specs.ts",
     "old": "    RELATIVE_PATH_NAMES.includes(spec) ||\n",
     "new": ""
+  },
+  {
+    "id": "D1581",
+    "defect": "Static imports are not read, so a file importing another workspace adds no edge and that workspace's changes miss its tests.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  for (const { moduleRequest } of result.module.staticImports) {\n    add(moduleRequest.value, SPECIFIER_FORM.module);\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D1582",
+    "defect": "Re-exports are not read, so a file re-exporting from another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "      if (moduleRequest !== null)\n        add(moduleRequest.value, SPECIFIER_FORM.module);\n",
+    "new": ""
+  },
+  {
+    "id": "D1583",
+    "defect": "A literal dynamic import() is not read, so a lazily imported workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "      addLiteral(node.source, SPECIFIER_FORM.module, add);\n",
+    "new": ""
+  },
+  {
+    "id": "D1584",
+    "defect": "A template literal with no substitution is treated as computed, so its specifier adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  return node.quasis[0]?.value.cooked ?? undefined;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D1585",
+    "defect": "A require() call is not read, so a CommonJS file requiring another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    return callee.name === REQUIRE ? SPECIFIER_FORM.module : undefined;",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D1586",
+    "defect": "A require.resolve() call is not read, so a file resolving a path in another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    (object.name === REQUIRE && method === RESOLVE) ||",
+    "new": "    false ||"
+  },
+  {
+    "id": "D1587",
+    "defect": "vi.importMock is missing from the Vitest module methods, so a test mocking another workspace through it adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  \"importMock\",\n",
+    "new": ""
+  },
+  {
+    "id": "D1588",
+    "defect": "An import.meta.resolve() call is not read, so a file resolving a module in another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    if (method === RESOLVE) return SPECIFIER_FORM.module;\n",
+    "new": ""
+  },
+  {
+    "id": "D1589",
+    "defect": "A TypeScript import x = require() declaration is not read, so it adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "        add(node.moduleReference.expression.value, SPECIFIER_FORM.module);\n",
+    "new": ""
+  },
+  {
+    "id": "D1590",
+    "defect": "A /// <reference path> directive is not read, so a file referencing another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    if (path !== undefined) add(path, SPECIFIER_FORM.fileRelative);",
+    "new": ""
+  },
+  {
+    "id": "D1591",
+    "defect": "A reference path without ./ is resolved as a module request, so it reads as a bare package name and widens while the listing is incomplete.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    if (path !== undefined) add(path, SPECIFIER_FORM.fileRelative);",
+    "new": "    if (path !== undefined) add(path, SPECIFIER_FORM.module);"
+  },
+  {
+    "id": "D1592",
+    "defect": "A glob pattern depends only on the workspace owning the directory before its wildcard, so the workspaces nested under that directory are missed.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    ...workspacesUnder(scan.graph, directory),\n",
+    "new": ""
+  },
+  {
+    "id": "D1593",
+    "defect": "A glob pattern depends only on workspaces nested under the directory before its wildcard, so the workspace owning that directory is missed.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    ...holdersOf(scan.graph, directory),\n",
+    "new": ""
+  },
+  {
+    "id": "D1594",
+    "defect": "An import.meta.glob array is treated as a computed argument, so none of its patterns adds an edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "      if (form === SPECIFIER_FORM.glob && first.type === \"ArrayExpression\") {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D1595",
+    "defect": "A negated glob pattern keeps its !, so it reads as a bare name and depends on nothing.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  add(negated ? text.slice(GLOB_NEGATION.length) : text, form);",
+    "new": "  add(text, form);"
+  },
+  {
+    "id": "D1596",
+    "defect": "A new URL(specifier, import.meta.url) is not read, so an asset in another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "      if (isFileUrl && first !== undefined) {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D1597",
+    "defect": "A relative specifier keeps its query suffix, so it resolves to a sibling path the root owns instead of the workspace it names.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  } else {\n    addPathEdges(scan, reference, withoutSuffix(text), producer);\n  }",
+    "new": "  } else {\n    addPathEdges(scan, reference, text, producer);\n  }"
+  },
+  {
+    "id": "D1598",
+    "defect": "Ownership accepts a directory the path climbs out of, so a specifier resolving outside the consumer root depends on the root workspace.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "    .filter((directory) => liesInside(directory, target))",
+    "new": "    .filter(() => true)"
+  },
+  {
+    "id": "D1654",
+    "defect": "An absolute specifier is read as a bare package name, so an absolute import into another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    !isRelative(text) &&\n    !isAbsolutePath(text)\n",
+    "new": "    !isRelative(text)\n"
+  },
+  {
+    "id": "D1599",
+    "defect": "A relative import's edge detail drops the specifier, so the selection reason cannot say which import chose the test.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    const detail = `${label} imports ${JSON.stringify(specifier.text)}`;",
+    "new": "    const detail = label;"
+  },
+  {
+    "id": "D1600",
+    "defect": "A bare specifier naming a listed workspace adds no edge, so a dependency no manifest declares is missed.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  for (const dependency of named) {\n    addEdge(scan, reference, dependency, producer);\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D1601",
+    "defect": "A scoped specifier's package name is cut to its first segment, so @scope/name/sub names no listed workspace.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const count = specifier.startsWith(SCOPE_PREFIX) ? SCOPED_NAME_SEGMENTS : 1;",
+    "new": "  const count = 1;"
+  },
+  {
+    "id": "D1602",
+    "defect": "While the listing is incomplete, a bare specifier naming no listed workspace adds nothing, so a workspace the listing missed is never selected.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  if (named.length > 0 || scan.graph.namesComplete) return;",
+    "new": "  return;"
+  },
+  {
+    "id": "D1603",
+    "defect": "A URL scheme is not recognized, so node:fs reads as a bare package name and widens while the listing is incomplete.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "const URL_SCHEME = /^[A-Za-z][A-Za-z\\d+.-]+:/;",
+    "new": "const URL_SCHEME = /^(?!)/;"
+  },
+  {
+    "id": "D1604",
+    "defect": "A # subpath import reads as a bare package name, so it widens while the listing is incomplete.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    !text.startsWith(SUBPATH_IMPORT_PREFIX) &&\n",
+    "new": ""
+  },
+  {
+    "id": "D1605",
+    "defect": "A bare specifier keeps its query suffix in its package name, so it names no listed workspace and the edge is dropped.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    const specifier = form === SPECIFIER_FORM.glob ? text : withoutSuffix(text);",
+    "new": "    const specifier = text;"
+  },
+  {
+    "id": "D1606",
+    "defect": "A tsconfig extends path is not followed into its workspace, so it adds no edge.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (isPathLike(target)) {\n    addPathEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);\n  } else {",
+    "new": "  if (isPathLike(target)) {\n  } else {"
+  },
+  {
+    "id": "D1607",
+    "defect": "Only the first entry of an extends array is read, so a later entry into another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  return isStringArray(value)\n    ? { ok: true, value }",
+    "new": "  return isStringArray(value)\n    ? { ok: true, value: value.slice(0, 1) }"
+  },
+  {
+    "id": "D1608",
+    "defect": "An extends naming a listed workspace's package adds no edge.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    addPackageEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);",
+    "new": ""
+  },
+  {
+    "id": "D1609",
+    "defect": "A tsconfig references path adds no edge, so a referenced project in another workspace is missed.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "      addPathEdges(scan, reference, path, EDGE_PRODUCER.tsconfig);",
+    "new": ""
+  },
+  {
+    "id": "D1617",
+    "defect": "jsconfig files are not recognized as configs, so their references add no edge.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "const CONFIG_FILE_NAME = /^(?:ts|js)config.*\\.json$/;",
+    "new": "const CONFIG_FILE_NAME = /^(?:ts)config.*\\.json$/;"
+  },
+  {
+    "id": "D1610",
+    "defect": "With no baseUrl, a paths target resolves against the filesystem root instead of the config's directory, so it lands outside the consumer.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "        base: base.directory ?? dirname(file),",
+    "new": "        base: base.directory ?? \"/\","
+  },
+  {
+    "id": "D1611",
+    "defect": "A config's own baseUrl is ignored, so its paths targets resolve against the wrong directory.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (own === undefined) return { ok: true, value: undefined };",
+    "new": "  if (true) return { ok: true, value: undefined };"
+  },
+  {
+    "id": "D1612",
+    "defect": "The extends chain is not searched for a baseUrl, so an inherited baseUrl is ignored and paths resolve against the config's own directory.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "      const found = seek(next.value, next.file, depth + 1);",
+    "new": "      const found: Nearest<T> = { ok: true, found: undefined };"
+  },
+  {
+    "id": "D1613",
+    "defect": "extends entries are searched first to last, so an earlier entry's baseUrl wins over the later one TypeScript applies.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    for (const target of extended.value.toReversed()) {",
+    "new": "    for (const target of extended.value) {"
+  },
+  {
+    "id": "D1614",
+    "defect": "A config two extends entries share stays on the chain after its search, so the second visit reads as a cycle and paths widens.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "      if (searched.has(next.file)) continue;\n      chain.add(next.file);\n      const found = seek(next.value, next.file, depth + 1);\n      chain.delete(next.file);\n",
+    "new": "      chain.add(next.file);\n      const found = seek(next.value, next.file, depth + 1);\n"
+  },
+  {
+    "id": "D1615",
+    "defect": "A paths config whose extends chain cannot be followed falls back to its own directory instead of widening.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (!base.ok) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1616",
+    "defect": "A paths target with a wildcard is resolved as a literal path, so only the workspace owning it is a dependency and the workspaces nested under it are missed.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "      addPatternEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);",
+    "new": "      addPathEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);"
+  },
+  {
+    "id": "D1622",
+    "defect": "A malformed references field is dropped silently, so the workspaces it points to are neither edges nor a widening.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    malformed(references.reason);\n",
+    "new": ""
+  },
+  {
+    "id": "D1623",
+    "defect": "The JSONC wrapper closes its parenthesis on the file's last line, so a closing line comment comments it out and the config fails to parse.",
+    "file": "packages/daemon/src/selection/jsonc.ts",
+    "old": "  const parsed = parseGuarded(JSONC_FILE_NAME, `(${json}\\n)`, {",
+    "new": "  const parsed = parseGuarded(JSONC_FILE_NAME, `(${json})`, {"
+  },
+  {
+    "id": "D1624",
+    "defect": "A tsconfig that does not parse is skipped without a widening, so the workspaces it points to are missed.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (!read.ok) {\n    uncertain(\n      scan.graph,\n      dependent,\n      read.kind,",
+    "new": "  if (!read.ok) {\n    return;\n    uncertain(\n      scan.graph,\n      dependent,\n      read.kind,"
+  },
+  {
+    "id": "D1618",
+    "defect": "A relative package.json imports target adds no edge, so a subpath import into another workspace is missed.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "        addPatternEdges(scan, reference, target, EDGE_PRODUCER.manifestImports);",
+    "new": ""
+  },
+  {
+    "id": "D1619",
+    "defect": "Conditional and array imports values are not descended into, so their targets add no edge.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  const children = Array.isArray(value)\n    ? value\n    : isRecord(value)\n      ? Object.values(value)\n      : [];",
+    "new": "  const children: unknown[] = [];"
+  },
+  {
+    "id": "D1620",
+    "defect": "A bare package.json imports target naming a listed workspace adds no edge.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "        addPackageEdges(scan, reference, target, EDGE_PRODUCER.manifestImports);",
+    "new": ""
+  },
+  {
+    "id": "D1621",
+    "defect": "Every non-relative imports target is read as a package name, so node:fs widens while the listing is incomplete.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "      } else if (isBare(target)) {",
+    "new": "      } else {"
+  },
+  {
+    "id": "D1625",
+    "defect": "A source file with parse errors is read for specifiers instead of widening, so the imports the errors hide are missed.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  return result.errors.length > 0",
+    "new": "  return result.errors.length > 99"
+  },
+  {
+    "id": "D1626",
+    "defect": ".astro is missing from the plugin formats, so an Astro file's imports are skipped without a widening.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "const PLUGIN_FORMAT_EXTENSIONS = [\".vue\", \".svelte\", \".astro\", \".mdx\"];",
+    "new": "const PLUGIN_FORMAT_EXTENSIONS = [\".vue\", \".svelte\", \".mdx\"];"
+  },
+  {
+    "id": "D1629",
+    "defect": "The bracket-depth guard admits 1,001 levels, one past its bound.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  if (depth > MAX_BRACKET_DEPTH) {",
+    "new": "  if (depth > MAX_BRACKET_DEPTH + 1) {"
+  },
+  {
+    "id": "D1630",
+    "defect": "The bracket-depth guard refuses a file exactly at its bound, so a legal file widens needlessly.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  if (depth > MAX_BRACKET_DEPTH) {",
+    "new": "  if (depth >= MAX_BRACKET_DEPTH) {"
+  },
+  {
+    "id": "D1631",
+    "defect": "A RangeError thrown while walking the syntax tree escapes the scan, so one deep file fails the whole selection instead of widening its workspace.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  try {\n    return { ok: true, specifiers: specifiersOf(parsed.result) };\n  } catch (error) {\n    return unparsed(`cannot be walked: ${errorText(error)}`);\n  }",
+    "new": "  return { ok: true, specifiers: specifiersOf(parsed.result) };"
+  },
+  {
+    "id": "D1627",
+    "defect": "The depth bound admits a directory 41 levels down, one past its bound.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "    if (depth + 1 > MAX_WALK_DEPTH) {",
+    "new": "    if (depth + 1 > MAX_WALK_DEPTH + 1) {"
+  },
+  {
+    "id": "D1628",
+    "defect": "The depth bound refuses a directory exactly 40 levels down, so its files are not read and it widens needlessly.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "    if (depth + 1 > MAX_WALK_DEPTH) {",
+    "new": "    if (depth + 1 >= MAX_WALK_DEPTH) {"
+  },
+  {
+    "id": "D1632",
+    "defect": ".mts is missing from the scanned extensions, so an .mts file's imports are never read.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "  \".mts\",\n",
+    "new": ""
+  },
+  {
+    "id": "D1633",
+    "defect": ".js files parse without JSX, so a React .js file fails to parse and widens its workspace on every change.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "const JSX_EXTENSIONS = [\".js\", \".mjs\"];",
+    "new": "const JSX_EXTENSIONS = [\".mjs\"];"
+  },
+  {
+    "id": "D1634",
+    "defect": ".cjs files parse as modules, so a CommonJS top-level return fails to parse and widens.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    return { lang: \"jsx\", sourceType: \"commonjs\", preserveParens: false };",
+    "new": "    return { lang: \"jsx\", preserveParens: false };"
+  },
+  {
+    "id": "D1635",
+    "defect": "node_modules is walked, so an installed package's imports become the workspace's edges.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "const SKIPPED_DIRECTORIES = [\"node_modules\", \".git\"];",
+    "new": "const SKIPPED_DIRECTORIES = [\".git\"];"
+  },
+  {
+    "id": "D1655",
+    "defect": ".git is walked, so a script under it becomes the workspace's edges.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "const SKIPPED_DIRECTORIES = [\"node_modules\", \".git\"];",
+    "new": "const SKIPPED_DIRECTORIES = [\"node_modules\"];"
+  },
+  {
+    "id": "D1636",
+    "defect": "A workspace's walk descends into the package workspaces nested in it, so their imports become the parent's edges.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  const walked = walkWorkspace(directory, nested, ignored, (path) =>",
+    "new": "  const walked = walkWorkspace(directory, [], ignored, (path) =>"
+  },
+  {
+    "id": "D1637",
+    "defect": "The walk follows a directory link, so the linked workspace's imports become the linking workspace's edges.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "    if (isFile(path)) classifyFile(walk, path, entry.name);\n    return;",
+    "new": "    if (isFile(path)) classifyFile(walk, path, entry.name);\n    else walk.pending.push({ directory: path, depth: depth + 1 });\n    return;"
+  },
+  {
+    "id": "D1638",
+    "defect": "A link edge is recorded as a relative import, so the selection reason misnames what chose the test.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  addPathEdges(scan, reference, target.path, EDGE_PRODUCER.link);",
+    "new": "  addPathEdges(scan, reference, target.path, EDGE_PRODUCER.relativeImport);"
+  },
+  {
+    "id": "D1639",
+    "defect": "A dangling link is treated as unreadable, so it widens its workspace instead of depending on where its text points.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    return { ok: true, path: resolve(dirname(link), readlinkSync(link)) };",
+    "new": "    return { ok: false, reason: `dangling ${readlinkSync(link)}` };"
+  },
+  {
+    "id": "D1640",
+    "defect": "Labels are taken only relative to the listed root, so a link target's real path under a linked or short-named root is labelled through ../.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const roots = real.ok && real.path !== root ? [root, real.path] : [root];",
+    "new": "  const roots = [root];"
+  },
+  {
+    "id": "D1641",
+    "defect": "The scan runs each source file to find its imports, so project code executes before any start.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    text = readFileSync(file, \"utf8\");",
+    "new": "    text = readFileSync(file, \"utf8\");\n    process.getBuiltinModule(\"node:child_process\").execFileSync(process.execPath, [file]);"
+  },
+  {
+    "id": "D1642",
+    "defect": "A source file that cannot be read is taken as importing nothing, so its imports are lost without a widening.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  } catch (error) {\n    return {\n      ok: false,\n      kind: UNCERTAINTY.unreadableSource,\n      reason: `cannot be read: ${errorText(error)}`,\n    };\n  }",
+    "new": "  } catch {\n    return { ok: true, specifiers: [] };\n  }"
+  },
+  {
+    "id": "D1643",
+    "defect": "A directory that cannot be listed is skipped without a widening, so the imports under it are lost.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "  if (!listing.ok) {\n    walk.uncertainties.push({",
+    "new": "  if (!listing.ok) {\n    return true;\n    walk.uncertainties.push({"
+  },
+  {
+    "id": "D1644",
+    "defect": "A link that can be neither resolved nor read is skipped without a widening, so what it links to is lost.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  if (!target.ok) {\n    uncertain(",
+    "new": "  if (!target.ok) {\n    return;\n    uncertain("
+  },
+  {
+    "id": "D1645",
+    "defect": "The entry limit admits 50,001 entries, one past its bound.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "    if (walk.visited > MAX_WALKED_ENTRIES) return false;",
+    "new": "    if (walk.visited > MAX_WALKED_ENTRIES + 1) return false;"
+  },
+  {
+    "id": "D1646",
+    "defect": "The entry limit refuses a workspace of exactly 50,000 entries, so it widens needlessly.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "    if (walk.visited > MAX_WALKED_ENTRIES) return false;",
+    "new": "    if (walk.visited >= MAX_WALKED_ENTRIES) return false;"
+  },
+  {
+    "id": "D1653",
+    "defect": "The AC7 fixture repository stops applying the shared fixture git config, so its commit runs under the developer's global hooks, signing and identity.",
+    "file": "packages/daemon/test/selection/source-scan.test.ts",
+    "old": "  writeFixtureGitConfig(root);\n",
+    "new": ""
+  },
+  {
+    "id": "D1648",
+    "defect": "The walk ignores what git reports as ignored, so build output under a gitignored directory is parsed and its failures and imports widen or add edges.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "      walk.ignored.has(path) ||\n",
+    "new": ""
+  },
+  {
+    "id": "D1647",
+    "defect": "A gitignored entry is counted before it is skipped, so ignored build output pushes a workspace past the entry limit and it widens.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "    if (isSkipped) continue;\n    walk.visited += 1;",
+    "new": "    walk.visited += walk.ignored.has(path) ? 1 : 0;\n    if (isSkipped) continue;\n    walk.visited += 1;"
+  },
+  {
+    "id": "D1649",
+    "defect": "Tracked files matching an ignore pattern are listed as ignored, so a tracked file inside an ignored directory is not scanned.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "  \"--others\",\n",
+    "new": "  \"--others\",\n  \"--cached\",\n"
+  },
+  {
+    "id": "D1650",
+    "defect": "Git inherits the caller's GIT_* environment, so a GIT_DIR naming another repository decides what the walk skips.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "    env: environmentWithoutGit(),\n",
+    "new": "    env: process.env,\n"
+  },
+  {
+    "id": "D1651",
+    "defect": "core.fsmonitor is left as the repository configures it, so listing ignored paths runs a program the consumer's git config names.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "  \"-c\",\n  \"core.fsmonitor=false\",\n",
+    "new": ""
+  },
+  {
+    "id": "D1652",
+    "defect": "When git cannot list ignored paths, the walk falls back to reading .gitignore itself, so outside a git repository it skips paths it must walk.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "  if (listed.error !== undefined || listed.status !== 0) return new Set();",
+    "new": "  if (listed.error !== undefined || listed.status !== 0) {\n    const excluded = process.getBuiltinModule(\"node:fs\").readFileSync(resolve(root, \".gitignore\"), \"utf8\");\n    return new Set(excluded.split(\"\\n\").filter((line) => line !== \"\").map((line) => resolve(root, line)));\n  }"
+  },
+  {
+    "id": "D1666",
+    "defect": "Only a query suffix is stripped, so a bare \"@x/b#frag\" names no listed workspace and a relative \"../../c#x\" resolves to a sibling the root owns.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const hash = text.indexOf(HASH_PREFIX);",
+    "new": "  const hash = -1;"
+  },
+  {
+    "id": "D1667",
+    "defect": "A file-relative specifier keeps its query suffix, so new URL(\"../../b?url\", import.meta.url) resolves to a sibling the root owns instead of packages/b.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    addPathEdges(scan, reference, withoutSuffix(text), producer);\n  } else if (isBare(text)) {",
+    "new": "    addPathEdges(scan, reference, text, producer);\n  } else if (isBare(text)) {"
+  },
+  {
+    "id": "D1668",
+    "defect": "Only tsconfig.json and jsconfig.json are read, so a tsconfig.build.json whose references point into another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "const CONFIG_FILE_NAME = /^(?:ts|js)config.*\\.json$/;",
+    "new": "const CONFIG_FILE_NAME = /^(?:ts|js)config\\.json$/;"
+  },
+  {
+    "id": "D1669",
+    "defect": "A dangling link's relative text resolves against the process's working directory, so it lands outside the consumer root and adds no edge.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    return { ok: true, path: resolve(dirname(link), readlinkSync(link)) };",
+    "new": "    return { ok: true, path: resolve(readlinkSync(link)) };"
+  },
+  {
+    "id": "D1670",
+    "defect": "A config with no paths of its own ignores the paths of a base config it extends, so a target in another workspace adds no edge.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  } else addInheritedPathsEdges(scan, dependent, file, config);",
+    "new": "  }"
+  },
+  {
+    "id": "D1671",
+    "defect": "Inherited paths resolve against the walked config's directory instead of the directory of the config that sets them.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  addPathsEdges(scan, dependent, file, config, found.value, found.file);",
+    "new": "  addPathsEdges(scan, dependent, file, config, found.value);"
+  },
+  {
+    "id": "D1672",
+    "defect": "A config with no paths of its own whose extends cannot be read skips the paths it may inherit without widening.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (!inherited.ok) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1673",
+    "defect": "A baseUrl that is not a string is ignored, so paths targets resolve against the config's directory with no widening.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    : {\n        ok: false,\n        reason: \"has a compilerOptions.baseUrl that is not a string\",\n      };",
+    "new": "    : { ok: true, value: undefined };"
+  },
+  {
+    "id": "D1674",
+    "defect": "The consumer root's own label is empty, so a walk-bound widening of the root workspace names no directory.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  return label === \"\" ? ROOT_PATH : label;",
+    "new": "  return label;"
+  },
+  {
+    "id": "D1675",
+    "defect": "Git runs from the consumer root, so an executable named git committed there runs in place of git while ignored paths are listed.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "      cwd: tmpdir(),",
+    "new": "      cwd: absoluteRoot,"
+  },
+  {
+    "id": "D1676",
+    "defect": "A Visitor is built for each file, and the parser keeps every one for the life of the process, so memory grows with every file scanned.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "    CALL_VISITOR.visit(program);",
+    "new": "    callVisitor().visit(program);"
+  },
+  {
+    "id": "D1677",
+    "defect": "A regular-expression literal the engine cannot build is read as JSON null, so a config holding one is accepted instead of refused.",
+    "file": "packages/daemon/src/selection/jsonc.ts",
+    "old": "      return \"regex\" in node || \"bigint\" in node\n        ? notJson(\"a regular expression or BigInt literal\")\n        : literalValue(node.value);",
+    "new": "      return literalValue(node.value);"
   }
 ]

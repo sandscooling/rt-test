@@ -1,10 +1,13 @@
-import { statSync } from "node:fs";
-import { join } from "node:path";
+import { readlinkSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { errorText } from "../vitest/error-text.js";
 import {
   joinPath,
+  liesInside,
   objectField,
   PACKAGE_JSON,
   readJson,
+  realPath,
   ROOT_PATH,
   type PackageWorkspace,
   type WorkspaceListing,
@@ -32,6 +35,17 @@ import {
   type SelectableWorkspace,
   type UncertaintyKind,
 } from "./selection-types.js";
+import { gitIgnoredPaths } from "./git-ignored.js";
+import { readSourceImports } from "./source-imports.js";
+import { walkWorkspace } from "./source-walk.js";
+import {
+  addPathEdges,
+  addSpecifierEdges,
+  newScan,
+  rootLabel,
+  type Scan,
+} from "./specifier-edges.js";
+import { addManifestImportsEdges, addTsconfigEdges } from "./tsconfig-edges.js";
 import { addVitestEdges } from "./vitest-edges.js";
 
 const DEPENDENCY_FIELDS = [
@@ -60,7 +74,7 @@ interface OverrideEntry {
   readonly value: unknown;
 }
 
-/** Reads each package workspace's `package.json` and nothing else from the consumer: no config or test module is loaded. */
+/** Reads and parses the consumer's manifests, sources and tsconfig files only: no config or project module is loaded or run. */
 export function buildDependencyInformation(
   listing: WorkspaceListing,
   vitestWorkspaces: readonly SelectableWorkspace[],
@@ -89,6 +103,7 @@ export function buildDependencyInformation(
   if (root?.read.ok === true) {
     addOverrideEdges(graph, root.workspace, root.read.manifest);
   }
+  addUndeclaredEdges(graph, manifests);
   for (const workspace of vitestWorkspaces) addVitestEdges(graph, workspace);
   return {
     packageWorkspaces: listing.workspaces,
@@ -350,4 +365,102 @@ function rootDependencySpecs(
   return DEPENDENCY_FIELDS.map((field) =>
     objectField(manifest[field], name),
   ).filter((spec): spec is string => typeof spec === "string");
+}
+
+/** The dependencies no `package.json` dependency field declares: imports, tsconfig fields, `imports` targets and links. */
+function addUndeclaredEdges(
+  graph: Graph,
+  manifests: readonly ReadManifest[],
+): void {
+  const [root] = graph.workspaces;
+  if (root === undefined) return;
+  const scan = newScan(graph, root.directory);
+  const ignored = gitIgnoredPaths(root.directory);
+  for (const { workspace, read } of manifests) {
+    addWorkspaceSourceEdges(scan, workspace, ignored);
+    if (read.ok) addManifestImportsEdges(scan, workspace, read.manifest);
+  }
+}
+
+function addWorkspaceSourceEdges(
+  scan: Scan,
+  workspace: PackageWorkspace,
+  ignored: ReadonlySet<string>,
+): void {
+  const { graph } = scan;
+  const directory = resolve(workspace.directory);
+  const nested = graph.workspaces
+    .filter(
+      (other) =>
+        other.path !== workspace.path &&
+        liesInside(directory, resolve(other.directory)),
+    )
+    .map((other) => other.directory);
+  const walked = walkWorkspace(directory, nested, ignored, (path) =>
+    rootLabel(scan, path),
+  );
+  for (const { kind, cause } of walked.uncertainties) {
+    uncertain(graph, workspace.path, kind, cause);
+  }
+  for (const link of walked.links) addLinkEdges(scan, workspace.path, link);
+  for (const file of walked.sources) {
+    addSourceFileEdges(scan, workspace.path, file);
+  }
+  for (const file of walked.configs) {
+    addTsconfigEdges(scan, workspace.path, file);
+  }
+}
+
+function addLinkEdges(scan: Scan, dependent: string, link: string): void {
+  const label = rootLabel(scan, link);
+  const target = linkTarget(link);
+  if (!target.ok) {
+    uncertain(
+      scan.graph,
+      dependent,
+      UNCERTAINTY.unreadableSource,
+      `link ${label} cannot be read, so what it links to is not known: ${target.reason}`,
+    );
+    return;
+  }
+  const reference = {
+    dependent,
+    base: dirname(link),
+    detail: `link ${label} to ${rootLabel(scan, target.path)}`,
+  };
+  addPathEdges(scan, reference, target.path, EDGE_PRODUCER.link);
+}
+
+/** A link whose target does not exist is taken at the path its text names, where a target created later would lie. */
+function linkTarget(
+  link: string,
+): { ok: true; path: string } | { ok: false; reason: string } {
+  const real = realPath(link);
+  if (real.ok) return real;
+  try {
+    return { ok: true, path: resolve(dirname(link), readlinkSync(link)) };
+  } catch (error) {
+    return { ok: false, reason: errorText(error) };
+  }
+}
+
+/** Relative specifiers resolve against the file's real directory, as Node and Vite resolve a linked file's imports. */
+function addSourceFileEdges(scan: Scan, dependent: string, file: string): void {
+  const label = rootLabel(scan, file);
+  const found = readSourceImports(file);
+  if (!found.ok) {
+    uncertain(
+      scan.graph,
+      dependent,
+      found.kind,
+      `${label} ${found.reason}, so its imports are not known`,
+    );
+    return;
+  }
+  const real = realPath(file);
+  const base = dirname(real.ok ? real.path : file);
+  for (const specifier of found.specifiers) {
+    const detail = `${label} imports ${JSON.stringify(specifier.text)}`;
+    addSpecifierEdges(scan, { dependent, base, detail }, specifier);
+  }
 }

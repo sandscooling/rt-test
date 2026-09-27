@@ -6,7 +6,7 @@ import type {
 } from "../vitest/find-workspaces.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 1;
+export const SELECTION_POLICY_VERSION = 2;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -14,6 +14,11 @@ export const EDGE_PRODUCER = {
   testModule: "test-module",
   setupFile: "setup-file",
   alias: "alias",
+  relativeImport: "relative-import",
+  bareImport: "bare-import",
+  tsconfig: "tsconfig",
+  manifestImports: "manifest-imports",
+  link: "link",
 } as const;
 
 export type EdgeProducerKind =
@@ -27,6 +32,12 @@ export const UNCERTAINTY = {
   unresolvedOverride: "unresolved-override",
   unresolvableAlias: "unresolvable-alias",
   testsNotKnown: "tests-not-known",
+  unreadableSource: "unreadable-source",
+  unparsedSource: "unparsed-source",
+  pluginFormatFile: "plugin-format-file",
+  walkBoundReached: "walk-bound-reached",
+  extendsUnfollowed: "extends-unfollowed",
+  malformedConfig: "malformed-config",
 } as const;
 
 export type UncertaintyKind = (typeof UNCERTAINTY)[keyof typeof UNCERTAINTY];
@@ -36,7 +47,7 @@ export interface DependencyEdge {
   readonly dependent: string;
   readonly dependency: string;
   readonly producer: EdgeProducerKind;
-  /** Quotes what produced the edge: the manifest field and key, test module, setup file or alias. */
+  /** Quotes what produced the edge: the manifest field and key, test module, setup file, alias, import, tsconfig field or link. */
   readonly detail: string;
 }
 
