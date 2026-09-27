@@ -523,5 +523,40 @@
     "file": "scripts/lib/orchestration/doc-integrity.mjs",
     "old": "  const watched = watchedPaths(config, gates);\n  let dirty;\n  try {\n    dirty = dirtyPaths(config.root, watched);",
     "new": "  let dirty;\n  try {\n    dirty = dirtyPaths(config.root, watchedPaths(config, gates));"
+  },
+  {
+    "id": "D1759",
+    "defect": "A claimed directory matches only a change at its own path, so the untracked files beneath it are never staged.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": ".filter(([key]) => covers(comparable(path), key))",
+    "new": ".filter(([key]) => comparable(path) === key)"
+  },
+  {
+    "id": "D1760",
+    "defect": "A claimed directory whose only change goes by --hunk is reported UNCHANGED.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "} else if (under.length === 0) plan.unchanged.push(w.path);",
+    "new": "} else if (found.length === 0) plan.unchanged.push(w.path);"
+  },
+  {
+    "id": "D1757",
+    "defect": "--also naming a directory stages everything beneath it, though only a claim vouches for a whole directory.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "if (byAlso && isDirectoryChange(w.path, under)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1762",
+    "defect": "A file covered by two overlapping claims is planned twice.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "    if (planned.has(comparable(change.path))) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D1786",
+    "defect": "A file beneath a claimed directory that --hunk also names is staged whole, so its unselected hunks are staged.",
+    "file": "scripts/lib/orchestration/stage.mjs",
+    "old": "(change) => !hunkPaths.has(comparable(change.path)),",
+    "new": "() => true,"
   }
 ]

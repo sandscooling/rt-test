@@ -1,0 +1,149 @@
+[
+  {
+    "id": "D1747",
+    "defect": "A recorded process still running inside the run's directory is found but never ended, so a killed run's daemon keeps running.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "for (const pid of ended) endProcess(pid);",
+    "new": ""
+  },
+  {
+    "id": "D1748",
+    "defect": "Every recorded process that still runs counts as the run's, so a process that reused a recorded id is ended.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "return forms.some((form) => text.includes(form));",
+    "new": "return true;"
+  },
+  {
+    "id": "D1749",
+    "defect": "A recorded file outside the run's directory, such as a Linux socket, is left behind.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "for (const file of entry.files ?? []) rmSync(file, { force: true });",
+    "new": ""
+  },
+  {
+    "id": "D1763",
+    "defect": "A recorded key's .tmp copy, which a killed writer leaves beside it, is left behind.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "const KEY_LEFTOVER_SUFFIXES = [\".tmp\", \".removing\"];",
+    "new": "const KEY_LEFTOVER_SUFFIXES = [\".removing\"];"
+  },
+  {
+    "id": "D1751",
+    "defect": "A Windows process query that cannot be made reads as no such process, so a live daemon's key is removed.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "throw new Error(\"cannot query processes: SystemRoot is not set\");",
+    "new": "return new Map();"
+  },
+  {
+    "id": "D1758",
+    "defect": "A relative path is recorded as given, so a cleanup running in another working directory looks for it in the wrong place.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "resolved[field] = entry[field].map((path) => resolve(path));",
+    "new": "resolved[field] = entry[field];"
+  },
+  {
+    "id": "D1752",
+    "defect": "The sweep cleans up a run whose process still runs, ending that run's daemons and removing its directory under it.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (!Number.isInteger(owner) || isRunning(owner)) continue;",
+    "new": "if (!Number.isInteger(owner)) continue;"
+  },
+  {
+    "id": "D1753",
+    "defect": "A watchdog that exits before it is ready reads as ready, so a run starts with nothing guarding it.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "      rejectReady(\n        new Error(`the run watchdog exited with ${code} before it was ready`),\n      ),",
+    "new": "      resolveReady(),"
+  },
+  {
+    "id": "D1750",
+    "defect": "The watchdog exits when its guarded run dies without cleaning up, so a killed run's daemon and directory are left.",
+    "file": "test/scripts/run-watchdog.mjs",
+    "old": "cleaning ??= cleanUpRun(runRoot).then(",
+    "new": "cleaning ??= Promise.resolve({ removed: true }).then("
+  },
+  {
+    "id": "D1754",
+    "defect": "The daemon suite's teardown passes after ending a process the run left running, hiding the leak.",
+    "file": "packages/daemon/test/temp-root.ts",
+    "old": "if (ended.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1755",
+    "defect": "A daemon process id a test adds to the harness's set is not recorded, so a killed run leaves that daemon running.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "    recordStarted(runTempRoot(), { pids: [pid] });\n",
+    "new": ""
+  },
+  {
+    "id": "D1756",
+    "defect": "withDaemons records nothing about its roots before the test body, so a daemon killed mid-test leaves its lock, key and executors.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  for (const root of roots) recordDaemonAt(root);\n",
+    "new": ""
+  },
+  {
+    "id": "D1761",
+    "defect": "withStandIn listens on the worktree's endpoint without recording it, so a killed run leaves the stand-in's key and socket.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  recordEndpointOf(worktreeIdentity, defaultStateDirectory(worktreeIdentity));\n",
+    "new": ""
+  },
+  {
+    "id": "D1774",
+    "defect": "trustedStart starts a daemon without recording its state directory first, so a run killed mid-start leaves its lock and key.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  recordDaemonAt(start.consumerRoot, stateDirectory);\n",
+    "new": ""
+  },
+  {
+    "id": "D1775",
+    "defect": "The daemon suite's setup starts no run watchdog, so a killed run leaves its daemons, keys and temp parent.",
+    "file": "packages/daemon/test/temp-root.ts",
+    "old": "  await guardRun(root);\n",
+    "new": ""
+  },
+  {
+    "id": "D1776",
+    "defect": "The daemon suite's setup no longer sweeps ended runs, so what a killed run left is never cleaned up.",
+    "file": "packages/daemon/test/temp-root.ts",
+    "old": "for (const problem of await sweepEndedRuns(RUN_PREFIX)) {",
+    "new": "for (const problem of []) {"
+  },
+  {
+    "id": "D1777",
+    "defect": "Teardown skips the run cleanup when a test's temp directory is still held, so a recorded process is neither ended nor named.",
+    "file": "packages/daemon/test/temp-root.ts",
+    "old": "    cleanup = await cleanUpRun(root);",
+    "new": "    cleanup =\n      stillHeld.length > 0\n        ? { ended: [], removed: true }\n        : await cleanUpRun(root);"
+  },
+  {
+    "id": "D1778",
+    "defect": "withDaemons records no executor pid files, so a killed run leaves the fixture's executors running.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "pidFiles: EXECUTOR_PID_FILES.map((name) => join(root, name)),",
+    "new": "pidFiles: [],"
+  },
+  {
+    "id": "D1779",
+    "defect": "withDaemons records no key or Linux socket for its roots, so a killed run leaves the daemon's key in place.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  if (worktree !== undefined) recordEndpointOf(worktree, stateDirectory);\n",
+    "new": ""
+  },
+  {
+    "id": "D1780",
+    "defect": "The cleanup ignores the ids in a recorded pid file, so the fixture's executors are left running.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "    ...(entry.pidFiles ?? []).flatMap(pidsIn),\n",
+    "new": ""
+  },
+  {
+    "id": "D1781",
+    "defect": "The cleanup ignores the id in a recorded lock directory's lock file, so a daemon known only by its store lock is left running.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "    ...(entry.lockDirectories ?? []).flatMap(lockFilesIn).flatMap(pidsIn),\n",
+    "new": ""
+  }
+]

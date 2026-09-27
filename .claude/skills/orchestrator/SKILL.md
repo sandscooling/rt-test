@@ -147,7 +147,7 @@ It stages every file the lane claims. Add `--also <path>` for each path in the m
 
 **Four checks before the commit:**
 
-- **Run `git status --short` after staging and account for every line not staged.** A claim on a directory stages nothing beneath it (the dry run marks it `UNCHANGED`), and a file whose claim was refused by another lane's claim is not the lane's at all to `stage-lane`, so both leave a reported path out of the commit silently. Add each such path with `--also`.
+- **Run `git status --short` after staging and account for every line not staged.** A file whose claim was refused by another lane's claim is not the lane's to `stage-lane`, so it leaves a reported path out of the commit silently. Add each such path with `--also`, which takes files, not directories.
 
 - **Compare the file total `stage-lane` prints against the members' reported path lists.** A file it marks as in the index before this run is the usual drift from another lane.
 - **Reconcile the dry run's add and delete counts against the kind of edit each contributor described**, not only the file count. **A pure append is the one shape with zero deletions**, so `+40 -0` on a file someone described as a correction is a hunk you have not staged. A path list built from "files I edited" cannot see a peer's edit to a file both touched, and neither member is wrong about its own work.

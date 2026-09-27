@@ -62,6 +62,30 @@ function buildRepo(base: string) {
 
 const hunk = (substring: string, path = DOC): HunkSpec => ({ path, substring });
 
+const GENERATED = ["tools/gen/a.mjs", "tools/gen/b.mjs"];
+
+/**
+ * A repository holding a committed `guide/a.md` and a committed file outside it, then a lane-a edit to the guide and
+ * two new untracked files under `tools/gen`, with `claims` claimed for lane-a.
+ */
+function claimedRepo(base: string, claims: readonly string[]) {
+  const root = join(base, "repo");
+  const claimsDir = join(base, "claims");
+  initRepo(root, {
+    "guide/a.md": "one\n",
+    "src/keep.ts": "export const a = 1;\n",
+  });
+  writeIn(root, "guide/a.md", "one\ntwo GUIDE_MARK\n");
+  for (const path of GENERATED) writeIn(root, path, "export {};\n");
+  claimPaths(
+    claimsDir,
+    pathRules(loadFlowConfig(REPO)),
+    { lane: "lane-a", thread: "t-a" },
+    claims,
+  );
+  return { root, claimsDir };
+}
+
 function stageIn(
   base: string,
   options: Partial<StageOptions> = {},
@@ -161,6 +185,78 @@ describe("stage-lane", PROCESS_SCENARIO, () => {
       return [status.get("src/gone.ts"), status.get("notes/new.md")];
     });
     expect(staged).toEqual(["D", "A"]);
+  });
+
+  it("D1759: stages every untracked file beneath a claimed directory", () => {
+    const staged = withTemp((base) => {
+      const { root, claimsDir } = claimedRepo(base, ["tools/gen"]);
+      stageLane({ root, claimsDir, lane: "lane-a" });
+      const status = stagedStatus(root);
+      return GENERATED.map((path) => status.get(path));
+    });
+    expect(staged).toEqual(["A", "A"]);
+  });
+
+  it("D1760: never reports a claimed directory whose only change is staged by --hunk as unchanged", () => {
+    const unchanged = withTemp((base) => {
+      const { root, claimsDir } = claimedRepo(base, ["guide"]);
+      const result = stageLane({
+        root,
+        claimsDir,
+        lane: "lane-a",
+        hunkSpecs: [hunk("GUIDE_MARK", "guide/a.md")],
+      });
+      return result.plan?.unchanged;
+    });
+    expect(unchanged).toEqual([]);
+  });
+
+  it("D1786: stages only the selected hunk of a file under a claimed directory that --hunk names", () => {
+    const indexed = withTemp((base) => {
+      const { root, claimsDir } = claimedRepo(base, ["guide"]);
+      const lines = docLines();
+      git(root, "checkout", "--", "guide/a.md");
+      writeIn(root, "guide/a.md", `${lines.join("\n")}\n`);
+      git(root, "commit", "-q", "-am", "long guide");
+      const edited = [...lines];
+      edited[1] = "line 2 GUIDE_KEEP";
+      edited[35] = "line 36 GUIDE_SKIP";
+      writeIn(root, "guide/a.md", `${edited.join("\n")}\n`);
+      stageLane({
+        root,
+        claimsDir,
+        lane: "lane-a",
+        hunkSpecs: [hunk("GUIDE_KEEP", "guide/a.md")],
+      });
+      return git(root, "show", ":guide/a.md");
+    });
+    const expected = docLines();
+    expected[1] = "line 2 GUIDE_KEEP";
+    expect(indexed).toBe(`${expected.join("\n")}\n`);
+  });
+
+  it("D1757: refuses an --also path that names a directory", () => {
+    const err = withTemp((base) => {
+      const { root, claimsDir } = claimedRepo(base, ["src/keep.ts"]);
+      return stageLane({ root, claimsDir, lane: "lane-a", also: ["tools/gen"] })
+        .err;
+    });
+    expect(err.some((line) => line.includes("--also names a directory"))).toBe(
+      true,
+    );
+  });
+
+  it("D1762: plans a file once when a claimed directory and a claimed file beneath it both cover it", () => {
+    const planned = withTemp((base) => {
+      const { root, claimsDir } = claimedRepo(base, [
+        "tools/gen",
+        GENERATED[0]!,
+      ]);
+      const result = stageLane({ root, claimsDir, lane: "lane-a" });
+      return result.plan?.whole.filter((change) => change.path === GENERATED[0])
+        .length;
+    });
+    expect(planned).toBe(1);
   });
 
   it("D704: stages no whole file when git apply --check refuses a hunk patch", () => {

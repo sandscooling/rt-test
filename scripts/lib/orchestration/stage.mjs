@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listClaims } from "./claims.mjs";
-import { comparable } from "./paths.mjs";
+import { comparable, covers } from "./paths.mjs";
 
 const PROG = "stage-lane";
 const EXIT = { OK: 0, REFUSED: 1 };
@@ -82,26 +82,55 @@ function uniqueByComparable(items) {
   return [...seen.values()];
 }
 
+// A requested directory stands for every change git reports beneath it.
+const changesAtOrUnder = (changes, path) =>
+  [...changes.entries()]
+    .filter(([key]) => covers(comparable(path), key))
+    .map(([, change]) => change);
+
+const isDirectoryChange = (path, under) =>
+  under.some((change) => comparable(change.path) !== comparable(path));
+
+function planChanges(plan, planned, found) {
+  for (const change of found) {
+    if (planned.has(comparable(change.path))) continue;
+    planned.add(comparable(change.path));
+    if (change.xy[1] === " ") plan.alreadyStaged.push(change.path);
+    else plan.whole.push(change);
+  }
+}
+
 function planWhole(root, requested, hunkPaths, errors) {
   const changes = worktreeChanges(
     root,
     requested.map((w) => w.path),
   );
   const plan = { whole: [], unchanged: [], alreadyStaged: [] };
+  const planned = new Set();
   for (const w of requested) {
-    const change = changes.get(comparable(w.path));
+    const byAlso = w.source === "--also";
     if (hunkPaths.has(comparable(w.path))) {
-      if (w.source === "--also") {
+      if (byAlso) {
         errors.push(
           `${w.path}: named by --also AND by --hunk; stage it one way only`,
         );
       }
-    } else if (change === undefined) {
-      if (w.source === "--also") {
-        errors.push(`${w.path}: --also names a file with no change to stage`);
-      } else plan.unchanged.push(w.path);
-    } else if (change.xy[1] === " ") plan.alreadyStaged.push(change.path);
-    else plan.whole.push(change);
+      continue;
+    }
+    const under = changesAtOrUnder(changes, w.path);
+    const found = under.filter(
+      (change) => !hunkPaths.has(comparable(change.path)),
+    );
+    if (byAlso && isDirectoryChange(w.path, under)) {
+      errors.push(
+        `${w.path}: --also names a directory; name each file, since only a claim vouches for a whole directory`,
+      );
+      continue;
+    }
+    if (under.length === 0 && byAlso) {
+      errors.push(`${w.path}: --also names a file with no change to stage`);
+    } else if (under.length === 0) plan.unchanged.push(w.path);
+    planChanges(plan, planned, found);
   }
   return plan;
 }

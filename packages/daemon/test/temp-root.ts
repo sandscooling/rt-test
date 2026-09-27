@@ -1,13 +1,16 @@
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestProject } from "vitest/node";
+import {
+  cleanUpRun,
+  guardRun,
+  removeDirectory,
+  sweepEndedRuns,
+  type RunCleanup,
+} from "../../../test/scripts/run-cleanup.mjs";
+
+export { removeDirectory };
 
 declare module "vitest" {
   export interface ProvidedContext {
@@ -21,68 +24,10 @@ const RUN_PREFIX = "rt-test-daemon-run-";
 export const HELD_DIRECTORIES_FILE = "held-directories";
 /** Separates a held directory from the name of the test that created it, in each line of `HELD_DIRECTORIES_FILE`. */
 export const HELD_RECORD_SEPARATOR = "\t";
-/**
- * How long a removal Windows refuses as held is retried: Windows reports an ended process exited before it releases
- * its handles, and a closed Vitest ends its workers without waiting for them. Node's own `rmSync` retries do not
- * cover `EPERM`, so the wait is explicit.
- */
-const RELEASE_WINDOW_MS = 11_000;
-const RELEASE_POLL_MS = 200;
-const NO_SIGNAL = 0;
-/** What Windows answers a removal of a directory that a live process holds open. */
-const HELD_DIRECTORY_CODES: ReadonlySet<unknown> = new Set(["EPERM", "EBUSY"]);
 
 interface HeldDirectory {
   readonly directory: string;
   readonly test: string;
-}
-
-export function isHeldOnWindows(error: unknown): boolean {
-  return (
-    process.platform === "win32" &&
-    HELD_DIRECTORY_CODES.has((error as NodeJS.ErrnoException).code)
-  );
-}
-
-/** Removes the directory, retrying while Windows reports it held; resolves false when it is still held after the window. */
-export async function removeDirectory(directory: string): Promise<boolean> {
-  const deadline = Date.now() + RELEASE_WINDOW_MS;
-  for (;;) {
-    try {
-      rmSync(directory, { recursive: true, force: true });
-      return true;
-    } catch (error) {
-      if (!isHeldOnWindows(error)) throw error;
-      if (Date.now() >= deadline) return false;
-      await new Promise((wake) => setTimeout(wake, RELEASE_POLL_MS));
-    }
-  }
-}
-
-function isRunning(pid: number): boolean {
-  try {
-    process.kill(pid, NO_SIGNAL);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-/**
- * Removes the parents that runs which have since ended left behind, since a killed or failed run never removes its
- * own. On Windows a parent a straggling process still holds is left for a later run to sweep.
- */
-function sweepEndedRuns(): void {
-  for (const name of readdirSync(tmpdir())) {
-    if (!name.startsWith(RUN_PREFIX)) continue;
-    const owner = Number.parseInt(name.slice(RUN_PREFIX.length), 10);
-    if (!Number.isInteger(owner) || isRunning(owner)) continue;
-    try {
-      rmSync(join(tmpdir(), name), { recursive: true, force: true });
-    } catch (error) {
-      if (!isHeldOnWindows(error)) throw error;
-    }
-  }
 }
 
 function heldDirectories(root: string): HeldDirectory[] {
@@ -104,10 +49,10 @@ function describeHeld(held: HeldDirectory): string {
 }
 
 /**
- * Runs once every test worker has exited. A directory held at its test's end but free now gets a warning, since the
- * hold did not outlive the run; one still held fails the run, naming the test that created it.
+ * A directory held at its test's end but free now gets a warning, since the hold did not outlive the run; one still
+ * held is returned.
  */
-async function teardown(root: string): Promise<void> {
+async function stillHeldDirectories(root: string): Promise<HeldDirectory[]> {
   const stillHeld: HeldDirectory[] = [];
   for (const held of heldDirectories(root)) {
     if (await removeDirectory(held.directory)) {
@@ -118,21 +63,53 @@ async function teardown(root: string): Promise<void> {
       stillHeld.push(held);
     }
   }
+  return stillHeld;
+}
+
+/**
+ * Runs once every test worker has exited, and always cleans up what the run recorded, so its watchdog is left nothing.
+ * Fails the run naming each directory still held, each recorded process it had to end, and a run directory still held.
+ */
+async function teardown(root: string): Promise<void> {
+  let stillHeld: HeldDirectory[] = [];
+  let cleanup: RunCleanup;
+  try {
+    stillHeld = await stillHeldDirectories(root);
+  } finally {
+    cleanup = await cleanUpRun(root);
+  }
+  const { ended, removed } = cleanup;
+  const problems: string[] = [];
   if (stillHeld.length > 0) {
-    throw new Error(
+    problems.push(
       `A process still held a test's temp directory at the end of the run: ${stillHeld.map(describeHeld).join(", ")}`,
     );
   }
-  if (!(await removeDirectory(root))) {
-    throw new Error(
+  if (ended.length > 0) {
+    problems.push(
+      `A process the run started was still running at the end of the run, and was ended: ${ended.join(", ")}`,
+    );
+  }
+  if (!removed) {
+    problems.push(
       `A process still held the run's temp directory at the end of the run: ${root}`,
     );
   }
+  if (problems.length > 0) throw new Error(problems.join("; "));
 }
 
-export default function setup(project: TestProject): () => Promise<void> {
-  sweepEndedRuns();
+/**
+ * Cleans up what ended runs left, then opens this run's temp parent under a watchdog that cleans it up if this run
+ * ends without its teardown, as a killed run does.
+ */
+export default async function setup(
+  project: TestProject,
+): Promise<() => Promise<void>> {
+  for (const problem of await sweepEndedRuns(RUN_PREFIX)) {
+    console.warn(`Could not clean up an ended daemon test run: ${problem}`);
+  }
   const root = mkdtempSync(join(tmpdir(), `${RUN_PREFIX}${process.pid}-`));
+  await guardRun(root);
   project.provide("rtTestDaemonTempRoot", root);
   return () => teardown(root);
 }

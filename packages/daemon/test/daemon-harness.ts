@@ -1,14 +1,14 @@
 import { createHmac, randomUUID } from "node:crypto";
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-import { basename, join } from "node:path";
+import { join } from "node:path";
+import { inject } from "vitest";
+import { LONGEST_TEST_TIMEOUT_MS } from "../../../test/scripts/longest-test-timeout.mjs";
+import {
+  recordStarted,
+  removeKeyFile,
+} from "../../../test/scripts/run-cleanup.mjs";
 import {
   startDaemon,
   stopDaemon,
@@ -27,7 +27,10 @@ import {
 } from "../src/daemon/endpoint.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { openStore } from "../src/store/open-store.js";
-import { consumerIdentity } from "../src/store/consumer-identity.js";
+import {
+  consumerIdentity,
+  defaultStateDirectory,
+} from "../src/store/consumer-identity.js";
 import { inConsumerCopy, inTempDir } from "./harness.js";
 
 /** What `RawConnection.next` resolves with once the daemon has closed the connection. */
@@ -201,6 +204,7 @@ export async function withStandIn<T>(
   let connections = 0;
   let closing: Promise<void> | undefined;
   let standIn: StandIn | undefined;
+  recordEndpointOf(worktreeIdentity, defaultStateDirectory(worktreeIdentity));
   const listening = await listenOnEndpoint(worktreeIdentity, (socket) => {
     connections += 1;
     sockets.add(socket);
@@ -252,7 +256,7 @@ export function memoryLog(): MemoryLog {
 }
 
 /** A test that starts a real daemon waits for its Node processes, its Vitest runs and its stop. */
-export const DAEMON_TEST_TIMEOUT_MS = 120_000;
+export const DAEMON_TEST_TIMEOUT_MS = LONGEST_TEST_TIMEOUT_MS;
 /** Covers a daemon's startup and its stop, each under 25 s, with room for a loaded machine. */
 export const DAEMON_WAIT_MS = 60_000;
 const POLL_MS = 25;
@@ -327,10 +331,72 @@ export function confirmNothing(consumerRoot: string): ConfirmedStart {
   return { consumerRoot, workspaces: [] };
 }
 
+/** The run's temp parent, where the run records what it starts for its watchdog. */
+function runTempRoot(): string {
+  const root = inject("rtTestDaemonTempRoot");
+  if (root === undefined) {
+    throw new Error(
+      "No global setup provided a temp root; run daemon tests through a Vitest project whose global setup is packages/daemon/test/temp-root.ts.",
+    );
+  }
+  return root;
+}
+
+function worktreeIdentityOf(root: string): string | undefined {
+  try {
+    return consumerIdentity(root).worktreeIdentity;
+  } catch {
+    // A root with no identity is refused before any daemon starts.
+    return undefined;
+  }
+}
+
+/** Records where a daemon for the worktree would hold its lock, key and Linux socket. */
+function recordEndpointOf(
+  worktreeIdentity: string,
+  stateDirectory: string,
+): void {
+  const location = clientEndpoint(worktreeIdentity);
+  const socket =
+    location.ok && location.runtimeDirectory !== undefined
+      ? [location.path]
+      : [];
+  recordStarted(runTempRoot(), {
+    lockDirectories: [stateDirectory],
+    keyFiles: location.ok ? [location.keyFile] : [],
+    files: socket,
+  });
+}
+
+/**
+ * Records, before a daemon for `root` starts, where it would hold its lock, key and socket and where the fixture
+ * writes its executors' ids.
+ */
+function recordDaemonAt(
+  root: string,
+  stateDirectory: string = defaultStateDirectory(root),
+): void {
+  recordStarted(runTempRoot(), {
+    pidFiles: EXECUTOR_PID_FILES.map((name) => join(root, name)),
+    lockDirectories: [stateDirectory],
+  });
+  const worktree = worktreeIdentityOf(root);
+  if (worktree !== undefined) recordEndpointOf(worktree, stateDirectory);
+}
+
+/** A set of daemon process ids that records each id added, so a run killed before its test ends them still can. */
+class RecordedPids extends Set<number> {
+  override add(pid: number): this {
+    recordStarted(runTempRoot(), { pids: [pid] });
+    return super.add(pid);
+  }
+}
+
 export function trustedStart(
   start: ConfirmedStart,
   stateDirectory?: string,
 ): Promise<DaemonIdentity> {
+  recordDaemonAt(start.consumerRoot, stateDirectory);
   return startDaemon({
     trusted: true,
     start,
@@ -400,7 +466,8 @@ export async function withDaemons<T>(
   roots: readonly string[],
   body: (pids: Set<number>) => Promise<T>,
 ): Promise<T> {
-  const pids = new Set<number>();
+  for (const root of roots) recordDaemonAt(root);
+  const pids = new RecordedPids();
   let result: T;
   try {
     result = await body(pids);
@@ -442,17 +509,7 @@ function removeLeftovers(root: string): void {
   if (location.runtimeDirectory !== undefined) {
     rmSync(location.path, { force: true });
   }
-  if (!existsSync(location.keyDirectory)) return;
-  const key = basename(location.keyFile);
-  for (const entry of readdirSync(location.keyDirectory)) {
-    if (
-      entry === key ||
-      (entry.startsWith(`${key}.`) &&
-        (entry.endsWith(".tmp") || entry.endsWith(".removing")))
-    ) {
-      rmSync(join(location.keyDirectory, entry), { force: true });
-    }
-  }
+  removeKeyFile(location.keyFile);
 }
 
 /** Copies the daemon fixture into a temp consumer with Vitest linked, and ends its daemon however `body` ends. */
