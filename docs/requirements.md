@@ -33,6 +33,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - FR17: Report code no named defect covers and branches reached but never proven, with mechanical suggestions each checked against the current tests: one a test catches names that attribution, and one that survives names a test owed. [Unscheduled: M4 mechanical suggestions, planned after M3]
 - FR18: Emit the gap report through the JSON CLI for a coding agent, and verify the defects and tests it proposes, without calling any model or sending source off the machine. [Unscheduled: M5 agent suggestions, planned after M4]
 - FR19: Make a suggestion a named defect only when the author accepts it into the defect definitions, and never let a suggestion weaken an existing test. [Unscheduled: M4 and M5 suggestion add-ons, planned after M3]
+- FR20: Report to a coding agent, after its tool calls, each change since its previous report in the state or freshness of the tests covering the files it edited, naming each test that failed or recovered, through a hook that only queries the CLI, starts no test and no daemon, and says when RT Test cannot answer rather than falling silent. [Sprint 2]
 
 ## Non-functional requirements
 

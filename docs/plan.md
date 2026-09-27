@@ -15,7 +15,7 @@ The product is a separate project usable by any Vitest consumer. Framework-speci
 3. A saved edit immediately invalidates affected results.
 4. The daemon, the only executor, debounces edit bursts and runs the smallest defensible selection ([ADR-0002](adr/0002-daemon-sole-executor.md)).
 5. Test events update a durable local store.
-6. Agents and humans query that store, or wait for the results covering their own files, and never start a run. Lint and typecheck stay with agents.
+6. Agents and humans query that store, or wait for the results covering their own files, and never start a run. Lint and typecheck stay with agents. An installed agent hook reports, after each tool call, only what changed for the tests covering that agent's edits.
 7. After ordinary tests pass, lower-priority work falsifies the affected named defects in isolation.
 
 State updates can be immediate; results arrive after tests finish. A run whose inputs change while it runs is invalidated and rerun. Unsaved buffers are outside the initial filesystem-watcher scope.

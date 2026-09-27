@@ -16,7 +16,7 @@ Delivered in the starter:
 
 ## M1: The daemon runs tests and answers
 
-Sprints 1 and 2. The daemon discovers tests across every Vitest workspace on 4.1.x and 5.x, persists results locally, tracks inputs, and runs each edit's selection at workspace granularity: the edited workspace plus the workspaces that depend on it. Agents query `summary` and `status <path>` and call `wait <files>` rather than running tests. Coarse but correct selection already offloads test runs: a Convex edit on Fleet Cooling costs about its three-minute workspace run rather than the seven-minute chain.
+Sprints 1 and 2. The daemon discovers tests across every Vitest workspace on 4.1.x and 5.x, persists results locally, tracks inputs, and runs each edit's selection at workspace granularity: the edited workspace plus the workspaces that depend on it. Agents query `summary` and `status <path>` and call `wait <files>` rather than running tests. A hook the consumer installs adds the tests an agent's own edits changed to its context after each tool call, so the agent learns of a break without asking. Coarse but correct selection already offloads test runs: a Convex edit on Fleet Cooling costs about its three-minute workspace run rather than the seven-minute chain.
 
 First spikes: the installed Vitest reporter and programmatic APIs on 4.1 and 5, test identity for `it.each` arms, `node:sqlite` on Node 22.13 (the raised floor), and the IPC transport on Windows and Linux.
 
