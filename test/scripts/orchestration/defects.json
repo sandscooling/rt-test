@@ -719,5 +719,61 @@
     "file": ".claude/hooks/format-on-save.cjs",
     "old": "readFileSync(0, \"utf8\") || \"{}\"",
     "new": "readFileSync(0, \"utf8\")"
+  },
+  {
+    "id": "D2032",
+    "defect": "The orchestrator is told to hand off from the members' 60% line, below its own 75% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "return isOrchestrator(transcriptPath)",
+    "new": "return false"
+  },
+  {
+    "id": "D2033",
+    "defect": "The orchestrator's handoff warning waits past its 75% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "const ORCHESTRATOR_HANDOFF_PERCENT = 75;",
+    "new": "const ORCHESTRATOR_HANDOFF_PERCENT = 80;"
+  },
+  {
+    "id": "D2034",
+    "defect": "A lane member is classed as the orchestrator and let past its 60% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "group === null || group === ORCHESTRATOR_GROUP;",
+    "new": "group === null || typeof group === \"string\";"
+  },
+  {
+    "id": "D2035",
+    "defect": "A session whose own row has a null group is warned from the members' 60% line instead of the orchestrator's 75%.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "group === null || group === ORCHESTRATOR_GROUP;",
+    "new": "group === ORCHESTRATOR_GROUP;"
+  },
+  {
+    "id": "D2036",
+    "defect": "session_list JSON echoed in another tool's result, naming a pending session_list call, classifies the session as the orchestrator.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "if (block.type !== \"tool_result\" || !pendingIds.has(block.tool_use_id)) {",
+    "new": "if (block.type !== \"tool_result\") {"
+  },
+  {
+    "id": "D2037",
+    "defect": "A group-filtered session_list with no self row resets the orchestrator to an unidentified session on the 60% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "row = selfRow(block) ?? row;",
+    "new": "row = selfRow(block);"
+  },
+  {
+    "id": "D2038",
+    "defect": "A self row missing its group key counts as the orchestrator and is let past the 60% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "group === null || group === ORCHESTRATOR_GROUP;",
+    "new": "group == null || group === ORCHESTRATOR_GROUP;"
+  },
+  {
+    "id": "D2039",
+    "defect": "A session_list result written as an array of text parts yields no self row, so the orchestrator is warned from the 60% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "return block.content.map((part) => part.text ?? \"\").join(\"\");",
+    "new": "return \"\";"
   }
 ]

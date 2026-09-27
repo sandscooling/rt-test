@@ -17,6 +17,13 @@ export const HANDOFF_PERCENT = 60;
 export const HANDOFF_DOC = "_agent-docs/handoff.md";
 export const ORCHESTRATOR_STATE = "_agent-docs/.scratch/orchestrator-state.md";
 
+const ORCHESTRATOR_HANDOFF_PERCENT = 75;
+const LOWEST_HANDOFF_PERCENT = Math.min(
+  HANDOFF_PERCENT,
+  ORCHESTRATOR_HANDOFF_PERCENT,
+);
+const SESSION_LIST_TOOL = "mcp__t3-code__session_list";
+const ORCHESTRATOR_GROUP = "orchestrator";
 const TAIL_BYTES = 1024 * 1024;
 const STALE_CACHE_MS = 24 * 60 * 60 * 1000;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -152,15 +159,106 @@ export function postToolContext(payload, { now = new Date() } = {}) {
   return [clock(now), handoffWarning(payload)].filter(Boolean).join(" ");
 }
 
+function parseEntry(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+const blocksOf = (entry) =>
+  Array.isArray(entry?.message?.content) ? entry.message.content : [];
+
+function resultText(block) {
+  if (typeof block.content === "string") return block.content;
+  if (!Array.isArray(block.content)) return "";
+  return block.content.map((part) => part.text ?? "").join("");
+}
+
+function selfRow(block) {
+  try {
+    const rows = JSON.parse(resultText(block))?.sessions;
+    return Array.isArray(rows) ? rows.find((row) => row?.self === true) : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordListCalls(entry, callIds) {
+  for (const block of blocksOf(entry)) {
+    if (block.type === "tool_use" && block.name === SESSION_LIST_TOOL) {
+      callIds.add(block.id);
+    }
+  }
+}
+
+// A group-filtered list omits the self row, so it leaves the previous one standing.
+function latestSelfRow(entry, pendingIds, previous) {
+  let row = previous;
+  for (const block of blocksOf(entry)) {
+    if (block.type !== "tool_result" || !pendingIds.has(block.tool_use_id)) {
+      continue;
+    }
+    pendingIds.delete(block.tool_use_id);
+    row = selfRow(block) ?? row;
+  }
+  return row;
+}
+
+function mentionsAny(line, ids) {
+  for (const id of ids) if (line.includes(id)) return true;
+  return false;
+}
+
+const isOrchestratorGroup = (group) =>
+  group === null || group === ORCHESTRATOR_GROUP;
+
+// Only a real session_list call's result counts, so a command that prints another session's list cannot
+// pass for this session's own. A session that never listed itself is not the orchestrator.
+function isOrchestratorTranscript(text) {
+  const pendingIds = new Set();
+  let row = null;
+  for (const line of text.split("\n")) {
+    const names = line.includes(SESSION_LIST_TOOL);
+    const answers = mentionsAny(line, pendingIds);
+    if (!names && !answers) continue;
+    const entry = parseEntry(line);
+    if (names) recordListCalls(entry, pendingIds);
+    if (answers) row = latestSelfRow(entry, pendingIds, row);
+  }
+  return row != null && isOrchestratorGroup(row.group);
+}
+
+function isOrchestrator(transcriptPath) {
+  try {
+    return isOrchestratorTranscript(readFileSync(transcriptPath, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+function handoffThreshold(transcriptPath) {
+  return isOrchestrator(transcriptPath)
+    ? {
+        percent: ORCHESTRATOR_HANDOFF_PERCENT,
+        label: `orchestrator's ${ORCHESTRATOR_HANDOFF_PERCENT}%`,
+      }
+    : { percent: HANDOFF_PERCENT, label: `${HANDOFF_PERCENT}%` };
+}
+
 function handoffWarning(payload) {
   // A subagent's call carries the parent's transcript, and a subagent cannot hand the parent off.
   if (payload.agent_id) return null;
   const used = usedTokens(payload.transcript_path);
-  if (used == null || (used / CONTEXT_WINDOW) * 100 < HANDOFF_PERCENT) {
-    return null;
-  }
+  if (used == null) return null;
+  const percent = (used / CONTEXT_WINDOW) * 100;
+  // Below the lowest line no session is warned, so the whole transcript is read only past it.
+  if (percent < LOWEST_HANDOFF_PERCENT) return null;
+  const threshold = handoffThreshold(payload.transcript_path);
+  if (percent < threshold.percent) return null;
   return (
-    `${formatContext(used)}: past the ${HANDOFF_PERCENT}% handoff line. Finish the tool call in hand, ` +
+    `${formatContext(used)}: past the ${threshold.label} handoff line. Finish the tool call in hand, ` +
     `start nothing new, and hand off to a successor by ${HANDOFF_DOC} (the /handoff skill). Never let the context compact.`
   );
 }
