@@ -19,7 +19,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - FR3: Persist results bound to project, worktree, run identity, input fingerprint, and adapter version, and keep them available across a daemon restart. [Ticket 1.2]
 - FR4: Start and stop the daemon explicitly for one trusted project, and execute no project code before that start. [Tickets 1.3, 1.3b, 1.3c]
 - FR5: Answer summary and `status <path>` queries through a CLI with versioned `--json` output, reporting counts per state for files and folders, without starting a test. [Ticket 1.4]
-- FR6: Mark every result a saved edit could affect as stale, and reconcile inputs after a start, a missed event, or a branch change before reporting any result current. [Tickets 2.1, 2.1b]
+- FR6: Mark every result a saved edit could affect as stale, and reconcile inputs after a start, a missed event, or a branch change before reporting any result current. [Tickets 2.1, 2.1b, 2.3]
 - FR7: Select the tests each change requires at workspace granularity, widening on uncertain dependencies, with a reason for each selected test, the trigger of each broad fallback, and selected and total counts. [Tickets 2.2, 2.2b]
 - FR8: Execute every selection in the daemon, and record a run whose inputs changed while it ran as invalidated and rerun it from stable inputs. [Sprint 2]
 - FR9: Answer `wait <files>` once every test covering those files has a current result or an explicit non-current state, or as superseded when a covering input changes after the call. [Sprint 2]
