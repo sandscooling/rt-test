@@ -65,13 +65,52 @@ function workspaceInputs(
   return { selected: project, testModules };
 }
 
+/**
+ * What one snapshot of the inputs reads outside them, each read at most once, so every answer from the snapshot
+ * reads the same files and versions. A later snapshot takes a new one, since it must read them again.
+ */
+export class SnapshotReads {
+  readonly #root: string;
+  /** By root-relative path. */
+  readonly #modules = new Map<string, FingerprintResult>();
+  /** By workspace directory. */
+  readonly #versions = new Map<string, string | null>();
+
+  constructor(root: string) {
+    this.#root = root;
+  }
+
+  /** The digest of the test module at `path`, root-relative. */
+  moduleDigest(path: string): FingerprintResult {
+    let read = this.#modules.get(path);
+    if (read === undefined) {
+      read = moduleDigest(absoluteInputPath(this.#root, path));
+      this.#modules.set(path, read);
+    }
+    return read;
+  }
+
+  /** Absent when no Vitest resolves from the directory, which is itself a state the digest must tell apart. */
+  readonly vitestVersion = (directory: string): string | null => {
+    if (!this.#versions.has(directory)) {
+      this.#versions.set(
+        directory,
+        resolveWorkspaceVitest(directory).version ?? null,
+      );
+    }
+    return this.#versions.get(directory) ?? null;
+  };
+}
+
 /** A Vitest workspace's current input fingerprint, or why none can be computed. */
 export function workspaceFingerprint(
   project: ProjectInputs,
   entry: WorkspaceDiscovery,
+  reads = new SnapshotReads(project.root),
 ): FingerprintResult {
+  const { vitestVersion } = reads;
   const inputs = workspaceInputs(project, listedTestModules(entry));
-  const modules = unselectedModuleDigests(inputs);
+  const modules = unselectedModuleDigests(inputs, reads);
   if (!modules.ok) return modules;
   return {
     ok: true,
@@ -88,12 +127,14 @@ export function workspaceFingerprint(
 export function discoveryFingerprint(
   project: ProjectInputs,
   discovery: TestDiscovery,
+  reads = new SnapshotReads(project.root),
 ): FingerprintResult {
+  const { vitestVersion } = reads;
   const inputs = workspaceInputs(
     project,
     discovery.workspaces.flatMap(listedTestModules),
   );
-  const modules = unselectedModuleDigests(inputs);
+  const modules = unselectedModuleDigests(inputs, reads);
   if (!modules.ok) return modules;
   return {
     ok: true,
@@ -136,11 +177,14 @@ type ModuleDigests =
   | { readonly ok: false; readonly reason: string };
 
 /** Reads each listed test module the selected inputs leave out, such as one git ignores, since no watch covers it. */
-function unselectedModuleDigests(inputs: WorkspaceInputs): ModuleDigests {
+function unselectedModuleDigests(
+  inputs: WorkspaceInputs,
+  reads: SnapshotReads,
+): ModuleDigests {
   const digests: string[][] = [];
   for (const path of [...new Set(inputs.testModules)].sort()) {
     if (inputs.selected.digests.has(path)) continue;
-    const read = moduleDigest(absoluteInputPath(inputs.selected.root, path));
+    const read = reads.moduleDigest(path);
     if (!read.ok) {
       return {
         ok: false,
@@ -166,11 +210,6 @@ function moduleDigest(path: string): FingerprintResult {
     }
     return { ok: false, reason: errorText(error) };
   }
-}
-
-/** Absent when no Vitest resolves from the directory, which is itself a state the digest must tell apart. */
-function vitestVersion(directory: string): string | null {
-  return resolveWorkspaceVitest(directory).version ?? null;
 }
 
 /**

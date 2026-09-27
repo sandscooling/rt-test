@@ -75,13 +75,14 @@ export class InputState {
 
   /** Removes the input at `path`, or every input and directory at or under it; returns the inputs removed. */
   remove(path: string, absolutePath: string): string[] {
-    const removed = this.#directories.has(absolutePath)
+    const isDirectory = this.#directories.has(absolutePath);
+    const removed = isDirectory
       ? [...this.#inputs.keys()].filter((input) => liesUnder(input, path))
       : this.#inputs.has(path)
         ? [path]
         : [];
     for (const input of removed) this.#inputs.delete(input);
-    this.#removeDirectoriesInside(absolutePath);
+    if (isDirectory) this.#removeDirectoriesInside(absolutePath);
     if (removed.length > 0) this.#changed = true;
     return removed;
   }

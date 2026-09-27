@@ -367,8 +367,8 @@
     "id": "D1889",
     "defect": "The daemon's tracker is given no exclusions, so the store and log writes under its state directory move its inputs during every job and no result ever reads current.",
     "file": "packages/daemon/src/daemon/daemon-main.ts",
-    "old": "      exclusions: [directory, log.file],",
-    "new": "      exclusions: [],"
+    "old": "    exclusions: [directory, log.file],",
+    "new": "    exclusions: [],"
   },
   {
     "id": "D1890",

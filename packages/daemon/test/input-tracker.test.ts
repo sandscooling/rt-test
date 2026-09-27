@@ -17,7 +17,8 @@ import {
   type PathLike,
   type WatchListener,
 } from "node:fs";
-import { basename, dirname, join, sep } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { recordStarted } from "../../../test/scripts/run-cleanup.mjs";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
@@ -25,6 +26,7 @@ import {
   ProjectInputs,
   workspaceFingerprint,
 } from "../src/inputs/fingerprint.js";
+import { gitSources } from "../src/inputs/git-sources.js";
 import { readEntryDigest } from "../src/inputs/input-inventory.js";
 import { InputTracker } from "../src/inputs/input-tracker.js";
 import { readCheckedIgnored } from "../src/selection/git-ignored.js";
@@ -64,6 +66,11 @@ vi.mock("../src/inputs/input-inventory.js", async (importOriginal) => {
   };
 });
 
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: vi.fn<typeof actual.homedir>(actual.homedir) };
+});
+
 vi.mock("../src/selection/git-ignored.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../src/selection/git-ignored.js")>();
@@ -90,6 +97,10 @@ const RECONCILING = "a reconciliation of the inputs is running";
 const FIRST_RECONCILIATION = "the first reconciliation has not ended";
 const PERIODIC_STARTED =
   "input reconciliation started: the periodic reconciliation";
+/** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
+const LOST_INPUT_SET_RETRY = 10_000;
+const LOST_INPUT_SET_RETRY_STARTED =
+  "input reconciliation started: an input event arrived while the input set could not be established";
 const TRACKER_MODULE = new URL(
   "../src/inputs/input-tracker.ts",
   import.meta.url,
@@ -380,6 +391,67 @@ const inotifyModel = ((
     },
   }) as unknown as FSWatcher;
 }) as typeof watch;
+
+interface LostInputSetRetry {
+  /** Whether a retry started within half the back-off after the event. */
+  readonly early: boolean;
+  /** Whether a retry started by the back-off's end. */
+  readonly due: boolean;
+  /** The reconciliation's state once a started retry has ended. */
+  readonly state: string;
+}
+
+/**
+ * Fails the first reconciliation with a directory past the depth bound, removes it, reports the removal through the
+ * root's watch, and says when a reconciliation followed. The watches are silent, so no event the file system raises
+ * starts a reconciliation of its own. Only `setTimeout` is fake, so the back-off, timed from the real clock, is
+ * already shortened by the setup; half of it is the early mark.
+ */
+async function retryAfterLostInputSet(
+  root: string,
+): Promise<LostInputSetRetry> {
+  const deep = `${Array(65).fill("d").join("/")}/x.ts`;
+  writeTree(root, { "src/a.ts": "", [deep]: "" });
+  const listeners: WatchListener<string>[] = [];
+  const paths: string[] = [];
+  vi.mocked(watch).mockImplementation(((
+    path: PathLike,
+    _options: unknown,
+    listener: WatchListener<string>,
+  ) => {
+    listeners.push(listener);
+    paths.push(String(path));
+    return silentWatch();
+  }) as typeof watch);
+  try {
+    return await withFakeTimeouts(() =>
+      tracking(root, async ({ tracker, log }) => {
+        rmSync(join(root, "d"), { recursive: true });
+        listeners[paths.indexOf(root)]?.("rename", "d");
+        await drained(tracker);
+        await vi.advanceTimersByTimeAsync(LOST_INPUT_SET_RETRY / 2);
+        const early = log.entries.includes(LOST_INPUT_SET_RETRY_STARTED);
+        await vi.advanceTimersByTimeAsync(LOST_INPUT_SET_RETRY / 2);
+        const due = log.entries.includes(LOST_INPUT_SET_RETRY_STARTED);
+        await settled(tracker);
+        return { early, due, state: tracker.facts().reconciliation.state };
+      }),
+    );
+  } finally {
+    vi.mocked(watch).mockReset();
+  }
+}
+
+/** Resolves once no reconciliation is running, polling on `setImmediate`, which fake `setTimeout` leaves real. */
+async function settled(tracker: InputTracker): Promise<void> {
+  const deadline = Date.now() + SETTLE_MS;
+  while (tracker.facts().reconciliation.state !== "complete") {
+    const facts = tracker.facts().reconciliation;
+    if (facts.state === "incomplete" && facts.reason !== RECONCILING) return;
+    if (Date.now() >= deadline) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
 
 /** Runs `body` with fake `setTimeout`, so a test reaches the periodic reconciliation without waiting for it. */
 async function withFakeTimeouts<T>(body: () => Promise<T>): Promise<T> {
@@ -844,6 +916,19 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
     expect(outcome).toStrictEqual({ early: false, due: true });
   });
 
+  it("D1961: an event after a reconciliation that could not establish the input set starts one by 10 s after it ended, and the inputs read complete after it", async () => {
+    const outcome = await inTempDir(retryAfterLostInputSet);
+    expect({ due: outcome.due, state: outcome.state }).toStrictEqual({
+      due: true,
+      state: "complete",
+    });
+  });
+
+  it("D1962: an event after a reconciliation that could not establish the input set starts no reconciliation within half the 10 s back-off", async () => {
+    const outcome = await inTempDir(retryAfterLostInputSet);
+    expect(outcome.early).toBe(false);
+  });
+
   it("D1908: a change no event reported, found by a reconciliation, raises the input revision", async () => {
     const rose = await inTempDir(async (root) => {
       writeTree(root, { "src/a.ts": "" });
@@ -1188,6 +1273,7 @@ describe(
     it("D1946: with process.platform read as linux, over the inotify model, a re-walk of the root that finds nothing changed leaves the revision where it was", async () => {
       const rose = await inTempDir(async (root) => {
         writeTree(root, { "src/a.ts": "", "b.ts": "" });
+        mkdirSync(join(root, basename(root)));
         const delivered: string[] = [];
         vi.mocked(watch).mockImplementation(((
           path: PathLike,
@@ -1206,8 +1292,9 @@ describe(
           return await onPlatform("linux", () =>
             tracking(root, async ({ tracker }) => {
               const revision = tracker.facts().revision;
-              // An entry named like the root reads, on Linux, as the root's own removal, so the root is walked again.
-              mkdirSync(join(root, basename(root)));
+              // An event named like the root, once no entry of that name exists, reads on Linux as the root's own
+              // removal, so the root is walked again.
+              rmSync(join(root, basename(root)), { recursive: true });
               await eventually(
                 () => delivered.includes(basename(root)),
                 SETTLE_MS,
@@ -1368,5 +1455,76 @@ describe(
       });
       expect(named).toBe(true);
     });
+
+    it("D1966: a write under a nested repository git cannot answer for counts as an input, though the enclosing repository ignores its name", async () => {
+      const moved = await inTempDir(async (root) => {
+        repository(root, "*.gen\n", {
+          "src/a.ts": "",
+          "nested/keep.ts": "",
+          "nested/.git": "gitdir: missing\n",
+        });
+        return tracking(root, async (tracked) => {
+          const before = tracked.fingerprint();
+          writeFileSync(join(root, "nested/new.gen"), "generated\n");
+          return movesFrom(tracked, before);
+        });
+      });
+      expect(moved).toBe(true);
+    });
   },
 );
+
+describe("the git files a reconciliation watches", () => {
+  it("D1963: a relative core.excludesFile is resolved against the repository's top level, with the consumer root in a subdirectory", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const git = repository(dir, "", { "sub/a.ts": "" });
+      git("config", "core.excludesFile", "rules");
+      const sources = await gitSources(
+        join(dir, "sub"),
+        [],
+        new AbortController().signal,
+      );
+      return sources.ok
+        ? sources.files.includes(resolve(realpathSync.native(dir), "rules"))
+        : sources.reason;
+    });
+    expect(outcome).toBe(true);
+  });
+
+  it("D1964: on Windows with HOME set, the user's git config files are read under HOME, not the profile directory", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const home = join(dir, "home");
+      const profile = join(dir, "profile");
+      mkdirSync(home);
+      mkdirSync(profile);
+      repository(join(dir, "repo"), "", { "a.ts": "" });
+      vi.mocked(homedir).mockReturnValue(profile);
+      const saved = {
+        HOME: process.env["HOME"],
+        XDG_CONFIG_HOME: process.env["XDG_CONFIG_HOME"],
+      };
+      process.env["HOME"] = home;
+      delete process.env["XDG_CONFIG_HOME"];
+      try {
+        const sources = await onPlatform("win32", () =>
+          gitSources(join(dir, "repo"), [], new AbortController().signal),
+        );
+        return sources.ok
+          ? {
+              config: sources.files.includes(join(home, ".gitconfig")),
+              xdg: sources.files.includes(
+                join(home, ".config", "git", "config"),
+              ),
+            }
+          : sources.reason;
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+        vi.mocked(homedir).mockReset();
+      }
+    });
+    expect(outcome).toStrictEqual({ config: true, xdg: true });
+  });
+});

@@ -94,6 +94,11 @@ async function serve(
   log: DaemonLog,
   directory: string,
 ): Promise<DaemonLifecycle | undefined> {
+  const inputs = new InputTracker({
+    consumerRoot: request.start.consumerRoot,
+    exclusions: [directory, log.file],
+    log,
+  });
   let accept = (socket: Socket): void => {
     socket.destroy();
   };
@@ -118,11 +123,7 @@ async function serve(
     store,
     log,
     executor: new Executor(log),
-    inputs: new InputTracker({
-      consumerRoot: request.start.consumerRoot,
-      exclusions: [directory, log.file],
-      log,
-    }),
+    inputs,
     closeEndpoint: async () => {
       server.closeConnections();
       await listening.close();

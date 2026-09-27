@@ -19,9 +19,8 @@ const EXECUTABLE = 0o755;
 
 // The developer's own GIT_* variables and system config would mask the hostile global config.
 function envWithGlobalConfig(globalConfig: string): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
-  );
+  const env = { ...process.env };
+  clearGitEnvironment(env);
   return { ...env, GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: "1" };
 }
 
