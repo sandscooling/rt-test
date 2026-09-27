@@ -23,7 +23,7 @@ Your name is `rt-<lane>-<role>`, and the skill your dispatch names owns your ste
 A failed tool call costs another full model request, and its error text stays in context for the rest of the session. Make each call right the first time:
 
 - Give Read, Grep, Glob and every file-deleting command an absolute path; a relative one resolves against whatever directory the shell is in.
-- Run Python as `python` or `py`, never `python3`, which resolves to the Microsoft Store placeholder. Repository tooling stays in Node (P11).
+- Repository tooling stays in Node (P11); for a one-off Python script, `python`, `py` and `python3` all run the installed Python.
 - Write a Bash command longer than a few lines as a script file and run the file. Write content holding backslashes with the Write tool, never a heredoc.
 - Undo your own edits with targeted edits; `git checkout -- <path>` is denied.
 - Read a file over 256 KB with `offset` and `limit`.
