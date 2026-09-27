@@ -28,6 +28,7 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 
 - tests: `bun x vitest run <paths or pattern>`, and confirm the file count matches what you targeted
 - lint: `bun x oxlint <paths>`
+- format: `bun x prettier --check <paths>` over every file you touched, docs, JSON and tests included, since the gate's first step fails on any one
 - typecheck: `bun run --filter <workspace> typecheck`, or `bun x tsc --noEmit` for root tooling
 - named defects: `bun run test:defects`, which requires one record per `D###` test in the `defects.json` beside your tests
 

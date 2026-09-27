@@ -130,7 +130,7 @@ A lane shares one checkout with its siblings, so a repo-wide gate reads every la
 
 | Gate                                                                                                                                                                                                                                                   | Owner            |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
-| § Targeted Typecheck, § Targeted Test Validation, targeted lint over the files you touched, `bun run test:defects` to prove your named defects, § Citation Shift Check                                                                                 | the member       |
+| § Targeted Typecheck, § Targeted Test Validation, targeted lint and `bun x prettier --check` over the files you touched, `bun run test:defects` to prove your named defects, § Citation Shift Check                                                    | the member       |
 | `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file; a worktree lane's review runs `bun run check` in its own tree (`_agent-docs/crew.md` § Worktree lanes) | the orchestrator |
 
 `bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your lane's claims.
