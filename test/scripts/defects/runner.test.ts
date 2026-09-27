@@ -114,6 +114,41 @@ function afterStall<T>(
   });
 }
 
+/** Runs the entry script `source` writes for a report path under the runner; `read`, or the runner's error. */
+function runEntry(source: (report: string) => string): Promise<string> {
+  return withScratch(async (dir) => {
+    const entry = join(dir, "entry.mjs");
+    const report = join(dir, "report.json");
+    writeFileSync(entry, source(report));
+    const run = createVitestRunner({ root: dir, entry });
+    return run({ sandbox: dir, report }).then(
+      () => "read",
+      (error: Error) => error.message,
+    );
+  });
+}
+
+const writesReport = (report: string, text: string) =>
+  `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(report)}, ${JSON.stringify(text)});\n`;
+
+const writesStdout = (text: string) =>
+  `process.stdout.write(${JSON.stringify(text)});\n`;
+
+const TAIL_LABEL = "; stdout tail: ";
+
+/** The stdout tail a no-report failure ends with. */
+const tailOf = (message: string) =>
+  message.slice(message.lastIndexOf(TAIL_LABEL) + TAIL_LABEL.length);
+
+function parseErrorOf(text: string): string {
+  try {
+    JSON.parse(text);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  throw new Error(`${text} parsed`);
+}
+
 describe("the Vitest runner", PROCESS_SCENARIO, () => {
   it("D905: scopes a run to the sandbox copy of the test file by absolute path", () => {
     const args = vitestArgs({ ...ARGS, files: [CALC_TEST] });
@@ -186,6 +221,106 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
       );
     });
     expect(outcome).toMatch(/no valid report/);
+  });
+
+  it("D1967: names a run's exit status, time to exit and exit-to-close lag when it left no report", async () => {
+    const outcome = await runEntry(() => "process.exitCode = 3;\n");
+    expect(outcome).toMatch(
+      /; exit status 3, exited \d+ ms after start, closed \d+ ms after exit; /,
+    );
+  });
+
+  it("D1968: says a report the run never wrote was never written", async () => {
+    const outcome = await runEntry(() => "process.exitCode = 1;\n");
+    expect(outcome).toContain(
+      "Bootstrap runner produced no valid report: the report was never written; ",
+    );
+  });
+
+  it("D1969: names a report that is not JSON by its byte size, head and parse error", async () => {
+    const truncated = '{"numPassedTests": 1, "testR';
+    const outcome = await runEntry((report) => writesReport(report, truncated));
+    expect(outcome).toContain(
+      String.raw`the report (28 bytes, starting "{\"numPassedTests\": 1, \"testR") is not JSON: ` +
+        parseErrorOf(truncated),
+    );
+  });
+
+  it("D1972: fails a report that parses but holds no testResults list through the no-report message", async () => {
+    const outcome = await runEntry((report) => writesReport(report, "null"));
+    expect(outcome).toContain(
+      'the report (4 bytes, starting "null") holds no testResults list',
+    );
+  });
+
+  it("D1970: quotes stdout that is not progress, keeping output written ahead of a progress event on its line", async () => {
+    const stdout = `plain before\n${collected}\nahead${collected}\n`;
+    const outcome = await runEntry(() => writesStdout(stdout));
+    expect(tailOf(outcome)).toBe("plain before\nahead");
+  });
+
+  it("D1971: cuts the stdout tail to its last 2000 characters behind a leading ...", async () => {
+    const lines = Array.from({ length: 50 }, (_, i) =>
+      `${String(i + 1).padStart(2, "0")}:`.padEnd(150, "x"),
+    );
+    const outcome = await runEntry(() => writesStdout(`${lines.join("\n")}\n`));
+    const kept = lines.slice(-20).join("\n");
+    expect(tailOf(outcome)).toBe(`...${kept.slice(-1997)}`);
+  });
+
+  it("D1973: quotes only the first 200 characters of a report that is not JSON", async () => {
+    const outcome = await runEntry((report) =>
+      writesReport(report, "x".repeat(300)),
+    );
+    expect(outcome).toContain(
+      `the report (300 bytes, starting "${"x".repeat(200)}") is not JSON`,
+    );
+  });
+
+  it("D1974: quotes a final stdout line that has no newline", async () => {
+    const outcome = await runEntry(() => writesStdout("first\nlast words"));
+    expect(tailOf(outcome)).toBe("first\nlast words");
+  });
+
+  it("D1975: keeps the last 20 non-blank stdout lines", async () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`);
+    const outcome = await runEntry(() =>
+      writesStdout(`${lines.join("\n\n")}\n`),
+    );
+    expect(tailOf(outcome)).toBe(lines.slice(30).join("\n"));
+  });
+
+  it("D1976: quotes the run's stderr whole when it left no report", async () => {
+    const outcome = await runEntry(
+      () => `process.stderr.write("vitest broke here\\n");\n`,
+    );
+    expect(outcome).toContain("; stderr: vitest broke here\n; stdout tail: ");
+  });
+
+  it("D1977: measures the close lag from the run's exit, not from its start", async () => {
+    const outcome = await runEntry(() => "setTimeout(() => {}, 1000);\n");
+    const [, exitMs, closeLagMs] =
+      /exited (\d+) ms after start, closed (\d+) ms after exit/.exec(outcome) ??
+      [];
+    expect(Number(closeLagMs)).toBeLessThan(Number(exitMs));
+  });
+
+  it("D1978: says a report that exists but cannot be read could not be read", async () => {
+    const outcome = await runEntry(
+      (report) =>
+        `import { mkdirSync } from "node:fs";\nmkdirSync(${JSON.stringify(report)});\n`,
+    );
+    expect(outcome).toContain(
+      "Bootstrap runner produced no valid report: the report could not be read: ",
+    );
+  });
+
+  it("D1979: gives blank stdout lines no place among the tail's 20", async () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`);
+    const outcome = await runEntry(() =>
+      writesStdout(`${lines.join("\n\n")}\n`),
+    );
+    expect(tailOf(outcome)).toBe(lines.join("\n"));
   });
 
   it("D946: rejects a run whose only failure is a different test", () => {

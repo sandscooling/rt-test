@@ -710,8 +710,8 @@
     "id": "D1702",
     "defect": "Any stdout line counts as progress, so a hung run that keeps printing ordinary output is never stopped.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "if (!log.read(line) || stalled) return;",
-    "new": "log.read(line);\n      if (stalled) return;"
+    "old": "if (!progressed || stalled) return;",
+    "new": "if (stalled) return;"
   },
   {
     "id": "D1703",
@@ -752,8 +752,8 @@
     "id": "D1708",
     "defect": "A run holding a test whose timeout exceeds LONGEST_TEST_TIMEOUT_MS passes, so the idle window can be shorter than a legitimate silence.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "else if (log.overLong.length > 0) fail(new Error(overLongText(log)));\n      else done",
-    "new": "else done"
+    "old": "else if (log.overLong.length > 0) fail(new Error(overLongText(log)));",
+    "new": "else if (false) fail(new Error(overLongText(log)));"
   },
   {
     "id": "D1709",
@@ -803,5 +803,96 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "const KILL_GRACE_MS = 10_000;",
     "new": "const KILL_GRACE_MS = 0;"
+  },
+  {
+    "id": "D1967",
+    "defect": "A run that left no report fails without its exit status, so a crash reads like a clean exit that wrote nothing.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "`exit status ${run.status}, exited ",
+    "new": "`exited "
+  },
+  {
+    "id": "D1968",
+    "defect": "A report the run never wrote is described as one that could not be read, hiding that Vitest never got as far as writing it.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "error.code === NOT_FOUND",
+    "new": "false"
+  },
+  {
+    "id": "D1969",
+    "defect": "A report that is not JSON fails without the parse error's message, so where the text broke goes unsaid.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "is not JSON: ${error.message}`",
+    "new": "is not JSON`"
+  },
+  {
+    "id": "D1970",
+    "defect": "Output another process wrote ahead of a progress event on the same stdout line is dropped from the failure's stdout tail.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "progressed ? line.slice(0, line.indexOf(PROGRESS_MARKER)) : line",
+    "new": "progressed ? \"\" : line"
+  },
+  {
+    "id": "D1971",
+    "defect": "The stdout tail is never cut to 2000 characters, so long output floods the failure message.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (all.length <= STDOUT_TAIL_CHARS) return all;",
+    "new": "return all;"
+  },
+  {
+    "id": "D1972",
+    "defect": "A report that parses but holds no testResults list is returned as read, and fails later as a bare TypeError with no evidence.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (!Array.isArray(report?.testResults)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D1973",
+    "defect": "A report that is not JSON is quoted past its first 200 characters.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "const REPORT_HEAD_CHARS = 200;",
+    "new": "const REPORT_HEAD_CHARS = 201;"
+  },
+  {
+    "id": "D1974",
+    "defect": "A final stdout line with no newline is never flushed into the stdout tail.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (pending !== \"\") onLine",
+    "new": "if (false) onLine"
+  },
+  {
+    "id": "D1975",
+    "defect": "The stdout tail keeps more than the last 20 non-blank lines.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "const STDOUT_TAIL_LINES = 20;",
+    "new": "const STDOUT_TAIL_LINES = 21;"
+  },
+  {
+    "id": "D1976",
+    "defect": "The no-report failure drops the run's stderr, so Vitest's own error output is lost from the message.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "`stderr: ${orEmpty(run.stderr)}`",
+    "new": "`stderr: (empty)`"
+  },
+  {
+    "id": "D1977",
+    "defect": "The exit-to-close lag is measured from the run's start, so it repeats the time to exit and hides whether close was held up after exit.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "elapsedMs(exitedAt, closedAt)",
+    "new": "elapsedMs(startedAt, closedAt)"
+  },
+  {
+    "id": "D1978",
+    "defect": "A report that exists but cannot be read is described as never written, hiding the read error.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "error.code === NOT_FOUND",
+    "new": "true"
+  },
+  {
+    "id": "D1979",
+    "defect": "Blank stdout lines take places in the tail's 20, so blank-separated output quotes fewer than 20 lines of evidence.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (line.trim() === \"\") return;",
+    "new": ""
   }
 ]

@@ -23,6 +23,11 @@ const PROGRESS_REPORTER = fileURLToPath(
 const PROGRESS_EVENTS = new Set(Object.values(PROGRESS_EVENT));
 const ASSERTION_FAILURE = /^AssertionError: /;
 const NO_MESSAGE = "no failure message";
+const NOT_FOUND = "ENOENT";
+const REPORT_HEAD_CHARS = 200;
+const STDOUT_TAIL_LINES = 20;
+const STDOUT_TAIL_CHARS = 2000;
+const CUT_MARKER = "...";
 
 function vitestEntry() {
   const require = createRequire(import.meta.url);
@@ -113,7 +118,33 @@ function followLines(stream, onLine) {
     pending = lines.pop();
     for (const line of lines) onLine(line.replace(/\r$/, ""));
   });
+  stream.on("end", () => {
+    if (pending !== "") onLine(pending.replace(/\r$/, ""));
+  });
 }
+
+/** Keeps the last non-blank stdout lines that were not progress, for a failure to quote. */
+function stdoutTail() {
+  const lines = [];
+  return {
+    add(line) {
+      if (line.trim() === "") return;
+      lines.push(line.slice(-STDOUT_TAIL_CHARS));
+      if (lines.length > STDOUT_TAIL_LINES) lines.shift();
+    },
+    text() {
+      const all = lines.join("\n");
+      if (all.length <= STDOUT_TAIL_CHARS) return all;
+      return `${CUT_MARKER}${all.slice(CUT_MARKER.length - STDOUT_TAIL_CHARS)}`;
+    },
+  };
+}
+
+/** The output on a stdout line that was not progress: all of it, or what another process wrote before the event. */
+const outputOf = (line, progressed) =>
+  progressed ? line.slice(0, line.indexOf(PROGRESS_MARKER)) : line;
+
+const elapsedMs = (from, to) => Math.round(to - from);
 
 const overLongText = (log) =>
   `${log.overLong.join("; ")} declares a timeout above LONGEST_TEST_TIMEOUT_MS (${LONGEST_TEST_TIMEOUT_MS} ms) in test/scripts/longest-test-timeout.mjs, which the verifier's idle window is sized from; raise that constant`;
@@ -161,7 +192,10 @@ function spawnRun(args, cwd, idleWindowMs) {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const startedAt = performance.now();
     const log = progressLog();
+    const tail = stdoutTail();
+    let exitedAt;
     let stalled = false;
     let stopProblem;
     const stopStalled = () => {
@@ -173,7 +207,9 @@ function spawnRun(args, cwd, idleWindowMs) {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => (stderr += chunk));
     followLines(child.stdout, (line) => {
-      if (!log.read(line) || stalled) return;
+      const progressed = log.read(line);
+      tail.add(outputOf(line, progressed));
+      if (!progressed || stalled) return;
       clearTimeout(idle);
       idle = setTimeout(stopStalled, idleWindowMs);
     });
@@ -185,15 +221,26 @@ function spawnRun(args, cwd, idleWindowMs) {
       fail(new Error(stallText(log, idleWindowMs, stopProblem)));
     // A worker still holding the stopped process's pipes delays "close" until the worker is ended.
     child.on("exit", () => {
+      exitedAt = performance.now();
       if (stalled) failStalled();
     });
     child.on("close", (status, signal) => {
       clearTimeout(idle);
+      const closedAt = performance.now();
       if (stalled) failStalled();
       else if (signal)
         fail(new Error(`Bootstrap runner interrupted: ${signal}`));
       else if (log.overLong.length > 0) fail(new Error(overLongText(log)));
-      else done({ status, stderr });
+      else
+        done({
+          status,
+          stderr,
+          stdout: tail.text(),
+          exitMs:
+            exitedAt === undefined ? null : elapsedMs(startedAt, exitedAt),
+          closeLagMs:
+            exitedAt === undefined ? null : elapsedMs(exitedAt, closedAt),
+        });
     });
   });
 }
@@ -207,15 +254,51 @@ export function createVitestRunner({
   return async ({ sandbox, report, files, pattern }) => {
     rmSync(report, { force: true });
     const args = vitestArgs({ entry, config, sandbox, report, files, pattern });
-    const { status, stderr } = await spawnRun(args, root, idleWindowMs);
-    try {
-      return { status, report: JSON.parse(readFileSync(report, "utf8")) };
-    } catch (error) {
-      throw new Error(`Bootstrap runner produced no valid report: ${stderr}`, {
-        cause: error,
-      });
+    const run = await spawnRun(args, root, idleWindowMs);
+    const read = readReport(report);
+    if (read.problem === undefined) {
+      return { status: run.status, report: read.report };
     }
+    throw new Error(noReportText(run, read.problem), { cause: read.error });
   };
+}
+
+function readReport(path) {
+  let bytes;
+  try {
+    bytes = readFileSync(path);
+  } catch (error) {
+    const problem =
+      error.code === NOT_FOUND
+        ? "the report was never written"
+        : `the report could not be read: ${error.message}`;
+    return { problem, error };
+  }
+  const text = bytes.toString("utf8");
+  const described = () =>
+    `the report (${bytes.length} bytes, starting ${JSON.stringify(text.slice(0, REPORT_HEAD_CHARS))})`;
+  let report;
+  try {
+    report = JSON.parse(text);
+  } catch (error) {
+    return { problem: `${described()} is not JSON: ${error.message}`, error };
+  }
+  if (!Array.isArray(report?.testResults)) {
+    return { problem: `${described()} holds no testResults list` };
+  }
+  return { report };
+}
+
+const orEmpty = (output) => output || "(empty)";
+const msOrUnknown = (ms) => (ms === null ? "unknown" : `${ms} ms`);
+
+function noReportText(run, problem) {
+  return [
+    `Bootstrap runner produced no valid report: ${problem}`,
+    `exit status ${run.status}, exited ${msOrUnknown(run.exitMs)} after start, closed ${msOrUnknown(run.closeLagMs)} after exit`,
+    `stderr: ${orEmpty(run.stderr)}`,
+    `stdout tail: ${orEmpty(run.stdout)}`,
+  ].join("; ");
 }
 
 const testsOf = (report) =>
