@@ -157,7 +157,10 @@ export class InputFilter {
     return false;
   }
 
-  /** The innermost repository holding `path` whose listing was read, since a nested one answers for its own paths. */
+  /**
+   * The innermost repository holding `path` whose listing was read, since a nested one answers for its own paths.
+   * Undefined when a failed repository lies between it and `path`, since that one ignores nothing.
+   */
   #repositoryOf(path: string): string | undefined {
     let found: string | undefined;
     for (const repository of this.#repositories) {
@@ -166,6 +169,14 @@ export class InputFilter {
         (found === undefined || liesInside(found, repository))
       ) {
         found = repository;
+      }
+    }
+    for (const failed of this.#failed) {
+      if (
+        liesInside(failed, path) &&
+        (found === undefined || liesInside(found, failed))
+      ) {
+        return undefined;
       }
     }
     return found;

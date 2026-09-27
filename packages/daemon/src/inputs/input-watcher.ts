@@ -78,8 +78,13 @@ export class InputWatcher {
           return;
         }
         this.#listener.changed(join(watched, name), kind);
-        // inotify reports a watched directory's own removal under its own name, so the directory itself is re-read.
-        if (!this.#recursive && name === basename(watched)) {
+        // inotify reports a watched directory's own removal under its own name, so the directory itself is re-read;
+        // a child of the same name is told apart by still existing.
+        if (
+          !this.#recursive &&
+          name === basename(watched) &&
+          !existsSync(join(watched, name))
+        ) {
           this.#listener.changed(watched, RENAME_EVENT);
         }
       },

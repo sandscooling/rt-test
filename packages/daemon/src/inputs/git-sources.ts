@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { WINDOWS } from "../daemon/endpoint.js";
 import { runGit } from "../selection/git-ignored.js";
 import { errorText } from "../vitest/error-text.js";
 import { liesInside } from "../vitest/find-workspaces.js";
@@ -37,6 +38,7 @@ const REFTABLE_TABLES = join("reftable", "tables.list");
 const REPOSITORY_CONFIG = "config";
 const IGNORE_FILE = ".gitignore";
 const XDG_CONFIG_HOME = "XDG_CONFIG_HOME";
+const HOME = "HOME";
 const DEFAULT_CONFIG_DIRECTORY = ".config";
 const XDG_GIT_DIRECTORY = "git";
 const XDG_EXCLUDES_FILE = "ignore";
@@ -45,7 +47,20 @@ const HOME_CONFIG_FILE = ".gitconfig";
 const LINE_BREAK = /\r?\n/;
 
 export type GitSources =
-  | { readonly ok: true; readonly files: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly files: readonly string[];
+      /** Why a nested repository's `info/exclude` is not among `files`, one reason per repository. */
+      readonly unread: readonly string[];
+    }
+  | { readonly ok: false; readonly reason: string };
+
+type EnclosingFiles =
+  | {
+      readonly ok: true;
+      readonly files: readonly string[];
+      readonly topLevel: string | undefined;
+    }
   | { readonly ok: false; readonly reason: string };
 
 /**
@@ -62,24 +77,53 @@ export async function gitSources(
 ): Promise<GitSources> {
   const insideRepository = enclosingRepository(root) !== undefined;
   if (!insideRepository && nestedRepositories.length === 0) {
-    return { ok: true, files: [] };
+    return { ok: true, files: [], unread: [] };
   }
-  const found = await Promise.all([
+  const [enclosing, nested] = await Promise.all([
     insideRepository
       ? enclosingRepositoryFiles(root, signal)
-      : Promise.resolve<GitSources>({ ok: true, files: [] }),
-    globalExcludesFile(root, signal),
-    ...nestedRepositories.map((repository) =>
-      gitPath(repository, EXCLUDE_FILE, signal),
+      : Promise.resolve<EnclosingFiles>({
+          ok: true,
+          files: [],
+          topLevel: undefined,
+        }),
+    Promise.all(
+      nestedRepositories.map((repository) =>
+        nestedExcludeFile(repository, signal),
+      ),
     ),
   ]);
-  const failed = found.find((result) => !result.ok);
-  if (failed !== undefined) return failed;
+  if (!enclosing.ok) return enclosing;
+  const excludes = await globalExcludesFile(
+    root,
+    enclosing.topLevel ?? root,
+    signal,
+  );
+  if (!excludes.ok) return excludes;
   return {
     ok: true,
     files: [
-      ...found.flatMap((result) => (result.ok ? result.files : [])),
+      ...enclosing.files,
+      ...excludes.files,
+      ...nested.flatMap((result) => (result.ok ? result.files : [])),
       ...globalConfigFiles(),
+    ],
+    unread: nested.flatMap((result) => (result.ok ? result.unread : [])),
+  };
+}
+
+/** A nested repository's `info/exclude`, or the reason it could not be located. */
+async function nestedExcludeFile(
+  repository: string,
+  signal: AbortSignal,
+): Promise<GitSources> {
+  const located = await gitPath(repository, EXCLUDE_FILE, signal);
+  if (located.ok) return located;
+  return {
+    ok: true,
+    files: [],
+    unread: [
+      `the info/exclude of ${repository} could not be located: ${located.reason}`,
     ],
   };
 }
@@ -91,7 +135,7 @@ export async function gitSources(
 async function enclosingRepositoryFiles(
   root: string,
   signal: AbortSignal,
-): Promise<GitSources> {
+): Promise<EnclosingFiles> {
   const listed = await runGit(root, REPOSITORY_PATHS_ARGUMENTS, { signal });
   if (!listed.ok) return listed;
   const paths = pathLines(listed.stdout);
@@ -122,6 +166,7 @@ async function enclosingRepositoryFiles(
       ...namedRef.files,
       ...ancestorIgnoreFiles(root, topLevel),
     ],
+    topLevel,
   };
 }
 
@@ -137,7 +182,9 @@ async function namedRefFile(
   } catch (error) {
     return { ok: false, reason: `cannot read ${head}: ${errorText(error)}` };
   }
-  if (!content.startsWith(SYMBOLIC_REF_PREFIX)) return { ok: true, files: [] };
+  if (!content.startsWith(SYMBOLIC_REF_PREFIX)) {
+    return { ok: true, files: [], unread: [] };
+  }
   return gitPath(
     root,
     content.slice(SYMBOLIC_REF_PREFIX.length).trim(),
@@ -157,11 +204,13 @@ async function gitPath(
     { signal },
   );
   if (!located.ok) return located;
-  return { ok: true, files: pathLines(located.stdout) };
+  return { ok: true, files: pathLines(located.stdout), unread: [] };
 }
 
+/** `core.excludesFile` as git reads it in `root`; git resolves a relative one against `base`. */
 async function globalExcludesFile(
   root: string,
+  base: string,
   signal: AbortSignal,
 ): Promise<GitSources> {
   const configured = await runGit(root, EXCLUDES_FILE_ARGUMENTS, {
@@ -170,17 +219,20 @@ async function globalExcludesFile(
   });
   if (!configured.ok) return configured;
   const path = configured.stdout.trim();
-  if (path !== "") return { ok: true, files: [resolve(root, path)] };
+  if (path !== "") {
+    return { ok: true, files: [resolve(base, path)], unread: [] };
+  }
   return {
     ok: true,
     files: [join(xdgConfigHome(), XDG_GIT_DIRECTORY, XDG_EXCLUDES_FILE)],
+    unread: [],
   };
 }
 
 /** The user's git config files, either of which can set `core.excludesFile`. */
 function globalConfigFiles(): string[] {
   return [
-    join(homedir(), HOME_CONFIG_FILE),
+    join(gitHome(), HOME_CONFIG_FILE),
     join(xdgConfigHome(), XDG_GIT_DIRECTORY, XDG_CONFIG_FILE),
   ];
 }
@@ -188,8 +240,15 @@ function globalConfigFiles(): string[] {
 function xdgConfigHome(): string {
   const configHome = process.env[XDG_CONFIG_HOME];
   return configHome === undefined || configHome === ""
-    ? join(homedir(), DEFAULT_CONFIG_DIRECTORY)
+    ? join(gitHome(), DEFAULT_CONFIG_DIRECTORY)
     : configHome;
+}
+
+/** The home directory git reads; Git for Windows prefers a non-empty `HOME`, which `homedir()` ignores there. */
+function gitHome(): string {
+  if (process.platform !== WINDOWS) return homedir();
+  const home = process.env[HOME];
+  return home === undefined || home === "" ? homedir() : home;
 }
 
 /** The `.gitignore` of each directory from the repository's top level down to the root's parent. */

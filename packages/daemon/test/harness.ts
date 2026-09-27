@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, inject } from "vitest";
+import { clearGitEnvironment } from "../../../test/scripts/git-environment.js";
 import { writeFixtureGitConfig } from "../../../test/scripts/git-fixture.js";
 import { PROCESS_SCENARIO_TIMEOUT_MS } from "../../../test/scripts/timeouts.js";
 import {
@@ -224,11 +225,8 @@ export function within<T>(
  * developer's reaches it, and returns a runner of git there, free of the caller's GIT_* variables.
  */
 export function fixtureRepository(root: string): (...args: string[]) => string {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([name]) => !name.toUpperCase().startsWith("GIT_"),
-    ),
-  );
+  const env = { ...process.env };
+  clearGitEnvironment(env);
   const git = (...args: string[]): string =>
     execFileSync("git", args, {
       cwd: root,

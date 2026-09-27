@@ -245,7 +245,9 @@ export function runGit(
       if (stderr.length < MAX_GIT_ERROR_CHARACTERS) stderr += chunk.toString();
     });
     child.on("error", (error) => {
-      failure ??= `git could not be run: ${errorText(error)}`;
+      failure ??= signal.aborted
+        ? `git ${commandText(args)} was stopped before it ended`
+        : `git could not be run: ${errorText(error)}`;
     });
     child.stdin.on("error", (error) => {
       failure ??= `git's input could not be written: ${errorText(error)}`;
@@ -260,14 +262,22 @@ export function runGit(
         settle({ ok: true, stdout: Buffer.concat(stdout).toString("utf8") });
         return;
       }
+      const ending =
+        code === null
+          ? `did not end within ${GIT_TIMEOUT_MS} ms`
+          : `ended with ${exitText(code, exitSignal)}`;
       settle({
         ok: false,
         reason:
           failure ??
-          `git ${args.filter((arg) => !FSMONITOR_OFF.includes(arg)).join(" ")} ended with ${exitText(code, exitSignal)}: ${stderr.slice(0, MAX_GIT_ERROR_CHARACTERS).trim()}`,
+          `git ${commandText(args)} ${ending}: ${stderr.slice(0, MAX_GIT_ERROR_CHARACTERS).trim()}`,
       });
     });
   });
+}
+
+function commandText(args: readonly string[]): string {
+  return args.filter((arg) => !FSMONITOR_OFF.includes(arg)).join(" ");
 }
 
 /**

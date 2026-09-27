@@ -17,6 +17,7 @@ import { errorText } from "../vitest/error-text.js";
 import { relativePosixPath } from "../vitest/find-workspaces.js";
 import {
   discoveryFingerprint,
+  SnapshotReads,
   testModuleChangedSince,
   workspaceFingerprint,
   type FingerprintResult,
@@ -40,6 +41,10 @@ import { InputWatcher } from "./input-watcher.js";
 
 /** How long after a reconciliation ends the next one runs, the longest an input change no event reported goes unseen. */
 export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+/** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
+const LOST_INPUT_SET_RETRY_MS = 10 * 1000;
+const LOST_INPUT_SET_RETRY_REASON =
+  "an input event arrived while the input set could not be established";
 const IGNORE_FILE = ".gitignore";
 const RENAME_EVENT = "rename";
 const FIRST_RECONCILIATION_REASON = "the first reconciliation has not ended";
@@ -106,6 +111,8 @@ export class InputTracker implements TrackedInputs {
   #started = false;
   #reconciling = false;
   #reconcileRequested = false;
+  /** Whether an event has already brought the next reconciliation forward since the last one ended. */
+  #retryArmed = false;
   #reconciliation: Promise<void> = Promise.resolve();
   #processing: Promise<void> | undefined;
   #inFlight = 0;
@@ -180,11 +187,13 @@ export class InputTracker implements TrackedInputs {
       };
     }
     const project = this.#state.project();
+    const reads = new SnapshotReads(project.root);
     return {
       facts,
-      workspaceFingerprint: (entry) => workspaceFingerprint(project, entry),
+      workspaceFingerprint: (entry) =>
+        workspaceFingerprint(project, entry, reads),
       discoveryFingerprint: (discovery) =>
-        discoveryFingerprint(project, discovery),
+        discoveryFingerprint(project, discovery, reads),
       testModuleChangedSince: (discovery, since) =>
         testModuleChangedSince(project, discovery, since),
     };
@@ -272,10 +281,30 @@ export class InputTracker implements TrackedInputs {
 
   /** Timed from the end of the last reconciliation, so one that outlasts the interval never runs back to back. */
   #armPeriodicReconciliation(): void {
+    this.#retryArmed = false;
+    this.#armReconciliation(RECONCILE_INTERVAL_MS, PERIODIC_REASON);
+  }
+
+  /**
+   * An event while the input set cannot be established may report its cause fixed, so it brings the next
+   * reconciliation forward to `LOST_INPUT_SET_RETRY_MS` after the last one ended.
+   */
+  #retryLostInputSet(): void {
+    if (this.#reconciling || this.#retryArmed) return;
+    if (this.#establishFailure === undefined) return;
+    this.#retryArmed = true;
+    const endedAt = Date.parse(this.#lastReconciledAt ?? "") || 0;
+    this.#armReconciliation(
+      Math.max(0, endedAt + LOST_INPUT_SET_RETRY_MS - Date.now()),
+      LOST_INPUT_SET_RETRY_REASON,
+    );
+  }
+
+  #armReconciliation(delayMs: number, reason: string): void {
     clearTimeout(this.#timer);
     this.#timer = setTimeout(
-      () => this.#requestReconciliation(PERIODIC_REASON),
-      RECONCILE_INTERVAL_MS,
+      () => this.#requestReconciliation(reason),
+      delayMs,
     );
     this.#timer.unref();
   }
@@ -283,25 +312,32 @@ export class InputTracker implements TrackedInputs {
   async #reconcileOnce(): Promise<void> {
     const signal = this.#abort.signal;
     this.#watcher.clearFailures();
+    const known = this.#filter?.nestedRepositories ?? [];
+    await this.#watchGitFiles(known, signal);
     const filter = await InputFilter.open(this.#root, this.#exclusions, signal);
     const inventory = await takeInventory(this.#scope(filter), this.#root);
-    const sources = await gitSources(
-      this.#root,
-      filter.nestedRepositories,
-      signal,
-    );
+    if (!sameMembers(known, filter.nestedRepositories)) {
+      await this.#watchGitFiles(filter.nestedRepositories, signal);
+    }
+    this.#filter = filter;
+    this.#reportGitUnread(filter);
+    this.#settleReconciliation(inventory);
+  }
+
+  /** Locates git's HEAD and ignore-rule files for `nestedRepositories` and watches them in place of the last ones. */
+  async #watchGitFiles(
+    nestedRepositories: readonly string[],
+    signal: AbortSignal,
+  ): Promise<void> {
+    const sources = await gitSources(this.#root, nestedRepositories, signal);
     const unwatched = this.#watcher.watchGitFiles(
       sources.ok ? sources.files : [],
     );
-    this.#filter = filter;
-    const unwatchedReasons = unwatched.map(
-      (reason) => `${GIT_FILE_UNWATCHED}: ${reason}`,
-    );
-    this.#gitFilesUnread = sources.ok
-      ? unwatchedReasons
-      : [...unwatchedReasons, `${GIT_SOURCES_UNREAD}: ${sources.reason}`];
-    this.#reportGitUnread(filter);
-    this.#settleReconciliation(inventory);
+    const unlocated = sources.ok ? sources.unread : [sources.reason];
+    this.#gitFilesUnread = [
+      ...unwatched.map((reason) => `${GIT_FILE_UNWATCHED}: ${reason}`),
+      ...unlocated.map((reason) => `${GIT_SOURCES_UNREAD}: ${reason}`),
+    ];
   }
 
   /** Logs git's unread reasons when they differ from the last reconciliation's, not on every one. */
@@ -383,6 +419,7 @@ export class InputTracker implements TrackedInputs {
     const filter = this.#filter;
     if (filter === undefined || !this.#state.established) {
       for (const [path] of batch) this.#jobs.record(this.#label(path));
+      this.#retryLostInputSet();
       return;
     }
     const unknown = batch
@@ -406,10 +443,12 @@ export class InputTracker implements TrackedInputs {
     const relative = relativePosixPath(this.#root, path);
     const entry = await readEntryDigest(path, this.#abort.signal);
     switch (entry.kind) {
-      case "absent":
+      case "absent": {
+        const wasDirectory = this.#state.hasDirectory(path);
         this.#recordAll(this.#state.remove(relative, path));
-        this.#watcher.dropDirectory(path);
+        if (wasDirectory) this.#watcher.dropDirectory(path);
         return;
+      }
       case "input":
         if (this.#state.hasDirectory(path)) {
           this.#recordAll(this.#state.remove(relative, path));
@@ -510,4 +549,16 @@ export class InputTracker implements TrackedInputs {
   #label(path: string): string {
     return relativePosixPath(this.#root, path);
   }
+}
+
+function sameMembers(
+  first: readonly string[],
+  second: readonly string[],
+): boolean {
+  const members = new Set(first);
+  const others = new Set(second);
+  return (
+    members.size === others.size &&
+    [...others].every((member) => members.has(member))
+  );
 }

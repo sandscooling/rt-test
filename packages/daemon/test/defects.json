@@ -3302,5 +3302,40 @@
     "file": "packages/daemon/src/inputs/input-tracker.ts",
     "old": "      await filter.check(unknown, this.#abort.signal);\n      this.#reportGitUnread(filter);\n",
     "new": "      await filter.check(unknown, this.#abort.signal);\n"
+  },
+  {
+    "id": "D1961",
+    "defect": "After a reconciliation that could not establish the input set, an event reporting the cause fixed starts no reconciliation, so results read unknown until the periodic one 5 minutes later.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      for (const [path] of batch) this.#jobs.record(this.#label(path));\n      this.#retryLostInputSet();\n",
+    "new": "      for (const [path] of batch) this.#jobs.record(this.#label(path));\n"
+  },
+  {
+    "id": "D1962",
+    "defect": "After a reconciliation that could not establish the input set, an event starts the next one at once, ignoring the 10 s back-off, so a continuous writer re-walks the tree back to back.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      Math.max(0, endedAt + LOST_INPUT_SET_RETRY_MS - Date.now()),",
+    "new": "      Math.min(0, endedAt + LOST_INPUT_SET_RETRY_MS - Date.now()),"
+  },
+  {
+    "id": "D1963",
+    "defect": "A relative core.excludesFile is watched against the consumer root, not the repository's top level, so with the root in a subdirectory an edit to it runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/git-sources.ts",
+    "old": "    enclosing.topLevel ?? root,",
+    "new": "    root,"
+  },
+  {
+    "id": "D1964",
+    "defect": "On Windows with HOME set, the user's git config files are watched under the profile directory, where Git for Windows does not read them.",
+    "file": "packages/daemon/src/inputs/git-sources.ts",
+    "old": "  if (process.platform !== WINDOWS) return homedir();",
+    "new": "  if (process.platform === WINDOWS) return homedir();"
+  },
+  {
+    "id": "D1966",
+    "defect": "A path in a nested repository git cannot answer for is asked about through the enclosing repository, whose rules can exclude it, though it counts as an input.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    for (const failed of this.#failed) {\n      if (\n        liesInside(failed, path) &&\n        (found === undefined || liesInside(found, failed))\n      ) {\n        return undefined;\n      }\n    }\n    return found;",
+    "new": "    return found;"
   }
 ]
