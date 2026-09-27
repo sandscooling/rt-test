@@ -1,12 +1,25 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { format } from "prettier";
+import { describe, expect, it, vi } from "vitest";
 import {
   GATE_TIMEOUT_MS,
   GATES,
   GIT_TIMEOUT_MS,
 } from "../../../scripts/lib/orchestration/doc-integrity.mjs";
+import {
+  formatOnSave,
+  type FormatResult,
+} from "../../../scripts/lib/orchestration/format-on-save.mjs";
 import { PROCESS_SCENARIO, PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 import {
   CLOCK_ONLY,
@@ -14,11 +27,25 @@ import {
   initRepo,
   REPO,
   withTemp,
+  withTempAsync,
   writeIn,
 } from "./harness.js";
 
+// Passes through to prettier, so a test can make one format call race a concurrent save.
+vi.mock("prettier", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("prettier")>();
+  return { ...actual, format: vi.fn<typeof actual.format>(actual.format) };
+});
+
 const ADR = "docs/adr/0001-first.md";
 const HOOKS = ".claude/hooks";
+const FORMAT_ENTRY = "format-on-save.cjs";
+const PROJECT = "project";
+// A line prettier's defaults rewrite, and the text they rewrite it to.
+const UNFORMATTED = "const a=1\n";
+const PRETTIER_DEFAULTS = "const a = 1;\n";
+const UNPARSEABLE = "const = ;\n";
+const CONCURRENT_SAVE = "const concurrent=2\n";
 const PROJECT_DIR = "$CLAUDE_PROJECT_DIR/";
 const ENTRY_DEPENDENCIES = [
   HOOKS,
@@ -145,6 +172,35 @@ function runMalformedPostTool() {
   });
 }
 
+interface Saved {
+  readonly result: FormatResult | string;
+  readonly text: string;
+}
+
+// Lays `files` out in a temp directory whose `project` folder is the root, formats `target` through
+// the repo's library, and returns its result, or the error it threw, with the target's text after.
+function formatSaved(
+  files: Record<string, string>,
+  target: string,
+  prepare: (dir: string) => void = () => undefined,
+): Promise<Saved> {
+  return withTempAsync(async (dir) => {
+    mkdirSync(join(dir, PROJECT));
+    for (const [path, text] of Object.entries(files)) writeIn(dir, path, text);
+    prepare(dir);
+    const file = join(dir, target);
+    const result = await formatOnSave(join(dir, PROJECT), file).catch(
+      (error: unknown) => `threw ${String(error)}`,
+    );
+    return { result, text: readFileSync(file, "utf8") };
+  });
+}
+
+const savePayload = (file_path: string) => ({
+  tool_name: "Write",
+  tool_input: { file_path },
+});
+
 describe("hook entries", PROCESS_SCENARIO, () => {
   it("D357: exits 2 from the doc-integrity entry when a gate fails", () => {
     expect(runDocIntegrity().status).toBe(2);
@@ -226,6 +282,170 @@ describe("hook entries", PROCESS_SCENARIO, () => {
   });
 });
 
+describe("format on save", PROCESS_SCENARIO, () => {
+  it("D1981: rewrites an unformatted saved file to prettier's output", async () => {
+    const saved = await formatSaved(
+      { "project/a.ts": UNFORMATTED },
+      "project/a.ts",
+    );
+    expect(saved.text).toBe(PRETTIER_DEFAULTS);
+  });
+
+  it("D1985: returns no note for a file it rewrote", async () => {
+    const saved = await formatSaved(
+      { "project/a.ts": UNFORMATTED },
+      "project/a.ts",
+    );
+    expect(saved.result).toEqual({
+      status: "formatted",
+      repoPath: "a.ts",
+      reason: null,
+      note: null,
+    });
+  });
+
+  it("D2022: indents by the project's .editorconfig", async () => {
+    const saved = await formatSaved(
+      {
+        "project/.editorconfig": "root = true\n\n[*]\nindent_style = tab\n",
+        "project/f.ts": "function f(){return 1}\n",
+      },
+      "project/f.ts",
+    );
+    expect(saved.text).toBe("function f() {\n\treturn 1;\n}\n");
+  });
+
+  it("D1982: leaves a file .prettierignore names untouched", async () => {
+    const saved = await formatSaved(
+      {
+        "project/.prettierignore": "skip.ts\n",
+        "project/skip.ts": UNFORMATTED,
+      },
+      "project/skip.ts",
+    );
+    expect(saved.text).toBe(UNFORMATTED);
+  });
+
+  it("D2025: leaves a file .gitignore names untouched", async () => {
+    const saved = await formatSaved(
+      { "project/.gitignore": "skip.ts\n", "project/skip.ts": UNFORMATTED },
+      "project/skip.ts",
+    );
+    expect(saved.text).toBe(UNFORMATTED);
+  });
+
+  it("D2023: leaves a file inside a .git folder untouched", async () => {
+    const saved = await formatSaved(
+      { "project/.git/a.ts": UNFORMATTED },
+      "project/.git/a.ts",
+    );
+    expect(saved.text).toBe(UNFORMATTED);
+  });
+
+  it("D2028: leaves a file inside a nested .git folder untouched", async () => {
+    const saved = await formatSaved(
+      { "project/sub/.git/a.ts": UNFORMATTED },
+      "project/sub/.git/a.ts",
+    );
+    expect(saved.text).toBe(UNFORMATTED);
+  });
+
+  it("D2029: skips a file prettier has no parser for, with no note", async () => {
+    const saved = await formatSaved(
+      { "project/notes.txt": "some  notes\n" },
+      "project/notes.txt",
+    );
+    expect(saved.result).toEqual(
+      expect.objectContaining({ status: "skipped", note: null }),
+    );
+  });
+
+  it("D2024: leaves a file reached through a link out of the project untouched", async () => {
+    const saved = await formatSaved(
+      { "outside/a.ts": UNFORMATTED },
+      "project/link/a.ts",
+      (dir) =>
+        symlinkSync(
+          join(dir, "outside"),
+          join(dir, PROJECT, "link"),
+          "junction",
+        ),
+    );
+    expect(saved.text).toBe(UNFORMATTED);
+  });
+
+  it("D1984: fails open on an unparseable file, keeping its text and naming it in the note", async () => {
+    const saved = await formatSaved(
+      { "project/bad.ts": UNPARSEABLE },
+      "project/bad.ts",
+    );
+    expect(saved).toEqual({
+      result: expect.objectContaining({
+        status: "failed",
+        note: expect.stringContaining("bad.ts"),
+      }),
+      text: UNPARSEABLE,
+    });
+  });
+
+  it("D2027: keeps a save that lands while prettier runs, with a note naming the file", async () => {
+    const actual = await vi.importActual<typeof import("prettier")>("prettier");
+    vi.mocked(format).mockImplementationOnce(async (source, options) => {
+      writeFileSync(String(options?.filepath), CONCURRENT_SAVE);
+      return actual.format(source, options);
+    });
+    const saved = await formatSaved(
+      { "project/a.ts": UNFORMATTED },
+      "project/a.ts",
+    ).finally(() => vi.mocked(format).mockReset());
+    expect(saved).toEqual({
+      result: expect.objectContaining({
+        status: "skipped",
+        note: expect.stringContaining("a.ts"),
+      }),
+      text: CONCURRENT_SAVE,
+    });
+  });
+
+  it("D1983: prints nothing for a save outside the project", () => {
+    const run = withTemp((dir) => {
+      const root = join(dir, PROJECT);
+      copyEntries(root);
+      writeIn(dir, "outside.ts", UNFORMATTED);
+      return runEntry(root, FORMAT_ENTRY, savePayload(join(dir, "outside.ts")));
+    });
+    expect({ status: run.status, stdout: run.stdout }).toEqual({
+      status: 0,
+      stdout: "",
+    });
+  });
+
+  it("D2030: prints nothing for an empty payload", () => {
+    const run = withTemp((root) => {
+      copyEntries(root);
+      return runEntry(root, FORMAT_ENTRY, "");
+    });
+    expect({ status: run.status, stdout: run.stdout }).toEqual({
+      status: 0,
+      stdout: "",
+    });
+  });
+
+  it("D2026: exits 0 with a one-line note when the formatter cannot load", () => {
+    const run = withTemp((root) => {
+      cpSync(join(REPO, HOOKS), join(root, HOOKS), { recursive: true });
+      writeIn(root, "a.ts", UNFORMATTED);
+      return runEntry(root, FORMAT_ENTRY, savePayload(join(root, "a.ts")));
+    });
+    expect({ status: run.status, stdout: run.stdout }).toEqual({
+      status: 0,
+      stdout: expect.stringMatching(
+        /^\{"hookSpecificOutput":\{"hookEventName":"PostToolUse","additionalContext":"The format-on-save hook failed, so the file stays as saved: [^\n]*"\}\}\n$/,
+      ),
+    });
+  });
+});
+
 describe("hook settings", () => {
   it("D364: names only hook entries that exist", () => {
     const missing = hookCommands()
@@ -261,6 +481,15 @@ describe("hook settings", () => {
         hook.command.endsWith(" --post-tool"),
     );
     expect(clocks).toHaveLength(1);
+  });
+
+  it("D1986: formats each Edit and Write save, within a 10 s timeout", () => {
+    const formatters = hookCommands()
+      .filter((hook) => entryOf(hook.command) === `${HOOKS}/${FORMAT_ENTRY}`)
+      .map(({ event, matcher, timeout }) => ({ event, matcher, timeout }));
+    expect(formatters).toEqual([
+      { event: "PostToolUse", matcher: "Edit|Write", timeout: 10 },
+    ]);
   });
 
   it("D367: gives the Stop hook time to run every doc gate", () => {

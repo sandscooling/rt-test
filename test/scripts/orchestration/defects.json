@@ -614,5 +614,110 @@
     "file": ".claude/hooks/prompt-context.cjs",
     "old": "if (process.argv.includes(\"--self\")) {",
     "new": "if (false) {"
+  },
+  {
+    "id": "D1981",
+    "defect": "The hook computes prettier's output but never writes it, so a saved file stays unformatted.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "  writeFileSync(file, formatted);\n",
+    "new": ""
+  },
+  {
+    "id": "D1982",
+    "defect": ".prettierignore is not passed to prettier, so the hook reformats a file the project ignores.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "const IGNORE_FILES = [\".gitignore\", \".prettierignore\"];",
+    "new": "const IGNORE_FILES = [\".gitignore\"];"
+  },
+  {
+    "id": "D1983",
+    "defect": "The outside-the-project guard is dropped, so a save outside the project crashes the hook and the session gets a failure note for a file it should skip silently.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "if (repoPath == null) return skipped(null, \"outside the project\");",
+    "new": ""
+  },
+  {
+    "id": "D1984",
+    "defect": "A prettier failure escapes formatOnSave, so the note no longer names the file that stayed as saved.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "    return {\n      status: STATUS.FAILED,",
+    "new": "    throw error;\n    return {\n      status: STATUS.FAILED,"
+  },
+  {
+    "id": "D1985",
+    "defect": "A rewritten file carries a reformat note again, duplicating the one Claude Code already gives.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "return { status: STATUS.FORMATTED, repoPath, reason: null, note: null };",
+    "new": "return { status: STATUS.FORMATTED, repoPath, reason: null, note: `prettier reformatted ${repoPath}.` };"
+  },
+  {
+    "id": "D1986",
+    "defect": "The format-on-save group matches Edit alone, so a Write save is never formatted.",
+    "file": ".claude/settings.json",
+    "old": "\"matcher\": \"Edit|Write\",",
+    "new": "\"matcher\": \"Edit\","
+  },
+  {
+    "id": "D2022",
+    "defect": "The hook resolves prettier's config without .editorconfig, so a tab-indented project is reformatted with spaces.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "{ editorconfig: true }",
+    "new": "{ editorconfig: false }"
+  },
+  {
+    "id": "D2023",
+    "defect": "The version-control folder guard is dropped, so the hook rewrites a file inside .git.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "if (inVcsDir(repoPath)) return skipped(repoPath, \"version-control folder\");",
+    "new": ""
+  },
+  {
+    "id": "D2024",
+    "defect": "The realpath check is dropped, so the hook rewrites a file outside the project reached through a link inside it.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "if (!isInside(realpathSync(root), realpathSync(file))) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2025",
+    "defect": ".gitignore is not passed to prettier, so the hook reformats a file git ignores.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "const IGNORE_FILES = [\".gitignore\", \".prettierignore\"];",
+    "new": "const IGNORE_FILES = [\".prettierignore\"];"
+  },
+  {
+    "id": "D2026",
+    "defect": "The entry drops its fail-open catch, so a formatter that cannot load exits non-zero with no note.",
+    "file": ".claude/hooks/format-on-save.cjs",
+    "old": "main().catch((error) => {",
+    "new": "main().then((error) => {"
+  },
+  {
+    "id": "D2027",
+    "defect": "The hook skips its re-read before writing, so it overwrites a save that landed while prettier ran.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "if (readFileSync(file, \"utf8\") !== source) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2028",
+    "defect": "The version-control check reads only the path's first segment, so the hook rewrites a file inside a nested .git folder.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": ".some((segment) => VCS_DIRS.includes(segment));",
+    "new": ".slice(0, 1)\n    .some((segment) => VCS_DIRS.includes(segment));"
+  },
+  {
+    "id": "D2029",
+    "defect": "The no-parser skip is dropped, so saving a file prettier cannot parse by type sends the session a failure note.",
+    "file": "scripts/lib/orchestration/format-on-save.mjs",
+    "old": "if (info.inferredParser == null) return skipped(repoPath, \"no parser\");",
+    "new": ""
+  },
+  {
+    "id": "D2030",
+    "defect": "The entry drops its empty-payload fallback, so an empty stdin makes it print a failure note.",
+    "file": ".claude/hooks/format-on-save.cjs",
+    "old": "readFileSync(0, \"utf8\") || \"{}\"",
+    "new": "readFileSync(0, \"utf8\")"
   }
 ]

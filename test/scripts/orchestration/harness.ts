@@ -16,10 +16,23 @@ export const FIXTURES = join(REPO, "test/fixtures/orchestration");
 // The prompt header's clock, `[YYYY-MM-DD HH:MM Day]`, standing alone.
 export const CLOCK_ONLY = /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Z][a-z]{2}\]$/;
 
+const makeTemp = () => mkdtempSync(join(tmpdir(), "rt-test-orchestration-"));
+
 export function withTemp<T>(run: (dir: string) => T): T {
-  const dir = mkdtempSync(join(tmpdir(), "rt-test-orchestration-"));
+  const dir = makeTemp();
   try {
     return run(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+export async function withTempAsync<T>(
+  run: (dir: string) => Promise<T>,
+): Promise<T> {
+  const dir = makeTemp();
+  try {
+    return await run(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
