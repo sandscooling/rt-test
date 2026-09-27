@@ -149,7 +149,15 @@ const elapsedMs = (from, to) => Math.round(to - from);
 const overLongText = (log) =>
   `${log.overLong.join("; ")} declares a timeout above LONGEST_TEST_TIMEOUT_MS (${LONGEST_TEST_TIMEOUT_MS} ms) in test/scripts/longest-test-timeout.mjs, which the verifier's idle window is sized from; raise that constant`;
 
-function stallText(log, idleWindowMs, stopProblem) {
+const orEmpty = (output) => output || "(empty)";
+
+/** The run's stderr and stdout tail, as a failure quotes them. */
+const outputEvidence = (run) => [
+  `stderr: ${orEmpty(run.stderr)}`,
+  `stdout tail: ${orEmpty(run.stdout)}`,
+];
+
+function stallText(log, idleWindowMs, stopProblem, output) {
   const running =
     log.running().join("; ") ||
     "no test reported (collecting, in a hook, tearing down, or in a test whose start Vitest had not yet sent)";
@@ -157,6 +165,7 @@ function stallText(log, idleWindowMs, stopProblem) {
     `Vitest made no progress for ${idleWindowMs} ms and was stopped; still running: ${running}; last progress: ${log.last}`,
     ...(log.overLong.length > 0 ? [overLongText(log)] : []),
     ...(stopProblem === undefined ? [] : [stopProblem]),
+    ...outputEvidence(output),
   ].join("; ");
 }
 
@@ -218,7 +227,14 @@ function spawnRun(args, cwd, idleWindowMs) {
       fail(error);
     });
     const failStalled = () =>
-      fail(new Error(stallText(log, idleWindowMs, stopProblem)));
+      fail(
+        new Error(
+          stallText(log, idleWindowMs, stopProblem, {
+            stderr,
+            stdout: tail.text(),
+          }),
+        ),
+      );
     // A worker still holding the stopped process's pipes delays "close" until the worker is ended.
     child.on("exit", () => {
       exitedAt = performance.now();
@@ -289,15 +305,13 @@ function readReport(path) {
   return { report };
 }
 
-const orEmpty = (output) => output || "(empty)";
 const msOrUnknown = (ms) => (ms === null ? "unknown" : `${ms} ms`);
 
 function noReportText(run, problem) {
   return [
     `Bootstrap runner produced no valid report: ${problem}`,
     `exit status ${run.status}, exited ${msOrUnknown(run.exitMs)} after start, closed ${msOrUnknown(run.closeLagMs)} after exit`,
-    `stderr: ${orEmpty(run.stderr)}`,
-    `stdout tail: ${orEmpty(run.stdout)}`,
+    ...outputEvidence(run),
   ].join("; ");
 }
 

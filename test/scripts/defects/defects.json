@@ -894,5 +894,12 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "if (line.trim() === \"\") return;",
     "new": ""
+  },
+  {
+    "id": "D1980",
+    "defect": "A stalled run fails without its stderr and stdout tail, so what Vitest said before it hung is lost.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "...outputEvidence(output),",
+    "new": ""
   }
 ]

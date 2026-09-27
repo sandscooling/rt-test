@@ -114,13 +114,23 @@ function afterStall<T>(
   });
 }
 
-/** Runs the entry script `source` writes for a report path under the runner; `read`, or the runner's error. */
-function runEntry(source: (report: string) => string): Promise<string> {
+/**
+ * Runs the entry script `source` writes for a report path under the runner, stopping it after `idleWindowMs`
+ * without progress when given; `read`, or the runner's error.
+ */
+function runEntry(
+  source: (report: string) => string,
+  idleWindowMs?: number,
+): Promise<string> {
   return withScratch(async (dir) => {
     const entry = join(dir, "entry.mjs");
     const report = join(dir, "report.json");
     writeFileSync(entry, source(report));
-    const run = createVitestRunner({ root: dir, entry });
+    const run = createVitestRunner({
+      root: dir,
+      entry,
+      ...(idleWindowMs === undefined ? {} : { idleWindowMs }),
+    });
     return run({ sandbox: dir, report }).then(
       () => "read",
       (error: Error) => error.message,
@@ -321,6 +331,17 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
       writesStdout(`${lines.join("\n\n")}\n`),
     );
     expect(tailOf(outcome)).toBe(lines.join("\n"));
+  });
+
+  it("D1980: quotes a stalled run's stderr and stdout tail in its stop failure", async () => {
+    const outcome = await runEntry(
+      () =>
+        `process.stderr.write("hung here\\n");\nprocess.stdout.write("said before hanging\\n");\nsetInterval(() => {}, 1000);\n`,
+      STALL_WINDOW_MS,
+    );
+    expect(outcome).toMatch(
+      /made no progress.*; stderr: hung here\n; stdout tail: said before hanging$/s,
+    );
   });
 
   it("D946: rejects a run whose only failure is a different test", () => {
