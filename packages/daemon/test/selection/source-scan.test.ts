@@ -27,10 +27,19 @@ import {
   widenedAt,
 } from "./harness.js";
 
+/** How many entries the walk read from each stand-in directory, by directory name. */
+const entriesRead = vi.hoisted(() => new Map<string, number>());
+
+type StandInEntry = Pick<
+  Dirent,
+  "name" | "isFile" | "isDirectory" | "isSymbolicLink"
+>;
+
 /**
- * A directory named `pad-<n>` lists `<n>` entries in all, the real ones padded with plain files, and a file, directory
- * or link named for its failure cannot be read, listed or resolved, so the walk's bounds and read failures are reached
- * without writing 50,000 files or depending on the host's permission model.
+ * A directory named `pad-<n>` lists `<n>` entries in all, its real ones followed by plain files, and one named
+ * `skipped-<n>` lists `<n>` `node_modules` entries before its real ones. A file, directory or link named for its
+ * failure cannot be read, listed or resolved. So the walk's bounds and read failures are reached without writing
+ * 50,000 files or depending on the host's permission model.
  */
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -39,26 +48,49 @@ vi.mock("node:fs", async (importOriginal) => {
       new Error(`EACCES: permission denied, ${operation} '${String(path)}'`),
       { code: "EACCES" },
     );
-  const padded = (
-    count: number,
-  ): Pick<Dirent, "name" | "isFile" | "isDirectory" | "isSymbolicLink">[] =>
-    Array.from({ length: count }, (_, index) => ({
-      name: `padding-${index}.txt`,
-      isFile: () => true,
-      isDirectory: () => false,
-      isSymbolicLink: () => false,
-    }));
-  function readdirSync(path: PathLike, options?: unknown): unknown {
+  const entry = (name: string, directory: boolean): StandInEntry => ({
+    name,
+    isFile: () => !directory,
+    isDirectory: () => directory,
+    isSymbolicLink: () => false,
+  });
+  /**
+   * A `Dir` yielding `leading` stand-ins, the real entries, then plain files up to `total` entries in all,
+   * each stand-in made only when read.
+   */
+  function standInDir(path: PathLike, leading: number, total: number): unknown {
+    const real = actual.readdirSync(path, { withFileTypes: true });
     const name = basename(String(path));
-    if (name === "unlistable") throw refused(path, "scandir");
-    const entries = actual.readdirSync(
-      path,
-      options as Parameters<typeof actual.readdirSync>[1],
-    );
+    let read = 0;
+    entriesRead.set(name, read);
+    const at = (index: number): StandInEntry | Dirent | null => {
+      if (index < leading) return entry("node_modules", true);
+      const inner = index - leading;
+      if (inner < real.length) return real[inner] ?? null;
+      return index < total ? entry(`padding-${index}.txt`, false) : null;
+    };
+    return {
+      path: String(path),
+      readSync: () => {
+        const next = at(read);
+        if (next !== null) read += 1;
+        entriesRead.set(name, read);
+        return next;
+      },
+      closeSync: () => undefined,
+    };
+  }
+  function opendirSync(path: PathLike, options?: unknown): unknown {
+    const name = basename(String(path));
+    if (name === "unlistable") throw refused(path, "opendir");
     const total = /^pad-(\d+)$/.exec(name)?.[1];
-    return total === undefined
-      ? entries
-      : [...entries, ...padded(Number(total) - entries.length)];
+    if (total !== undefined) return standInDir(path, 0, Number(total));
+    const skipped = /^skipped-(\d+)$/.exec(name)?.[1];
+    if (skipped !== undefined) return standInDir(path, Number(skipped), 0);
+    return actual.opendirSync(
+      path,
+      options as Parameters<typeof actual.opendirSync>[1],
+    );
   }
   function readFileSync(path: PathLike, options?: unknown): unknown {
     if (basename(String(path)) === "unreadable.ts") throw refused(path, "open");
@@ -78,7 +110,7 @@ vi.mock("node:fs", async (importOriginal) => {
       ? relative(dirname(String(path)), String(target))
       : target;
   }
-  return { ...actual, readdirSync, readFileSync, readlinkSync };
+  return { ...actual, opendirSync, readFileSync, readlinkSync };
 });
 
 /** Counts every `Visitor` the parser is asked to build, since it keeps each one for the life of the process. */
@@ -337,6 +369,79 @@ describe("gitignored paths inside a git repository", PROCESS_SCENARIO, () => {
       process.env.PATH = path;
     }
     expect(appScan(information)).toEqual({ edges: [], widenings: [] });
+  });
+});
+
+describe("repositories nested in the consumer", PROCESS_SCENARIO, () => {
+  it("D1680: a nested repository's own gitignored directory is not scanned", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          { "packages/app/nested/gen/dep.ts": 'import "@x/b";\n' },
+          {
+            prepare: (root) => {
+              commitRepository(join(root, "packages/app/nested"), "gen/\n");
+              commitRepository(root, "");
+            },
+          },
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D1700: a submodule, whose .git is a file, has its own gitignored directory skipped", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {},
+          {
+            prepare: (root) => {
+              const origin = join(dirname(root), "sub-origin");
+              mkdirSync(origin);
+              commitRepository(origin, "gen/\n");
+              const git = commitRepository(root, "");
+              git(
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                origin.replaceAll("\\", "/"),
+                "packages/app/sub",
+              );
+              mkdirSync(join(root, "packages/app/sub/gen"));
+              writeFileSync(
+                join(root, "packages/app/sub/gen/dep.ts"),
+                'import "@x/b";\n',
+              );
+            },
+          },
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("reading a directory within the walk's budget", () => {
+  it("D1678: skipped entries read before a kept one do not use up the budget, so the kept file is still scanned", async () => {
+    expect(
+      appScan(
+        await scanApp({
+          "packages/app/skipped-50000/x.ts": 'import "@x/b";\n',
+        }),
+      ),
+    ).toEqual({ edges: ["bare-import packages/b"], widenings: [] });
+  });
+
+  it("D1679: a directory past the remaining budget is not read whole before the walk widens", async () => {
+    const information = await scanApp({ "packages/app/pad-60000/x.txt": "" });
+    expect({
+      scan: appScan(information),
+      readWhole: entriesRead.get("pad-60000") === 60_000,
+    }).toEqual({
+      scan: { edges: [], widenings: ["walk-bound-reached"] },
+      readWhole: false,
+    });
   });
 });
 

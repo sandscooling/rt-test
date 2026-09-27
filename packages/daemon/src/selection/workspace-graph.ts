@@ -35,7 +35,7 @@ import {
   type SelectableWorkspace,
   type UncertaintyKind,
 } from "./selection-types.js";
-import { gitIgnoredPaths } from "./git-ignored.js";
+import { ignoredPathsReader, type IgnoredPaths } from "./git-ignored.js";
 import { readSourceImports } from "./source-imports.js";
 import { walkWorkspace } from "./source-walk.js";
 import {
@@ -375,7 +375,7 @@ function addUndeclaredEdges(
   const [root] = graph.workspaces;
   if (root === undefined) return;
   const scan = newScan(graph, root.directory);
-  const ignored = gitIgnoredPaths(root.directory);
+  const ignored = ignoredPathsReader(root.directory);
   for (const { workspace, read } of manifests) {
     addWorkspaceSourceEdges(scan, workspace, ignored);
     if (read.ok) addManifestImportsEdges(scan, workspace, read.manifest);
@@ -385,7 +385,7 @@ function addUndeclaredEdges(
 function addWorkspaceSourceEdges(
   scan: Scan,
   workspace: PackageWorkspace,
-  ignored: ReadonlySet<string>,
+  ignored: IgnoredPaths,
 ): void {
   const { graph } = scan;
   const directory = resolve(workspace.directory);

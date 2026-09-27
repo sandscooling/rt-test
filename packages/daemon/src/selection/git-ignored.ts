@@ -22,11 +22,32 @@ const GIT_TIMEOUT_MS = 30_000;
 const MAX_GIT_OUTPUT_BYTES = 256 * 1024 * 1024;
 const ENTRY_SEPARATOR = "\0";
 
+/** What git reports as ignored under the consumer root and under each nested repository the walk enters. */
+export interface IgnoredPaths {
+  readonly has: (path: string) => boolean;
+  /** Asks git once per scan for a repository inside the root, whose ignored paths the root's listing omits. */
+  readonly addRepository: (directory: string) => void;
+}
+
+export function ignoredPathsReader(root: string): IgnoredPaths {
+  const listings = [gitIgnoredPaths(root)];
+  const asked = new Set([resolve(root)]);
+  return {
+    has: (path) => listings.some((listing) => listing.has(path)),
+    addRepository: (directory) => {
+      const repository = resolve(directory);
+      if (asked.has(repository)) return;
+      asked.add(repository);
+      listings.push(gitIgnoredPaths(repository));
+    },
+  };
+}
+
 /**
  * The absolute paths under `root` that git reports as ignored. Outside a git repository, or when git cannot
  * be run or its output read, it is empty, so the walk skips nothing and widens nothing extra.
  */
-export function gitIgnoredPaths(root: string): ReadonlySet<string> {
+function gitIgnoredPaths(root: string): ReadonlySet<string> {
   const absoluteRoot = resolve(root);
   const listed = spawnSync(
     GIT,

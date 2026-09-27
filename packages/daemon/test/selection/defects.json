@@ -1102,14 +1102,14 @@
     "id": "D1635",
     "defect": "node_modules is walked, so an installed package's imports become the workspace's edges.",
     "file": "packages/daemon/src/selection/source-walk.ts",
-    "old": "const SKIPPED_DIRECTORIES = [\"node_modules\", \".git\"];",
-    "new": "const SKIPPED_DIRECTORIES = [\".git\"];"
+    "old": "const SKIPPED_DIRECTORIES = [\"node_modules\", GIT_DIRECTORY];",
+    "new": "const SKIPPED_DIRECTORIES = [GIT_DIRECTORY];"
   },
   {
     "id": "D1655",
     "defect": ".git is walked, so a script under it becomes the workspace's edges.",
     "file": "packages/daemon/src/selection/source-walk.ts",
-    "old": "const SKIPPED_DIRECTORIES = [\"node_modules\", \".git\"];",
+    "old": "const SKIPPED_DIRECTORIES = [\"node_modules\", GIT_DIRECTORY];",
     "new": "const SKIPPED_DIRECTORIES = [\"node_modules\"];"
   },
   {
@@ -1200,15 +1200,15 @@
     "id": "D1648",
     "defect": "The walk ignores what git reports as ignored, so build output under a gitignored directory is parsed and its failures and imports widen or add edges.",
     "file": "packages/daemon/src/selection/source-walk.ts",
-    "old": "      walk.ignored.has(path) ||\n",
+    "old": "    walk.ignored.has(path) ||\n",
     "new": ""
   },
   {
     "id": "D1647",
     "defect": "A gitignored entry is counted before it is skipped, so ignored build output pushes a workspace past the entry limit and it widens.",
     "file": "packages/daemon/src/selection/source-walk.ts",
-    "old": "    if (isSkipped) continue;\n    walk.visited += 1;",
-    "new": "    walk.visited += walk.ignored.has(path) ? 1 : 0;\n    if (isSkipped) continue;\n    walk.visited += 1;"
+    "old": "    (entry) => !isSkipped(walk, join(directory, entry.name), entry.name),",
+    "new": "    (entry) => {\n      const path = join(directory, entry.name);\n      if (walk.ignored.has(path)) walk.visited += 1;\n      return !isSkipped(walk, path, entry.name);\n    },"
   },
   {
     "id": "D1649",
@@ -1321,5 +1321,33 @@
     "file": "packages/daemon/src/selection/jsonc.ts",
     "old": "      return \"regex\" in node || \"bigint\" in node\n        ? notJson(\"a regular expression or BigInt literal\")\n        : literalValue(node.value);",
     "new": "      return literalValue(node.value);"
+  },
+  {
+    "id": "D1678",
+    "defect": "Skipped entries read from a directory use up the walk's remaining budget, so a directory whose node_modules or gitignored entries pass it stops before its kept entries and their imports add no edge.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "      if (keep(entry)) entries.push(entry);",
+    "new": "      if (keep(entry)) entries.push(entry);\n      else limit -= 1;"
+  },
+  {
+    "id": "D1679",
+    "defect": "A directory is read whole before the bound applies, so a directory of millions of entries is held in memory.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "      entry !== null && entries.length <= limit;",
+    "new": "      entry !== null;"
+  },
+  {
+    "id": "D1680",
+    "defect": "A nested repository's own gitignored paths are walked, so its ignored build output widens or adds edges.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "  if (holdsRepository(directory)) walk.ignored.addRepository(directory);\n",
+    "new": ""
+  },
+  {
+    "id": "D1700",
+    "defect": "Only a .git directory marks a repository, so a submodule, whose .git is a file, has its gitignored paths walked.",
+    "file": "packages/daemon/src/selection/source-walk.ts",
+    "old": "      lstatSync(join(directory, GIT_DIRECTORY), { throwIfNoEntry: false }) !==\n      undefined",
+    "new": "      lstatSync(join(directory, GIT_DIRECTORY), { throwIfNoEntry: false })?.isDirectory() ===\n      true"
   }
 ]

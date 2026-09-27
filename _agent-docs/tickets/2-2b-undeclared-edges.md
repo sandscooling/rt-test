@@ -349,6 +349,15 @@ Review gap rows 1 to 12 (review c8368897, 2026-09-27 02:16), all proven by `bun 
 - D1676 (row 11): A `Visitor` is built per file and the parser keeps each one. `source-scan.test.ts` wraps `oxc-parser`'s `Visitor` to count constructions, and a scan of three files must build none.
 - D1677 (row 12): A regular-expression literal the engine cannot build (`/(/`, which `oxc-parser` accepts with a `null` value) is read as JSON `null` (AC4).
 
+Step 9 round (review c8368897, 2026-09-27 06:49), proven by `bun run test:defects` exit 0, 1048 of 1048 detected, 06:53:51 to 07:01:27:
+
+- The `node:fs` stand-in in `source-scan.test.ts` now serves `opendirSync`, since the walk streams directories: a `pad-<n>` directory yields its real entries then plain files up to `<n>`, a `skipped-<n>` directory yields `<n>` `node_modules` entries before its real ones, `unlistable` is refused, and each stand-in directory records how many entries were read. D1643, D1645 and D1674 pass again, unchanged.
+- Re-anchored: D1635, D1655 (`GIT_DIRECTORY`), D1648 (`isSkipped`), D1647 (now counts an ignored entry inside the `keep` callback).
+- D1678 (row 13): Skipped entries read from a directory use up the remaining budget, so a directory whose `node_modules` entries pass it stops before its kept file (AC5, AC7).
+- D1679 (row 14): A directory is read whole before the bound applies; a `pad-60000` directory must widen without all 60,000 entries being read (AC4).
+- D1680 (row 15): A nested repository's own gitignored directory is walked (AC7). Real nested repository, committed under the shared fixture settings.
+- D1700 (row 16): Only a `.git` directory marks a repository, so a submodule's gitignored directory is walked (AC7). Real submodule added with `protocol.file.allow=always`.
+
 Re-anchored after the review's fix round and re-proven in the same run: D1611 and D1614 (new text in `tsconfig-edges.ts`), D1612 (its replacement now uses the `Nearest<T>` shape), D1623 (now `jsonc.ts`).
 
 #### Deliberately Untested
@@ -380,16 +389,25 @@ Considered and not fixed: a gitignored generated file carrying the only cross-wo
 
 Third-party answers (assumptions agent, installed `oxc-parser` 0.151.0 and git 2.55.0.windows.5): U1, U2 and U3 CONFIRMED. `import x = require()` appears only as a `TSImportEqualsDeclaration`, never in `staticImports`. A `/// <reference path>` is a `Line` comment whose value keeps the third slash. Without `-c core.fsmonitor=false`, `ls-files --others --ignored` runs a hook the repository's config names; with it, nothing runs. An unknown `lang` or `sourceType` is silently ignored.
 
-Undisposed tech debt:
+Tech debt, fixed in Step 9 against ba87f9e (2026-09-27, about 06:55; no open GitHub issue matched):
 
-- `packages/daemon/src/selection/source-walk.ts` `listEntries`: one directory is read and sorted whole before `MAX_WALKED_ENTRIES` applies, so a directory of millions of entries is held in memory before the bound widens.
-- `packages/daemon/src/selection/git-ignored.ts`: `ls-files --others` does not descend into a nested repository or submodule, so paths their own `.gitignore` ignores are walked, which can pass the entry limit or parse build output and widen needlessly. Safe direction.
+- `source-walk.ts` `listEntries`: one directory was read and sorted whole before `MAX_WALKED_ENTRIES` applied. It now streams the directory through `opendirSync`, drops skipped entries while reading, and stops once more entries are kept than the walk's remaining budget, sorting only what it kept. Node 24.19's `Dir#readSync` resolves an unknown entry type with `lstatSync`, as `readdirSync` does (`internal/fs/dir` `processReadResult` and `internal/fs/utils` `getDirent`, read with `--expose-internals`).
+- `git-ignored.ts` and `source-walk.ts`: `ls-files --others` does not descend into a nested repository or submodule, and `--recurse-submodules` supports only `--cached` and `--stage` (git 2.55 `git-ls-files.html`). The walk now asks git once per scan for the ignored paths of each directory holding a `.git` entry, through `ignoredPathsReader`.
 
 Defect records this fix round moved (anchors re-checked against the tree; each fails to match):
 
 - D1611: `old` `  if (own === undefined) return { ok: true, value: undefined };` → `new` `  if (true) return { ok: true, value: undefined };` in `tsconfig-edges.ts` (every `baseUrl` ignored).
 - D1614: `old` `      if (searched.has(next.file)) continue;\n      chain.add(next.file);\n      const found = seek(next.value, next.file, depth + 1);\n      chain.delete(next.file);\n` → `new` `      chain.add(next.file);\n      const found = seek(next.value, next.file, depth + 1);\n`.
 - D1623: unchanged text; `file` is now `packages/daemon/src/selection/jsonc.ts`.
+
+Defect records the Step 9 round moved, in `source-walk.ts`:
+
+- D1635: `old` `const SKIPPED_DIRECTORIES = ["node_modules", GIT_DIRECTORY];` → `new` `const SKIPPED_DIRECTORIES = [GIT_DIRECTORY];`
+- D1655: the same `old` → `new` `const SKIPPED_DIRECTORIES = ["node_modules"];`
+- D1648: `old` `    walk.ignored.has(path) ||\n` (now in `isSkipped`) → `new` empty.
+- D1647: the skip now runs while the directory is read, in the `keep` callback `    (entry) => !isSkipped(walk, join(directory, entry.name), entry.name),`; the mutation must count an ignored entry toward `walk.visited` there.
+
+Tests the Step 9 round broke: D1643, D1645 and D1674 in `source-scan.test.ts` fail because its `node:fs` stand-in replaces `readdirSync`, which the walk no longer calls; the stand-in must serve `opendirSync` (a `Dir` whose `readSync` yields the padded, refused or real entries). Not a regression: the listing failure, the bound and the root label behave as before.
 
 #### Test Coverage Gaps
 
@@ -409,6 +427,10 @@ Denominator: 75 named-defect tests (D1581 to D1655) against the behaviors AC1 to
 | 10  | `git-ignored.ts` `gitIgnoredPaths`                            | Git runs from the daemon's working directory, the consumer root, so on Windows a `git.exe` there runs while ignored paths are listed (AC6). Linux `execvp` does not search the working directory unless `PATH` holds a relative entry; decide whether a `PATH` entry of `.` makes it observable on both hosts, or record it as untested. | `source-scan.test.ts`                             | HIGH (daemon-state)        |
 | 11  | `source-imports.ts` `visitCalls`                              | A `Visitor` is built per file, and the parser keeps every one for the life of the process, so memory grows with every file scanned. Decide whether a bounded observation exists or record it as untested.                                                                                                                                | `source-scan.test.ts`                             | MEDIUM (daemon-state)      |
 | 12  | `jsonc.ts` `jsonValue`                                        | A regular-expression literal the engine cannot build is read as JSON `null`. Likely inert on Node 22 and 24 (the parser rejects an invalid pattern first); record it as untested if no input reaches it.                                                                                                                                 | `workspace-graph.test.ts`                         | LOW                        |
+| 13  | `source-walk.ts` `listEntries`                                | The bound counts skipped entries while the directory is read, so a directory whose gitignored or `node_modules` entries pass the remaining budget stops before its kept entries and their imports add no edge (AC5, AC7).                                                                                                                | `source-scan.test.ts`                             | HIGH (consumer, narrows)   |
+| 14  | `source-walk.ts` `listEntries`                                | The whole directory is read before the bound applies, so a directory of millions of entries is held in memory. Observable through the stand-in `Dir`: reading stops at the remaining budget plus one kept entry.                                                                                                                         | `source-scan.test.ts`                             | MEDIUM (daemon-state)      |
+| 15  | `source-walk.ts` `walkDirectory`                              | A nested repository's own gitignored paths are walked, so its ignored build output widens or adds edges (AC7).                                                                                                                                                                                                                           | `source-scan.test.ts`, a real nested repository   | MEDIUM                     |
+| 16  | `source-walk.ts` `holdsRepository`                            | A submodule, whose `.git` is a file, is not recognized as a repository, so its gitignored paths are walked (AC7).                                                                                                                                                                                                                        | `source-scan.test.ts`                             | MEDIUM                     |
 
 ### Completion Notes
 
