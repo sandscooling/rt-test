@@ -1,4 +1,5 @@
 import { existsSync, writeFileSync } from "node:fs";
+import { spawnsChildren, startHeartbeat } from "./children.mjs";
 
 const here = (name) => new URL(`./${name}`, import.meta.url);
 
@@ -15,7 +16,9 @@ if (existsSync(here("hold-collect"))) {
 }
 
 // With `hold` present, the test runs until `release` appears, so a stop or a kill lands mid-run.
+// With `spawn-children` present, the test starts a heartbeat child.
 it("held", async () => {
+  if (spawnsChildren()) await startHeartbeat(`test-${process.pid}`);
   if (!existsSync(here("hold"))) return;
   writeFileSync(here("holding"), String(process.pid));
   await holdUntil("release");

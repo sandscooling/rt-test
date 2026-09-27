@@ -6,6 +6,7 @@ import {
   type ExecutorReply,
   type ExecutorRequest,
 } from "./executor-jobs.js";
+import { endOwnTree } from "./process-tree.js";
 
 const STOP_REASON = "the daemon is stopping";
 const DISCONNECTED_REASON = "the executor lost its channel to the daemon";
@@ -23,9 +24,9 @@ process.on("message", (request: ExecutorRequest) => {
 
 process.on("disconnect", () => {
   disconnected = true;
-  if (current === undefined) process.exit();
+  if (current === undefined) return endOwnTree();
   current.abort(new Error(DISCONNECTED_REASON));
-  setTimeout(() => process.exit(), EXECUTOR_BOUND_MS);
+  setTimeout(endOwnTree, EXECUTOR_BOUND_MS);
 });
 
 async function runJob(
@@ -53,6 +54,6 @@ async function runJob(
     reply = { type: "job-failed", error: errorText(error) };
   }
   current = undefined;
-  if (disconnected) process.exit();
+  if (disconnected) endOwnTree();
   process.send?.(reply);
 }

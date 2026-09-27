@@ -1,0 +1,40 @@
+# Let every daemon prove itself to its client
+
+Status: accepted
+
+The daemon's endpoint is a name any local process can try to take. Windows pipe names are machine-wide, so another user can create a worktree's pipe before its daemon does, or after the daemon exits, and answer in its place. Once clients ask the daemon for results, a process that only looks like the daemon could report false results as current. Operating-system permissions alone cannot settle it, since Node exposes neither a pipe server's owner nor a peer's credentials.
+
+Every daemon proves itself with a key only it and its user can read. At each start, once it holds the endpoint, the daemon writes a fresh random key to a directory only its user may enter. On Linux that is the socket's runtime directory. On Windows it is `rt-test` under the local application data of the profile the user's token names. That directory is created with its own DACL, granting only the user, SYSTEM and Administrators with no inherited access, and it is refused whenever its DACL grants anyone else, since a profile folder can grant a group read access. A client reads the key before it sends anything, then sends a fresh random challenge, and trusts an answer only when it carries the HMAC-SHA256, under that key, of the challenge, the worktree identity and the process id the answer names. This covers the hello, the stop and its acknowledgement, and the version-mismatch error. A later answer on the same connection, such as a status, carries no proof: it is trusted because the connection's first answer was proven, and no other process can answer on a connection the daemon accepted. A process that holds the endpoint without the key is reported as not this user's daemon, so a start, status or stop refuses it. The daemon removes its key once its endpoint is closed.
+
+The proof is frozen with the stop request (ADR-0001's framing, 1.3's frozen set): the hello's type, version and challenge, the challenge on the stop, the proof on their answers, the key's location and the proof's construction never change in any protocol version. So a client of any version from this one on can check a daemon of any other before it trusts even a stop acknowledgement. A daemon built before the proof, which only development builds ran, cannot prove itself and is refused.
+
+On Windows the daemon makes the key directory its own at every start. It sets itself as the owner, removes inherited access, and grants itself, SYSTEM and Administrators. The owner's implicit right to change the DACL then belongs to this user alone. A directory it cannot take over, or one that still grants anyone else, is refused with the reason, and so is a directory without a DACL, which grants everyone access. Every client checks the DACL again before trusting the key.
+
+Rejected alternatives:
+
+- Relying on the pipe's DACL, which gives other users read access only. It keeps them from sending requests, but not from serving the name themselves.
+- Keeping the key in the state directory. That directory is often readable by other users, and a client asking for status does not know which state directory the daemon was given.
+- A secret pipe name. Pipe names can be enumerated, and a name freed by an exiting daemon can be taken.
+
+## Rendezvous
+
+A client finds the daemon from the worktree identity and the user alone, never from its environment. On Linux the socket and key live in `/tmp/rt-test-<uid>`, whatever `XDG_RUNTIME_DIR` or `TMPDIR` say. Sessions started by ssh, cron or su see different values, so a client would otherwise miss a running daemon and start a second one. `/run/user/<uid>` is removed at the user's last logout, which would unlink a detached daemon's socket. Because `/tmp` is shared, the daemon and every client check with `lstat`, following no link, that the directory is a directory owned by the user with mode 0700, and refuse it otherwise. systemd-tmpfiles skips a live socket but ages an untouched file, so the daemon refreshes its key's times daily.
+
+The daemon also holds a lock in the state directory, named from the worktree identity, for its whole life. A start that missed the endpoint, from another mount namespace for example, still cannot open a second writer on the worktree's store.
+
+## Process tree
+
+Nothing a job starts outlives the job. The daemon runs each job in an executor process of its own and ends that process's whole tree when the job ends, when the job has not ended within the executor bound after an abort, and when the daemon closes. On Linux the executor leads its own process group, and the daemon kills the group, which reaches every process in it even after the executor has exited. An executor that loses the daemon aborts its job and then kills its own group.
+
+On Windows the job object Node's libuv gives each child it starts is not enough. It allows silent breakaway, so only Node's own children join it: a process a test starts through `cmd.exe`, a `.cmd` launcher or any other program joins no job. Once Vitest ends the worker between it and the executor, no walk by parent reaches it either. So before an executor is sent its job, the daemon puts it in a job object of its own that kills on close and allows no breakaway, and every process the executor's tree starts, through any program, joins that job. Ending the job ends the tree at once. The job objects are held by one PowerShell helper per daemon, which compiles a small P/Invoke class and is started at the first job. It is a child of the daemon and the only holder of each job's handle. So when the daemon dies, the helper dies with it and every job's tree ends; when the helper alone dies, the running job's tree ends and that job stores nothing. A walk by parent, `taskkill /T`, remains the fallback when a job cannot be ended, and a job whose executor cannot be put in a job object is not run and is reported with the reason. So a policy that blocks PowerShell's `Add-Type`, such as Constrained Language Mode, stops every job, and each job's reason names that policy and what to ask an administrator.
+
+Measured on Windows 11 with Node 24.19.0:
+
+- A shell child started by a `globalSetup`, by a test in a threads worker and by a test in a forks worker ended with its job, where libuv's job alone left the last one running.
+- A stop and a daemon SIGKILL mid-run each left no helper, executor, worker or child.
+- The helper's first job cost about 1.5 s warm and 2.5 s cold, for PowerShell's start and the class's compile. Each later job's containment cost under 1 ms to set up and to end.
+- Node 22 was not measured on Windows.
+
+On Linux a child spawned by a `globalSetup` or by a test ended with its job, and a daemon killed mid-run left no executor, worker or test child. A new process per job costs about 0.4 to 0.5 s of process start and Vitest import. That is accepted, since it also gives each run a fresh process, as a user's own `vitest` run has.
+
+Known limit: a process the project's own code deliberately detaches, through `setsid`, `detached: true` or a job breakaway, leaves the group and is not ended. On Windows the job allows no breakaway, so there only a process started outside the job reaches that far, for example through a service or a scheduled task. The project chose to leave RT Test's control, and stopping it would need operating-system sandboxing outside M1. An executor stuck in synchronous code when the daemon is killed cannot run its own group kill on Linux, so that tree ends only when the loop does. A stop, which ends the tree at the bound, still reaches it.

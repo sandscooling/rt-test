@@ -1585,8 +1585,8 @@
     "id": "D1448",
     "defect": "The daemon greets a connection before it has sent anything, so a read-only client of another user receives data.",
     "file": "packages/daemon/src/daemon/server.ts",
-    "old": "      serve(socket, handlers, log);",
-    "new": "      socket.write(encodeLine({ type: \"greeting\" }));\n      serve(socket, handlers, log);"
+    "old": "      serve(socket, { handlers, prove }, log);",
+    "new": "      socket.write(encodeLine({ type: \"greeting\" }));\n      serve(socket, { handlers, prove }, log);"
   },
   {
     "id": "D1449",
@@ -1739,22 +1739,8 @@
     "id": "D1470",
     "defect": "A client connects through a runtime directory other users can enter, where another user's socket could answer.",
     "file": "packages/daemon/src/daemon/endpoint.ts",
-    "old": "  const refusal = runtimeDirectoryRefusal(location.runtimeDirectory, false);",
-    "new": "  const refusal = undefined;"
-  },
-  {
-    "id": "D1471",
-    "defect": "A socket path one byte past the 108-byte limit is accepted, so a Node that truncates it listens on a shortened path.",
-    "file": "packages/daemon/src/daemon/endpoint.ts",
-    "old": "  if (bytes > MAX_SOCKET_PATH_BYTES) {",
-    "new": "  if (bytes > MAX_SOCKET_PATH_BYTES + 1) {"
-  },
-  {
-    "id": "D1472",
-    "defect": "A socket path of exactly 108 bytes is refused, though it listens and connects.",
-    "file": "packages/daemon/src/daemon/endpoint.ts",
-    "old": "  if (bytes > MAX_SOCKET_PATH_BYTES) {",
-    "new": "  if (bytes >= MAX_SOCKET_PATH_BYTES) {"
+    "old": "      : runtimeDirectoryRefusal(endpoint.runtimeDirectory, false);",
+    "new": "      : undefined;"
   },
   {
     "id": "D1473",
@@ -1823,14 +1809,14 @@
     "id": "D1483",
     "defect": "A status request with no daemon serving the worktree resolves with nothing instead of rejecting.",
     "file": "packages/daemon/src/client.ts",
-    "old": "    throw new Error(`No daemon serves the worktree at ${consumerRoot}.`);\n  }\n  return status;",
+    "old": "    throw new Error(`No daemon serves the worktree at ${target.consumerRoot}.`);\n  }\n  return status;",
     "new": "  }\n  return status;"
   },
   {
     "id": "D1484",
     "defect": "A stop with no daemon serving the worktree rejects without naming the consumer root.",
     "file": "packages/daemon/src/client.ts",
-    "old": "      ? `No daemon serves the worktree at ${consumerRoot}.`",
+    "old": "      ? `No daemon serves the worktree at ${target.consumerRoot}.`",
     "new": "      ? \"No daemon serves this worktree.\""
   },
   {
@@ -1893,7 +1879,7 @@
     "id": "D1493",
     "defect": "A job stuck past the executor bound after a stop is never ended, so the daemon never exits.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "      this.#boundPassed = true;\n      child.kill(KILL_SIGNAL);",
+    "old": "      this.#boundPassed = true;\n      endProcessTree(child);",
     "new": "      this.#boundPassed = true;"
   },
   {
@@ -1905,10 +1891,10 @@
   },
   {
     "id": "D1495",
-    "defect": "An executor that exits during a job is kept as the executor, so every later job is sent to a dead process and stores nothing.",
+    "defect": "An executor that exits during a job never settles it, so the killed run is never listed as unstored and the next workspace never runs.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "    if (this.#child !== child) return;\n    this.#child = undefined;\n    const settle = this.#settle;",
-    "new": "    if (this.#child !== child) return;\n    const settle = this.#settle;"
+    "old": "    this.#child = undefined;\n    const settle = this.#settle;\n    if (settle === undefined) return;",
+    "new": "    this.#child = undefined;\n    const settle = undefined;\n    if (settle === undefined) return;"
   },
   {
     "id": "D1496",
@@ -1981,13 +1967,6 @@
     "new": "  return \"gone\";"
   },
   {
-    "id": "D1533",
-    "defect": "A relative XDG_RUNTIME_DIR is used as the runtime directory, so a client and a daemon whose working directories differ look for the socket in different places.",
-    "file": "packages/daemon/src/daemon/endpoint.ts",
-    "old": "  if (configured !== undefined && isAbsolute(configured)) return configured;",
-    "new": "  if (configured !== undefined && configured !== \"\") return configured;"
-  },
-  {
     "id": "D1534",
     "defect": "A first startup message that is not a confirmed start crashes the daemon with a raw TypeError instead of a refusal naming the message.",
     "file": "packages/daemon/src/daemon/daemon-main.ts",
@@ -2042,5 +2021,383 @@
     "file": "packages/daemon/src/store/read-discovery.ts",
     "old": "      return { status, workspace, reason: text(row, \"error\") };",
     "new": "      return { status, workspace, reason: \"\" };"
+  },
+  {
+    "id": "D1566",
+    "defect": "The challenge limit is off by one, so a 257-character challenge, past the frozen 256, is answered with a proof.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    value.length <= MAX_CHALLENGE_LENGTH",
+    "new": "    value.length <= MAX_CHALLENGE_LENGTH + 1"
+  },
+  {
+    "id": "D1567",
+    "defect": "The challenge limit is off by one, so a challenge of exactly the frozen 256 characters gets no proof and its client refuses the daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    value.length <= MAX_CHALLENGE_LENGTH",
+    "new": "    value.length < MAX_CHALLENGE_LENGTH"
+  },
+  {
+    "id": "D1568",
+    "defect": "A request without a challenge is answered with a proof, which the frozen protocol reserves for a challenged request.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "        isChallenge(challenge)\n          ? proofOf(secret, challenge, worktreeIdentity, process.pid)\n          : undefined,",
+    "new": "        proofOf(secret, String(challenge), worktreeIdentity, process.pid),"
+  },
+  {
+    "id": "D1569",
+    "defect": "The version-mismatch error carries no proof, so a client of any version cannot tell this user's daemon of another version from an impostor.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    pid: handlers.identity.pid,\n    ...withProof(proof),\n  };\n  send(socket, mismatch);",
+    "new": "    pid: handlers.identity.pid,\n  };\n  send(socket, mismatch);"
+  },
+  {
+    "id": "D1570",
+    "defect": "The stop acknowledgement carries no proof, so a client cannot trust it came from this user's daemon.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      stopAcknowledgement(handlers, prove(parsed.message[\"challenge\"])),",
+    "new": "      stopAcknowledgement(handlers, undefined),"
+  },
+  {
+    "id": "D1580",
+    "defect": "The Linux runtime directory follows TMPDIR, so a client in a session with another TMPDIR misses a running daemon and can start a second one.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  const runtimeDirectory = join(\n    SHARED_TEMPORARY_DIRECTORY,",
+    "new": "  const runtimeDirectory = join(\n    process.env[\"TMPDIR\"] ?? SHARED_TEMPORARY_DIRECTORY,"
+  },
+  {
+    "id": "D1562",
+    "defect": "The proof leaves out the worktree identity, so the daemon of another worktree of this user can answer for this one.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    .update([challenge, worktreeIdentity, String(pid)].join(PROOF_SEPARATOR))",
+    "new": "    .update([challenge, String(pid)].join(PROOF_SEPARATOR))"
+  },
+  {
+    "id": "D1563",
+    "defect": "The proof leaves out the process id, so an answer can name another process than the daemon that proved it.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    .update([challenge, worktreeIdentity, String(pid)].join(PROOF_SEPARATOR))",
+    "new": "    .update([challenge, worktreeIdentity].join(PROOF_SEPARATOR))"
+  },
+  {
+    "id": "D1564",
+    "defect": "A stopping daemon's key removal deletes the key a starting daemon has just written in its place, so the new daemon can no longer prove itself.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    if (readFileSync(aside, \"utf8\") !== secret) putBack(aside, file);",
+    "new": "    if (readFileSync(aside, \"utf8\") === \"never\") putBack(aside, file);"
+  },
+  {
+    "id": "D1565",
+    "defect": "The proof's construction drifts from the frozen one, joining its parts with another separator, so a client of another version refuses this daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "const PROOF_SEPARATOR = \"\\0\";",
+    "new": "const PROOF_SEPARATOR = \"\\n\";"
+  },
+  {
+    "id": "D1577",
+    "defect": "The key directory check accepts a DACL granting a trustee other than the user, SYSTEM and Administrators, so a start writes its key where the Users group can read it.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "    if (!allowed.has(trustee)) others.add(trustee);",
+    "new": "    if (allowed.has(\"never\")) others.add(trustee);"
+  },
+  {
+    "id": "D1578",
+    "defect": "A Windows client trusts the key without checking its directory's DACL, so a key other users could read authenticates the daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    : protectedDirectoryRefusal(endpoint.keyDirectory);",
+    "new": "    : undefined;"
+  },
+  {
+    "id": "D1579",
+    "defect": "A new key directory keeps inherited access, so a group its profile folder grants can read the daemon's key.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "    \"/inheritance:r\",\n",
+    "new": ""
+  },
+  {
+    "id": "D1656",
+    "defect": "On Linux an executor is not a process group leader, so the daemon has no group through which to end what its job started.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "  return process.platform !== WINDOWS;",
+    "new": "  return false;"
+  },
+  {
+    "id": "D1657",
+    "defect": "On Windows an executor is started detached, so it leaves the daemon's job object and its tree can outlive the daemon.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "  return process.platform !== WINDOWS;",
+    "new": "  return true;"
+  },
+  {
+    "id": "D1658",
+    "defect": "On Linux ending an executor's tree kills only the executor, so a child its job started outlives the job.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "  endGroup(child.pid);",
+    "new": "  child.kill(KILL_SIGNAL);"
+  },
+  {
+    "id": "D1659",
+    "defect": "On Linux an executor that ends itself, after losing the daemon, exits without killing its process group, so its job's children outlive it.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "  else endGroup(process.pid);",
+    "new": ""
+  },
+  {
+    "id": "D1556",
+    "defect": "The client accepts a proof made with another key, so status reports an impostor on the endpoint as this user's daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    : \"its proof does not match this worktree's daemon key\";",
+    "new": "    : undefined;"
+  },
+  {
+    "id": "D1557",
+    "defect": "The client accepts a stop acknowledgement proven with another key, so a stop trusts an impostor's acknowledgement and waits on the process it names.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    : \"its proof does not match this worktree's daemon key\";",
+    "new": "    : undefined;"
+  },
+  {
+    "id": "D1558",
+    "defect": "The client accepts a proof made with another key, so a start reports an impostor as this user's running daemon instead of refusing it as not this user's daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    : \"its proof does not match this worktree's daemon key\";",
+    "new": "    : undefined;"
+  },
+  {
+    "id": "D1559",
+    "defect": "A missing proof is read as a valid one, so status reports an impostor that answers without a proof as this user's daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    return `it answered without a proof: ${JSON.stringify(answer)}`;",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D1560",
+    "defect": "A missing proof is read as a valid one, so a stop trusts an impostor's unproven acknowledgement.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    return `it answered without a proof: ${JSON.stringify(answer)}`;",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D1561",
+    "defect": "A missing proof is read as a valid one, so a start reports an unproven impostor as this user's running daemon instead of refusing it as not this user's daemon.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    return `it answered without a proof: ${JSON.stringify(answer)}`;",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D1571",
+    "defect": "The client reads the daemon key after the answer arrives, when a stopping daemon has already removed it, so every stop of the client's own daemon fails.",
+    "file": "packages/daemon/src/client.ts",
+    "old": "  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);\n  const challenge = newChallenge();\n  const answer = await connection.request(request(challenge));",
+    "new": "  const challenge = newChallenge();\n  const answer = await connection.request(request(challenge));\n  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);"
+  },
+  {
+    "id": "D1572",
+    "defect": "The daemon leaves its key behind when it stops.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "      key.remove();\n      lock.release();",
+    "new": "      lock.release();"
+  },
+  {
+    "id": "D1573",
+    "defect": "The daemon never releases its store lock, so it outlives the daemon's stop.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "      key.remove();\n      lock.release();",
+    "new": "      key.remove();"
+  },
+  {
+    "id": "D1576",
+    "defect": "The store lock is released once the store is open, so it no longer guards the store while the daemon serves.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "    return { ok: true, key, lock, store: openStore(directory) };",
+    "new": "    lock.release();\n    return { ok: true, key, lock, store: openStore(directory) };"
+  },
+  {
+    "id": "D1574",
+    "defect": "A start cannot replace the key a killed daemon left, so the worktree cannot be served again until someone deletes it.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    renameSync(temporary, endpoint.keyFile);",
+    "new": "    linkSync(temporary, endpoint.keyFile);"
+  },
+  {
+    "id": "D1575",
+    "defect": "A start ignores a store lock held by a running process, so two daemons can write the worktree's store.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "  if (!lock.ok) {\n    await listening.close();\n    key.remove();",
+    "new": "  if (lock.ok === \"never\") {\n    await listening.close();\n    key.remove();"
+  },
+  {
+    "id": "D1660",
+    "defect": "The daemon settles a job without ending its executor's tree, so the executor and the children its global setup and test started outlive the job.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "        void tree.end().then(() => exited.then(() => resolve(reply)));",
+    "new": "        resolve(reply);"
+  },
+  {
+    "id": "D1662",
+    "defect": "On Windows ending an executor's tree kills only the executor, so a process its job started through a shell, which is in no job object, outlives the job.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "  endWindowsTree(child.pid);\n  if (!hasExited(child)) child.kill(KILL_SIGNAL);",
+    "new": "  if (!hasExited(child)) child.kill(KILL_SIGNAL);"
+  },
+  {
+    "id": "D1663",
+    "defect": "On Windows an executor that ends itself, after losing the daemon, exits without walking its tree, so a process its job started through a shell outlives it.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "  if (process.platform === WINDOWS) endWindowsTree(process.pid);\n  else endGroup(process.pid);",
+    "new": "  if (process.platform !== WINDOWS) endGroup(process.pid);"
+  },
+  {
+    "id": "D1661",
+    "defect": "The daemon settles a job without ending its executor's tree, so a child its global setup or test started through a shell outlives the job.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "        void tree.end().then(() => exited.then(() => resolve(reply)));",
+    "new": "        resolve(reply);"
+  },
+  {
+    "id": "D1664",
+    "defect": "A null DACL followed by a label is read as a protected directory, so a client trusts a key everyone may read.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "    if (dacl.includes(NO_DACL) || !dacl.includes(ACE_START)) {",
+    "new": "    if (!dacl.includes(ACE_START)) {"
+  },
+  {
+    "id": "D1665",
+    "defect": "A job stuck past the executor bound is never ended, so a child its stuck global setup started through a shell runs on past the stop.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      this.#boundPassed = true;\n      endProcessTree(child);",
+    "new": "      this.#boundPassed = true;"
+  },
+  {
+    "id": "D1681",
+    "defect": "An executor is sent its job before it is held, so a process its job starts before the hold escapes the tree that is ended with the job.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      tree = await this.#containment.contain(child);",
+    "new": "      child.send(request);\n      tree = await this.#containment.contain(child);"
+  },
+  {
+    "id": "D1682",
+    "defect": "A job whose executor cannot be held is run anyway, so what it starts can outlive it.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    } catch (error) {\n      return this.#unsent(",
+    "new": "    } catch (error) {\n      tree = { end: async () => endProcessTree(child) };\n      if (error === tree) return this.#unsent("
+  },
+  {
+    "id": "D1683",
+    "defect": "Closing the executor leaves what holds the trees open, so the Windows job object helper survives the daemon's stop.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    await this.#containment.close();",
+    "new": ""
+  },
+  {
+    "id": "D1684",
+    "defect": "An abort that arrives while the executor is being held is ignored, so the job runs after the stop began.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (this.#abortBeforeSend) {",
+    "new": "    if (this.#abortBeforeSend && Date.now() < 0) {"
+  },
+  {
+    "id": "D1689",
+    "defect": "The store-lock refusal calls the serving daemon another start of this worktree's daemon.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "    storeLockFile(directory, scope.worktreeIdentity),\n    STORE_LOCK_HOLDER,\n  );",
+    "new": "    storeLockFile(directory, scope.worktreeIdentity),\n  );"
+  },
+  {
+    "id": "D1698",
+    "defect": "A helper whose Add-Type is blocked is reported without PowerShell's reason, the policy or the remedy.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (!ready.startsWith(prefix)) {",
+    "new": "    if (ready !== \"never\") {"
+  },
+  {
+    "id": "D1699",
+    "defect": "A helper killed at its answer timeout still reads as alive, so the next job asks the silent helper instead of starting a new one.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "        this.#end(\n          new Error(\n            `the job object helper did not answer",
+    "new": "        this.#waiting.shift()?.(\n          new Error(\n            `the job object helper did not answer"
+  },
+  {
+    "id": "D1696",
+    "defect": "On Windows a job the helper cannot end is not walked with taskkill /T, so its processes outlive the job.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "      `cannot end the job object of executor process ${child.pid}: ${errorText(error)}`,\n    );\n    endProcessTree(child);",
+    "new": "      `cannot end the job object of executor process ${child.pid}: ${errorText(error)}`,\n    );"
+  },
+  {
+    "id": "D1697",
+    "defect": "On Linux a group kill that throws escapes uncaught into the daemon instead of being warned about.",
+    "file": "packages/daemon/src/daemon/process-tree.ts",
+    "old": "function endGroupOf(child: ChildProcess): void {\n  try {\n    endProcessTree(child);\n  } catch (error) {",
+    "new": "function endGroupOf(child: ChildProcess): void {\n  endProcessTree(child);\n  if (Date.now() < 0) try {\n    endProcessTree(child);\n  } catch (error) {"
+  },
+  {
+    "id": "D1693",
+    "defect": "A job settles once its tree's end is asked for, before its executor has exited, so the next job can start while the last one's processes still run.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "        void tree.end().then(() => exited.then(() => resolve(reply)));",
+    "new": "        void tree.end().then(() => resolve(reply));"
+  },
+  {
+    "id": "D1694",
+    "defect": "A job whose executor exits while it is being held is sent to the dead executor and never settles, so a stop waits forever.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (this.#child !== child) {\n      await tree.end();",
+    "new": "    if (this.#child === undefined && Date.now() < 0) {\n      await tree.end();"
+  },
+  {
+    "id": "D1695",
+    "defect": "A job whose executor could not be started, with no pid and no exit, is treated as started, and ends without saying the executor could not be started.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (neverStarted(child)) {\n      return this.#unsent(child, exited, NOT_STARTED_REASON);",
+    "new": "    if (neverStarted(child) && Date.now() < 0) {\n      return this.#unsent(child, exited, NOT_STARTED_REASON);"
+  },
+  {
+    "id": "D1685",
+    "defect": "The daemon never sets itself as the key directory's owner, so an existing directory stays owned by another account, which keeps the owner's right to rewrite its DACL.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "  runTool(ICACLS, [directory, \"/setowner\", user]);\n",
+    "new": ""
+  },
+  {
+    "id": "D1686",
+    "defect": "The DACL is saved inside the directory under check, where anyone who can write there could replace it before it is read.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "  const saved = join(dirname(directory), `${SAVE_PREFIX}${randomName()}`);",
+    "new": "  const saved = join(directory, `${SAVE_PREFIX}${randomName()}`);"
+  },
+  {
+    "id": "D1687",
+    "defect": "A mandatory label after a protected DACL is read as a trustee, so a protected key directory is refused.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "  const [daclAces = \"\"] = dacl.split(SACL_PREFIX);",
+    "new": "  const daclAces = dacl;"
+  },
+  {
+    "id": "D1688",
+    "defect": "A deny entry for another trustee is read as a grant, so a protected key directory carrying one is refused.",
+    "file": "packages/daemon/src/daemon/windows-acl.ts",
+    "old": "    if (DENY_ACE_TYPES.has(fields[0] ?? \"\")) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D1690",
+    "defect": "A proof of another length throws a raw RangeError instead of being refused as not matching this worktree's daemon key.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "  return received.length === expected.length &&\n    timingSafeEqual(received, expected)",
+    "new": "  return timingSafeEqual(received, expected)"
+  },
+  {
+    "id": "D1691",
+    "defect": "The key file is written readable by other users, not with mode 0600.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "const KEY_FILE_MODE = 0o600;",
+    "new": "const KEY_FILE_MODE = 0o644;"
+  },
+  {
+    "id": "D1692",
+    "defect": "A key moved aside for removal that could not be confirmed ours is deleted, so a successor's key can be lost.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "      );\n    }\n  }\n}\n\n/** A key written after it was moved aside is newer, so it stays. */",
+    "new": "      );\n    }\n  } finally {\n    rmSync(aside, { force: true });\n  }\n}\n\n/** A key written after it was moved aside is newer, so it stays. */"
   }
 ]

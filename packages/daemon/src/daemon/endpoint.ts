@@ -6,37 +6,48 @@ import {
   type Server,
   type Socket,
 } from "node:net";
-import { tmpdir, userInfo } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { userInfo } from "node:os";
+import { join } from "node:path";
 import { errorText } from "../vitest/error-text.js";
 import { runtimeDirectoryRefusal, takeLock } from "./runtime-directory.js";
 
-const WINDOWS = "win32";
+export const WINDOWS = "win32";
+/*
+ * Frozen for every protocol version, since a client of any version must find a daemon of any other and its key: each
+ * name and directory below, and the identity hash that names the endpoint and the key.
+ */
 const PIPE_PREFIX = "\\\\.\\pipe\\rt-test-";
-const RUNTIME_DIRECTORY_VARIABLE = "XDG_RUNTIME_DIR";
+/** Every session of a user, whatever its environment, finds the same directory: never `TMPDIR` or `XDG_RUNTIME_DIR`. */
+const SHARED_TEMPORARY_DIRECTORY = "/tmp";
 const RUNTIME_DIRECTORY_PREFIX = "rt-test-";
+/** Under the profile the user's token names, which no environment variable moves. */
+const WINDOWS_KEY_DIRECTORY = ["AppData", "Local", "rt-test"] as const;
 const SOCKET_EXTENSION = ".sock";
 const LOCK_EXTENSION = ".lock";
-/** Linux's `sun_path` size, which Linux fills without a terminating NUL: a longer path is refused by one Node and silently truncated by another. */
-export const MAX_SOCKET_PATH_BYTES = 108;
+const KEY_EXTENSION = ".key";
 const HASH_ALGORITHM = "sha256";
 const HASH_LENGTH = 32;
 const HASH_SEPARATOR = "\0";
 
-/** Where a worktree's daemon listens. */
+/** Where a worktree's daemon listens, and where it keeps its key. */
+export interface Endpoint {
+  readonly path: string;
+  /** Linux only: the directory holding the socket and its lock file. */
+  readonly runtimeDirectory?: string;
+  /** Only this user may enter it; on Linux it is the runtime directory. */
+  readonly keyDirectory: string;
+  /** Where the daemon serving this endpoint keeps the key it proves itself with. */
+  readonly keyFile: string;
+}
+
 export type EndpointLocation =
-  | {
-      readonly ok: true;
-      readonly path: string;
-      /** Linux only: the directory holding the socket and its lock file. */
-      readonly runtimeDirectory?: string;
-    }
+  | ({ readonly ok: true } & Endpoint)
   | { readonly ok: false; readonly reason: string };
 
 export type Listening =
   | {
       readonly ok: true;
-      readonly path: string;
+      readonly endpoint: Endpoint;
       /**
        * Resolves once the endpoint accepts no connection and every connection it accepted has ended; on Linux the
        * socket file is gone.
@@ -72,43 +83,46 @@ export function identityHash(...parts: readonly string[]): string {
 }
 
 /**
- * The endpoint a client may connect to: refused when the Linux socket path is too long, or when its runtime
- * directory is not this user's alone, since another user's socket there could answer in the daemon's place.
+ * The endpoint a client may connect to: refused when its Linux runtime directory is not this user's alone, since
+ * another user's socket there could answer in the daemon's place.
  */
 export function clientEndpoint(worktreeIdentity: string): EndpointLocation {
-  const location = endpointLocation(worktreeIdentity);
-  if (!location.ok || location.runtimeDirectory === undefined) return location;
-  const refusal = runtimeDirectoryRefusal(location.runtimeDirectory, false);
-  return refusal === undefined ? location : { ok: false, reason: refusal };
+  const endpoint = endpointOf(worktreeIdentity);
+  const refusal =
+    endpoint.runtimeDirectory === undefined
+      ? undefined
+      : runtimeDirectoryRefusal(endpoint.runtimeDirectory, false);
+  return refusal === undefined
+    ? { ok: true, ...endpoint }
+    : { ok: false, reason: refusal };
 }
 
-/** The pipe namespace is shared by every user of a Windows machine, so its name hashes the user too. */
-function endpointLocation(worktreeIdentity: string): EndpointLocation {
+/**
+ * The pipe namespace is shared by every user of a Windows machine, so its name hashes the user too. The Linux socket
+ * path has a fixed shape well under the 108-byte `sun_path` limit.
+ */
+function endpointOf(worktreeIdentity: string): Endpoint {
   if (process.platform === WINDOWS) {
+    const user = userInfo();
+    const name = identityHash(user.username, worktreeIdentity);
+    const keyDirectory = join(user.homedir, ...WINDOWS_KEY_DIRECTORY);
     return {
-      ok: true,
-      path: `${PIPE_PREFIX}${identityHash(userInfo().username, worktreeIdentity)}`,
+      path: `${PIPE_PREFIX}${name}`,
+      keyDirectory,
+      keyFile: join(keyDirectory, `${name}${KEY_EXTENSION}`),
     };
   }
-  const runtimeDirectory = linuxRuntimeDirectory();
-  const path = join(
-    runtimeDirectory,
-    `${identityHash(worktreeIdentity)}${SOCKET_EXTENSION}`,
+  const runtimeDirectory = join(
+    SHARED_TEMPORARY_DIRECTORY,
+    `${RUNTIME_DIRECTORY_PREFIX}${process.getuid?.()}`,
   );
-  const bytes = Buffer.byteLength(path, "utf8");
-  if (bytes > MAX_SOCKET_PATH_BYTES) {
-    return {
-      ok: false,
-      reason: `the socket path ${path} is ${bytes} bytes, longer than the platform's limit of ${MAX_SOCKET_PATH_BYTES} bytes`,
-    };
-  }
-  return { ok: true, path, runtimeDirectory };
-}
-
-function linuxRuntimeDirectory(): string {
-  const configured = process.env[RUNTIME_DIRECTORY_VARIABLE];
-  if (configured !== undefined && isAbsolute(configured)) return configured;
-  return join(tmpdir(), `${RUNTIME_DIRECTORY_PREFIX}${process.getuid?.()}`);
+  const name = identityHash(worktreeIdentity);
+  return {
+    path: join(runtimeDirectory, `${name}${SOCKET_EXTENSION}`),
+    runtimeDirectory,
+    keyDirectory: runtimeDirectory,
+    keyFile: join(runtimeDirectory, `${name}${KEY_EXTENSION}`),
+  };
 }
 
 /** Resolves with the connected socket, or rejects with the connection error, whose `code` says why. */
@@ -125,38 +139,32 @@ export function connectEndpoint(path: string): Promise<Socket> {
 
 /**
  * Takes the worktree's endpoint and serves each connection with `onConnection`. Refuses, listening nowhere, when
- * another daemon answers there, when the Linux path is too long, or when the runtime directory is not this user's.
+ * a process already answers there, or when the Linux runtime directory is not this user's.
  */
 export async function listenOnEndpoint(
   worktreeIdentity: string,
   onConnection: (socket: Socket) => void,
   held: HeldEndpoint = SOCKET_FILE,
 ): Promise<Listening> {
-  const location = endpointLocation(worktreeIdentity);
-  if (!location.ok) return location;
+  const endpoint = endpointOf(worktreeIdentity);
   try {
-    return await listenAt(
-      location.path,
-      location.runtimeDirectory,
-      onConnection,
-      held,
-    );
+    return await listenAt(endpoint, onConnection, held);
   } catch (error) {
     return {
       ok: false,
-      reason: `cannot take the endpoint ${location.path}: ${errorText(error)}`,
+      reason: `cannot take the endpoint ${endpoint.path}: ${errorText(error)}`,
     };
   }
 }
 
 async function listenAt(
-  path: string,
-  runtimeDirectory: string | undefined,
+  endpoint: Endpoint,
   onConnection: (socket: Socket) => void,
   held: HeldEndpoint,
 ): Promise<Listening> {
+  const { path, runtimeDirectory } = endpoint;
   if (runtimeDirectory === undefined) {
-    return listenOrReport(path, onConnection, held);
+    return listenOrReport(endpoint, onConnection, held);
   }
   const refusal = runtimeDirectoryRefusal(runtimeDirectory, true);
   if (refusal !== undefined) return { ok: false, reason: refusal };
@@ -165,28 +173,31 @@ async function listenAt(
   );
   if (!lock.ok) return lock;
   try {
-    return await listenOrReport(path, onConnection, held);
+    return await listenOrReport(endpoint, onConnection, held);
   } finally {
     lock.release();
   }
 }
 
 async function listenOrReport(
-  path: string,
+  endpoint: Endpoint,
   onConnection: (socket: Socket) => void,
   held: HeldEndpoint,
 ): Promise<Listening> {
+  const { path } = endpoint;
   const first = await tryListen(path, onConnection);
-  if (first.ok || first.code !== "EADDRINUSE") return listening(first, path);
+  if (first.ok || first.code !== "EADDRINUSE") {
+    return listening(first, endpoint);
+  }
   const holder = await held.holder(path);
   if (holder === "answers") {
     return {
       ok: false,
-      reason: `another daemon already serves this worktree's endpoint ${path}`,
+      reason: `a process already answers on this worktree's endpoint ${path}`,
     };
   }
   if (holder === "stale-file") await held.removeStale(path);
-  return listening(await tryListen(path, onConnection), path);
+  return listening(await tryListen(path, onConnection), endpoint);
 }
 
 type ListenAttempt =
@@ -211,17 +222,17 @@ function tryListen(
   });
 }
 
-function listening(attempt: ListenAttempt, path: string): Listening {
+function listening(attempt: ListenAttempt, endpoint: Endpoint): Listening {
   if (!attempt.ok) {
     return {
       ok: false,
-      reason: `cannot listen on ${path}: ${attempt.reason}`,
+      reason: `cannot listen on ${endpoint.path}: ${attempt.reason}`,
     };
   }
   const { server } = attempt;
   return {
     ok: true,
-    path,
+    endpoint,
     close: () =>
       new Promise<void>((resolve) => {
         server.close(() => resolve());

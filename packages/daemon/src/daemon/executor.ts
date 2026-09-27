@@ -11,9 +11,20 @@ import {
   type ExecutorReply,
   type ExecutorRequest,
 } from "./executor-jobs.js";
+import {
+  endProcessTree,
+  hasExited,
+  ownsProcessGroup,
+  treeContainment,
+  type ContainedTree,
+  type TreeContainment,
+} from "./process-tree.js";
 
 const EXECUTOR_ENTRY = "executor-main";
-const KILL_SIGNAL = "SIGKILL";
+const ABORTED_BEFORE_SEND_REASON =
+  "the stop arrived before the job was sent to its executor process, so the job was not run";
+const NOT_STARTED_REASON =
+  "the executor process could not be started, so the job was not run";
 
 /** A job either ended and produced its record, or ended with nothing to store and the reason. */
 export type JobOutcome<T> =
@@ -26,13 +37,19 @@ type JobReply =
 
 type Settle = (reply: JobReply) => void;
 
-/** Hosts Vitest in a child process, one job at a time, so its signal handlers, env writes and stuck code stay out of the daemon. */
+/**
+ * Hosts Vitest in a child process per job, so its signal handlers, env writes and stuck code stay out of the daemon,
+ * and nothing a job started outlives it.
+ */
 export class Executor {
   readonly #log: DaemonLog;
   #child: ChildProcess | undefined;
   #settle: Settle | undefined;
   #boundTimer: NodeJS.Timeout | undefined;
   #boundPassed = false;
+  /** An abort that arrived while the job's executor was being contained, before the job was sent to it. */
+  #abortBeforeSend = false;
+  readonly #containment: TreeContainment = treeContainment();
 
   constructor(log: DaemonLog) {
     this.#log = log;
@@ -55,33 +72,36 @@ export class Executor {
       : { ended: false, reason: failureReason(reply) };
   }
 
-  /** Aborts the job in progress, and ends the executor process when the job has not ended within the bound. */
+  /** Aborts the job in progress, and ends the executor's process tree when the job has not ended within the bound. */
   abort(): void {
     const child = this.#child;
-    if (this.#settle === undefined || child === undefined) return;
+    if (child === undefined) return;
+    if (this.#settle === undefined) {
+      this.#abortBeforeSend = true;
+      return;
+    }
     if (child.connected)
       child.send({ type: "abort" } satisfies ExecutorRequest);
     this.#boundTimer ??= setTimeout(() => {
       this.#boundPassed = true;
-      child.kill(KILL_SIGNAL);
+      endProcessTree(child);
     }, EXECUTOR_BOUND_MS);
   }
 
-  /** Closes the channel, which ends an idle executor process, and resolves once it has exited or been ended. */
-  close(): Promise<void> {
+  /**
+   * Resolves once no executor process remains. Each job's process tree ends with the job, so only a job still in
+   * progress holds one: closing its channel aborts it, and its tree is ended when the bound passes.
+   */
+  async close(): Promise<void> {
+    await this.#childEnded();
+    await this.#containment.close();
+  }
+
+  #childEnded(): Promise<void> {
     const child = this.#child;
-    if (
-      child === undefined ||
-      child.exitCode !== null ||
-      child.signalCode !== null
-    ) {
-      return Promise.resolve();
-    }
+    if (child === undefined || hasExited(child)) return Promise.resolve();
     return new Promise((resolve) => {
-      const timer = setTimeout(
-        () => child.kill(KILL_SIGNAL),
-        EXECUTOR_BOUND_MS,
-      );
+      const timer = setTimeout(() => endProcessTree(child), EXECUTOR_BOUND_MS);
       child.once("exit", () => {
         clearTimeout(timer);
         resolve();
@@ -90,17 +110,52 @@ export class Executor {
     });
   }
 
-  #job(
+  /**
+   * Runs one job in a process of its own, held with every process it starts before the job is sent, and settles once
+   * that whole tree has ended.
+   */
+  async #job(
     request: Exclude<ExecutorRequest, { type: "abort" }>,
   ): Promise<JobReply> {
+    this.#abortBeforeSend = false;
+    const child = this.#startChild();
+    const exited = new Promise<void>((ended) => {
+      if (neverStarted(child) || hasExited(child)) ended();
+      else child.once("exit", () => ended());
+    });
+    if (neverStarted(child)) {
+      return this.#unsent(child, exited, NOT_STARTED_REASON);
+    }
+    let tree: ContainedTree;
+    try {
+      tree = await this.#containment.contain(child);
+    } catch (error) {
+      return this.#unsent(
+        child,
+        exited,
+        `the executor process ${child.pid} could not be held with the processes it starts, so the job was not run: ${errorText(error)}`,
+      );
+    }
+    if (this.#child !== child) {
+      await tree.end();
+      return this.#unsent(
+        child,
+        exited,
+        `the executor process ${child.pid} ended before its job was sent, so the job was not run`,
+      );
+    }
+    if (this.#abortBeforeSend) {
+      await tree.end();
+      return this.#unsent(child, exited, ABORTED_BEFORE_SEND_REASON);
+    }
     return new Promise((resolve) => {
-      const child = this.#ensureChild();
       this.#settle = (reply) => {
         this.#settle = undefined;
         clearTimeout(this.#boundTimer);
         this.#boundTimer = undefined;
         this.#boundPassed = false;
-        resolve(reply);
+        if (this.#child === child) this.#child = undefined;
+        void tree.end().then(() => exited.then(() => resolve(reply)));
       };
       child.send(request, (error) => {
         if (error !== null) {
@@ -113,12 +168,25 @@ export class Executor {
     });
   }
 
-  #ensureChild(): ChildProcess {
-    if (this.#child !== undefined) return this.#child;
+  /** Ends an executor that was never sent its job, and says why the job has nothing to store. */
+  async #unsent(
+    child: ChildProcess,
+    exited: Promise<void>,
+    reason: string,
+  ): Promise<JobReply> {
+    this.#log.entry(reason);
+    if (this.#child === child) this.#child = undefined;
+    endProcessTree(child);
+    await exited;
+    return { type: "lost", reason };
+  }
+
+  #startChild(): ChildProcess {
     const entry = daemonEntryPoint(EXECUTOR_ENTRY);
     const child = fork(entry.file, [], {
       execArgv: [...entry.execArgv],
       stdio: ["ignore", "inherit", "inherit", "ipc"],
+      detached: ownsProcessGroup(),
       windowsHide: true,
     });
     child.on("message", (reply: ExecutorReply) => {
@@ -141,9 +209,7 @@ export class Executor {
    */
   #lost(child: ChildProcess, reason: string): void {
     this.#log.entry(reason);
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill(KILL_SIGNAL);
-    }
+    endProcessTree(child);
     if (this.#child !== child) return;
     this.#child = undefined;
     this.#settle?.({ type: "lost", reason });
@@ -164,6 +230,11 @@ export class Executor {
     this.#log.entry(reason);
     settle({ type: "lost", reason });
   }
+}
+
+/** A child whose spawn failed has no process id and emits `error` but never `exit`. */
+function neverStarted(child: ChildProcess): boolean {
+  return child.pid === undefined;
 }
 
 function failureReason(reply: JobReply): string {

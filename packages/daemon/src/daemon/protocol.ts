@@ -1,10 +1,11 @@
 /**
  * The daemon's local protocol: one UTF-8 JSON object per `\n`-terminated line, in both directions.
  *
- * Frozen for every protocol version, so a client of any version can stop a daemon of any other: the line framing,
- * the line limit's floor, the stop request, its acknowledgement, and the version-mismatch error. A later version may
- * add fields to these but never remove or rename one, and a reader ignores fields it does not know. Everything else
- * is versioned and may change with `PROTOCOL_VERSION`.
+ * Frozen for every protocol version, so a client of any version can check and stop a daemon of any other: the line
+ * framing, the line limit's floor, the hello's type, version and challenge, the stop request, its acknowledgement,
+ * the version-mismatch error, and the proof a daemon gives in answer to a challenge. A later version may add fields
+ * to these but never remove or rename one, and a reader ignores fields it does not know. Everything else is
+ * versioned and may change with `PROTOCOL_VERSION`.
  */
 
 import { BUSY_TIMEOUT_MS } from "../store/schema.js";
@@ -32,6 +33,7 @@ export const ERROR_TYPE = "error";
 /** Frozen. */
 export const VERSION_MISMATCH_CODE = "protocol-version-mismatch";
 
+/** Frozen: a daemon of any version answers a hello, or its version-mismatch error, with a proof. */
 export const HELLO_TYPE = "hello";
 export const STATUS_TYPE = "status";
 
@@ -39,13 +41,23 @@ export const START_TYPE = "start";
 export const SERVING_TYPE = "serving";
 export const REFUSED_TYPE = "refused";
 
+/** Frozen: a fresh random string a client sends, which the daemon's answer must prove with its key. */
+export interface Challenged {
+  readonly challenge: string;
+}
+
+/** Frozen: present whenever the request carried a challenge of at most 256 characters, the frozen limit. */
+export interface Proven {
+  readonly proof?: string;
+}
+
 /** Frozen: a connection may send it as its first line, with no hello, or at any point after. */
-export interface StopRequest {
+export interface StopRequest extends Partial<Challenged> {
   readonly type: typeof STOP_TYPE;
 }
 
 /** Frozen: says the stop has begun, never that it has completed. */
-export interface StopAcknowledgement {
+export interface StopAcknowledgement extends Proven {
   readonly type: typeof STOPPING_TYPE;
   readonly pid: number;
   /** Where the daemon logs its stop, for a client that cannot ask its status. */
@@ -53,7 +65,7 @@ export interface StopAcknowledgement {
 }
 
 /** Frozen: the answer to a hello of another protocol version. */
-export interface VersionMismatchError {
+export interface VersionMismatchError extends Proven {
   readonly type: typeof ERROR_TYPE;
   readonly code: typeof VERSION_MISMATCH_CODE;
   readonly message: string;
@@ -65,7 +77,8 @@ export interface VersionMismatchError {
 
 export const STOP_REQUEST: StopRequest = { type: STOP_TYPE };
 
-export interface HelloRequest {
+/** Frozen: its type, protocol version and challenge. */
+export interface HelloRequest extends Challenged {
   readonly type: typeof HELLO_TYPE;
   readonly protocolVersion: number;
 }
@@ -90,7 +103,7 @@ export interface ErrorResponse {
   readonly message: string;
 }
 
-export interface HelloResponse {
+export interface HelloResponse extends Proven {
   readonly type: typeof HELLO_TYPE;
   readonly protocolVersion: number;
   readonly pid: number;

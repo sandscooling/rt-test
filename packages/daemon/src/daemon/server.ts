@@ -33,6 +33,9 @@ export interface DaemonHandlers {
   isStopping(): boolean;
 }
 
+/** The proof answering a request's challenge, made with the daemon's key; undefined when there is no challenge. */
+export type Prover = (challenge: unknown) => string | undefined;
+
 export interface ConnectionServer {
   readonly onConnection: (socket: Socket) => void;
   /** Ends every open connection once what was written to it has flushed, or once the close grace passes. */
@@ -48,13 +51,14 @@ const CLOSE_GRACE_MS = 1_000;
 export function connectionServer(
   handlers: DaemonHandlers,
   log: DaemonLog,
+  prove: Prover,
 ): ConnectionServer {
   const sockets = new Set<Socket>();
   return {
     onConnection: (socket) => {
       sockets.add(socket);
       socket.once("close", () => sockets.delete(socket));
-      serve(socket, handlers, log);
+      serve(socket, { handlers, prove }, log);
     },
     closeConnections: () => {
       for (const socket of sockets) {
@@ -65,13 +69,18 @@ export function connectionServer(
   };
 }
 
-function serve(socket: Socket, handlers: DaemonHandlers, log: DaemonLog): void {
+interface Answerer {
+  readonly handlers: DaemonHandlers;
+  readonly prove: Prover;
+}
+
+function serve(socket: Socket, answerer: Answerer, log: DaemonLog): void {
   const decoder = new LineDecoder();
   const connection = { state: "awaiting-hello" as ConnectionState };
   socket.on("data", (chunk: Buffer) => {
     for (const line of decoder.push(chunk)) {
       if (!socket.writable) return;
-      answer(socket, connection, line, handlers);
+      answer(socket, connection, line, answerer);
     }
   });
   socket.on("error", (error) => {
@@ -83,11 +92,15 @@ function answer(
   socket: Socket,
   connection: { state: ConnectionState },
   line: DecodedLine,
-  handlers: DaemonHandlers,
+  answerer: Answerer,
 ): void {
+  const { handlers, prove } = answerer;
   const parsed = line.tooLong ? undefined : parseLine(line.text);
   if (parsed?.ok === true && isStopRequest(parsed.message)) {
-    send(socket, stopAcknowledgement(handlers));
+    send(
+      socket,
+      stopAcknowledgement(handlers, prove(parsed.message["challenge"])),
+    );
     handlers.stop();
     return;
   }
@@ -108,7 +121,7 @@ function answer(
   }
   const message = parsed.message;
   if (message["type"] === HELLO_TYPE) {
-    connection.state = hello(socket, message, handlers);
+    connection.state = hello(socket, message, answerer);
     return;
   }
   if (connection.state === "awaiting-hello") {
@@ -127,14 +140,16 @@ function answer(
 function hello(
   socket: Socket,
   message: ProtocolMessage,
-  handlers: DaemonHandlers,
+  { handlers, prove }: Answerer,
 ): ConnectionState {
   const clientVersion = message["protocolVersion"];
+  const proof = prove(message["challenge"]);
   if (clientVersion === PROTOCOL_VERSION) {
     const response: HelloResponse = {
       type: HELLO_TYPE,
       protocolVersion: PROTOCOL_VERSION,
       pid: handlers.identity.pid,
+      ...withProof(proof),
     };
     send(socket, response);
     return "ready";
@@ -146,6 +161,7 @@ function hello(
     protocolVersion: PROTOCOL_VERSION,
     clientProtocolVersion: clientVersion ?? null,
     pid: handlers.identity.pid,
+    ...withProof(proof),
   };
   send(socket, mismatch);
   return "mismatched";
@@ -173,12 +189,21 @@ function versionedAnswer(
   );
 }
 
-function stopAcknowledgement(handlers: DaemonHandlers): StopAcknowledgement {
+function stopAcknowledgement(
+  handlers: DaemonHandlers,
+  proof: string | undefined,
+): StopAcknowledgement {
   return {
     type: STOPPING_TYPE,
     pid: handlers.identity.pid,
     logFile: handlers.identity.logFile,
+    ...withProof(proof),
   };
+}
+
+/** A request without a challenge gets no proof field, rather than one holding nothing. */
+function withProof(proof: string | undefined): { proof?: string } {
+  return proof === undefined ? {} : { proof };
 }
 
 function error(code: ErrorCode, message: string): ErrorResponse {

@@ -6,8 +6,7 @@ import {
   writeFileSync,
   type Stats,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   clientEndpoint,
@@ -52,15 +51,28 @@ function fakeStats(directory: FakeDirectory): Stats {
   } as Stats;
 }
 
-/** Runs `body` as the Linux user `OWN_UID`, with `lstat` answering `directory` when given, and puts everything back. */
+/** Where every session of the Linux user `OWN_UID` finds its daemon, with `/` separators on either host. */
+const SHARED_RUNTIME_DIRECTORY = `/tmp/rt-test-${OWN_UID}`;
+
+/** A path the endpoint built with the host's `node:path`, with `/` separators on either host. */
+function posix(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+/**
+ * Runs `body` as the Linux user `OWN_UID`, with `lstat` answering `directory` when given and `environment` set, and
+ * puts everything back.
+ */
 function asLinuxUser<T>(
   body: () => T,
   directory?: FakeDirectory,
-  runtimeDirectory = RUNTIME_DIRECTORY,
+  environment: Readonly<Record<string, string>> = {},
 ): T {
   const platform = Object.getOwnPropertyDescriptor(process, "platform");
   const getuid = Object.getOwnPropertyDescriptor(process, "getuid");
-  const saved = process.env["XDG_RUNTIME_DIR"];
+  const saved = Object.keys(environment).map(
+    (name) => [name, process.env[name]] as const,
+  );
   const lstat = vi.mocked(lstatSync);
   const actualLstat = lstat.getMockImplementation();
   Object.defineProperty(process, "platform", { value: "linux" });
@@ -68,7 +80,7 @@ function asLinuxUser<T>(
     value: () => OWN_UID,
     configurable: true,
   });
-  process.env["XDG_RUNTIME_DIR"] = runtimeDirectory;
+  Object.assign(process.env, environment);
   if (directory !== undefined) {
     lstat.mockImplementation((() =>
       fakeStats(directory)) as unknown as typeof lstatSync);
@@ -77,8 +89,10 @@ function asLinuxUser<T>(
     return body();
   } finally {
     if (actualLstat !== undefined) lstat.mockImplementation(actualLstat);
-    if (saved === undefined) delete process.env["XDG_RUNTIME_DIR"];
-    else process.env["XDG_RUNTIME_DIR"] = saved;
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     if (getuid === undefined) delete (process as { getuid?: unknown }).getuid;
     else Object.defineProperty(process, "getuid", getuid);
     if (platform !== undefined)
@@ -120,9 +134,29 @@ describe("the Linux runtime directory", () => {
     const location = asLinuxUser(() => clientEndpoint(WORKTREE), {
       permissions: 0o755,
     });
-    expect(location).toStrictEqual({
-      ok: false,
-      reason: `other users can enter the runtime directory ${RUNTIME_DIRECTORY} (mode 755, 700 required)`,
+    expect(location.ok ? location : posix(location.reason)).toBe(
+      `other users can enter the runtime directory ${SHARED_RUNTIME_DIRECTORY} (mode 755, 700 required)`,
+    );
+  });
+
+  it("D1580: the socket and the key live in /tmp/rt-test-<uid> whatever TMPDIR and XDG_RUNTIME_DIR hold", () => {
+    const location = asLinuxUser(
+      () => clientEndpoint(WORKTREE),
+      { permissions: 0o700 },
+      { TMPDIR: "/var/tmp", XDG_RUNTIME_DIR: `/run/user/${OWN_UID}` },
+    );
+    expect(
+      location.ok
+        ? {
+            runtimeDirectory: posix(location.runtimeDirectory ?? ""),
+            socketDirectory: posix(dirname(location.path)),
+            keyDirectory: posix(dirname(location.keyFile)),
+          }
+        : location.reason,
+    ).toStrictEqual({
+      runtimeDirectory: SHARED_RUNTIME_DIRECTORY,
+      socketDirectory: SHARED_RUNTIME_DIRECTORY,
+      keyDirectory: SHARED_RUNTIME_DIRECTORY,
     });
   });
 });
@@ -131,17 +165,6 @@ describe("where the runtime directory is and what it holds", () => {
   it("D1536: a runtime directory path that is a regular file is refused", () => {
     expect(refusalFor({ permissions: 0o700, file: true })).toBe(
       `${RUNTIME_DIRECTORY} is not a directory`,
-    );
-  });
-
-  it("D1533: a relative XDG_RUNTIME_DIR is passed over for rt-test-<uid> under the system temporary directory", () => {
-    const location = asLinuxUser(
-      () => clientEndpoint(WORKTREE),
-      { permissions: 0o700 },
-      "relative/runtime",
-    );
-    expect(location.ok ? location.runtimeDirectory : location.reason).toBe(
-      join(tmpdir(), `rt-test-${OWN_UID}`),
     );
   });
 });
@@ -180,37 +203,6 @@ describe("an endpoint a stale file still holds", () => {
       refused: holderAfterConnectError("ECONNREFUSED"),
       missing: holderAfterConnectError("ENOENT"),
     }).toStrictEqual({ refused: "stale-file", missing: "gone" });
-  });
-});
-
-describe("the Linux socket path limit", () => {
-  /** A runtime directory whose socket path, `<directory>/<32 hex digits>.sock`, is `bytes` long. */
-  function runtimeDirectoryFor(bytes: number): string {
-    const socketName = 32 + ".sock".length;
-    return `/${"r".repeat(bytes - socketName - 2)}`;
-  }
-
-  it("D1471: a socket path of 109 bytes is refused, naming its length and the 108-byte limit", () => {
-    const location = asLinuxUser(
-      () => clientEndpoint(WORKTREE),
-      undefined,
-      runtimeDirectoryFor(109),
-    );
-    expect(location).toStrictEqual({
-      ok: false,
-      reason: expect.stringMatching(
-        / is 109 bytes, longer than the platform's limit of 108 bytes$/,
-      ),
-    });
-  });
-
-  it("D1472: a socket path of exactly 108 bytes is accepted", () => {
-    const location = asLinuxUser(
-      () => clientEndpoint(WORKTREE),
-      undefined,
-      runtimeDirectoryFor(108),
-    );
-    expect(location.ok).toBe(true);
   });
 });
 

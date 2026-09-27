@@ -1,12 +1,14 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Socket } from "node:net";
 import { consumerIdentity } from "../store/consumer-identity.js";
 import { openStore, type RtTestStore } from "../store/open-store.js";
 import type { StoreScope } from "../store/stored-records.js";
 import { errorText } from "../vitest/error-text.js";
 import { DaemonLog, daemonLogFile } from "./daemon-log.js";
-import { listenOnEndpoint } from "./endpoint.js";
+import { createDaemonKey, type DaemonKey } from "./endpoint-proof.js";
+import { identityHash, listenOnEndpoint, type Listening } from "./endpoint.js";
 import { Executor } from "./executor.js";
+import { takeLock, type Lock } from "./runtime-directory.js";
 import { DaemonLifecycle } from "./lifecycle.js";
 import {
   PROTOCOL_VERSION,
@@ -20,6 +22,9 @@ import { connectionServer } from "./server.js";
 
 const STOP_SIGNALS = ["SIGTERM", "SIGINT"] as const;
 const REFUSED_EXIT_CODE = 1;
+const STORE_LOCK_PREFIX = "daemon-";
+const STORE_LOCK_EXTENSION = ".lock";
+const STORE_LOCK_HOLDER = "a daemon serving this worktree's store";
 
 const [consumerRoot, stateDirectory] = process.argv.slice(2);
 
@@ -69,7 +74,10 @@ async function main(): Promise<void> {
   process.exit();
 }
 
-/** Takes the endpoint, then opens the store, before anything executes, refusing the start on either. */
+/**
+ * Takes the endpoint, writes the key the daemon proves itself with, locks the worktree's store for the daemon's life
+ * and opens it, all before anything executes, refusing the start on any of them.
+ */
 async function serve(
   request: StartupRequest,
   scope: StoreScope,
@@ -83,13 +91,9 @@ async function serve(
     accept(socket),
   );
   if (!listening.ok) return refuse(log, listening.reason);
-  let store: RtTestStore;
-  try {
-    store = openStore(directory);
-  } catch (error) {
-    await listening.close();
-    return refuse(log, `cannot open the store: ${errorText(error)}`);
-  }
+  const held = await holdStore(listening, scope, directory);
+  if (!held.ok) return refuse(log, held.reason);
+  const { key, lock, store } = held;
   const lifecycle = new DaemonLifecycle({
     identity: {
       pid: process.pid,
@@ -104,15 +108,69 @@ async function serve(
     store,
     log,
     executor: new Executor(log),
-    closeEndpoint: () => {
+    closeEndpoint: async () => {
       server.closeConnections();
-      return listening.close();
+      await listening.close();
+      key.remove();
+      lock.release();
     },
   });
-  const server = connectionServer(lifecycle, log);
+  const server = connectionServer(lifecycle, log, key.prove);
   accept = server.onConnection;
-  log.entry(`serving on ${listening.path}`);
+  log.entry(`serving on ${listening.endpoint.path}`);
   return lifecycle;
+}
+
+type HeldStore =
+  | {
+      readonly ok: true;
+      readonly key: DaemonKey;
+      readonly lock: HeldLock;
+      readonly store: RtTestStore;
+    }
+  | { readonly ok: false; readonly reason: string };
+
+type HeldLock = Extract<Lock, { ok: true }>;
+
+/**
+ * The store lock is held until the daemon exits, so a start that missed this daemon's endpoint, from another mount
+ * namespace for example, still cannot open a second writer on the worktree's store.
+ */
+async function holdStore(
+  listening: Extract<Listening, { ok: true }>,
+  scope: StoreScope,
+  directory: string,
+): Promise<HeldStore> {
+  const created = createDaemonKey(listening.endpoint, scope.worktreeIdentity);
+  if (!created.ok) {
+    await listening.close();
+    return created;
+  }
+  const { key } = created;
+  const lock = takeLock(
+    storeLockFile(directory, scope.worktreeIdentity),
+    STORE_LOCK_HOLDER,
+  );
+  if (!lock.ok) {
+    await listening.close();
+    key.remove();
+    return { ok: false, reason: lock.reason };
+  }
+  try {
+    return { ok: true, key, lock, store: openStore(directory) };
+  } catch (error) {
+    await listening.close();
+    key.remove();
+    lock.release();
+    return { ok: false, reason: `cannot open the store: ${errorText(error)}` };
+  }
+}
+
+function storeLockFile(directory: string, worktreeIdentity: string): string {
+  return join(
+    directory,
+    `${STORE_LOCK_PREFIX}${identityHash(worktreeIdentity)}${STORE_LOCK_EXTENSION}`,
+  );
 }
 
 function isStartupRequest(message: unknown): message is StartupRequest {

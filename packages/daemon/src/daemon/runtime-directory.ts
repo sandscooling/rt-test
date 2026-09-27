@@ -15,6 +15,8 @@ const PERMISSION_BITS = 0o777;
 const NO_SIGNAL = 0;
 const TEMPORARY_SUFFIX = ".tmp";
 const STALE_SUFFIX = ".stale";
+/** The start lock is held across the stale-socket check, its unlink and the listen, so two racing starts never unlink each other's live socket. */
+const START_LOCK_HOLDER = "another start of this worktree's daemon";
 
 export type Lock =
   | { readonly ok: true; release(): void }
@@ -51,16 +53,19 @@ export function runtimeDirectoryRefusal(
 }
 
 /**
- * An exclusive lock file naming this process, held across the stale-socket check, its unlink and the listen, so two
- * racing starts never unlink each other's live socket. A lock whose process has ended is taken over.
+ * An exclusive lock file naming this process. A lock whose process has ended is taken over. A refusal names the
+ * holding process as `holderRole`, what a process holding this lock is.
  */
-export function takeLock(file: string): Lock {
+export function takeLock(
+  file: string,
+  holderRole: string = START_LOCK_HOLDER,
+): Lock {
   if (createLock(file)) return held(file);
   const holder = readHolder(file);
   if (holder !== undefined && isRunning(holder)) {
     return {
       ok: false,
-      reason: `another start of this worktree's daemon, process ${holder}, holds ${file}; delete it if no such start is running`,
+      reason: `${holderRole}, process ${holder}, holds ${file}; delete it if process ${holder} is not one`,
     };
   }
   if (holder !== undefined) removeStaleLock(file, holder);
@@ -68,7 +73,7 @@ export function takeLock(file: string): Lock {
     ? held(file)
     : {
         ok: false,
-        reason: `another start of this worktree's daemon holds ${file}; delete it if no such start is running`,
+        reason: `${holderRole} holds ${file}; delete it if no such process is running`,
       };
 }
 

@@ -1,8 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHmac, randomUUID } from "node:crypto";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { createInterface } from "node:readline";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   startDaemon,
   stopDaemon,
@@ -10,6 +16,15 @@ import {
   type DaemonIdentity,
 } from "../src/client.js";
 import type { DaemonLog } from "../src/daemon/daemon-log.js";
+import {
+  createDaemonKey,
+  type DaemonKey,
+} from "../src/daemon/endpoint-proof.js";
+import {
+  clientEndpoint,
+  listenOnEndpoint,
+  type Endpoint,
+} from "../src/daemon/endpoint.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { openStore } from "../src/store/open-store.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
@@ -124,6 +139,99 @@ export async function withTestEndpoint<T>(
   });
 }
 
+/** An endpoint whose key lives in a key directory of its own under `dir`, for a test that needs a key and no daemon. */
+export function keyedEndpoint(dir: string): Endpoint {
+  const keyDirectory = join(dir, "keys");
+  return {
+    path: join(dir, "endpoint"),
+    keyDirectory,
+    keyFile: join(keyDirectory, "daemon.key"),
+  };
+}
+
+/**
+ * The proof the daemon's design freezes, written out here rather than imported: the HMAC-SHA256, keyed by the key
+ * file's text, of the challenge, the worktree identity and the decimal process id joined by NUL, in hex.
+ */
+export function frozenProof(
+  keyText: string,
+  challenge: string,
+  worktreeIdentity: string,
+  pid: number,
+): string {
+  return createHmac("sha256", keyText)
+    .update(`${challenge}\0${worktreeIdentity}\0${pid}`)
+    .digest("hex");
+}
+
+/** Writes a key for `endpoint` as a starting daemon does, hands `body` the key and its file's text, and removes it after. */
+export async function withDaemonKey<T>(
+  endpoint: Endpoint,
+  worktreeIdentity: string,
+  body: (key: DaemonKey, keyText: string) => T | Promise<T>,
+): Promise<T> {
+  const created = createDaemonKey(endpoint, worktreeIdentity);
+  if (!created.ok) throw new Error(created.reason);
+  try {
+    return await body(created.key, readFileSync(endpoint.keyFile, "utf8"));
+  } finally {
+    created.key.remove();
+  }
+}
+
+/** A process listening on a worktree's real endpoint in its daemon's place. */
+export interface StandIn {
+  readonly endpoint: Endpoint;
+  /** How many connections it has accepted. */
+  readonly connections: number;
+  /** Stops listening and drops every connection; later calls do nothing. */
+  close(): Promise<void>;
+}
+
+/**
+ * Listens on the worktree's real endpoint, answering each request line with what `answer` returns (nothing when it
+ * returns undefined), and closes however `body` ends.
+ */
+export async function withStandIn<T>(
+  worktreeIdentity: string,
+  answer: (request: Line, standIn: StandIn) => object | undefined,
+  body: (standIn: StandIn) => Promise<T>,
+): Promise<T> {
+  const sockets = new Set<Socket>();
+  let connections = 0;
+  let closing: Promise<void> | undefined;
+  let standIn: StandIn | undefined;
+  const listening = await listenOnEndpoint(worktreeIdentity, (socket) => {
+    connections += 1;
+    sockets.add(socket);
+    socket.on("error", () => undefined);
+    createInterface({ input: socket }).on("line", (line) => {
+      if (standIn === undefined) return;
+      const reply = answer(JSON.parse(line) as Line, standIn);
+      if (reply !== undefined) socket.write(`${JSON.stringify(reply)}\n`);
+    });
+  });
+  if (!listening.ok) throw new Error(listening.reason);
+  standIn = {
+    endpoint: listening.endpoint,
+    get connections() {
+      return connections;
+    },
+    close: () => {
+      closing ??= (() => {
+        for (const socket of sockets) socket.destroy();
+        return listening.close();
+      })();
+      return closing;
+    },
+  };
+  try {
+    return await body(standIn);
+  } finally {
+    await standIn.close();
+  }
+}
+
 /** A daemon log that keeps its entries in memory. */
 export interface MemoryLog extends DaemonLog {
   readonly entries: string[];
@@ -187,6 +295,17 @@ export function fixtureFile(root: string, name: string): string {
   return join(root, WORKSPACE_A, name);
 }
 
+/**
+ * Resolves once the fixture has written the marker `name`, however long a loaded machine takes to reach it, so the
+ * test acts at the point the fixture holds rather than whenever a wait of its own gives up. The test's timeout still
+ * ends a run that never gets there.
+ */
+export async function atHoldPoint(root: string, name: string): Promise<void> {
+  while (!existsSync(fixtureFile(root, name))) {
+    await new Promise((wake) => setTimeout(wake, POLL_MS));
+  }
+}
+
 export function holdAt(root: string, hold: string): void {
   writeFileSync(fixtureFile(root, hold), "");
 }
@@ -217,6 +336,17 @@ export function trustedStart(
     start,
     ...(stateDirectory === undefined ? {} : { stateDirectory }),
   });
+}
+
+/** Starts a daemon for `root`, adding its process id to `pids` so the test ends it whatever happens. */
+export async function started(
+  root: string,
+  pids: Set<number>,
+  start = confirmNothing(root),
+): Promise<Settled<DaemonIdentity>> {
+  const identity = await settled(trustedStart(start));
+  if (!("thrown" in identity)) pids.add(identity.pid);
+  return identity;
 }
 
 /** The daemon's log entries, without their timestamps. */
@@ -297,7 +427,32 @@ async function endDaemons(
   const recorded = [...pids, ...roots.flatMap(executorPids)];
   for (const pid of recorded) end(pid);
   await eventually(() => recorded.every((pid) => !isRunning(pid)));
-  return recorded.filter((pid) => isRunning(pid));
+  const alive = recorded.filter((pid) => isRunning(pid));
+  if (alive.length === 0) for (const root of roots) removeLeftovers(root);
+  return alive;
+}
+
+/**
+ * Removes what a daemon the test had to kill leaves behind: its key, which on Windows is in the user's profile, with
+ * any copy a killed start left half written, and on Linux its socket file in the shared `/tmp`.
+ */
+function removeLeftovers(root: string): void {
+  const location = clientEndpoint(consumerIdentity(root).worktreeIdentity);
+  if (!location.ok) return;
+  if (location.runtimeDirectory !== undefined) {
+    rmSync(location.path, { force: true });
+  }
+  if (!existsSync(location.keyDirectory)) return;
+  const key = basename(location.keyFile);
+  for (const entry of readdirSync(location.keyDirectory)) {
+    if (
+      entry === key ||
+      (entry.startsWith(`${key}.`) &&
+        (entry.endsWith(".tmp") || entry.endsWith(".removing")))
+    ) {
+      rmSync(join(location.keyDirectory, entry), { force: true });
+    }
+  }
 }
 
 /** Copies the daemon fixture into a temp consumer with Vitest linked, and ends its daemon however `body` ends. */

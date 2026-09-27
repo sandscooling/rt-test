@@ -6,12 +6,13 @@ import {
   defaultStateDirectory,
 } from "./store/consumer-identity.js";
 import { BUSY_TIMEOUT_MS } from "./store/schema.js";
-import type { StoreScope } from "./store/stored-records.js";
 import type { ConfirmedStart } from "./vitest/confirmed-start.js";
 import { errorText, exitText } from "./vitest/error-text.js";
 import { DaemonConnection } from "./daemon/daemon-connection.js";
 import { daemonLogFile } from "./daemon/daemon-log.js";
-import { clientEndpoint } from "./daemon/endpoint.js";
+import { daemonVerifier, newChallenge } from "./daemon/endpoint-proof.js";
+import { clientEndpoint, WINDOWS, type Endpoint } from "./daemon/endpoint.js";
+import { KEY_DIRECTORY_START_BOUND_MS } from "./daemon/windows-acl.js";
 import { daemonEntryPoint } from "./daemon/entry-point.js";
 import { EXECUTOR_BOUND_MS } from "./daemon/executor-jobs.js";
 import { isRunning } from "./daemon/runtime-directory.js";
@@ -60,8 +61,13 @@ const APPEND_FLAG = "a";
 const STARTUP_STORE_WAITS = 4;
 /** Covers starting Node and taking the endpoint. */
 const STARTUP_MARGIN_MS = 5_000;
+/** On Windows the daemon protects its key directory, and the client checks it, with system tools before answering. */
+const STARTUP_KEY_DIRECTORY_MS =
+  process.platform === WINDOWS ? KEY_DIRECTORY_START_BOUND_MS : 0;
 export const STARTUP_DEADLINE_MS =
-  STARTUP_STORE_WAITS * BUSY_TIMEOUT_MS + STARTUP_MARGIN_MS;
+  STARTUP_STORE_WAITS * BUSY_TIMEOUT_MS +
+  STARTUP_KEY_DIRECTORY_MS +
+  STARTUP_MARGIN_MS;
 /** Covers closing the store and the endpoint after the executor has ended. */
 const STOP_MARGIN_MS = 5_000;
 /** A stopping daemon waits out the executor bound, then one store write, then closes. */
@@ -85,17 +91,16 @@ export async function startDaemon(
       `Refusing to start a daemon for ${start.consumerRoot}: the caller did not state that the project is trusted.`,
     );
   }
-  const scope = consumerIdentity(start.consumerRoot);
-  const path = endpointPath(start.consumerRoot, scope, "start");
-  await refuseRunningDaemon(start.consumerRoot, path);
+  const target = targetOf(start.consumerRoot, "start");
+  await refuseRunningDaemon(target);
   const stateDirectory = resolve(
     options.stateDirectory ?? defaultStateDirectory(start.consumerRoot),
   );
   mkdirSync(stateDirectory, { recursive: true });
-  const logFile = daemonLogFile(stateDirectory, scope.worktreeIdentity);
+  const logFile = daemonLogFile(stateDirectory, target.worktreeIdentity);
   const child = spawnDaemon(start.consumerRoot, stateDirectory, logFile);
   try {
-    return await startedDaemon(child, start, path, logFile);
+    return await startedDaemon(child, start, target, logFile);
   } catch (error) {
     abandon(child);
     throw error;
@@ -105,7 +110,7 @@ export async function startDaemon(
 async function startedDaemon(
   child: ChildProcess,
   start: ConfirmedStart,
-  path: string,
+  target: DaemonTarget,
   logFile: string,
 ): Promise<DaemonIdentity> {
   const deadline = Date.now() + STARTUP_DEADLINE_MS;
@@ -118,7 +123,7 @@ async function startedDaemon(
     );
   }
   const status = await beforeDeadline(
-    askStatus(start.consumerRoot, path),
+    askStatus(target),
     deadline,
     `the daemon, process ${report.pid}, did not answer its status within ${STARTUP_DEADLINE_MS} ms of its start; see ${logFile}`,
   );
@@ -140,8 +145,7 @@ function abandon(child: ChildProcess): void {
 export async function daemonStatus(
   consumerRoot: string,
 ): Promise<StatusResponse> {
-  const scope = consumerIdentity(consumerRoot);
-  return askStatus(consumerRoot, endpointPath(consumerRoot, scope, "query"));
+  return askStatus(targetOf(consumerRoot, "query"));
 }
 
 /**
@@ -149,12 +153,14 @@ export async function daemonStatus(
  * accepts no connection. A stop already under way is joined.
  */
 export async function stopDaemon(consumerRoot: string): Promise<void> {
-  const scope = consumerIdentity(consumerRoot);
-  const path = endpointPath(consumerRoot, scope, "stop");
-  const connection = await connect(consumerRoot, path);
+  const target = targetOf(consumerRoot, "stop");
+  const connection = await connect(target);
   let answer: ProtocolMessage;
   try {
-    answer = await connection.request(STOP_REQUEST);
+    answer = await provenRequest(target, connection, (challenge) => ({
+      ...STOP_REQUEST,
+      challenge,
+    }));
   } finally {
     connection.close();
   }
@@ -164,56 +170,81 @@ export async function stopDaemon(consumerRoot: string): Promise<void> {
     );
   }
   await waitForExit(
-    consumerRoot,
-    path,
+    target,
     answer["pid"],
     typeof answer["logFile"] === "string" ? answer["logFile"] : undefined,
   );
 }
 
-function endpointPath(
+/** A worktree's daemon as a client addresses it. */
+interface DaemonTarget {
+  readonly consumerRoot: string;
+  readonly worktreeIdentity: string;
+  readonly endpoint: Endpoint;
+}
+
+function targetOf(
   consumerRoot: string,
-  scope: StoreScope,
   action: "start" | "query" | "stop",
-): string {
-  const location = clientEndpoint(scope.worktreeIdentity);
-  if (location.ok) return location.path;
+): DaemonTarget {
+  const { worktreeIdentity } = consumerIdentity(consumerRoot);
+  const location = clientEndpoint(worktreeIdentity);
+  if (location.ok)
+    return { consumerRoot, worktreeIdentity, endpoint: location };
   const verb = action === "start" ? "start" : "reach";
   throw new Error(
     `Cannot ${verb} a daemon for ${consumerRoot}: ${location.reason}.`,
   );
 }
 
-async function connect(
-  consumerRoot: string,
-  path: string,
-): Promise<DaemonConnection> {
-  const connected = await DaemonConnection.open(path);
+async function connect(target: DaemonTarget): Promise<DaemonConnection> {
+  const connected = await DaemonConnection.open(target.endpoint.path);
   if (connected.ok) return connected.connection;
   throw new Error(
     connected.nothingListens
-      ? `No daemon serves the worktree at ${consumerRoot}.`
-      : `Cannot reach the daemon for ${consumerRoot}: ${connected.reason}.`,
+      ? `No daemon serves the worktree at ${target.consumerRoot}.`
+      : `Cannot reach the daemon for ${target.consumerRoot}: ${connected.reason}.`,
   );
 }
 
-async function askStatus(
-  consumerRoot: string,
-  path: string,
-): Promise<StatusResponse> {
-  const status = await statusIfServing(consumerRoot, path);
+/**
+ * Sends a request carrying a fresh challenge, and resolves with the answer only once it proves it came from this
+ * user's daemon for the worktree, so no process that took the endpoint can answer in its place.
+ */
+async function provenRequest(
+  target: DaemonTarget,
+  connection: DaemonConnection,
+  request: (challenge: string) => object,
+): Promise<ProtocolMessage> {
+  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);
+  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);
+  const challenge = newChallenge();
+  const answer = await connection.request(request(challenge));
+  const refusal = verifier.verifier.refusal(challenge, answer);
+  if (refusal === undefined) return answer;
+  throw notTheDaemon(target, refusal);
+}
+
+function notTheDaemon(target: DaemonTarget, reason: string): Error {
+  return new Error(
+    `The process answering on ${target.endpoint.path} is not this user's daemon for ${target.consumerRoot}: ${reason}.`,
+  );
+}
+
+async function askStatus(target: DaemonTarget): Promise<StatusResponse> {
+  const status = await statusIfServing(target);
   if (status === undefined) {
-    throw new Error(`No daemon serves the worktree at ${consumerRoot}.`);
+    throw new Error(`No daemon serves the worktree at ${target.consumerRoot}.`);
   }
   return status;
 }
 
 /** Undefined when nothing listens on the endpoint. */
 async function statusIfServing(
-  consumerRoot: string,
-  path: string,
+  target: DaemonTarget,
 ): Promise<StatusResponse | undefined> {
-  const connected = await DaemonConnection.open(path);
+  const { consumerRoot } = target;
+  const connected = await DaemonConnection.open(target.endpoint.path);
   if (!connected.ok) {
     if (connected.nothingListens) return undefined;
     throw new Error(
@@ -224,10 +255,11 @@ async function statusIfServing(
   try {
     requireAnswer(
       consumerRoot,
-      await connection.request({
+      await provenRequest(target, connection, (challenge) => ({
         type: HELLO_TYPE,
         protocolVersion: PROTOCOL_VERSION,
-      }),
+        challenge,
+      })),
       HELLO_TYPE,
     );
     const status = await connection.request({
@@ -261,16 +293,15 @@ function requireAnswer(
   );
 }
 
-async function refuseRunningDaemon(
-  consumerRoot: string,
-  path: string,
-): Promise<void> {
+/** Refuses when anything holds the endpoint: this user's daemon, one of another version, or an impostor. */
+async function refuseRunningDaemon(target: DaemonTarget): Promise<void> {
+  const { consumerRoot } = target;
   let status: StatusResponse | undefined;
   try {
-    status = await statusIfServing(consumerRoot, path);
+    status = await statusIfServing(target);
   } catch (error) {
     throw new Error(
-      `Refusing to start a second daemon for ${consumerRoot}: ${errorText(error)}`,
+      `Refusing to start a daemon for ${consumerRoot}: ${errorText(error)}`,
       { cause: error },
     );
   }
@@ -368,8 +399,7 @@ async function beforeDeadline<T>(
 }
 
 async function waitForExit(
-  consumerRoot: string,
-  path: string,
+  { consumerRoot, endpoint: { path } }: DaemonTarget,
   pid: number,
   logFile: string | undefined,
 ): Promise<void> {

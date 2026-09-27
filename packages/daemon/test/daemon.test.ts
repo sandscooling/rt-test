@@ -1,6 +1,5 @@
 import { fork, spawn, spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
-import type { Socket } from "node:net";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -10,7 +9,8 @@ import {
   stopDaemon,
   type DaemonIdentity,
 } from "../src/client.js";
-import { clientEndpoint, listenOnEndpoint } from "../src/daemon/endpoint.js";
+import type { DaemonKey } from "../src/daemon/endpoint-proof.js";
+import { clientEndpoint, identityHash } from "../src/daemon/endpoint.js";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
 import { EXECUTOR_BOUND_MS } from "../src/daemon/executor-jobs.js";
 import { RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
@@ -18,6 +18,7 @@ import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
+  atHoldPoint,
   DAEMON_FIXTURE,
   IDLE_ENTRY,
   RawConnection,
@@ -27,15 +28,19 @@ import {
   eventually,
   executorPids,
   fixtureFile,
+  frozenProof,
   holdAt,
   logEntries,
   logged,
   settled,
+  started,
   storedRuns,
   trustedStart,
   withDaemonConsumer,
+  withDaemonKey,
   withDaemons,
-  type Settled,
+  withStandIn,
+  type StandIn,
 } from "./daemon-harness.js";
 import {
   REPO,
@@ -59,21 +64,121 @@ const VITEST_PACKAGE_URL =
 /** A stop that polls every 100 ms has probed the endpoint again well within this. */
 const PROBE_BOUND_MS = 5_000;
 
-/** Starts a daemon for `root`, adding its process id to `pids` so the test ends it whatever happens. */
-async function started(
-  root: string,
-  pids: Set<number>,
-  start = confirmNothing(root),
-): Promise<Settled<DaemonIdentity>> {
-  const identity = await settled(trustedStart(start));
-  if (!("thrown" in identity)) pids.add(identity.pid);
-  return identity;
+function clientLocation(worktreeIdentity: string) {
+  const location = clientEndpoint(worktreeIdentity);
+  if (!location.ok) throw new Error(location.reason);
+  return location;
 }
 
 function endpointOf(identity: DaemonIdentity): string {
-  const location = clientEndpoint(identity.worktreeIdentity);
-  if (!location.ok) throw new Error(location.reason);
-  return location.path;
+  return clientLocation(identity.worktreeIdentity).path;
+}
+
+function keyFileOf(identity: DaemonIdentity): string {
+  return clientLocation(identity.worktreeIdentity).keyFile;
+}
+
+/** The lock the daemon holds on its worktree's store, `daemon-<worktree hash>.lock` in the state directory. */
+function storeLockOf(stateDirectory: string, worktreeIdentity: string): string {
+  return join(stateDirectory, `daemon-${identityHash(worktreeIdentity)}.lock`);
+}
+
+/** The id of a process that has already exited, which no running process holds. */
+function exitedPid(): number {
+  return spawnSync(process.execPath, ["-e", ""]).pid;
+}
+
+function escaped(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** How a client reports a process on the endpoint that does not prove itself this user's daemon for the root. */
+function notTheDaemon(path: string, root: string): RegExp {
+  return new RegExp(
+    `The process answering on ${escaped(path)} is not this user's daemon for ${escaped(root)}: `,
+  );
+}
+
+/** What a stand-in hands its answers to prove them: the key it holds, and the worktree it answers for. */
+interface KeyContext {
+  readonly worktree: string;
+  readonly key: DaemonKey;
+  readonly keyText: string;
+}
+
+type StandInAnswer = (
+  request: Readonly<Record<string, unknown>>,
+  standIn: StandIn,
+) => object | undefined;
+
+/**
+ * Holds `root`'s real endpoint in its daemon's place, with a key for it written where the daemon keeps one, as a
+ * daemon killed earlier leaves it, and removes both however `body` ends.
+ */
+function withKeyedStandIn<T>(
+  root: string,
+  answer: (context: KeyContext) => StandInAnswer,
+  body: (standIn: StandIn) => Promise<T>,
+): Promise<T> {
+  const worktree = consumerIdentity(root).worktreeIdentity;
+  return withDaemonKey(clientLocation(worktree), worktree, (key, keyText) =>
+    withStandIn(worktree, answer({ worktree, key, keyText }), body),
+  );
+}
+
+/** How a stand-in proves its answers: with the key it holds, with another key, or not at all. */
+type Proving = "key" | "another key" | "no proof";
+
+function proofField(
+  proving: Proving,
+  context: KeyContext,
+  request: Readonly<Record<string, unknown>>,
+  pid: number,
+): { proof?: string } {
+  if (proving === "no proof") return {};
+  const keyText = proving === "key" ? context.keyText : "another key";
+  return {
+    proof: frozenProof(
+      keyText,
+      String(request["challenge"]),
+      context.worktree,
+      pid,
+    ),
+  };
+}
+
+/** Lets a stand-in's stop acknowledgement reach its client before it stops listening. */
+const STAND_IN_CLOSE_MS = 100;
+
+/**
+ * Answers the hello, the status and the stop as a daemon of this version with process `pid` would, proving the hello
+ * and the stop acknowledgement as `proving` says, and stops listening just after acknowledging a stop.
+ */
+function answerAs(pid: number, proving: Proving) {
+  return (context: KeyContext): StandInAnswer =>
+    (request, standIn) => {
+      switch (request["type"]) {
+        case "hello":
+          return {
+            type: "hello",
+            protocolVersion: 1,
+            pid,
+            ...proofField(proving, context, request, pid),
+          };
+        case "status":
+          return { type: "status", protocolVersion: 1, pid };
+        case "stop":
+          setTimeout(() => void standIn.close(), STAND_IN_CLOSE_MS);
+          return {
+            type: "stopping",
+            pid,
+            logFile: "stand-in.log",
+            ...proofField(proving, context, request, pid),
+          };
+        default:
+          return undefined;
+      }
+    };
 }
 
 /** Whether the daemon's process has exited and its endpoint accepts no connection. */
@@ -135,34 +240,34 @@ describe("a client with no daemon to talk to", () => {
   it(
     "D1537: a stop keeps waiting while the endpoint still accepts connections after the daemon's process has exited",
     async () => {
-      const outcome = await inTempDir(async (root) => {
-        const exitedPid = spawnSync(process.execPath, ["-e", ""]).pid;
-        const sockets = new Set<Socket>();
-        let connections = 0;
-        const listening = await listenOnEndpoint(
-          consumerIdentity(root).worktreeIdentity,
-          (socket) => {
-            connections += 1;
-            sockets.add(socket);
-            socket.on("error", () => undefined);
-            socket.on("data", () => {
-              socket.write(
-                `${JSON.stringify({ type: "stopping", pid: exitedPid, logFile: "stand-in.log" })}\n`,
-              );
+      const pid = exitedPid();
+      const outcome = await inTempDir((root) =>
+        withKeyedStandIn(
+          root,
+          (context) => (request) =>
+            request["type"] === "stop"
+              ? {
+                  type: "stopping",
+                  pid,
+                  logFile: "stand-in.log",
+                  ...proofField("key", context, request, pid),
+                }
+              : undefined,
+          async (standIn) => {
+            let stopSettled = false;
+            const stop = settled(stopDaemon(root)).finally(() => {
+              stopSettled = true;
             });
+            const probed = await eventually(
+              () => standIn.connections >= 2,
+              PROBE_BOUND_MS,
+            );
+            const waiting = !stopSettled;
+            await standIn.close();
+            return { probed, waiting, stop: await stop };
           },
-        );
-        if (!listening.ok) return { thrown: listening.reason };
-        let stopSettled = false;
-        const stop = settled(stopDaemon(root)).finally(() => {
-          stopSettled = true;
-        });
-        const probed = await eventually(() => connections >= 2, PROBE_BOUND_MS);
-        const waiting = !stopSettled;
-        for (const socket of sockets) socket.destroy();
-        await listening.close();
-        return { probed, waiting, stop: await stop };
-      });
+        ),
+      );
       expect(outcome).toStrictEqual({
         probed: true,
         waiting: true,
@@ -426,7 +531,7 @@ describe("stopping a daemon", () => {
         holdAt(root, "hold");
         const identity = await started(root, pids, confirmEvery(root));
         if ("thrown" in identity) return identity;
-        await eventually(() => existsSync(fixtureFile(root, "holding")));
+        await atHoldPoint(root, "holding");
         await settled(stopDaemon(root));
         return storedRuns(identity.stateDirectory, root);
       });
@@ -442,7 +547,7 @@ describe("stopping a daemon", () => {
         writeFileSync(fixtureFile(root, "stick-at"), "2");
         const identity = await started(root, pids, confirmEvery(root));
         if ("thrown" in identity) return identity;
-        await eventually(() => existsSync(fixtureFile(root, "stuck")));
+        await atHoldPoint(root, "stuck");
         const stop = await settled(stopDaemon(root));
         return {
           stop,
@@ -535,36 +640,22 @@ describe("stopping a daemon", () => {
   );
 
   it("D1503: a start that finds a daemon of another protocol version is refused, naming its process and version and saying it can be stopped", async () => {
-    const start = await inTempDir(async (root) => {
-      const sockets = new Set<Socket>();
-      const listening = await listenOnEndpoint(
-        consumerIdentity(root).worktreeIdentity,
-        (socket) => {
-          sockets.add(socket);
-          socket.on("data", () => {
-            socket.write(
-              `${JSON.stringify({
-                type: "error",
-                code: "protocol-version-mismatch",
-                message: "another version",
-                protocolVersion: NEXT_PROTOCOL_VERSION,
-                clientProtocolVersion: 1,
-                pid: 4242,
-              })}\n`,
-            );
-          });
-        },
-      );
-      if (!listening.ok) return { thrown: listening.reason };
-      try {
-        return await settled(
-          startDaemon({ trusted: true, start: confirmNothing(root) }),
-        );
-      } finally {
-        for (const socket of sockets) socket.destroy();
-        await listening.close();
-      }
-    });
+    const start = await inTempDir((root) =>
+      withKeyedStandIn(
+        root,
+        (context) => (request) => ({
+          type: "error",
+          code: "protocol-version-mismatch",
+          message: "another version",
+          protocolVersion: NEXT_PROTOCOL_VERSION,
+          clientProtocolVersion: 1,
+          pid: 4242,
+          ...proofField("key", context, request, 4242),
+        }),
+        () =>
+          settled(startDaemon({ trusted: true, start: confirmNothing(root) })),
+      ),
+    );
     expect(start).toStrictEqual({
       thrown: expect.stringMatching(
         /process 4242\b.*protocol version 2\b.*can be stopped/,
@@ -581,7 +672,7 @@ describe("the executor process", () => {
         writeFileSync(fixtureFile(root, "stick-at"), "1");
         const identity = await started(root, pids, confirmEvery(root));
         if ("thrown" in identity) return identity;
-        await eventually(() => existsSync(fixtureFile(root, "stuck")));
+        await atHoldPoint(root, "stuck");
         const asked = Date.now();
         const status = await settled(daemonStatus(root));
         return {
@@ -604,9 +695,9 @@ describe("the executor process", () => {
         holdAt(root, "hold");
         const identity = await started(root, pids, confirmEvery(root));
         if ("thrown" in identity) return identity;
-        await eventually(() => existsSync(fixtureFile(root, "holding")));
+        await atHoldPoint(root, "holding");
         for (const pid of new Set(executorPids(root))) {
-          process.kill(pid, "SIGKILL");
+          if (isRunning(pid)) process.kill(pid, "SIGKILL");
         }
         await eventually(() => logged(identity.logFile, IDLE_ENTRY));
         const status = await settled(daemonStatus(root));
@@ -648,7 +739,7 @@ describe("the executor process", () => {
             },
             configFile: `${WORKSPACE_A}/vitest.config.mjs`,
           });
-          await eventually(() => existsSync(fixtureFile(root, "holding")));
+          await atHoldPoint(root, "holding");
           executor.disconnect();
           return await eventually(
             () => executor.exitCode !== null || executor.signalCode !== null,
@@ -673,7 +764,7 @@ describe("the executor process", () => {
           () => started(root, pids, confirmEvery(root)),
         );
         if ("thrown" in identity) return identity;
-        await eventually(() => existsSync(fixtureFile(root, "holding")));
+        await atHoldPoint(root, "holding");
         writeFileSync(join(identity.stateDirectory, "emit-sigterm"), "");
         return {
           exited: await eventually(() => !isRunning(identity.pid)),
@@ -755,4 +846,242 @@ async function withNodeOptions<T>(
     if (saved === undefined) delete process.env["NODE_OPTIONS"];
     else process.env["NODE_OPTIONS"] = saved;
   }
+}
+
+describe("a process on the endpoint that is not this user's daemon", () => {
+  /** Holds `root`'s endpoint as an impostor proving as `proving` says, and hands `body` the endpoint's path. */
+  function asImpostor<T>(
+    root: string,
+    proving: Proving,
+    body: (path: string) => Promise<T>,
+  ): Promise<T> {
+    return withKeyedStandIn(root, answerAs(exitedPid(), proving), (standIn) =>
+      body(standIn.endpoint.path),
+    );
+  }
+
+  it("D1556: status refuses an impostor whose hello carries a proof made with another key, naming the endpoint", async () => {
+    const outcome = await inTempDir((root) =>
+      asImpostor(root, "another key", async (path) => ({
+        status: await settled(daemonStatus(root)),
+        expected: notTheDaemon(path, root),
+      })),
+    );
+    expect(outcome.status).toStrictEqual({
+      thrown: expect.stringMatching(outcome.expected),
+    });
+  });
+
+  it("D1557: stop refuses an impostor whose acknowledgement names an exited process and carries a proof made with another key", async () => {
+    const outcome = await inTempDir((root) =>
+      asImpostor(root, "another key", async (path) => ({
+        stop: await settled(stopDaemon(root)),
+        expected: notTheDaemon(path, root),
+      })),
+    );
+    expect(outcome.stop).toStrictEqual({
+      thrown: expect.stringMatching(outcome.expected),
+    });
+  });
+
+  it("D1558: a start refuses an impostor whose hello carries a proof made with another key, and spawns no daemon", async () => {
+    const outcome = await inTempDir((root) =>
+      asImpostor(root, "another key", async (path) => ({
+        start: await settled(trustedStart(confirmNothing(root))),
+        stateDirectoryMade: existsSync(join(root, ".rt-test")),
+        expected: notTheDaemon(path, root),
+      })),
+    );
+    expect({
+      start: outcome.start,
+      stateDirectoryMade: outcome.stateDirectoryMade,
+    }).toStrictEqual({
+      start: { thrown: expect.stringMatching(outcome.expected) },
+      stateDirectoryMade: false,
+    });
+  });
+
+  it("D1559: status refuses an impostor whose hello carries no proof, naming the endpoint", async () => {
+    const outcome = await inTempDir((root) =>
+      asImpostor(root, "no proof", async (path) => ({
+        status: await settled(daemonStatus(root)),
+        expected: notTheDaemon(path, root),
+      })),
+    );
+    expect(outcome.status).toStrictEqual({
+      thrown: expect.stringMatching(outcome.expected),
+    });
+  });
+
+  it("D1560: stop refuses an impostor whose acknowledgement names an exited process and carries no proof", async () => {
+    const outcome = await inTempDir((root) =>
+      asImpostor(root, "no proof", async (path) => ({
+        stop: await settled(stopDaemon(root)),
+        expected: notTheDaemon(path, root),
+      })),
+    );
+    expect(outcome.stop).toStrictEqual({
+      thrown: expect.stringMatching(outcome.expected),
+    });
+  });
+
+  it("D1561: a start refuses an impostor whose hello carries no proof, and spawns no daemon", async () => {
+    const outcome = await inTempDir((root) =>
+      asImpostor(root, "no proof", async (path) => ({
+        start: await settled(trustedStart(confirmNothing(root))),
+        stateDirectoryMade: existsSync(join(root, ".rt-test")),
+        expected: notTheDaemon(path, root),
+      })),
+    );
+    expect({
+      start: outcome.start,
+      stateDirectoryMade: outcome.stateDirectoryMade,
+    }).toStrictEqual({
+      start: { thrown: expect.stringMatching(outcome.expected) },
+      stateDirectoryMade: false,
+    });
+  });
+
+  it("D1571: a stop verifies a daemon that removes its key as it acknowledges, since the client read the key before sending", async () => {
+    const pid = exitedPid();
+    const stop = await inTempDir((root) =>
+      withKeyedStandIn(
+        root,
+        (context) => (request, standIn) => {
+          if (request["type"] !== "stop") return undefined;
+          context.key.remove();
+          setTimeout(() => void standIn.close(), STAND_IN_CLOSE_MS);
+          return {
+            type: "stopping",
+            pid,
+            logFile: "stand-in.log",
+            ...proofField("key", context, request, pid),
+          };
+        },
+        () => settled(stopDaemon(root)),
+      ),
+    );
+    expect(stop).toBeUndefined();
+  });
+});
+
+describe("the key and the store lock a daemon holds", () => {
+  it(
+    "D1572: a daemon's key file exists while it serves and is gone once its stop completes",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await started(root, pids);
+        if ("thrown" in identity) return identity;
+        const serving = existsSync(keyFileOf(identity));
+        await settled(stopDaemon(root));
+        return { serving, stopped: existsSync(keyFileOf(identity)) };
+      });
+      expect(outcome).toStrictEqual({ serving: true, stopped: false });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1573: the store lock exists while the daemon serves and is gone once its stop completes",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await started(root, pids);
+        if ("thrown" in identity) return identity;
+        const lock = storeLockOf(
+          identity.stateDirectory,
+          identity.worktreeIdentity,
+        );
+        const serving = existsSync(lock);
+        await settled(stopDaemon(root));
+        return { serving, stopped: existsSync(lock) };
+      });
+      expect(outcome).toStrictEqual({ serving: true, stopped: false });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1576: the store lock names the daemon's process for as long as it serves, not only while it starts",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await started(root, pids);
+        if ("thrown" in identity) return identity;
+        const lock = storeLockOf(
+          identity.stateDirectory,
+          identity.worktreeIdentity,
+        );
+        return {
+          holder: existsSync(lock) ? readFileSync(lock, "utf8") : "no lock",
+          pid: String(identity.pid),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        holder: "pid" in outcome ? outcome.pid : "",
+        pid: "pid" in outcome ? outcome.pid : "",
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1574: a killed daemon leaves its key, and the next start replaces it and proves itself",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const first = await started(root, pids);
+        if ("thrown" in first) return first;
+        process.kill(first.pid, "SIGKILL");
+        await eventually(() => gone(first));
+        const keyLeft = existsSync(keyFileOf(first));
+        const second = await started(root, pids);
+        if ("thrown" in second) return { keyLeft, second };
+        const status = await settled(daemonStatus(root));
+        return {
+          keyLeft,
+          serving: "thrown" in status ? status : status.pid === second.pid,
+        };
+      });
+      expect(outcome).toStrictEqual({ keyLeft: true, serving: true });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1575: a start whose store lock names a running process is refused, naming that process and the lock file",
+    async () => {
+      const outcome = await startWithStoreLockHeld();
+      expect(outcome.start).toStrictEqual({
+        thrown: expect.stringMatching(
+          new RegExp(`process ${process.pid}, holds ${escaped(outcome.lock)}`),
+        ),
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1689: the refusal of a start whose store lock is held calls the holder a daemon serving the worktree's store",
+    async () => {
+      const outcome = await startWithStoreLockHeld();
+      expect(outcome.start).toStrictEqual({
+        thrown: expect.stringContaining(
+          `a daemon serving this worktree's store, process ${process.pid}, holds`,
+        ),
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+/** Starts a daemon for a fresh consumer whose store lock already names this running process. */
+function startWithStoreLockHeld() {
+  return withDaemonConsumer(async (root, pids) => {
+    const stateDirectory = join(root, ".rt-test");
+    const lock = storeLockOf(
+      stateDirectory,
+      consumerIdentity(root).worktreeIdentity,
+    );
+    mkdirSync(stateDirectory, { recursive: true });
+    writeFileSync(lock, String(process.pid));
+    return { start: await started(root, pids), lock };
+  });
 }
