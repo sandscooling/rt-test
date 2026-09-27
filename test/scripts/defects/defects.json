@@ -625,7 +625,7 @@
   {
     "id": "D1152",
     "defect": "A probe error other than ESRCH (an out-of-range pid) reads as an exited process, so its run is removed.",
-    "file": "scripts/lib/defects/runs.mjs",
+    "file": "scripts/lib/processes.mjs",
     "old": "return error.code !== NO_SUCH_PROCESS;",
     "new": "return false;"
   },

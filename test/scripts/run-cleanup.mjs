@@ -11,6 +11,9 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isRunning } from "../../scripts/lib/processes.mjs";
+
+export { isRunning };
 
 /** Lists, one JSON entry per line, what a test run started, for whoever ends the run to clean up. */
 export const STARTED_FILE = "started-processes";
@@ -18,7 +21,6 @@ const WATCHDOG = fileURLToPath(new URL("./run-watchdog.mjs", import.meta.url));
 const LOCK_EXTENSION = ".lock";
 const KEY_LEFTOVER_SUFFIXES = [".tmp", ".removing"];
 const WINDOWS = "win32";
-const NO_SIGNAL = 0;
 const KILL_SIGNAL = "SIGKILL";
 /** How long one PowerShell query for process command lines may take on a loaded machine. */
 const COMMAND_LINE_QUERY_MS = 30_000;
@@ -31,8 +33,6 @@ const RELEASE_POLL_MS = 200;
 /** What Windows answers a removal of a directory that a live process holds open. */
 const HELD_DIRECTORY_CODES = new Set(["EPERM", "EBUSY"]);
 const NOT_FOUND = "ENOENT";
-/** What `process.kill` answers for a process that runs but is not this user's to signal. */
-const NOT_PERMITTED = "EPERM";
 const POWERSHELL_UNDER_SYSTEM_ROOT = [
   "System32",
   "WindowsPowerShell",
@@ -59,16 +59,6 @@ export async function removeDirectory(directory) {
       if (Date.now() >= deadline) return false;
       await new Promise((wake) => setTimeout(wake, RELEASE_POLL_MS));
     }
-  }
-}
-
-export function isRunning(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, NO_SIGNAL);
-    return true;
-  } catch (error) {
-    return error.code === NOT_PERMITTED;
   }
 }
 
