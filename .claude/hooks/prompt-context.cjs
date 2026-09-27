@@ -1,7 +1,7 @@
 // UserPromptSubmit hook: prepends local time, context use, and rate-limit windows to each prompt.
 //   --post-tool  PostToolUse and PostToolUseFailure hook: local time after every tool call, plus a handoff instruction above the handoff line.
 //   --self       prints this session's context line on demand.
-// Fields are dropped rather than faked when a source is unavailable, and any error fails open.
+// Fields are dropped rather than faked when a source is unavailable. An error fails open in the hook modes, and exits 1 under --self.
 const { readFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -53,7 +53,12 @@ main(process.argv.slice(2)).then(
   (code) => {
     process.exitCode = code;
   },
-  () => {
+  (error) => {
+    if (process.argv.includes("--self")) {
+      console.error(`context unknown: ${error}`);
+      process.exitCode = 1;
+      return;
+    }
     if (!process.argv.includes("--post-tool")) console.log("{}");
   },
 );

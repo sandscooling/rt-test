@@ -204,6 +204,17 @@ describe("hook entries", PROCESS_SCENARIO, () => {
     expect(run.status).toBe(0);
   });
 
+  it("D1959: exits 1 from --self, printing nothing on stdout, when the gauge cannot load", () => {
+    const run = withTemp((root) => {
+      cpSync(join(REPO, HOOKS), join(root, HOOKS), { recursive: true });
+      return runEntry(root, "prompt-context.cjs", {}, ["--self"]);
+    });
+    expect({ status: run.status, stdout: run.stdout }).toEqual({
+      status: 1,
+      stdout: "",
+    });
+  });
+
   it("D362: labels the prompt header as UserPromptSubmit context", () => {
     const out = hookOutput("prompt-context.cjs", 1000);
     expect(out.hookSpecificOutput?.hookEventName).toBe("UserPromptSubmit");

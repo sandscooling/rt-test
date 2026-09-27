@@ -24,7 +24,6 @@ export declare const CONTEXT_WINDOW: number;
 export declare const HANDOFF_PERCENT: number;
 export declare const HANDOFF_DOC: string;
 export declare const ORCHESTRATOR_STATE: string;
-export declare function stamp(d: Date): string;
 export declare function lastUsage(text: string): number | null;
 export declare function usedTokens(transcriptPath: unknown): number | null;
 export declare function formatContext(used: number, max?: number): string;

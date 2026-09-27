@@ -607,5 +607,12 @@
     "file": ".claude/hooks/prompt-context.cjs",
     "old": "if (!process.argv.includes(\"--post-tool\")) console.log(\"{}\");",
     "new": "process.exitCode = 1;\n    if (!process.argv.includes(\"--post-tool\")) console.log(\"{}\");"
+  },
+  {
+    "id": "D1959",
+    "defect": "The --self mode reports success on an internal error, printing {} and exiting 0.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "if (process.argv.includes(\"--self\")) {",
+    "new": "if (false) {"
   }
 ]

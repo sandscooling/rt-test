@@ -23,7 +23,7 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const pad = (n) => String(n).padStart(2, "0");
 
-export function stamp(d) {
+function stamp(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ${DAYS[d.getDay()]}`;
 }
 
