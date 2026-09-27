@@ -1,4 +1,6 @@
 import type { StatusResponse } from "../daemon/protocol.js";
+import type { FingerprintResult } from "../inputs/fingerprint.js";
+import type { CurrentInputs } from "../inputs/input-tracker.js";
 import type { LatestResults } from "../store/open-store.js";
 import type { StoredDiscovery, StoredRun } from "../store/stored-records.js";
 import { VITEST_ADAPTER_VERSION } from "../vitest/adapter-version.js";
@@ -8,6 +10,7 @@ import type {
 } from "../vitest/discover-tests.js";
 import {
   activityText,
+  CURRENT,
   FAILED_MODULE,
   SOURCE_NOT_READ,
   TYPECHECK_MODULE,
@@ -22,10 +25,12 @@ import {
   type NoAnswer,
   type NotDiscoveredEntry,
   type SummaryAnswer,
+  type UnfingerprintedWorkspace,
   type WorkspaceFacts,
 } from "./answer.js";
 import {
   countStandings,
+  discoveryFreshness,
   isCurrentAdapterVersion,
   testStandings,
   type TestStanding,
@@ -40,6 +45,8 @@ export type DaemonView = Pick<
 /** What a query answers from once a discovery is stored. */
 export interface QueryBasis {
   readonly discovery: StoredDiscovery;
+  /** Each workspace's latest stored run, by workspace path. */
+  readonly latestRuns: ReadonlyMap<string, StoredRun>;
   readonly standings: readonly TestStanding[];
   readonly notDiscovered: readonly NotDiscoveredEntry[];
   readonly context: AnswerContext;
@@ -54,18 +61,22 @@ const TYPECHECK_MODULE_REASON =
 export function summaryAnswer(
   results: LatestResults,
   daemon: DaemonView,
+  inputs: CurrentInputs,
 ): SummaryAnswer | NoAnswer {
-  const basis = queryBasis(results, daemon);
+  const basis = queryBasis(results, daemon, inputs);
   if ("noAnswer" in basis) return basis;
-  const { discovery, standings, notDiscovered, context } = basis;
+  const {
+    discovery,
+    latestRuns: runs,
+    standings,
+    notDiscovered,
+    context,
+  } = basis;
   if (standings.length === 0 && notDiscovered.length === 0) {
     return {
       noAnswer: `the latest discovery stored for ${daemon.consumerRoot} holds no test and nothing RT Test could not discover`,
     };
   }
-  const runs = new Map(
-    results.latestRuns.map((run) => [run.run.workspace.path, run]),
-  );
   return {
     ...context,
     counts: countStandings(standings),
@@ -83,16 +94,31 @@ export function summaryAnswer(
 export function queryBasis(
   results: LatestResults,
   daemon: DaemonView,
+  inputs: CurrentInputs,
 ): QueryBasis | NoAnswer {
-  const { discovery, latestRuns } = results;
+  const { discovery } = results;
   if (discovery === undefined) {
     return {
       noAnswer: `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; it is ${activityText(daemon.activity)}`,
     };
   }
+  const latestRuns = new Map(
+    results.latestRuns.map((run) => [run.run.workspace.path, run]),
+  );
+  const fingerprints = workspaceFingerprints(discovery.discovery, inputs);
+  const freshness = discoveryFreshness(
+    discovery,
+    digestOf(inputs.discoveryFingerprint(discovery.discovery)),
+  );
   return {
     discovery,
-    standings: testStandings(discovery, latestRuns),
+    latestRuns,
+    standings: testStandings(
+      discovery,
+      latestRuns,
+      (path) => digestOf(fingerprints.get(path)),
+      freshness === CURRENT,
+    ),
     notDiscovered: notDiscoveredEntries(discovery.discovery),
     context: {
       consumerRoot: daemon.consumerRoot,
@@ -100,11 +126,42 @@ export function queryBasis(
       discovery: {
         discoveryId: discovery.discoveryId,
         ...adapterVersionFacts(discovery.adapterVersion),
+        freshness,
       },
+      inputs: inputs.facts,
+      unfingerprintedWorkspaces:
+        inputs.unavailable === undefined ? unfingerprinted(fingerprints) : [],
       activity: daemon.activity,
       unstoredJobs: daemon.unstoredJobs,
     },
   };
+}
+
+/** Each discovered workspace's current fingerprint, composed once per answer. */
+function workspaceFingerprints(
+  discovery: TestDiscovery,
+  inputs: CurrentInputs,
+): Map<string, FingerprintResult> {
+  return new Map(
+    discovery.workspaces
+      .filter((entry) => entry.status === "discovered")
+      .map((entry) => [
+        entry.workspace.path,
+        inputs.workspaceFingerprint(entry),
+      ]),
+  );
+}
+
+function digestOf(print: FingerprintResult | undefined): string | undefined {
+  return print?.ok === true ? print.digest : undefined;
+}
+
+function unfingerprinted(
+  fingerprints: ReadonlyMap<string, FingerprintResult>,
+): UnfingerprintedWorkspace[] {
+  return [...fingerprints].flatMap(([workspacePath, print]) =>
+    print.ok ? [] : [{ workspacePath, reason: print.reason }],
+  );
 }
 
 function notDiscoveredEntries(discovery: TestDiscovery): NotDiscoveredEntry[] {

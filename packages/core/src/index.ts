@@ -1,4 +1,4 @@
-export { assessEvidence } from "./evidence.js";
+export { assessEvidence, assessFreshness } from "./evidence.js";
 export type {
   EvidenceAssessment,
   Freshness,

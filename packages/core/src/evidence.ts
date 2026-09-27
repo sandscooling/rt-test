@@ -17,7 +17,7 @@ export function assessEvidence(
   currentFingerprint: string | undefined,
 ): EvidenceAssessment {
   const outcome = evidence?.outcome ?? "never-run";
-  const freshness = assessFreshness(evidence, currentFingerprint);
+  const freshness = assessFreshness(evidence?.fingerprint, currentFingerprint);
   return {
     outcome,
     freshness,
@@ -25,11 +25,14 @@ export function assessEvidence(
   };
 }
 
-function assessFreshness(
-  evidence: TestEvidence | undefined,
+/**
+ * Whether a record made under `fingerprint` still describes the inputs whose fingerprint is `currentFingerprint`;
+ * unknown when either is absent or empty, since an empty digest stands for none.
+ */
+export function assessFreshness(
+  fingerprint: string | undefined,
   currentFingerprint: string | undefined,
 ): Freshness {
-  if (!evidence || !currentFingerprint || !evidence.fingerprint)
-    return "unknown";
-  return evidence.fingerprint === currentFingerprint ? "current" : "stale";
+  if (!currentFingerprint || !fingerprint) return "unknown";
+  return fingerprint === currentFingerprint ? "current" : "stale";
 }

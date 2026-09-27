@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import type { Executor, JobOutcome } from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
 import type { DaemonIdentity } from "../src/daemon/protocol.js";
+import type { FingerprintResult } from "../src/inputs/fingerprint.js";
+import {
+  JobWindows,
+  type JobMark,
+  type JobVerdict,
+} from "../src/inputs/input-jobs.js";
+import type {
+  CurrentInputs,
+  TrackedInputs,
+} from "../src/inputs/input-tracker.js";
+import type { InputFacts } from "../src/query/answer.js";
 import {
   openStore,
   type LatestResults,
@@ -25,7 +36,7 @@ import type {
   WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
 import { memoryLog, type MemoryLog } from "./daemon-harness.js";
-import { inTempDir } from "./harness.js";
+import { inTempDir, within } from "./harness.js";
 
 const SCOPE: StoreScope = {
   projectIdentity: "/consumer/.git",
@@ -43,6 +54,18 @@ const IDENTITY: DaemonIdentity = {
 const FLUSH_TURNS = 20;
 const CONFIG_NOT_CONFIRMED =
   "its config file is no longer the one confirmed at start";
+/** Longer than a stop of the scripted daemon takes, and short enough that a stop that never ends fails the test. */
+const STOP_BOUND_MS = 2000;
+const DISCOVERY_DIGEST = "discovery-digest";
+const FINGERPRINTED: JobVerdict = { fingerprinted: true };
+const SETTLED_INPUTS: InputFacts = {
+  revision: 1,
+  reconciliation: { state: "complete" },
+  lastReconciledAt: "2026-09-27T12:00:00.000Z",
+  watcher: { state: "healthy" },
+  pendingChanges: 0,
+  gitUnread: [],
+};
 
 function workspace(path: string): VitestWorkspace {
   return { path, directory: `/consumer/${path}` };
@@ -116,6 +139,7 @@ class ScriptedExecutor implements Pick<
   "discover" | "run" | "abort" | "close"
 > {
   readonly runs: string[] = [];
+  discoveries = 0;
   aborts = 0;
   readonly #discovery: Promise<JobOutcome<TestDiscovery>>;
   readonly #runs: (path: string) => Promise<RunOutcome>;
@@ -132,6 +156,7 @@ class ScriptedExecutor implements Pick<
   }
 
   discover(): Promise<JobOutcome<TestDiscovery>> {
+    this.discoveries += 1;
     return this.#discovery;
   }
 
@@ -154,6 +179,9 @@ class RecordingStore implements RtTestStore {
   readonly file = "/consumer/.rt-test/store.sqlite";
   readonly runs: WorkspaceRun[] = [];
   readonly discoveries: TestDiscovery[] = [];
+  /** The fingerprint each run and each discovery was written under, in the order written. */
+  readonly runFingerprints: StoreBindings["inputFingerprint"][] = [];
+  readonly discoveryFingerprints: StoreBindings["inputFingerprint"][] = [];
   closed = false;
   readonly #failingRuns: ReadonlySet<string>;
 
@@ -167,6 +195,7 @@ class RecordingStore implements RtTestStore {
       throw new Error("database is locked");
     }
     this.runs.push(run);
+    this.runFingerprints.push(bindings.inputFingerprint);
     return { ...bindings, adapterVersion: 3, runId: "run", run };
   }
 
@@ -176,6 +205,7 @@ class RecordingStore implements RtTestStore {
   ): StoredDiscovery {
     if (this.closed) throw new Error("the store is closed");
     this.discoveries.push(written);
+    this.discoveryFingerprints.push(bindings.inputFingerprint);
     return {
       ...bindings,
       adapterVersion: 3,
@@ -228,12 +258,81 @@ class RecordingStore implements RtTestStore {
   }
 }
 
+interface InputsScript {
+  /** Keeps the first reconciliation running until the test resolves `reconciled`. */
+  readonly heldReconciliation?: boolean;
+  /** Keeps every job's end waiting on the inputs until the inputs stop. */
+  readonly heldJobEnds?: boolean;
+  /** Each job's verdict, in the order the jobs end; a job past the list is fingerprinted. */
+  readonly verdicts?: readonly JobVerdict[];
+  /** A workspace's current fingerprint, asked at its run's start and again at its end. */
+  readonly fingerprintOf?: (workspacePath: string) => FingerprintResult;
+  /** Why a listed test module no watch covers may have changed during the discovery. */
+  readonly moduleChanged?: string;
+}
+
+/** Inputs whose reconciliation, fingerprints and job verdicts the test scripts, recording each start and stop. */
+class StandInInputs implements TrackedInputs {
+  starts = 0;
+  stops = 0;
+  readonly reconciled = new Deferred<void>();
+  readonly #released = new Deferred<void>();
+  readonly #script: InputsScript;
+  readonly #verdicts: JobVerdict[];
+
+  constructor(script: InputsScript = {}) {
+    this.#script = script;
+    this.#verdicts = [...(script.verdicts ?? [])];
+  }
+
+  start(): void {
+    this.starts += 1;
+    if (this.#script.heldReconciliation !== true) this.reconciled.resolve();
+  }
+
+  firstReconciled(): Promise<void> {
+    return this.reconciled.promise;
+  }
+
+  current(): CurrentInputs {
+    const fingerprintOf =
+      this.#script.fingerprintOf ??
+      ((path: string): FingerprintResult => ({
+        ok: true,
+        digest: `${path}-digest`,
+      }));
+    return {
+      facts: SETTLED_INPUTS,
+      workspaceFingerprint: (entry) => fingerprintOf(entry.workspace.path),
+      discoveryFingerprint: () => ({ ok: true, digest: DISCOVERY_DIGEST }),
+      testModuleChangedSince: () => this.#script.moduleChanged,
+    };
+  }
+
+  beginJob(): JobMark {
+    return new JobWindows().open(undefined);
+  }
+
+  async endJob(): Promise<JobVerdict> {
+    if (this.#script.heldJobEnds === true) await this.#released.promise;
+    return this.#verdicts.shift() ?? FINGERPRINTED;
+  }
+
+  stop(): Promise<void> {
+    this.stops += 1;
+    this.#released.resolve();
+    this.reconciled.resolve();
+    return Promise.resolve();
+  }
+}
+
 interface Daemon {
   readonly lifecycle: DaemonLifecycle;
   readonly executor: ScriptedExecutor;
   readonly store: RecordingStore;
   readonly log: MemoryLog;
   readonly endpointCloses: { count: number };
+  readonly inputs: StandInInputs;
 }
 
 function daemon(
@@ -241,6 +340,7 @@ function daemon(
   executor: ScriptedExecutor,
   store: RtTestStore = new RecordingStore(),
   identity: DaemonIdentity = IDENTITY,
+  inputs: StandInInputs = new StandInInputs(),
 ): Daemon {
   const log = memoryLog();
   const endpointCloses = { count: 0 };
@@ -251,6 +351,7 @@ function daemon(
     store,
     log,
     executor: executor as unknown as Executor,
+    inputs,
     closeEndpoint: () => {
       endpointCloses.count += 1;
       return Promise.resolve();
@@ -262,7 +363,23 @@ function daemon(
     store: store as RecordingStore,
     log,
     endpointCloses,
+    inputs,
   };
+}
+
+/** A daemon over one confirmed workspace `a`, discovered and run once, with inputs the test scripts. */
+function scripted(script: InputsScript): Daemon {
+  const executor = new ScriptedExecutor({
+    ended: true,
+    value: discovery(discovered("a")),
+  });
+  return daemon(
+    confirmed("a"),
+    executor,
+    new RecordingStore(),
+    IDENTITY,
+    new StandInInputs(script),
+  );
 }
 
 async function flush(): Promise<void> {
@@ -332,7 +449,7 @@ describe("the start sequence", () => {
     expect(executor.runs).toStrictEqual(["a", "b", "c"]);
   });
 
-  it("D1453: the discovery and each run are stored under the worktree's project and worktree, not fingerprinted", async () => {
+  it("D1453: the discovery and each run whose inputs held still are stored under the worktree's project and worktree and the digest they started from", async () => {
     const bindings = await inTempDir(async (dir) => {
       const store = openStore(dir);
       try {
@@ -357,11 +474,84 @@ describe("the start sequence", () => {
         store.close();
       }
     });
-    const expected = {
-      ...SCOPE,
-      inputFingerprint: { kind: "not-fingerprinted" },
-    };
-    expect(bindings).toStrictEqual({ discovery: expected, runs: [expected] });
+    expect(bindings).toStrictEqual({
+      discovery: {
+        ...SCOPE,
+        inputFingerprint: { kind: "digest", digest: DISCOVERY_DIGEST },
+      },
+      runs: [
+        { ...SCOPE, inputFingerprint: { kind: "digest", digest: "a-digest" } },
+      ],
+    });
+  });
+
+  it("D1877: a run whose inputs changed while it ran is stored not fingerprinted, and the log names the run and the change", async () => {
+    const reason = "its inputs changed while it ran: packages/a/src/a.ts";
+    const { store, log } = await begun(
+      scripted({
+        verdicts: [FINGERPRINTED, { fingerprinted: false, reason }],
+      }),
+    );
+    expect({
+      runs: store.runFingerprints,
+      logged: log.entries.filter((entry) =>
+        entry.includes("stored not fingerprinted"),
+      ),
+    }).toStrictEqual({
+      runs: [{ kind: "not-fingerprinted" }],
+      logged: [`the run of a is stored not fingerprinted: ${reason}`],
+    });
+  });
+
+  it("D1878: a run whose workspace fingerprint at its end differs from the one at its start is stored not fingerprinted", async () => {
+    let asked = 0;
+    const { store } = await begun(
+      scripted({
+        fingerprintOf: () => {
+          asked += 1;
+          return { ok: true, digest: `a-digest-${asked}` };
+        },
+      }),
+    );
+    expect(store.runFingerprints).toStrictEqual([
+      { kind: "not-fingerprinted" },
+    ]);
+  });
+
+  it("D1879: a discovery during which a listed test module no watch covers may have changed is stored not fingerprinted, naming the module", async () => {
+    const moduleChanged =
+      "the test module packages/a/gen/a.test.ts, which no watch covers, may have changed while the job ran";
+    const { store, log } = await begun(scripted({ moduleChanged }));
+    expect({
+      discovery: store.discoveryFingerprints,
+      logged: log.entries.filter((entry) =>
+        entry.includes("stored not fingerprinted"),
+      ),
+    }).toStrictEqual({
+      discovery: [{ kind: "not-fingerprinted" }],
+      logged: [`the discovery is stored not fingerprinted: ${moduleChanged}`],
+    });
+  });
+
+  it("D1880: no discovery starts until the first reconciliation of the inputs has ended", async () => {
+    const started = await begun(scripted({ heldReconciliation: true }));
+    const before = started.executor.discoveries;
+    started.inputs.reconciled.resolve();
+    await flush();
+    expect({ before, after: started.executor.discoveries }).toStrictEqual({
+      before: 0,
+      after: 1,
+    });
+  });
+
+  it("D1882: the input tracker starts when the start sequence begins, never when the daemon is built", async () => {
+    const built = scripted({});
+    const beforeBegin = built.inputs.starts;
+    await begun(built);
+    expect({ beforeBegin, afterBegin: built.inputs.starts }).toStrictEqual({
+      beforeBegin: 0,
+      afterBegin: 1,
+    });
   });
 
   it("D1457: a run whose store write fails is listed as stored nothing, and the next workspace still runs", async () => {
@@ -582,6 +772,26 @@ describe("stopping", () => {
     await lifecycle.stopped();
     await flush();
     expect(endpointCloses.count).toBe(1);
+  });
+
+  it("D1881: a stop while a job's end waits on the inputs stops the tracker, so the stop ends", async () => {
+    const { lifecycle } = await begun(scripted({ heldJobEnds: true }));
+    lifecycle.stop();
+    expect(
+      await within(
+        lifecycle.stopped().then(() => "stopped"),
+        STOP_BOUND_MS,
+      ),
+    ).toBe("stopped");
+  });
+
+  it("D1953: a stop during the first reconciliation of the inputs starts no discovery", async () => {
+    const { lifecycle, executor } = await begun(
+      scripted({ heldReconciliation: true }),
+    );
+    lifecycle.stop();
+    await lifecycle.stopped();
+    expect(executor.discoveries).toBe(0);
   });
 
   it("D1465: a discovery that returns after the stop arrived is not stored, and is listed with the reason", async () => {

@@ -362,5 +362,54 @@
     "file": "packages/cli/src/commands/status.ts",
     "old": "            requestedPath: path,",
     "new": "            path,"
+  },
+  {
+    "id": "D1889",
+    "defect": "The daemon's tracker is given no exclusions, so the store and log writes under its state directory move its inputs during every job and no result ever reads current.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "      exclusions: [directory, log.file],",
+    "new": "      exclusions: [],"
+  },
+  {
+    "id": "D1890",
+    "defect": "A human answer leaves out the input revision, the reconciliation and watcher states with their reasons, and what of git was unread.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    ...inputLines(answer.inputs),\n",
+    "new": ""
+  },
+  {
+    "id": "D1940",
+    "defect": "A human answer never prints when the last reconciliation ended, reading none has ended yet whatever the facts say.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "      : `ended ${inputs.lastReconciledAt}`;",
+    "new": "      : NOT_YET_RECONCILED;"
+  },
+  {
+    "id": "D1941",
+    "defect": "A human answer leaves out how many changed paths the daemon has not yet read.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "      : [`Changed paths not yet read: ${inputs.pendingChanges}`]),",
+    "new": "      : []),"
+  },
+  {
+    "id": "D1942",
+    "defect": "A human answer leaves out the workspaces with no current fingerprint and their reasons.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "      : [UNFINGERPRINTED_HEADING, ...unfingerprinted]),",
+    "new": "      : []),"
+  },
+  {
+    "id": "D1943",
+    "defect": "A human answer leaves out the discovery's freshness.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    `Discovery freshness: ${discovery.freshness}`,\n",
+    "new": ""
+  },
+  {
+    "id": "D1944",
+    "defect": "--json drops the input facts from the answer.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  delete fields[\"protocolVersion\"];",
+    "new": "  delete fields[\"protocolVersion\"];\n  delete fields[\"inputs\"];"
   }
 ]

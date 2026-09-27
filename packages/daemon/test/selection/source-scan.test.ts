@@ -17,6 +17,7 @@ import {
   PROCESS_SCENARIO,
   PROCESS_SCENARIO_TIMEOUT_MS,
 } from "../../../../test/scripts/timeouts.js";
+import { ignoredPathsReader } from "../../src/selection/git-ignored.js";
 import {
   appEdges,
   appScan,
@@ -252,6 +253,22 @@ describe("gitignored paths inside a git repository", PROCESS_SCENARIO, () => {
         gitUnderHostileConfig(root)("log", "-1", "--format=%an <%ae>").trim(),
     );
     expect(author).toBe(FIXTURE_AUTHOR);
+  });
+
+  it("D1954: a directory git lists only because every entry in it was ignored, which git does not itself ignore, is not reported ignored", async () => {
+    const reported = await inspectTree(
+      {
+        ...appTree({
+          change: "",
+          files: { "packages/app/newdir/only.log": "a log line\n" },
+        }),
+        prepare: (root) => {
+          commitRepository(root, "*.log\n");
+        },
+      },
+      (root) => ignoredPathsReader(root).has(join(root, "packages/app/newdir")),
+    );
+    expect(reported).toBe(false);
   });
 
   it("D1648: a gitignored directory is not scanned, so its unparsable file and its import add neither a widening nor an edge", async () => {

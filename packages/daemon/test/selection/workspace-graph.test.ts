@@ -5,6 +5,7 @@ import type {
   DependencyInformation,
   ResolvedAlias,
 } from "../../src/selection/selection-types.js";
+import { onPlatform } from "../harness.js";
 import {
   APP,
   appEdges,
@@ -61,23 +62,6 @@ function aliases(
   replacement: (root: string) => string,
 ): (root: string) => readonly ResolvedAlias[] {
   return (root) => [{ find: "@alias", replacement: replacement(root) }];
-}
-
-/** Runs `body` while `process.platform` reads as `platform`, restoring it after. */
-async function onPlatform<T>(
-  platform: NodeJS.Platform,
-  body: () => Promise<T>,
-): Promise<T> {
-  const saved = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", {
-    value: platform,
-    configurable: true,
-  });
-  try {
-    return await body();
-  } finally {
-    if (saved !== undefined) Object.defineProperty(process, "platform", saved);
-  }
 }
 
 describe("listing a consumer's package workspaces", () => {

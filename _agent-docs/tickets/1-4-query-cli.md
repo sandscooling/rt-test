@@ -376,7 +376,7 @@ Fixed in review, each needing the gap row named beside it:
 Tech debt, undisposed:
 
 - [Pre-existing] `packages/daemon/src/store/open-store.ts` `RtTestStore.readRuns`, `readRun` and `readLatestDiscovery` have no production caller; only tests call them, and every hand-built store must implement them (C59).
-  - Orchestrator decided B at 10:56 on 2026-09-27; it runs as a change-request after ticket 2.1 lands, since both touch lifecycle.test.ts.
+  - Orchestrator decided at 10:53 on 2026-09-27 to drop `readRuns`, `readRun` and `readLatestDiscovery` from `RtTestStore` and give tests a read-only helper over the module-level readers; it runs as a change-request after ticket 2.1 lands, since both touch lifecycle.test.ts.
 - [Duplication] `packages/daemon/src/query/summary.ts` `summaryAnswer` rebuilds the workspace-path-to-run `Map` that `packages/daemon/src/query/test-states.ts` `testStandings` builds from the same `latestRuns`; `QueryBasis` could carry it.
 
 D1838: its mutation names no defect a consumer can observe. `query-client.ts` `queryErrorReason` reads `invalid-request` and `query-failed` alike (its default branch), and the message is unchanged under the mutation, so the CLI's output and exit code are byte-identical; no criterion names a throwing query. Gap 10 re-points it.

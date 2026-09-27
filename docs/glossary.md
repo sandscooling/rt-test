@@ -35,7 +35,7 @@ The consumer root and each Vitest workspace, with the config file shown for it, 
 _Avoid_: trusted list, allowlist
 
 **Input fingerprint**:
-A digest of every input that can change a test's result.
+A digest of every input, the environment, and the runtime and tool versions that can change a test's result.
 _Avoid_: hash, cache key
 
 **Input**:
@@ -47,7 +47,7 @@ A file the consumer lists in `rt-test.json` as read by no test, so its edit chan
 _Avoid_: ignored file, excluded file
 
 **Input revision**:
-The number naming a worktree's inputs as the daemon last observed them, raised by each change it observes.
+The number naming a worktree's inputs as the daemon last observed them in its current life, raised once for each batch of changes it observes.
 _Avoid_: version, generation
 
 **Reconciliation**:

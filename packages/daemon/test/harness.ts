@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   cpSync,
@@ -11,6 +12,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, inject } from "vitest";
+import { writeFixtureGitConfig } from "../../../test/scripts/git-fixture.js";
+import { PROCESS_SCENARIO_TIMEOUT_MS } from "../../../test/scripts/timeouts.js";
 import {
   HELD_DIRECTORIES_FILE,
   HELD_RECORD_SEPARATOR,
@@ -183,6 +186,61 @@ export async function waitUntil(
   while (!ready() && !done) {
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
+}
+
+/** Runs `body` while `process.platform` reads as `platform`, restoring it after. */
+export async function onPlatform<T>(
+  platform: NodeJS.Platform,
+  body: () => Promise<T>,
+): Promise<T> {
+  const saved = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true,
+  });
+  try {
+    return await body();
+  } finally {
+    if (saved !== undefined) Object.defineProperty(process, "platform", saved);
+  }
+}
+
+export const WAITING = "waiting";
+
+/** Resolves with what `work` resolves to, or with `WAITING` if it has not ended within `boundMs`. */
+export function within<T>(
+  work: Promise<T>,
+  boundMs: number,
+): Promise<T | typeof WAITING> {
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<typeof WAITING>((resolve) => {
+    timer = setTimeout(() => resolve(WAITING), boundMs);
+  });
+  return Promise.race([work, bound]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Makes `root` a git repository under the fixture git settings, so no global hook, signing or identity of the
+ * developer's reaches it, and returns a runner of git there, free of the caller's GIT_* variables.
+ */
+export function fixtureRepository(root: string): (...args: string[]) => string {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => !name.toUpperCase().startsWith("GIT_"),
+    ),
+  );
+  const git = (...args: string[]): string =>
+    execFileSync("git", args, {
+      cwd: root,
+      env,
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: PROCESS_SCENARIO_TIMEOUT_MS,
+      windowsHide: true,
+    });
+  git("init", "-q");
+  writeFixtureGitConfig(root);
+  return git;
 }
 
 export type Pool = "forks" | "threads";

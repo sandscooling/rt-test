@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -7,9 +13,12 @@ import { describe, expect, it } from "vitest";
 import {
   daemonStatus,
   servingDaemon,
+  TEST_STATES,
   type DaemonIdentity,
+  type InputFacts,
   type NotDiscoveredEntry,
   type StartPlan,
+  type SummaryResponse,
 } from "@rt-test/daemon/client";
 import { daemonEntryPoint } from "../../daemon/src/daemon/entry-point.js";
 import { isRunning } from "../../daemon/src/daemon/runtime-directory.js";
@@ -32,9 +41,18 @@ import {
   withStandIn,
   type Settled,
 } from "../../daemon/test/daemon-harness.js";
-import { REPO, confirmEvery, inTempDir } from "../../daemon/test/harness.js";
+import {
+  REPO,
+  confirmEvery,
+  fixtureRepository,
+  inTempDir,
+} from "../../daemon/test/harness.js";
 import type { CliIo } from "../src/command.js";
-import { notDiscoveredLines } from "../src/answer-text.js";
+import {
+  answerFields,
+  contextLines,
+  notDiscoveredLines,
+} from "../src/answer-text.js";
 import { main } from "../src/main.js";
 import { Output, type ExitCode } from "../src/output.js";
 import { decideTrust, type TrustDecision } from "../src/trust-prompt.js";
@@ -1036,6 +1054,65 @@ function nonZeroStates(run: CliRun): Document {
   );
 }
 
+/**
+ * Makes the fixture copy a git repository that ignores the markers the fixture writes into its own tree at every job,
+ * so only the daemon's own writes, under its state directory, could still move its inputs.
+ */
+function ignoreFixtureMarkers(root: string): void {
+  writeFileSync(join(root, ".gitignore"), "executor-pids\nsetups\n");
+  fixtureRepository(root);
+}
+
+const RECONCILED_AT = "2026-09-27T12:00:00.000Z";
+/** Inputs reconciled and watched, with nothing unread and no time of the last reconciliation. */
+const SETTLED_INPUTS: InputFacts = {
+  revision: 2,
+  reconciliation: { state: "complete" },
+  watcher: { state: "healthy" },
+  pendingChanges: 0,
+  gitUnread: [],
+};
+
+/** A summary answer with no test, a stale discovery and settled inputs, overridden by `more`. */
+function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
+  return {
+    type: "summary",
+    protocolVersion: 1,
+    consumerRoot: "/consumer",
+    currentAdapterVersion: 3,
+    discovery: {
+      discoveryId: "discovery-1",
+      adapterVersion: 3,
+      adapterVersionCurrent: true,
+      freshness: "stale",
+    },
+    inputs: SETTLED_INPUTS,
+    unfingerprintedWorkspaces: [],
+    activity: { state: "idle" },
+    unstoredJobs: [],
+    counts: {
+      tests: 0,
+      states: Object.fromEntries(
+        TEST_STATES.map((state) => [state, 0]),
+      ) as SummaryResponse["counts"]["states"],
+      freshness: { current: 0, stale: 0, unknown: 0 },
+    },
+    duplicateTests: 0,
+    notDiscovered: [],
+    workspaces: [],
+    ...more,
+  };
+}
+
+/** The freshness counts of a `summary --json` that are not zero. */
+async function nonZeroFreshness(root: string): Promise<Document> {
+  const run = await runCli(["summary", "--json"], { cwd: root });
+  const freshness = countsOf(run)["freshness"] as Document | undefined;
+  return Object.fromEntries(
+    Object.entries(freshness ?? {}).filter(([, count]) => count !== 0),
+  );
+}
+
 function notDiscoveredKinds(run: CliRun): unknown[] {
   const entries = documentOf(run)["notDiscovered"];
   return Array.isArray(entries)
@@ -1094,6 +1171,33 @@ describe("a query", () => {
         exit: 0,
         ok: true,
         states: { passed: 2, failed: 1 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1889: a daemon's results read current once it idles with its inputs unchanged, and stale after an input is edited",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        ignoreFixtureMarkers(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const before = await nonZeroFreshness(root);
+        appendFileSync(
+          join(root, WORKSPACE_B, "passes.test.mjs"),
+          "// an edit\n",
+        );
+        let after: Document = {};
+        await eventually(async () => {
+          after = await nonZeroFreshness(root);
+          return after["stale"] === 2;
+        });
+        return { before, after };
+      });
+      expect(outcome).toStrictEqual({
+        before: { current: 2 },
+        after: { stale: 2 },
       });
     },
     DAEMON_TEST_TIMEOUT_MS,
@@ -1304,6 +1408,91 @@ describe("a query", () => {
       omittedCharacters: 0,
     };
     expect(notDiscoveredLines([entry])[1]).toContain("2 errors");
+  });
+
+  it("D1890: a human answer prints the input revision, the reconciliation and watcher states with their reasons, what of git was unread, and the discovery's freshness", () => {
+    const reconciliationReason = "a reconciliation of the inputs is running";
+    const watcherReason =
+      "cannot watch /consumer/src: ENOSPC: System limit for number of file watchers reached";
+    const gitReason =
+      "git's ignored paths could not be read, so every file there counts as an input: git could not be run";
+    const answer = humanAnswer({
+      inputs: {
+        revision: 7,
+        reconciliation: { state: "incomplete", reason: reconciliationReason },
+        watcher: { state: "unhealthy", reason: watcherReason },
+        pendingChanges: 0,
+        gitUnread: [gitReason],
+      },
+    });
+    const text = contextLines(answer).join("\n");
+    expect({
+      revision: /revision\D*\b7\b/i.test(text),
+      reconciliation: text.includes(reconciliationReason),
+      watcher: text.includes(watcherReason),
+      gitUnread: text.includes(gitReason),
+      discovery: /discovery[^\n]*\bstale\b/i.test(text),
+    }).toStrictEqual({
+      revision: true,
+      reconciliation: true,
+      watcher: true,
+      gitUnread: true,
+      discovery: true,
+    });
+  });
+
+  it("D1940: a human answer prints when the last reconciliation ended", () => {
+    const text = contextLines(
+      humanAnswer({
+        inputs: { ...SETTLED_INPUTS, lastReconciledAt: RECONCILED_AT },
+      }),
+    ).join("\n");
+    expect(text.includes(RECONCILED_AT)).toBe(true);
+  });
+
+  it("D1941: a human answer prints how many changed paths the daemon has not yet read", () => {
+    const text = contextLines(
+      humanAnswer({ inputs: { ...SETTLED_INPUTS, pendingChanges: 3 } }),
+    ).join("\n");
+    expect(/changed paths[^\n]*\b3\b/i.test(text)).toBe(true);
+  });
+
+  it("D1942: a human answer names each workspace with no current fingerprint beside its reason", () => {
+    const reason =
+      "the test module packages/b/gen/b.test.ts cannot be read: EISDIR: illegal operation on a directory, read";
+    const lines = contextLines(
+      humanAnswer({
+        unfingerprintedWorkspaces: [{ workspacePath: WORKSPACE_B, reason }],
+      }),
+    );
+    expect(
+      lines.some((line) => line.includes(WORKSPACE_B) && line.includes(reason)),
+    ).toBe(true);
+  });
+
+  it("D1943: a human answer prints the discovery's freshness while the inputs are settled", () => {
+    const text = contextLines(humanAnswer({})).join("\n");
+    expect(/discovery[^\n]*\bstale\b/i.test(text)).toBe(true);
+  });
+
+  it("D1944: --json fields keep the input facts, the discovery's freshness and the unfingerprinted workspaces", () => {
+    const answer = humanAnswer({
+      unfingerprintedWorkspaces: [
+        { workspacePath: WORKSPACE_B, reason: "cannot be read" },
+      ],
+    });
+    const fields = answerFields(answer);
+    expect({
+      inputs: fields["inputs"],
+      discovery: (fields["discovery"] as Document | undefined)?.["freshness"],
+      unfingerprinted: fields["unfingerprintedWorkspaces"],
+    }).toStrictEqual({
+      inputs: SETTLED_INPUTS,
+      discovery: "stale",
+      unfingerprinted: [
+        { workspacePath: WORKSPACE_B, reason: "cannot be read" },
+      ],
+    });
   });
 
   it(

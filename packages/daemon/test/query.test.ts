@@ -1,7 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { FingerprintResult } from "../src/inputs/fingerprint.js";
+import type { CurrentInputs } from "../src/inputs/input-tracker.js";
 import type {
+  InputFacts,
   NoAnswer,
   PathStatusAnswer,
   SummaryAnswer,
@@ -49,6 +52,55 @@ const IDLE: DaemonView = {
   activity: { state: "idle" },
   unstoredJobs: [],
 };
+const FIRST_RECONCILIATION = "the first reconciliation has not ended";
+const OTHER_DIGEST = "sha256:2C26B46B68FFC68F";
+
+/** Inputs before the first reconciliation has ended, when no fingerprint can be computed. */
+const UNSETTLED: CurrentInputs = {
+  facts: {
+    revision: 0,
+    reconciliation: { state: "incomplete", reason: FIRST_RECONCILIATION },
+    watcher: { state: "healthy" },
+    pendingChanges: 0,
+    gitUnread: [],
+  },
+  unavailable: FIRST_RECONCILIATION,
+  workspaceFingerprint: () => ({ ok: false, reason: FIRST_RECONCILIATION }),
+  discoveryFingerprint: () => ({ ok: false, reason: FIRST_RECONCILIATION }),
+  testModuleChangedSince: () => FIRST_RECONCILIATION,
+};
+
+const SETTLED_FACTS: InputFacts = {
+  revision: 3,
+  reconciliation: { state: "complete" },
+  lastReconciledAt: "2026-09-27T12:00:00.000Z",
+  watcher: { state: "healthy" },
+  pendingChanges: 0,
+  gitUnread: [],
+};
+
+/** Settled inputs whose current fingerprint is `workspaces[path]` for each workspace, and `discovery` for the discovery. */
+function settled(
+  workspaces: Readonly<Record<string, FingerprintResult>>,
+  discovery: FingerprintResult = { ok: true, digest: OTHER_DIGEST },
+): CurrentInputs {
+  return {
+    facts: SETTLED_FACTS,
+    workspaceFingerprint: (entry) =>
+      workspaces[entry.workspace.path] ?? {
+        ok: false,
+        reason: `no fingerprint was scripted for ${entry.workspace.path}`,
+      },
+    discoveryFingerprint: () => discovery,
+    testModuleChangedSince: () => undefined,
+  };
+}
+
+function digestOf(fingerprint: InputFingerprint): FingerprintResult {
+  return fingerprint.kind === "digest"
+    ? { ok: true, digest: fingerprint.digest }
+    : { ok: false, reason: "not fingerprinted" };
+}
 
 interface TestPlace {
   readonly workspacePath?: string;
@@ -97,11 +149,12 @@ function storedDiscovery(
   workspaces: readonly WorkspaceDiscovery[],
   notRead: readonly UnreadWorkspaceSource[] = [],
   adapterVersion = VITEST_ADAPTER_VERSION,
+  inputFingerprint = UNFINGERPRINTED,
 ): StoredDiscovery {
   return {
     projectIdentity: `${ROOT}/.git`,
     worktreeIdentity: ROOT,
-    inputFingerprint: UNFINGERPRINTED,
+    inputFingerprint,
     adapterVersion,
     discoveryId: "discovery-1",
     discovery: { workspaces, notRead },
@@ -175,8 +228,9 @@ function answered<A extends object>(answer: A | NoAnswer): A {
 function summaryOf(
   discovery: StoredDiscovery,
   latestRuns: readonly StoredRun[] = [],
+  inputs: CurrentInputs = UNSETTLED,
 ): SummaryAnswer {
-  return answered(summaryAnswer(results(discovery, latestRuns), IDLE));
+  return answered(summaryAnswer(results(discovery, latestRuns), IDLE, inputs));
 }
 
 /** The counts of a set that are not zero, which is all a test of one state or freshness needs to read. */
@@ -421,7 +475,7 @@ describe("each test's freshness, beside its state", () => {
     expect(nonZero(summary.counts.freshness)).toStrictEqual({ unknown: 1 });
   });
 
-  it("D1806: a finished result of the current adapter version stored with a digest is unknown, since no current fingerprint exists", () => {
+  it("D1806: a finished result of the current adapter version stored with a digest is unknown while no current fingerprint can be computed", () => {
     const test = discovered("fingerprinted");
     const summary = summaryOf(
       storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
@@ -453,8 +507,235 @@ describe("each test's freshness, beside its state", () => {
         discoveryId: "discovery-1",
         adapterVersion: OTHER_ADAPTER_VERSION,
         adapterVersionCurrent: false,
+        freshness: "stale",
       },
     });
+  });
+
+  it("D1883: a finished result stored with a digest equal to its workspace's current fingerprint is current", () => {
+    const test = discovered("unchanged");
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
+      [
+        storedRun(
+          ranRun([ranModule([finished(test, "passed")])]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+      settled({ [WORKSPACE_A]: digestOf(DIGEST) }),
+    );
+    expect(nonZero(summary.counts.freshness)).toStrictEqual({ current: 1 });
+  });
+
+  it("D1884: each result is compared with its own workspace's current fingerprint, so one stored under another workspace's digest is stale", () => {
+    const inA = discovered("a");
+    const inB = discovered("b", { workspacePath: WORKSPACE_B });
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [inA]),
+        discoveredWorkspace(WORKSPACE_B, [inB]),
+      ]),
+      [
+        storedRun(
+          ranRun([ranModule([finished(inA, "passed")])]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+        storedRun(
+          ranRun([ranModule([finished(inB, "passed")])], {}, WORKSPACE_B),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+      settled({
+        [WORKSPACE_A]: digestOf(DIGEST),
+        [WORKSPACE_B]: { ok: true, digest: OTHER_DIGEST },
+      }),
+    );
+    expect(nonZero(summary.counts.freshness)).toStrictEqual({
+      current: 1,
+      stale: 1,
+    });
+  });
+
+  it("D1885: the answer's discovery is current when its stored digest equals the discovery's current fingerprint", () => {
+    const summary = summaryOf(
+      storedDiscovery(
+        [discoveredWorkspace(WORKSPACE_A, [discovered("a")])],
+        [],
+        VITEST_ADAPTER_VERSION,
+        DIGEST,
+      ),
+      [],
+      settled({ [WORKSPACE_A]: digestOf(DIGEST) }, digestOf(DIGEST)),
+    );
+    expect(summary.discovery.freshness).toBe("current");
+  });
+
+  it("D1886: a workspace whose own fingerprint cannot be computed is listed with the reason, while the others answer", () => {
+    const reason =
+      "the test module packages/b/gen/b.test.ts cannot be read: EISDIR: illegal operation on a directory, read";
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+        discoveredWorkspace(WORKSPACE_B, [
+          discovered("b", { workspacePath: WORKSPACE_B }),
+        ]),
+      ]),
+      [],
+      settled({
+        [WORKSPACE_A]: digestOf(DIGEST),
+        [WORKSPACE_B]: { ok: false, reason },
+      }),
+    );
+    expect(summary.unfingerprintedWorkspaces).toStrictEqual([
+      { workspacePath: WORKSPACE_B, reason },
+    ]);
+  });
+
+  it("D1887: while the discovery is not current, a duplicate-marked test's result is unknown and a uniquely named test's is current", () => {
+    const first = discovered("twin", { isDuplicate: true });
+    const second: DiscoveredTest = {
+      ...first,
+      identity: { ...first.identity, occurrence: 1 },
+    };
+    const alone = discovered("alone");
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [first, second, alone]),
+      ]),
+      [
+        storedRun(
+          ranRun([
+            ranModule([
+              finished(first, "passed"),
+              finished(second, "failed"),
+              finished(alone, "passed"),
+            ]),
+          ]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+      settled({ [WORKSPACE_A]: digestOf(DIGEST) }),
+    );
+    expect({
+      freshness: nonZero(summary.counts.freshness),
+      discovery: summary.discovery.freshness,
+    }).toStrictEqual({
+      freshness: { unknown: 2, current: 1 },
+      discovery: "unknown",
+    });
+  });
+
+  it("D1935: while the discovery is not current, a test it lists once but the run records twice is unknown, not current from the new test's result", () => {
+    const listed = discovered("twin");
+    const recordedFirst: RecordedTest = {
+      ...finished(listed, "failed"),
+      isDuplicate: true,
+    };
+    const recordedSecond: RecordedTest = {
+      ...finished(listed, "passed"),
+      identity: { ...listed.identity, occurrence: 1 },
+      isDuplicate: true,
+    };
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [listed])]),
+      [
+        storedRun(
+          ranRun([ranModule([recordedFirst, recordedSecond])]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+      settled({ [WORKSPACE_A]: digestOf(DIGEST) }),
+    );
+    expect(nonZero(summary.counts.freshness)).toStrictEqual({ unknown: 1 });
+  });
+
+  it("D1936: while the discovery is current, a duplicate-marked test's result stored under the current digest is current", () => {
+    const first = discovered("twin", { isDuplicate: true });
+    const second: DiscoveredTest = {
+      ...first,
+      identity: { ...first.identity, occurrence: 1 },
+    };
+    const summary = summaryOf(
+      storedDiscovery(
+        [discoveredWorkspace(WORKSPACE_A, [first, second])],
+        [],
+        VITEST_ADAPTER_VERSION,
+        DIGEST,
+      ),
+      [
+        storedRun(
+          ranRun([
+            ranModule([finished(first, "passed"), finished(second, "passed")]),
+          ]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+      settled({ [WORKSPACE_A]: digestOf(DIGEST) }, digestOf(DIGEST)),
+    );
+    expect(nonZero(summary.counts.freshness)).toStrictEqual({ current: 2 });
+  });
+
+  it("D1937: a discovery stored under another digest than its current fingerprint is stale, and vouches for no duplicate's position", () => {
+    const first = discovered("twin", { isDuplicate: true });
+    const second: DiscoveredTest = {
+      ...first,
+      identity: { ...first.identity, occurrence: 1 },
+    };
+    const summary = summaryOf(
+      storedDiscovery(
+        [discoveredWorkspace(WORKSPACE_A, [first, second])],
+        [],
+        VITEST_ADAPTER_VERSION,
+        DIGEST,
+      ),
+      [
+        storedRun(
+          ranRun([
+            ranModule([finished(first, "passed"), finished(second, "passed")]),
+          ]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+      settled(
+        { [WORKSPACE_A]: digestOf(DIGEST) },
+        { ok: true, digest: OTHER_DIGEST },
+      ),
+    );
+    expect({
+      discovery: summary.discovery.freshness,
+      freshness: nonZero(summary.counts.freshness),
+    }).toStrictEqual({ discovery: "stale", freshness: { unknown: 2 } });
+  });
+
+  it("D1938: a summary and a path status carry the input facts of the inputs they were answered from", async () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+      [],
+      settled({ [WORKSPACE_A]: digestOf(DIGEST) }),
+    );
+    const pathStatus = await statusIn(
+      WORKSPACE_A,
+      (answer) => ("noAnswer" in answer ? answer : answer.inputs),
+      settled({}),
+    );
+    expect({ summary: summary.inputs, pathStatus }).toStrictEqual({
+      summary: SETTLED_FACTS,
+      pathStatus: SETTLED_FACTS,
+    });
+  });
+
+  it("D1939: while no fingerprint can be computed, no workspace is listed as unfingerprinted on its own", () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+    );
+    expect(summary.unfingerprintedWorkspaces).toStrictEqual([]);
   });
 });
 
@@ -766,15 +1047,20 @@ describe("a summary with nothing to answer", () => {
     const answer = summaryAnswer(
       results(storedDiscovery([discoveredWorkspace(WORKSPACE_A, [])])),
       IDLE,
+      UNSETTLED,
     );
     expect("noAnswer" in answer).toBe(true);
   });
 
   it("D1821: with no stored discovery, the reason names the daemon's activity", () => {
-    const answer = summaryAnswer(results(undefined), {
-      ...IDLE,
-      activity: { state: "running", workspacePath: WORKSPACE_A },
-    });
+    const answer = summaryAnswer(
+      results(undefined),
+      {
+        ...IDLE,
+        activity: { state: "running", workspacePath: WORKSPACE_A },
+      },
+      UNSETTLED,
+    );
     expect("noAnswer" in answer ? answer.noAnswer : answer).toMatch(
       /running workspace packages\/a/,
     );
@@ -859,12 +1145,15 @@ function statusIn(
   work: (answer: PathStatusAnswer | NoAnswer, root: string) => unknown = (
     answer,
   ) => answer,
+  inputs: CurrentInputs = UNSETTLED,
 ): Promise<unknown> {
   return inTempDir((root) => {
-    const answer = pathStatusAnswer(join(root, path), consumerTree(root), {
-      ...IDLE,
-      consumerRoot: root,
-    });
+    const answer = pathStatusAnswer(
+      join(root, path),
+      consumerTree(root),
+      { ...IDLE, consumerRoot: root },
+      inputs,
+    );
     return work(answer, root);
   });
 }

@@ -1,5 +1,6 @@
 import {
   assessEvidence,
+  assessFreshness,
   testIdentityKey,
   type Freshness,
   type TestIdentity,
@@ -37,13 +38,21 @@ export interface TestStanding {
 
 /** What a run holds for one test: a finished outcome, or the state that stands in for one. */
 type RunAnswer =
-  | { readonly outcome: TestOutcome }
+  | {
+      readonly outcome: TestOutcome;
+      /** Whether the run told the test apart from same-named ones only by its position. */
+      readonly positional: boolean;
+    }
   | { readonly state: Exclude<TestState, TestOutcome> };
 
-/** The evidence of an unfingerprinted result, which `assessEvidence` rates unknown. */
+/** The digest of an unfingerprinted record, which rates unknown. */
 const NO_FINGERPRINT = "";
-/** No input fingerprint is computed yet, so no result is current. */
-const CURRENT_FINGERPRINT: string | undefined = undefined;
+
+/** A workspace's current input fingerprint by its path; undefined when none can be computed now. */
+export type CurrentFingerprints = (workspacePath: string) => string | undefined;
+
+/** A stored run or discovery: what it was produced from. */
+type StoredBasis = Pick<StoredRun, "adapterVersion" | "inputFingerprint">;
 
 const RUN_STATES = {
   failed: RUN_FAILED,
@@ -56,15 +65,25 @@ const MODULE_STATES = {
   failed: MODULE_FAILED_TO_LOAD,
 } as const;
 
-/** Every test of every discovered workspace of the discovery, each answered only by its workspace's latest run. */
+/**
+ * Every test of every discovered workspace of the discovery, each answered only by its workspace's latest run. A
+ * test the discovery or the run marks duplicate is matched to its result by its position, which only a current
+ * discovery vouches for.
+ */
 export function testStandings(
   discovery: StoredDiscovery,
-  latestRuns: readonly StoredRun[],
+  latestRuns: ReadonlyMap<string, StoredRun>,
+  current: CurrentFingerprints,
+  discoveryIsCurrent: boolean,
 ): TestStanding[] {
-  const runs = new Map(latestRuns.map((run) => [run.run.workspace.path, run]));
   return discovery.discovery.workspaces.flatMap((entry) =>
     entry.status === "discovered"
-      ? workspaceStandings(entry.tests, runs.get(entry.workspace.path))
+      ? workspaceStandings(
+          entry.tests,
+          latestRuns.get(entry.workspace.path),
+          current(entry.workspace.path),
+          discoveryIsCurrent,
+        )
       : [],
   );
 }
@@ -72,6 +91,8 @@ export function testStandings(
 function workspaceStandings(
   tests: readonly DiscoveredTest[],
   stored: StoredRun | undefined,
+  currentFingerprint: string | undefined,
+  discoveryIsCurrent: boolean,
 ): TestStanding[] {
   if (stored === undefined) {
     return tests.map((test) => ({
@@ -87,26 +108,56 @@ function workspaceStandings(
       ? {
           test,
           state: found.outcome,
-          freshness: finishedFreshness(found.outcome, stored),
+          freshness: storedFreshness(stored, (digest) =>
+            positionUnvouched(test, found.positional, discoveryIsCurrent)
+              ? UNKNOWN
+              : assessEvidence(
+                  { fingerprint: digest, outcome: found.outcome },
+                  currentFingerprint,
+                ).freshness,
+          ),
         }
       : { test, state: found.state, freshness: UNKNOWN };
   });
 }
 
-/** A finished result's freshness; a test with no finished result is unknown, so it never reaches here. */
-function finishedFreshness(outcome: TestOutcome, stored: StoredRun): Freshness {
+/**
+ * A test marked duplicate by the discovery or by the run that answers it is told apart only by its position, which
+ * only a current discovery vouches for.
+ */
+function positionUnvouched(
+  test: DiscoveredTest,
+  recordedPositional: boolean,
+  discoveryIsCurrent: boolean,
+): boolean {
+  return (test.isDuplicate || recordedPositional) && !discoveryIsCurrent;
+}
+
+/** The discovery's freshness, decided as a finished result's is. */
+export function discoveryFreshness(
+  stored: StoredBasis,
+  currentFingerprint: string | undefined,
+): Freshness {
+  return storedFreshness(stored, (digest) =>
+    assessFreshness(digest, currentFingerprint),
+  );
+}
+
+/**
+ * Stale when stored under another adapter version, whatever the inputs; otherwise `assess` rates the stored digest
+ * against the current fingerprint, and a record stored not fingerprinted has none, so it is unknown.
+ */
+function storedFreshness(
+  stored: StoredBasis,
+  assess: (digest: string) => Freshness,
+): Freshness {
   if (!isCurrentAdapterVersion(stored.adapterVersion)) return STALE;
   const fingerprint = stored.inputFingerprint;
-  return assessEvidence(
-    {
-      fingerprint:
-        fingerprint.kind === NOT_FINGERPRINTED
-          ? NO_FINGERPRINT
-          : fingerprint.digest,
-      outcome,
-    },
-    CURRENT_FINGERPRINT,
-  ).freshness;
+  return assess(
+    fingerprint.kind === NOT_FINGERPRINTED
+      ? NO_FINGERPRINT
+      : fingerprint.digest,
+  );
 }
 
 /** A record stored under another adapter version was recorded under another meaning. */
@@ -141,7 +192,7 @@ function runAnswerer(stored: StoredRun): (identity: TestIdentity) => RunAnswer {
 
 function recordedAnswer(test: RecordedTest): RunAnswer {
   return test.execution === "finished"
-    ? { outcome: test.outcome }
+    ? { outcome: test.outcome, positional: test.isDuplicate }
     : { state: INTERRUPTED };
 }
 

@@ -1618,10 +1618,10 @@
   },
   {
     "id": "D1453",
-    "defect": "The daemon stores its records under a fingerprint, so a result whose inputs were never fingerprinted can read as current.",
+    "defect": "The daemon stores every job not fingerprinted, even one whose inputs held still from its start to its end, so none of its results can ever read current.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      inputFingerprint: { kind: NOT_FINGERPRINTED },",
-    "new": "      inputFingerprint: { kind: \"digest\", digest: \"unknown\" },"
+    "old": "    if (print.ok) {\n      return {\n        ...scope,",
+    "new": "    if (print.ok && false) {\n      return {\n        ...scope,"
   },
   {
     "id": "D1454",
@@ -1921,8 +1921,8 @@
     "id": "D1500",
     "defect": "The daemon stores its records under the project's identity for the worktree's, so two worktrees on one state directory read back each other's runs.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      ...parts.scope,",
-    "new": "      ...parts.scope,\n      worktreeIdentity: parts.scope.projectIdentity,"
+    "old": "    const { scope, log } = this.#parts;",
+    "new": "    const { log } = this.#parts;\n    const scope = { ...this.#parts.scope, worktreeIdentity: this.#parts.scope.projectIdentity };"
   },
   {
     "id": "D1501",
@@ -2416,10 +2416,10 @@
   },
   {
     "id": "D1766",
-    "defect": "A stop that arrives between the serving report and the acceptance is followed by the start sequence, so discovery starts after the stop.",
-    "file": "packages/daemon/src/daemon/daemon-main.ts",
-    "old": "    if (!lifecycle.isStopping()) lifecycle.begin();",
-    "new": "    lifecycle.begin();"
+    "defect": "The daemon never reads itself as stopping, so a stop that arrives between the serving report and the acceptance is followed by the start sequence, and discovery starts after the stop.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return this.#stopping !== undefined;",
+    "new": "    return false;"
   },
   {
     "id": "D1767",
@@ -2432,8 +2432,8 @@
     "id": "D1792",
     "defect": "Every finished test reads passed, whatever outcome its latest run recorded.",
     "file": "packages/daemon/src/query/test-states.ts",
-    "old": "    ? { outcome: test.outcome }",
-    "new": "    ? { outcome: \"passed\" as const }"
+    "old": "    ? { outcome: test.outcome, positional: test.isDuplicate }",
+    "new": "    ? { outcome: \"passed\" as const, positional: test.isDuplicate }"
   },
   {
     "id": "D1793",
@@ -2528,10 +2528,10 @@
   },
   {
     "id": "D1806",
-    "defect": "A fingerprinted result is compared with its own digest as the current fingerprint, so it reads current.",
+    "defect": "A fingerprinted result is compared with its own digest as the current fingerprint, so it reads current when no current fingerprint can be computed.",
     "file": "packages/daemon/src/query/test-states.ts",
-    "old": "    CURRENT_FINGERPRINT,\n  ).freshness;",
-    "new": "    fingerprint.kind === NOT_FINGERPRINTED ? undefined : fingerprint.digest,\n  ).freshness;"
+    "old": "                  currentFingerprint,\n                ).freshness,",
+    "new": "                  digest,\n                ).freshness,"
   },
   {
     "id": "D1807",
@@ -2662,7 +2662,7 @@
   {
     "id": "D1825",
     "defect": "A module path holding .. is joined without normalizing, so its test never lies under the folder it is in.",
-    "file": "packages/daemon/src/query/path-status.ts",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
     "old": "  return posix.normalize(posix.join(workspacePath, modulePath));",
     "new": "  return `${workspacePath}/${modulePath}`;"
   },
@@ -2838,8 +2838,8 @@
     "id": "D1872",
     "defect": "A path-status answer leaves out the jobs that ended with nothing stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return pathStatusAnswer(path, this.#latestResults(), this.#view());",
-    "new": "    return pathStatusAnswer(path, this.#latestResults(), { ...this.#view(), unstoredJobs: [] });"
+    "old": "      path,\n      this.#latestResults(),\n      this.#view(),",
+    "new": "      path,\n      this.#latestResults(),\n      { ...this.#view(), unstoredJobs: [] },"
   },
   {
     "id": "D1844",
@@ -2875,5 +2875,432 @@
     "file": "packages/daemon/src/query-client.ts",
     "old": "`Cannot get an answer from the daemon for ${consumerRoot}: ${errorText(failure)}.`",
     "new": "`Cannot get an answer from the daemon: ${errorText(failure)}.`"
+  },
+  {
+    "id": "D1877",
+    "defect": "A job's verdict is ignored, so a run during which an input changed is stored under its digest and can read current.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const print: FingerprintResult = verdict.fingerprinted\n      ? fingerprint()",
+    "new": "    const print: FingerprintResult = true\n      ? fingerprint()"
+  },
+  {
+    "id": "D1878",
+    "defect": "A run is stored under its start fingerprint even when its workspace's fingerprint at its end differs.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "  return started.digest === ended.digest\n    ? started",
+    "new": "  return true\n    ? started"
+  },
+  {
+    "id": "D1879",
+    "defect": "A discovery is stored under its digest although a listed test module no watch covers may have changed while it ran.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      return changed === undefined\n        ? current.discoveryFingerprint(discovery)",
+    "new": "      return true\n        ? current.discoveryFingerprint(discovery)"
+  },
+  {
+    "id": "D1880",
+    "defect": "The discovery starts before the first reconciliation of the inputs has ended.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.firstReconciled();\n",
+    "new": ""
+  },
+  {
+    "id": "D1881",
+    "defect": "The stop sequence never stops the input tracker, so a job's end waiting on the inputs holds the stop forever.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.stop();\n",
+    "new": ""
+  },
+  {
+    "id": "D1882",
+    "defect": "The input tracker starts when the daemon is built, before the confirmed start is accepted.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#parts = parts;\n",
+    "new": "    this.#parts = parts;\n    parts.inputs.start();\n"
+  },
+  {
+    "id": "D1883",
+    "defect": "A query never passes a workspace's current fingerprint to the comparison, so a result whose inputs are unchanged reads unknown, never current.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      (path) => digestOf(fingerprints.get(path)),",
+    "new": "      () => undefined,"
+  },
+  {
+    "id": "D1884",
+    "defect": "Every result is compared with the first workspace's current fingerprint, so a result stored under that workspace's digest reads current in another workspace whose inputs differ.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "          current(entry.workspace.path),",
+    "new": "          current(discovery.discovery.workspaces[0]?.workspace.path ?? \"\"),"
+  },
+  {
+    "id": "D1885",
+    "defect": "The discovery's freshness is decided with no current fingerprint, so a discovery whose inputs are unchanged never reads current.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    digestOf(inputs.discoveryFingerprint(discovery.discovery)),",
+    "new": "    undefined,"
+  },
+  {
+    "id": "D1886",
+    "defect": "A workspace whose own fingerprint cannot be computed is left out of the answer, so nothing says why its results read unknown.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    print.ok ? [] : [{ workspacePath, reason: print.reason }],",
+    "new": "    [],"
+  },
+  {
+    "id": "D1887",
+    "defect": "A duplicate-marked test is matched to a result by its position even while the discovery is not current, so it can read current from another test's result.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  return (test.isDuplicate || recordedPositional) && !discoveryIsCurrent;",
+    "new": "  return false;"
+  },
+  {
+    "id": "D1888",
+    "defect": "An event naming an edited input is read but its new digest is never kept, so the fingerprint and the revision stay as they were.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#state.set(relative, entry.digest);\n",
+    "new": ""
+  },
+  {
+    "id": "D1891",
+    "defect": "Reading the queue of changed paths re-schedules itself when the queue is empty, so an idle tracker holds the event loop and no timer fires.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (this.#queue.size === 0 || this.#processing !== undefined) return;",
+    "new": "    if (this.#processing !== undefined) return;"
+  },
+  {
+    "id": "D1892",
+    "defect": "A directory git's listing names only because every entry in it was ignored is taken as ignored itself, so a new file git does not ignore there is never an input.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "    paths: new Set([...absolutePaths(absolute, files), ...checked.paths]),",
+    "new": "    paths: new Set([...absolutePaths(absolute, files), ...absolutePaths(absolute, directories)]),"
+  },
+  {
+    "id": "D1893",
+    "defect": "A path created after git's listing is counted without asking git, so a new file an ignore pattern covers changes the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    return this.#repositoryOf(path) !== undefined;",
+    "new": "    return false;"
+  },
+  {
+    "id": "D1894",
+    "defect": "A path under a directory git lists as ignored is not excluded, so a write there changes the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "      if (this.#ignored.has(current)) return true;\n",
+    "new": ""
+  },
+  {
+    "id": "D1895",
+    "defect": "A path under node_modules is not excluded, so installing a package changes the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "        .some((segment) => SKIPPED_DIRECTORIES.includes(segment))",
+    "new": "        .some(() => false)"
+  },
+  {
+    "id": "D1896",
+    "defect": "The exclusions are compared as the caller spelled them, so the state directory given through a link to the consumer root is not excluded and the daemon's own writes change the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    this.#exclusions = exclusions.map(canonicalPath);",
+    "new": "    this.#exclusions = exclusions;"
+  },
+  {
+    "id": "D1897",
+    "defect": "A job's end waits for every event accepted by the time it checks, not those seen before its end, so events naming a file that never stop arriving hold the job's end forever.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "    return !this.#reconciling() && this.#readThrough >= through;",
+    "new": "    return !this.#reconciling() && this.#readThrough >= this.#accepted;"
+  },
+  {
+    "id": "D1898",
+    "defect": "A listed test module no watch covers is never checked for an edit during a job, so a discovery that read it mid-edit is stored under its digest.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    if (inputs.selected.digests.has(path)) continue;\n    const modified",
+    "new": "    continue;\n    const modified"
+  },
+  {
+    "id": "D1899",
+    "defect": "A listed test module git ignores is left out of its workspace's fingerprint, so an edit to it leaves the workspace's results current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    if (inputs.selected.digests.has(path)) continue;\n    const read",
+    "new": "    continue;\n    const read"
+  },
+  {
+    "id": "D1900",
+    "defect": "A listed test module that cannot be read is taken as deleted, so its workspace gets a fingerprint from an input set it could not establish.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {\n      return { ok: true, digest: ABSENT_MODULE };",
+    "new": "    if (true) {\n      return { ok: true, digest: ABSENT_MODULE };"
+  },
+  {
+    "id": "D1901",
+    "defect": "The inventory's depth bound is never applied, so a walk past 64 levels completes as if the input set were bounded.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "  if (depth + 1 > MAX_INVENTORY_DEPTH) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1902",
+    "defect": "The inventory's depth bound refuses a directory exactly 64 levels below the root.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "  if (depth + 1 > MAX_INVENTORY_DEPTH) {",
+    "new": "  if (depth + 1 >= MAX_INVENTORY_DEPTH) {"
+  },
+  {
+    "id": "D1903",
+    "defect": "A watch that cannot open asks for another reconciliation while one runs, whose walk fails the same way, so the first reconciliation never ends.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (!this.#reconciling) this.#requestReconciliation(reason);\n  }\n\n  #markUnhealthy",
+    "new": "    this.#requestReconciliation(reason);\n  }\n\n  #markUnhealthy"
+  },
+  {
+    "id": "D1904",
+    "defect": "A git listing that cannot be run is not reported, so nothing says every file there counted as an input.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "      this.#unread.add(`${UNREAD_IGNORED_PREFIX}: ${listing.reason}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D1905",
+    "defect": "A change to a watched git file is dropped, so a commit or checkout that moves HEAD runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        if (names.has(name)) this.#listener.gitChanged(join(directory, name));",
+    "new": "        if (false) this.#listener.gitChanged(join(directory, name));"
+  },
+  {
+    "id": "D1906",
+    "defect": "An edit to a .gitignore under the root is read as an ordinary input edit, so what git ignores is not read again.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (basename(path) === IGNORE_FILE) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D1907",
+    "defect": "The periodic reconciliation runs 10 minutes after the last one ended, not 5, doubling how long an unreported change goes unseen.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;",
+    "new": "export const RECONCILE_INTERVAL_MS = 10 * 60 * 1000;"
+  },
+  {
+    "id": "D1908",
+    "defect": "A reconciliation that finds a changed input does not raise the input revision.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    if (changed.length > 0) this.#changed = true;\n",
+    "new": ""
+  },
+  {
+    "id": "D1909",
+    "defect": "A watch event reporting lost events is ignored, so the watcher stays healthy and no reconciliation looks for the changes it missed.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        if (name === null) {\n          this.#fail(LOST_EVENTS_REASON);\n          return;\n        }\n        this.#listener.changed(join(watched, name), kind);",
+    "new": "        if (name === null) {\n          return;\n        }\n        this.#listener.changed(join(watched, name), kind);"
+  },
+  {
+    "id": "D1910",
+    "defect": "A fingerprint is computed while a reconciliation runs, so a result can read current before the reconciliation has checked its inputs.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (this.#reconciling) return RECONCILING_REASON;\n",
+    "new": ""
+  },
+  {
+    "id": "D1911",
+    "defect": "A reconciliation keeps the watch failures of the rounds before it, so a watcher once unhealthy never returns to healthy.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#watcher.clearFailures();\n",
+    "new": ""
+  },
+  {
+    "id": "D1912",
+    "defect": "A fingerprint is computed before the first reconciliation has ended, over no inputs at all.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (this.#lastReconciledAt === undefined) {\n      return FIRST_RECONCILIATION_REASON;\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D1913",
+    "defect": "The project's digest is taken over its inputs in the order they were read, so two reconciliations of the same tree can disagree.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "  for (const key of [...entries.keys()].sort()) {",
+    "new": "  for (const key of [...entries.keys()]) {"
+  },
+  {
+    "id": "D1914",
+    "defect": "The environment is left out of the fingerprint, so a daemon restarted under another environment keeps its results current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    environment: environmentDigest,\n",
+    "new": ""
+  },
+  {
+    "id": "D1915",
+    "defect": "The Vitest version a workspace resolves is left out of its fingerprint, so upgrading Vitest keeps its results current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      vitestVersion: vitestVersion(entry.workspace.directory),",
+    "new": "      vitestVersion: null,"
+  },
+  {
+    "id": "D1916",
+    "defect": "The one watch of the root that Windows takes is opened non-recursive, so an edit below the root's own entries goes unseen.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "      watched,\n      this.#recursive,\n",
+    "new": "      watched,\n      false,\n"
+  },
+  {
+    "id": "D1917",
+    "defect": "A closed directory watch stays on the Linux watch list, so a directory deleted and re-created is refused a new watch and an edit in it goes unseen; proven over the test's inotify model, where a watch is bound to the directory it opened on, told apart by file id and birth time.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    this.#stop(watcher);\n    this.#tree.delete(directory);",
+    "new": "    this.#stop(watcher);"
+  },
+  {
+    "id": "D1918",
+    "defect": "A directory re-read on a rename keeps its old Linux watch, which is bound to the deleted directory, so an edit in the directory now there goes unseen; proven over the test's inotify model, where a watch is bound to the directory it opened on, told apart by file id and birth time.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    filter.distrust(path);\n    this.#watcher.dropDirectory(path);\n",
+    "new": "    filter.distrust(path);\n"
+  },
+  {
+    "id": "D1919",
+    "defect": "A watch is opened on the path as spelled, not its real path, so on Windows a directory reached through a short (8.3) name aborts the process on its first event; a directory link stands in for the short name.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        realpathSync.native(directory),",
+    "new": "        directory,"
+  },
+  {
+    "id": "D1920",
+    "defect": "A watcher that went unhealthy during a job is not recorded against it, so a job that spanned lost events is stored under its digest once a reconciliation has made the watcher healthy again.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n    this.#jobs.record(reason);\n",
+    "new": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n"
+  },
+  {
+    "id": "D1921",
+    "defect": "Every reconciliation request is recorded against the running jobs, so a job during which a reconciliation found no change is stored not fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#reconcileRequested = true;\n    if (this.#reconciling) return;",
+    "new": "    this.#reconcileRequested = true;\n    this.#jobs.record(reason);\n    if (this.#reconciling) return;"
+  },
+  {
+    "id": "D1922",
+    "defect": "The repository's info/exclude is not watched, so a change to what it ignores runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/git-sources.ts",
+    "old": "      exclude,\n",
+    "new": ""
+  },
+  {
+    "id": "D1923",
+    "defect": "A .gitignore between the repository's top level and the consumer root is not watched, so a change to what it ignores runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/git-sources.ts",
+    "old": "      ...ancestorIgnoreFiles(root, topLevel),\n",
+    "new": ""
+  },
+  {
+    "id": "D1924",
+    "defect": "packed-refs is not watched, so a ref moved only there, as a pack or a fetch can, runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/git-sources.ts",
+    "old": "      packedRefs,\n",
+    "new": ""
+  },
+  {
+    "id": "D1935",
+    "defect": "Only the discovery's duplicate mark is read, so a test the discovery lists once but the run records twice reads current by position from the new test's result while the discovery is not current.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  return (test.isDuplicate || recordedPositional) && !discoveryIsCurrent;",
+    "new": "  return test.isDuplicate && !discoveryIsCurrent;"
+  },
+  {
+    "id": "D1936",
+    "defect": "A duplicate-marked test never reads current, even while the discovery that marks it is current.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  return (test.isDuplicate || recordedPositional) && !discoveryIsCurrent;",
+    "new": "  return test.isDuplicate || recordedPositional;"
+  },
+  {
+    "id": "D1937",
+    "defect": "A stale discovery vouches for a duplicate's position as a current one does, so its duplicates read current.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      freshness === CURRENT,",
+    "new": "      freshness !== \"unknown\","
+  },
+  {
+    "id": "D1938",
+    "defect": "An answer carries input facts other than those of the inputs it was answered from.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      inputs: inputs.facts,",
+    "new": "      inputs: { ...inputs.facts, revision: 0 },"
+  },
+  {
+    "id": "D1939",
+    "defect": "While no fingerprint can be computed, every workspace is listed as unfingerprinted with the reason that is the whole answer's.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "        inputs.unavailable === undefined ? unfingerprinted(fingerprints) : [],",
+    "new": "        unfingerprinted(fingerprints),"
+  },
+  {
+    "id": "D1945",
+    "defect": "A job that starts while its inputs are unsettled is judged only by what changed while it ran, so one started during a lost-events reconciliation that then found no change is stored under its digest.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "    if (mark.unsettled !== undefined) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D1946",
+    "defect": "A re-walk of the consumer root compares against no earlier input, since the root's relative path matches none, so it reports every input changed and raises the revision; proven over the test's inotify model.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "  if (path === ROOT_RELATIVE_PATH) return true;\n",
+    "new": ""
+  },
+  {
+    "id": "D1947",
+    "defect": "A batch read that throws never marks its events read, so a job's end waits for an event that may never come.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "        this.#readFailed(error);\n      }",
+    "new": "        this.#readFailed(error);\n        return;\n      }"
+  },
+  {
+    "id": "D1948",
+    "defect": "A git file whose watch cannot open makes the input watcher unhealthy, so every result reads unknown for the daemon's life.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        (reason) => {\n          unopened.push(reason);\n        },",
+    "new": "        (reason) => this.#cannotWatchTree(directory, reason),"
+  },
+  {
+    "id": "D1949",
+    "defect": "With the consumer root outside git, no git file is watched even for a nested repository, so an edit to its info/exclude runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/git-sources.ts",
+    "old": "  if (!insideRepository && nestedRepositories.length === 0) {",
+    "new": "  if (!insideRepository) {"
+  },
+  {
+    "id": "D1950",
+    "defect": "A nested repository's ignored paths are never read, so a write to a path its .gitignore ignores changes the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    if (directory === this.#root || !holdsRepository(directory)) return;",
+    "new": "    return;"
+  },
+  {
+    "id": "D1951",
+    "defect": "A git file whose directory does not exist yet is watched for its own name in the nearest directory, so creating its directory is never matched and runs no reconciliation.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    names.add(basename(entry));",
+    "new": "    names.add(basename(file));"
+  },
+  {
+    "id": "D1952",
+    "defect": "A content hash ignores the stop signal, so a stop waits for a file's whole read.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "    signal === undefined ? undefined : { signal },",
+    "new": "    undefined,"
+  },
+  {
+    "id": "D1953",
+    "defect": "A stop that arrives during the first reconciliation of the inputs is followed by the discovery once the reconciliation ends.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.firstReconciled();\n    if (this.isStopping()) return;\n",
+    "new": "    await inputs.firstReconciled();\n"
+  },
+  {
+    "id": "D1960",
+    "defect": "A check-ignore that fails for a path created after a reconciliation is never named in git's unread reasons or the log, though the path counts as an input.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      await filter.check(unknown, this.#abort.signal);\n      this.#reportGitUnread(filter);\n",
+    "new": "      await filter.check(unknown, this.#abort.signal);\n"
   }
 ]
