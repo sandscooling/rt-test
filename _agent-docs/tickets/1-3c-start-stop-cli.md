@@ -371,6 +371,13 @@ Tech debt, left for triage against the commit:
 - `packages/daemon/src/daemon/daemon-main.ts` `serve`: a throw after `holdStore` succeeded (`new Executor`, `connectionServer`) reaches `main().catch`, which exits without closing the endpoint or removing the key and lock.
 - `packages/daemon/src/daemon/lifecycle.ts:86` `stop`: a rejected `#stopSequence` (for example `executor.close()` rejecting) is never handled, and the daemon can end before `closeEndpoint` runs.
 
+Tech-debt triage against 045758a (Step 9; `node scripts/list-open-issues.mjs`: 0 open issues). Rulings by the orchestrator, 09:05:
+
+- The duplicated refusal: 1.4's dev applies it, since 1.4 edits both files. It exports one reason builder from `client.ts`, used by `refuseRunningDaemon` and by `start.ts`, and the tests session re-anchors D1731 then.
+- `abandon`'s immediate kill: left as is. It leaves one key file per worktree in a user-only directory, which the next start overwrites and which cannot vouch for an impostor (ADR-0006). Nothing runs, since the daemon executes nothing before `begin`, and the store lock is recovered by pid.
+- `serve` after `holdStore`: closed, unreachable. What follows `holdStore` only assigns fields (`DaemonLifecycle`), builds `WindowsJobs` without starting its helper (`treeContainment`), returns an object literal (`connectionServer`), or catches its own errors (`DaemonLog.entry`).
+- `#stopSequence` rejecting: closed, unreachable. `#sequence` carries a catch from `begin`. `executor.close()` only resolves, through `#childEnded` and `WindowsJobs.close`. `store.close()` and `closeEndpoint()` are each caught.
+
 #### Test Coverage Gaps
 
 | #   | Source                                                              | Defect                                                                                                                                                                                                                                                                                                                                                                                        | Expected test                                                                                                                                                                                                                                                                                                         | Severity |
