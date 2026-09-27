@@ -73,7 +73,7 @@ const LISTED_WORKSPACES = [WORKSPACE_A, WORKSPACE_B].map((path) => ({
 const DECLINED = "not started: not trusted";
 const NON_INPUTS_FILE = "rt-test.json";
 const UNUSABLE_JSON_REASON =
-  "rt-test.json declares no non-inputs, so every file stays an input: it is not readable JSON (";
+  "rt-test.json declares no non-inputs, so every file stays an input: it is not valid JSON: ";
 /** How the listing's sentence on what a start executes begins. */
 const EXECUTES_OPENING = "Starting executes";
 /** How the question marks its answers. */

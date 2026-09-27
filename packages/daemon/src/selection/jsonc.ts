@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import type { Expression } from "oxc-parser";
 import { errorText } from "../vitest/error-text.js";
+import { BYTE_ORDER_MARK } from "../vitest/find-workspaces.js";
 import { parseGuarded } from "./source-imports.js";
 import { UNCERTAINTY, type UncertaintyKind } from "./selection-types.js";
 
 /** Nesting a config or `imports` value may reach before it is treated as unreadable. */
 export const MAX_JSON_DEPTH = 64;
 const JSONC_FILE_NAME = "config.js";
-const BYTE_ORDER_MARK = String.fromCodePoint(0xfeff);
 const NEGATIVE = "-";
 
 type Read<T> =

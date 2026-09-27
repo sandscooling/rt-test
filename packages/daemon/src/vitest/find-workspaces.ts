@@ -34,7 +34,7 @@ export const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
 const CHILDREN_SUFFIX = "/*";
 const NEGATION_PREFIX = "!";
 /** Some Windows editors begin a UTF-8 file with it, and `JSON.parse` refuses it. */
-const BYTE_ORDER_MARK = "﻿";
+export const BYTE_ORDER_MARK = String.fromCodePoint(0xfeff);
 const WILDCARD = "*";
 export const ROOT_PATH = ".";
 const PARENT_SEGMENT = "..";
@@ -194,7 +194,7 @@ function workspacePatterns(
   if (!existsSync(join(root, PACKAGE_JSON))) return [];
   const manifest = readJson(join(root, PACKAGE_JSON));
   if (!manifest.ok) {
-    notRead.push({ source: PACKAGE_JSON, reason: manifest.reason });
+    notRead.push({ source: PACKAGE_JSON, reason: `it ${manifest.reason}` });
     return [];
   }
   const field = objectField(manifest.value, WORKSPACES_FIELD);
@@ -279,7 +279,7 @@ function holdsVitestConfig(
   if (!manifest.ok) {
     notRead.push({
       source: joinPath(path, PACKAGE_JSON),
-      reason: `${manifest.reason}, so it was not checked for a Vitest dependency`,
+      reason: `it ${manifest.reason}, so it was not checked for a Vitest dependency`,
     });
     return false;
   }
@@ -300,15 +300,21 @@ function dependsOnVitest(manifest: unknown): boolean {
   });
 }
 
+/** A failed read's reason completes a sentence whose subject is the file: "cannot be read: ..." or "is not valid JSON: ...". */
 export function readJson(file: string): JsonRead {
+  let text: string;
   try {
-    const text = readFileSync(file, "utf8");
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    return { ok: false, reason: `cannot be read: ${errorText(error)}` };
+  }
+  try {
     const json = text.startsWith(BYTE_ORDER_MARK)
       ? text.slice(BYTE_ORDER_MARK.length)
       : text;
     return { ok: true, value: JSON.parse(json) };
   } catch (error) {
-    return { ok: false, reason: `cannot read: ${errorText(error)}` };
+    return { ok: false, reason: `is not valid JSON: ${errorText(error)}` };
   }
 }
 

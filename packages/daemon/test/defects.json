@@ -178,7 +178,7 @@
     "id": "D1044",
     "defect": "An unreadable root package.json is skipped silently, so no workspace pattern is searched and none is reported.",
     "file": "packages/daemon/src/vitest/find-workspaces.ts",
-    "old": "notRead.push({ source: PACKAGE_JSON, reason: manifest.reason });",
+    "old": "notRead.push({ source: PACKAGE_JSON, reason: `it ${manifest.reason}` });",
     "new": ""
   },
   {
@@ -3076,8 +3076,8 @@
     "id": "D1907",
     "defect": "The periodic reconciliation runs 10 minutes after the last one ended, not 5, doubling how long an unreported change goes unseen.",
     "file": "packages/daemon/src/inputs/reconcile-schedule.ts",
-    "old": "export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;",
-    "new": "export const RECONCILE_INTERVAL_MS = 10 * 60 * 1000;"
+    "old": "const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;",
+    "new": "const RECONCILE_INTERVAL_MS = 10 * 60 * 1000;"
   },
   {
     "id": "D1908",
@@ -3426,8 +3426,8 @@
     "id": "D1999",
     "defect": "An rt-test.json deleted between the existence check and the read is reported as unusable, with a reason, rather than as absent.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "    return after === true\n",
-    "new": "    return true\n"
+    "old": "return after === true ? unusable(",
+    "new": "return true ? unusable("
   },
   {
     "id": "D2000",
@@ -3561,5 +3561,12 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    let stored: TestDiscovery | undefined;\n    try {\n      stored = this.#latestResults().discovery?.discovery;\n    } catch (error) {\n      log.error(\"reading the latest stored discovery's test modules\", error);\n      return;\n    }\n",
     "new": "    const stored = this.#latestResults().discovery?.discovery;\n"
+  },
+  {
+    "id": "D2055",
+    "defect": "A JSON syntax error is reported as a file that cannot be read, so the reason blurs an unreadable rt-test.json with one that is not valid JSON.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    return { ok: false, reason: `is not valid JSON: ${errorText(error)}` };",
+    "new": "    return { ok: false, reason: `cannot be read: ${errorText(error)}` };"
   }
 ]

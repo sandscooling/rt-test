@@ -1,6 +1,11 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
-import { VITE_CONFIG_FILES, VITEST_CONFIG_FILES } from "./find-workspaces.js";
+import {
+  BYTE_ORDER_MARK,
+  PACKAGE_JSON,
+  VITE_CONFIG_FILES,
+  VITEST_CONFIG_FILES,
+} from "./find-workspaces.js";
 
 /** Loads through Vite's module runner, writing no temp file, but cannot load CommonJS syntax. */
 const RUNNER_LOADER = "runner";
@@ -23,8 +28,6 @@ const CONFIG_FILES = [...VITEST_CONFIG_FILES, ...VITE_CONFIG_FILES];
 const ESM_EXTENSIONS: ReadonlySet<string> = new Set([".mts", ".mjs"]);
 const COMMONJS_EXTENSIONS: ReadonlySet<string> = new Set([".cts", ".cjs"]);
 const ESM_PACKAGE_TYPE = "module";
-const PACKAGE_JSON = "package.json";
-const BYTE_ORDER_MARK = "﻿";
 
 /** The config file Vitest would load from the workspace directory, and the loader that loads it writing nothing; undefined when it holds none. */
 export function workspaceConfig(

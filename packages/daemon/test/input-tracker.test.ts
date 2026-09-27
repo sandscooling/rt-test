@@ -125,7 +125,7 @@ const DECLARATION_FILE = "rt-test.json";
 const DECLARATION_CHANGED_STARTED =
   "input reconciliation started: rt-test.json, which declares the non-inputs, changed";
 const UNUSABLE_JSON_REASON =
-  "rt-test.json declares no non-inputs, so every file stays an input: it is not readable JSON (";
+  "rt-test.json declares no non-inputs, so every file stays an input: it is not valid JSON: ";
 const TRACKER_MODULE = new URL(
   "../src/inputs/input-tracker.ts",
   import.meta.url,
@@ -1998,5 +1998,14 @@ describe("the declared patterns", () => {
     expect(await declarationStateIn(JSON.stringify(["docs/**"]))).toBe(
       "unusable",
     );
+  });
+
+  it("D2055: an rt-test.json that is not valid JSON is reported as not valid JSON, never as a file that cannot be read", async () => {
+    const declaration = await declarationIn("{ not json");
+    const reason = "reason" in declaration ? declaration.reason : "";
+    expect({
+      notValid: reason.includes("it is not valid JSON:"),
+      unreadable: reason.includes("cannot be read"),
+    }).toStrictEqual({ notValid: true, unreadable: false });
   });
 });

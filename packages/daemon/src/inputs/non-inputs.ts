@@ -70,9 +70,7 @@ export function readNonInputs(consumerRoot: string): NonInputsDeclaration {
   const read = readJson(file);
   if (!read.ok) {
     const after = presence(file);
-    return after === true
-      ? unusable(`it is not readable JSON (${read.reason})`)
-      : after;
+    return after === true ? unusable(`it ${read.reason}`) : after;
   }
   const problem = declarationProblem(read.value);
   if (problem !== undefined) return unusable(problem);
