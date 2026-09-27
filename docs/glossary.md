@@ -42,6 +42,10 @@ _Avoid_: hash, cache key
 A file whose edit RT Test treats as able to change a test's result.
 _Avoid_: source, dependency
 
+**Declared non-input**:
+A file the consumer lists in `rt-test.json` as read by no test, so its edit changes no input fingerprint and selects nothing.
+_Avoid_: ignored file, excluded file
+
 **Input revision**:
 The number naming a worktree's inputs as the daemon last observed them, raised by each change it observes.
 _Avoid_: version, generation

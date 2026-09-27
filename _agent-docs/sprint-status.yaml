@@ -10,8 +10,8 @@ sprint-1: done
 1-4-query-cli: done
 
 sprint-2: in-progress
-2-1-track-inputs: ready-for-dev
-2-1b-declared-non-inputs: backlog
+2-1-track-inputs: in-progress
+2-1b-declared-non-inputs: ready-for-dev
 2-2-workspace-selection: done
 2-2b-undeclared-edges: done
 2-3-schedule-runs: backlog
