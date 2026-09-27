@@ -1,0 +1,716 @@
+[
+  {
+    "id": "D1346",
+    "defect": "The package workspace listing keeps only Vitest workspaces, so a plain package a Vitest workspace depends on is never listed and its changes select nothing.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  return listWorkspaces(consumerRoot, () => true);",
+    "new": "  return listWorkspaces(consumerRoot, holdsVitestConfig);"
+  },
+  {
+    "id": "D1347",
+    "defect": "peerDependencies is not read, so a workspace depending on another only as a peer is never selected by its changes.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  \"peerDependencies\",\n",
+    "new": ""
+  },
+  {
+    "id": "D1348",
+    "defect": "An npm: alias is read as a registry package, so the workspace it installs is not a dependency.",
+    "file": "packages/daemon/src/selection/package-specs.ts",
+    "old": "  if (spec.startsWith(NPM_ALIAS_PREFIX)) {",
+    "new": "  if (spec.startsWith(\"npm-alias-never:\")) {"
+  },
+  {
+    "id": "D1349",
+    "defect": "A file: dependency is read as a registry package, so the workspace its path points into is not a dependency.",
+    "file": "packages/daemon/src/selection/package-specs.ts",
+    "old": "const LOCAL_PATH_PREFIXES = [\"file:\", \"link:\", \"portal:\"];",
+    "new": "const LOCAL_PATH_PREFIXES = [\"link:\", \"portal:\"];"
+  },
+  {
+    "id": "D1350",
+    "defect": "A dependency named by its key and by its workspace:* spec records the same edge twice.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    if (byKey.includes(dependency)) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D1351",
+    "defect": "A manifest edge's producer drops the field and key, so the selection reason cannot say which dependency selected the test.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "const detail = `${manifestPath} ${field} ${JSON.stringify(key)}: ${JSON.stringify(spec)}`;",
+    "new": "const detail = `${manifestPath}: ${JSON.stringify(spec)}`;"
+  },
+  {
+    "id": "D1352",
+    "defect": "The root resolutions field is not read, so a Yarn resolution pointing into a workspace adds no edge.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "const OVERRIDE_FIELDS = [[\"overrides\"], [\"resolutions\"], [\"pnpm\", \"overrides\"]];",
+    "new": "const OVERRIDE_FIELDS = [[\"overrides\"], [\"pnpm\", \"overrides\"]];"
+  },
+  {
+    "id": "D1353",
+    "defect": "A nested override object is taken as one unresolvable entry instead of being walked, so its local path widens rather than adding its edge.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    if (!isRecord(next.value)) {",
+    "new": "    if (next.value !== null) {"
+  },
+  {
+    "id": "D1354",
+    "defect": "A $name override resolves through its own key instead of the root dependency it references, so its workspace edge becomes a widening.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "? target.name : overrideKeyPackage(entry.key)",
+    "new": "? overrideKeyPackage(entry.key) : overrideKeyPackage(entry.key)"
+  },
+  {
+    "id": "D1355",
+    "defect": "An override resolving to no listed workspace widens nothing, so a change elsewhere misses the workspaces it may replace a package in.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    uncertain(graph, path, unresolved.kind, `${detail} ${unresolved.cause}`);",
+    "new": ""
+  },
+  {
+    "id": "D1356",
+    "defect": "A test module's holder is looked up at the Vitest workspace's own directory, so a test module in another package workspace adds no edge.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    for (const holder of holdersOf(graph, resolve(base, directory))) {",
+    "new": "    for (const holder of holdersOf(graph, base)) {"
+  },
+  {
+    "id": "D1357",
+    "defect": "Workspaces are matched only by their listed directory, so through a linked consumer root a test module's real path matches no workspace.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "    real.ok && real.path !== listed ? [listed, real.path] : [listed];",
+    "new": "    [listed];"
+  },
+  {
+    "id": "D1358",
+    "defect": "Setup files add no edge, so a change in the workspace holding one does not select the Vitest workspace that runs it.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    addSetupEdge(graph, workspace.path, file, `setup file ${file}`);",
+    "new": ""
+  },
+  {
+    "id": "D1359",
+    "defect": "Global setup files add no edge, so a change in the workspace holding one does not select the Vitest workspace that runs it.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    addSetupEdge(graph, workspace.path, file, `global setup file ${file}`);",
+    "new": ""
+  },
+  {
+    "id": "D1360",
+    "defect": "A setup file's path is matched unnormalized, so ./packages/b/setup.ts falls to the root and adds no edge to packages/b.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  const owner = owningWorkspace(normalizeRelativePath(file), graph.workspaces);",
+    "new": "  const owner = owningWorkspace(file, graph.workspaces);"
+  },
+  {
+    "id": "D1361",
+    "defect": "An alias replaced by an absolute path adds no edge to the workspace it points into.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    return { ok: true, paths: aliasPathTargets(graph, prefix) };",
+    "new": "    return { ok: true, paths: [] };"
+  },
+  {
+    "id": "D1362",
+    "defect": "An alias replaced by a package subpath is looked up by the whole specifier, so it names no package and adds no edge.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "        prefix.startsWith(`${name}${POSIX_SEPARATOR}`),",
+    "new": "        false,"
+  },
+  {
+    "id": "D1363",
+    "defect": "A capture alias's path prefix is resolved only as one directory, so it reaches the parent's holder and not the workspaces below it.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    if (begun && !paths.includes(path)) paths.push(path);",
+    "new": ""
+  },
+  {
+    "id": "D1364",
+    "defect": "A capture alias's name prefix must equal a package name, so @x/$1 reaches no @x/ package.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "        name.startsWith(prefix) ||",
+    "new": "        name === prefix ||"
+  },
+  {
+    "id": "D1365",
+    "defect": "On Windows a capture alias's directory match is case-sensitive, so a replacement spelled in another case reaches no workspace.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    ? posixPath.toLowerCase()",
+    "new": "    ? posixPath"
+  },
+  {
+    "id": "D1366",
+    "defect": "A missing package.json reads as an empty manifest, so its workspace depends on nothing instead of everything.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    return unknownBecause(UNCERTAINTY.manifestMissing, \"does not exist\");",
+    "new": "    return { ok: true, manifest: {} };"
+  },
+  {
+    "id": "D1367",
+    "defect": "An unparseable package.json reads as an empty manifest, so its workspace depends on nothing instead of everything.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    return unknownBecause(UNCERTAINTY.manifestUnreadable, read.reason);",
+    "new": "    return { ok: true, manifest: {} };"
+  },
+  {
+    "id": "D1368",
+    "defect": "A package.json holding a JSON array is read as a manifest with no dependencies instead of widening.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  return isRecord(read.value)",
+    "new": "  return typeof read.value === \"object\" && read.value !== null"
+  },
+  {
+    "id": "D1369",
+    "defect": "A dependency field holding an array is read as entries keyed by index instead of widening.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    if (!isRecord(entries)) {",
+    "new": "    if (typeof entries !== \"object\") {"
+  },
+  {
+    "id": "D1370",
+    "defect": "A dependency spec that is not a string is read as an external package instead of widening.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "      : notAString();",
+    "new": "      : { ok: true as const, paths: [] };"
+  },
+  {
+    "id": "D1371",
+    "defect": "A local path dependency resolving outside every listed workspace is taken as resolved instead of widening.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "  return holders.length === 0\n    ? {",
+    "new": "  return holders.length === 0 && path.startsWith(HOME_PATH_PREFIX)\n    ? {"
+  },
+  {
+    "id": "D1372",
+    "defect": "A ~/ path is resolved against the declaring workspace's directory, so it lands in that workspace and widens nothing.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "  const holders = path.startsWith(HOME_PATH_PREFIX)",
+    "new": "  const holders = false"
+  },
+  {
+    "id": "D1373",
+    "defect": "workspace:other@* resolves through the dependency's key instead of other, so an unlisted other widens nothing.",
+    "file": "packages/daemon/src/selection/package-specs.ts",
+    "old": "  return versionIndex(rest) === undefined",
+    "new": "  return true"
+  },
+  {
+    "id": "D1374",
+    "defect": "A Vitest workspace whose tests are not known depends on nothing extra, so a change in a workspace its unseen test modules lie in misses it.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  } else {\n    uncertain(",
+    "new": "  } else if (tests.known) {\n    uncertain("
+  },
+  {
+    "id": "D1375",
+    "defect": "The tests-not-known widening's cause drops discovery's reason, so the selection reason cannot say why the tests were not known.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "may lie in any package workspace: ${tests.reason}`,",
+    "new": "may lie in any package workspace`,"
+  },
+  {
+    "id": "D1376",
+    "defect": "An alias replaced by a relative path is read as a bare package name, so it widens nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (prefix === \"\" || isLocalPath(prefix)) {",
+    "new": "  if (prefix === \"\") {"
+  },
+  {
+    "id": "D1377",
+    "defect": "An alias replaced by an empty string is read as a bare package name, so it widens nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (prefix === \"\" || isLocalPath(prefix)) {",
+    "new": "  if (isLocalPath(prefix)) {"
+  },
+  {
+    "id": "D1378",
+    "defect": "A capture reference is not recognized, so an alias replaced by a bare $1 is read as a package named $1 and widens nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|')/;",
+    "new": "const REPLACEMENT_REFERENCE = /\\$(?:never)/;"
+  },
+  {
+    "id": "D1379",
+    "defect": "An incomplete listing still counts the package names as complete, so a dependency naming an unlisted workspace is taken as external.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "      listing.notRead.length === 0 &&\n",
+    "new": ""
+  },
+  {
+    "id": "D1380",
+    "defect": "A dependency naming no listed workspace widens even while the listing is complete, so every external package selects everything.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  if (namesNoWorkspace && !graph.namesComplete) {",
+    "new": "  if (namesNoWorkspace) {"
+  },
+  {
+    "id": "D1381",
+    "defect": "An unreadable listed manifest leaves the package names counted as complete, so a dependency on that workspace's unread name is taken as external.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "      listing.notRead.length === 0 &&\n      manifests.every(\n        ({ read }) => read.ok || read.kind === UNCERTAINTY.manifestMissing,\n      ),",
+    "new": "      listing.notRead.length === 0,"
+  },
+  {
+    "id": "D1382",
+    "defect": "While the listing is incomplete, an alias naming no listed package is taken as external instead of widening.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (paths.length === 0 && !graph.namesComplete) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1383",
+    "defect": "While the listing is incomplete, an override naming no listed package is taken as external instead of widening every workspace.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  return namesUnlisted && !graph.namesComplete",
+    "new": "  return false"
+  },
+  {
+    "id": "D1384",
+    "defect": "Ownership compares by bare string prefix, so packages/a owns packages/ab/x.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "    path.startsWith(`${workspacePath}${POSIX_SEPARATOR}`)",
+    "new": "    path.startsWith(workspacePath)"
+  },
+  {
+    "id": "D1385",
+    "defect": "The first package workspace holding a path owns it instead of the deepest, so a nested workspace's change falls to the root.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "    if (owner === undefined || depth(workspace.path) > depth(owner.path)) {",
+    "new": "    if (owner === undefined) {"
+  },
+  {
+    "id": "D1386",
+    "defect": "Selected tests carry no reason, so nothing says which changed path selected them.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      reasons: workspaceReasons,\n    }));",
+    "new": "      reasons: [],\n    }));"
+  },
+  {
+    "id": "D1387",
+    "defect": "The dependents walk stops after direct dependents, so a Vitest workspace reached through a plain package is missed.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      queue.push(link.workspace);\n",
+    "new": ""
+  },
+  {
+    "id": "D1388",
+    "defect": "A reason keeps only the chain's last step, so it does not name the workspaces the change passed through.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "        links: [...chain.links, link],",
+    "new": "        links: [link],"
+  },
+  {
+    "id": "D1389",
+    "defect": "A workspace reached again by a longer path replaces its chain, so the reason carries a longer chain than the shortest.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      if (chains.has(link.workspace)) continue;",
+    "new": "      if (link.workspace === current) continue;"
+  },
+  {
+    "id": "D1390",
+    "defect": "A workspace keeps only the last changed path's reasons, so a test selected by two paths names one.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "        ...(reasons.get(workspace) ?? []),\n        ...workspaceReasons,",
+    "new": "        ...workspaceReasons,"
+  },
+  {
+    "id": "D1391",
+    "defect": "A path's later trigger replaces its earlier reason for a workspace, so a config change reads as a plain change.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      reasons.set(workspace, [...(reasons.get(workspace) ?? []), reason]);",
+    "new": "      reasons.set(workspace, [reason]);"
+  },
+  {
+    "id": "D1392",
+    "defect": "A path that selected nothing carries no reason, so its report reads like a path that needed nothing.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      selected.length > 0\n        ? undefined\n        : nothingSelectedReason(context, owner, notRunnable),",
+    "new": "      undefined,"
+  },
+  {
+    "id": "D1393",
+    "defect": "bun.lockb is not a lockfile name, so a Bun binary lockfile change selects only its own workspace.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  \"bun.lockb\",\n",
+    "new": ""
+  },
+  {
+    "id": "D1394",
+    "defect": "A project-wide fallback starts from the path's own workspace, so a lockfile change selects only its dependents.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    (kind) => ({ kind, scope: FALLBACK_SCOPE.project, starts: vitestPaths }),",
+    "new": "    (kind) => ({ kind, scope: FALLBACK_SCOPE.workspace, starts: owner === undefined ? [] : [owner] }),"
+  },
+  {
+    "id": "D1395",
+    "defect": "A package.json change is a plain path, so a manifest edit that adds a dependency misses its new dependents.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (name === PACKAGE_JSON) kinds.push(TRIGGER.manifest);",
+    "new": ""
+  },
+  {
+    "id": "D1396",
+    "defect": "A path the root owns while other workspaces are listed is a plain change, so it selects only the root's dependents.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    kinds.push(TRIGGER.rootOwnedPath);\n",
+    "new": ""
+  },
+  {
+    "id": "D1397",
+    "defect": "A root-owned path is project-wide even when the root is the only package workspace.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (owner === ROOT_PATH && dependencies.packageWorkspaces.length > 1) {",
+    "new": "  if (owner === ROOT_PATH && dependencies.packageWorkspaces.length > 0) {"
+  },
+  {
+    "id": "D1398",
+    "defect": "A path in a listed directory with no package.json that is not a Vitest workspace is a plain change, so it selects nothing.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (ownerIsNoPackage && !ownerIsVitest) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1399",
+    "defect": "A Vitest workspace with no package.json turns each of its changes into a project-wide missing-manifest fallback.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (ownerIsNoPackage && !ownerIsVitest) {",
+    "new": "  if (ownerIsNoPackage) {"
+  },
+  {
+    "id": "D1400",
+    "defect": "A config file name outside every Vitest workspace is a plain path, so a config that creates a workspace selects nothing.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    kinds.push(TRIGGER.configOutsideWorkspace);\n",
+    "new": ""
+  },
+  {
+    "id": "D1401",
+    "defect": "A config file in a subdirectory of a Vitest workspace counts as inside it, so a config that creates a nested workspace selects only the outer one.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    !context.vitestPaths.includes(configDirectory)",
+    "new": "    !context.vitestPaths.some((workspace) => configDirectory.startsWith(workspace))"
+  },
+  {
+    "id": "D1402",
+    "defect": "A config file in a Vitest workspace's directory is project-wide, so it selects unrelated workspaces too.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    !context.vitestPaths.includes(configDirectory)",
+    "new": "    context.vitestPaths.length > 0"
+  },
+  {
+    "id": "D1403",
+    "defect": "A workspace config change is reported as a plain changed path, so its fallback does not name its trigger.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      kind: TRIGGER.workspaceConfig,",
+    "new": "      kind: TRIGGER.changedPath,"
+  },
+  {
+    "id": "D1404",
+    "defect": "Vite config file names are not config files, so a vite.config change in a Vitest workspace is a plain change.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "const CONFIG_FILES = new Set([...VITEST_CONFIG_FILES, ...VITE_CONFIG_FILES]);",
+    "new": "const CONFIG_FILES = new Set([...VITEST_CONFIG_FILES]);"
+  },
+  {
+    "id": "D1405",
+    "defect": "A setup file change is not a fallback, so it selects only its own workspace's dependents and names no setup trigger.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    [TRIGGER.setupFile, (workspace) => workspace.setupFiles],\n",
+    "new": ""
+  },
+  {
+    "id": "D1406",
+    "defect": "A workspace-scoped fallback selects its starting workspaces but not their dependents.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  const reached = [...walkDependents(context, trigger.starts)];",
+    "new": "  const reached = trigger.kind === TRIGGER.changedPath ? [...walkDependents(context, trigger.starts)] : trigger.starts.map((start) => [start, { from: start, links: [] }] as const);"
+  },
+  {
+    "id": "D1407",
+    "defect": "A global setup file change is not a fallback, so it names no global setup trigger.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    [TRIGGER.globalSetupFile, (workspace) => workspace.globalSetupFiles],\n",
+    "new": ""
+  },
+  {
+    "id": "D1408",
+    "defect": "A setup file named unnormalized never matches the changed path, so its change is not a setup fallback.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "        files(workspace).some((file) => normalizeRelativePath(file) === path),",
+    "new": "        files(workspace).some((file) => file === path),"
+  },
+  {
+    "id": "D1409",
+    "defect": "The selected Vitest workspace count reports every runnable workspace.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    selectedWorkspaces: workspaces.length,",
+    "new": "    selectedWorkspaces: input.workspaces.length,"
+  },
+  {
+    "id": "D1410",
+    "defect": "The total test count reports only the selected tests.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      count: knownTotal,",
+    "new": "      count: selectedTestCount,"
+  },
+  {
+    "id": "D1411",
+    "defect": "The selected test count claims to be complete while a selected workspace's tests are not known.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      complete: workspaces.every(({ tests }) => tests.known),",
+    "new": "      complete: true,"
+  },
+  {
+    "id": "D1412",
+    "defect": "The total test count claims to be complete while a workspace's tests are not known.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "        listingsComplete && input.workspaces.every(({ tests }) => tests.known),",
+    "new": "        listingsComplete,"
+  },
+  {
+    "id": "D1413",
+    "defect": "The total test count claims to be complete while a listing reports a source not read.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "        listingsComplete && input.workspaces.every(({ tests }) => tests.known),",
+    "new": "        input.workspaces.every(({ tests }) => tests.known),"
+  },
+  {
+    "id": "D1414",
+    "defect": "The Vitest workspace listing's unread sources are ignored, so the total workspace count claims to be complete.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    input.vitestListingNotRead.length === 0;",
+    "new": "    true;"
+  },
+  {
+    "id": "D1415",
+    "defect": "The package workspace listing's unread sources are ignored, so the total workspace count claims to be complete.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    input.dependencies.notRead.length === 0 &&",
+    "new": "    true &&"
+  },
+  {
+    "id": "D1416",
+    "defect": "A selection names only the package listing's unread sources, dropping the Vitest listing's.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    notRead: [...input.dependencies.notRead, ...input.vitestListingNotRead],",
+    "new": "    notRead: [...input.dependencies.notRead],"
+  },
+  {
+    "id": "D1417",
+    "defect": "A not-runnable workspace a change reaches is reported among the path's selected workspaces.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    if (excluded === undefined) {",
+    "new": "    if (true) {"
+  },
+  {
+    "id": "D1418",
+    "defect": "A path's report drops the not-runnable workspaces it reached, so it does not say why they were left out.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      notRunnable.push(excluded);",
+    "new": ""
+  },
+  {
+    "id": "D1419",
+    "defect": "The counts report no not-runnable workspaces.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    notRunnableWorkspaces: input.notRunnable.length,",
+    "new": "    notRunnableWorkspaces: 0,"
+  },
+  {
+    "id": "D1420",
+    "defect": "A path reaching only not-runnable workspaces says no Vitest workspace depends on it.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (notRunnable.length > 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1421",
+    "defect": "A widening reached only through a not-runnable workspace is reported as used.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      if (!context.notRunnable.has(workspace)) {",
+    "new": "      if (true) {"
+  },
+  {
+    "id": "D1422",
+    "defect": "A widening that selected a workspace is not reported as used.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    if (widening !== undefined) context.usedWidenings.add(widening);",
+    "new": ""
+  },
+  {
+    "id": "D1423",
+    "defect": "A change selecting no test is shaped like a successful selection.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    tests.length === 0 && workspaces.every(({ tests }) => tests.known);",
+    "new": "    false;"
+  },
+  {
+    "id": "D1424",
+    "defect": "A selection whose only workspace has tests not known is reported as nothing selected.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    tests.length === 0 && workspaces.every(({ tests }) => tests.known);",
+    "new": "    tests.length === 0;"
+  },
+  {
+    "id": "D1425",
+    "defect": "A selected workspace with no known tests counts as a selection, so zero tests reads as success.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    tests.length === 0 && workspaces.every(({ tests }) => tests.known);",
+    "new": "    workspaces.length === 0 && workspaces.every(({ tests }) => tests.known);"
+  },
+  {
+    "id": "D1426",
+    "defect": "A selection does not carry the selection policy version.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    policyVersion: SELECTION_POLICY_VERSION,\n    tests,",
+    "new": "    policyVersion: 0,\n    tests,"
+  },
+  {
+    "id": "D1427",
+    "defect": "A refused change does not carry the selection policy version.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "        policyVersion: SELECTION_POLICY_VERSION,\n        path: raw,",
+    "new": "        policyVersion: 0,\n        path: raw,"
+  },
+  {
+    "id": "D1428",
+    "defect": "An absolute path is not refused and is selected as if it lay in the consumer root.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (posix.isAbsolute(path) || win32.parse(path).root !== \"\") {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1429",
+    "defect": "A drive-relative path such as C:foo is not absolute to win32.isAbsolute, so it is selected instead of refused.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (posix.isAbsolute(path) || win32.parse(path).root !== \"\") {",
+    "new": "  if (posix.isAbsolute(path) || win32.isAbsolute(path)) {"
+  },
+  {
+    "id": "D1430",
+    "defect": "A path is checked for leaving the root before normalization, so packages/../../x is selected.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  const escapes = [posix.normalize(path), win32.normalize(path)].some(",
+    "new": "  const escapes = [path].some("
+  },
+  {
+    "id": "D1431",
+    "defect": "Only / counts as a separator after .., so ..\\x is selected instead of refused.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "const CHANGE_PATH_SEPARATORS = [posix.sep, win32.sep];",
+    "new": "const CHANGE_PATH_SEPARATORS = [posix.sep];"
+  },
+  {
+    "id": "D1432",
+    "defect": "Only a change's first path is checked, so a refused path after a valid one still yields a selection.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    if (refusal !== undefined) {",
+    "new": "    if (refusal !== undefined && paths.length === 0) {"
+  },
+  {
+    "id": "D1433",
+    "defect": "An override key's parent chain is not split off, so parent>@x/b names no workspace and its workspace:* edge becomes a widening.",
+    "file": "packages/daemon/src/selection/package-specs.ts",
+    "old": "  const last = key.split(OVERRIDE_PARENT_SEPARATOR).at(-1) ?? key;",
+    "new": "  const last = key;"
+  },
+  {
+    "id": "D1511",
+    "defect": "An alias replaced by a directory holding several workspaces reaches only the directory's own holder, so a change in one of them misses the Vitest workspace importing it through the alias.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    if (begun && !paths.includes(path)) paths.push(path);",
+    "new": ""
+  },
+  {
+    "id": "D1512",
+    "defect": "An alias replaced by a partial bare name reaches no package that name begins.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "        name.startsWith(prefix) ||",
+    "new": "        name === prefix ||"
+  },
+  {
+    "id": "D1513",
+    "defect": "A $<name> reference is read as literal text, so an alias through it reaches only the root.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|')/;",
+    "new": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|`|')/;"
+  },
+  {
+    "id": "D1514",
+    "defect": "An alias path prefix holding .. is compared as written, so it reaches no workspace below the directory it names.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "comparable(normalize(prefix))",
+    "new": "comparable(prefix)"
+  },
+  {
+    "id": "D1515",
+    "defect": "A local path whose link carries it into another workspace yields only its listed holder, so a change in the linked workspace misses the dependent.",
+    "file": "packages/daemon/src/selection/graph-state.ts",
+    "old": "  const targets = real.ok ? [absolute, real.path] : [absolute];",
+    "new": "  const targets = [absolute];"
+  },
+  {
+    "id": "D1516",
+    "defect": "The dependents walk cache keys every start set alike, so a second changed path reuses the first path's dependents.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  const key = starts.join(WALK_KEY_SEPARATOR);",
+    "new": "  const key = \"\";"
+  },
+  {
+    "id": "D1517",
+    "defect": "While a listing reports a source not read, a path that selected nothing says as fact that no Vitest workspace depends on it.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  return sources.length === 0",
+    "new": "  return true"
+  },
+  {
+    "id": "D1518",
+    "defect": "A changed path normalizing to exactly .. is not refused.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    relativePath === PARENT_SEGMENT ||\n",
+    "new": ""
+  },
+  {
+    "id": "D1519",
+    "defect": "Change paths are not normalized, so ./packages/app/x.ts is a second, root-owned path beside packages/app/x.ts.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    paths.add(normalizeRelativePath(raw));",
+    "new": "    paths.add(raw);"
+  },
+  {
+    "id": "D1520",
+    "defect": "A widening reached only by a plain package workspace, selecting no Vitest workspace, is reported as used.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    .filter(([workspace]) => context.vitestPaths.includes(workspace))\n",
+    "new": ""
+  },
+  {
+    "id": "D1521",
+    "defect": "The selection-level not-runnable list drops the caller's not-runnable workspaces and their reasons.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    notRunnable: input.notRunnable,",
+    "new": "    notRunnable: [],"
+  },
+  {
+    "id": "D1522",
+    "defect": "A $name override referencing a root dependency the root does not declare adds no edge and no widening.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  if (specs.length === 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1523",
+    "defect": "An override value that is neither a string nor an object adds no widening.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  if (typeof entry.value !== \"string\") {",
+    "new": "  if (typeof entry.value !== \"string\") {\n    return [];\n  }\n  if (false) {"
+  },
+  {
+    "id": "D1524",
+    "defect": "A bare .. dependency parses as a registry range, so it adds no edge to the parent workspace.",
+    "file": "packages/daemon/src/selection/package-specs.ts",
+    "old": "    RELATIVE_PATH_NAMES.includes(spec) ||\n",
+    "new": ""
+  }
+]

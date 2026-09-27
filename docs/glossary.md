@@ -11,7 +11,7 @@ One directory RT Test runs as its own Vitest instance: the consumer root or a pa
 _Avoid_: project, package
 
 **Package workspace**:
-One directory the consumer's package manager treats as a package: the consumer root, or a directory the root `package.json` `workspaces` field lists. Every Vitest workspace is one, and the dependencies between them decide selection.
+One directory RT Test treats as a package: the consumer root, or a directory the root `package.json` `workspaces` field lists, whether or not it holds a `package.json`. Every Vitest workspace is one, and the dependencies between them decide selection.
 _Avoid_: package, project
 
 **Test identity**:

@@ -1221,8 +1221,8 @@
     "id": "D1296",
     "defect": "Every directory reached through a link is refused as outside the root, even one whose real path lies inside it.",
     "file": "packages/daemon/src/vitest/find-workspaces.ts",
-    "old": "  const outside =\n",
-    "new": "  const outside =\n    real.path !== directory ||\n"
+    "old": "  return liesInside(realRoot.path, real.path)",
+    "new": "  return real.path === directory && liesInside(realRoot.path, real.path)"
   },
   {
     "id": "D1297",

@@ -19,13 +19,13 @@ const VITEST_PACKAGE = "vitest";
 const VITEST_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"];
 const WORKSPACES_FIELD = "workspaces";
 const WORKSPACE_PACKAGES_FIELD = "packages";
-const POSIX_SEPARATOR = "/";
-const PACKAGE_JSON = "package.json";
+export const POSIX_SEPARATOR = "/";
+export const PACKAGE_JSON = "package.json";
 const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
 const CHILDREN_SUFFIX = "/*";
 const NEGATION_PREFIX = "!";
 const WILDCARD = "*";
-const ROOT_PATH = ".";
+export const ROOT_PATH = ".";
 const PARENT_SEGMENT = "..";
 
 export interface VitestWorkspace {
@@ -33,6 +33,9 @@ export interface VitestWorkspace {
   readonly path: string;
   readonly directory: string;
 }
+
+/** The consumer root or a directory the root `workspaces` patterns list, whether or not it holds a Vitest config. */
+export type PackageWorkspace = VitestWorkspace;
 
 export interface UnreadWorkspaceSource {
   /** The file or `workspaces` pattern that was not searched. */
@@ -54,6 +57,23 @@ type JsonRead =
   | { readonly ok: false; readonly reason: string };
 
 export function findVitestWorkspaces(consumerRoot: string): WorkspaceListing {
+  return listWorkspaces(consumerRoot, holdsVitestConfig);
+}
+
+export function findPackageWorkspaces(consumerRoot: string): WorkspaceListing {
+  return listWorkspaces(consumerRoot, () => true);
+}
+
+type WorkspaceFilter = (
+  directory: string,
+  path: string,
+  notRead: UnreadWorkspaceSource[],
+) => boolean;
+
+function listWorkspaces(
+  consumerRoot: string,
+  keep: WorkspaceFilter,
+): WorkspaceListing {
   const notRead: UnreadWorkspaceSource[] = [];
   if (existsSync(join(consumerRoot, PNPM_WORKSPACE_FILE))) {
     notRead.push({
@@ -70,7 +90,7 @@ export function findVitestWorkspaces(consumerRoot: string): WorkspaceListing {
   for (const directory of candidates) {
     const path = workspacePath(consumerRoot, directory);
     if (workspaces.has(path)) continue;
-    if (!holdsVitestConfig(directory, path, notRead)) continue;
+    if (!keep(directory, path, notRead)) continue;
     const duplicate = duplicateReason(listedByRealPath, directory, path);
     if (duplicate !== undefined) {
       notRead.push({ source: path, reason: duplicate });
@@ -126,17 +146,26 @@ function outsideRootReason(
   if (!real.ok) {
     return `${directory} ${real.reason}, so it could not be checked to lie inside the consumer root and was not searched`;
   }
-  const path = relative(realRoot.path, real.path);
-  const outside =
-    path === PARENT_SEGMENT ||
-    path.startsWith(`${PARENT_SEGMENT}${sep}`) ||
-    isAbsolute(path);
-  return outside
-    ? `${directory} resolves to ${real.path}, outside the consumer root ${realRoot.path}, so it was not searched`
-    : undefined;
+  return liesInside(realRoot.path, real.path)
+    ? undefined
+    : `${directory} resolves to ${real.path}, outside the consumer root ${realRoot.path}, so it was not searched`;
 }
 
-function realPath(path: string): RealPath {
+/** Whether `path` is `directory` or lies beneath it; both absolute. */
+export function liesInside(directory: string, path: string): boolean {
+  const fromDirectory = relative(directory, path);
+  return !(climbsOut(fromDirectory, sep) || isAbsolute(fromDirectory));
+}
+
+/** Whether a relative path, split by `separator`, climbs above the directory it is relative to. */
+export function climbsOut(relativePath: string, separator: string): boolean {
+  return (
+    relativePath === PARENT_SEGMENT ||
+    relativePath.startsWith(`${PARENT_SEGMENT}${separator}`)
+  );
+}
+
+export function realPath(path: string): RealPath {
   try {
     return { ok: true, path: realpathSync.native(path) };
   } catch (error) {
@@ -260,7 +289,7 @@ function dependsOnVitest(manifest: unknown): boolean {
   });
 }
 
-function readJson(file: string): JsonRead {
+export function readJson(file: string): JsonRead {
   try {
     return { ok: true, value: JSON.parse(readFileSync(file, "utf8")) };
   } catch (error) {
@@ -268,7 +297,7 @@ function readJson(file: string): JsonRead {
   }
 }
 
-function objectField(value: unknown, key: string): unknown {
+export function objectField(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
@@ -312,7 +341,7 @@ function workspacePath(root: string, directory: string): string {
   return path === "" ? ROOT_PATH : path;
 }
 
-function joinPath(workspace: string, file: string): string {
+export function joinPath(workspace: string, file: string): string {
   return workspace === ROOT_PATH
     ? file
     : `${workspace}${POSIX_SEPARATOR}${file}`;
