@@ -27,7 +27,8 @@ const SOURCE_EXTENSIONS = [
 ];
 const PLUGIN_FORMAT_EXTENSIONS = [".vue", ".svelte", ".astro", ".mdx"];
 const GIT_DIRECTORY = ".git";
-const SKIPPED_DIRECTORIES = ["node_modules", GIT_DIRECTORY];
+/** Directory names no walk enters, wherever they lie. */
+export const SKIPPED_DIRECTORIES = ["node_modules", GIT_DIRECTORY];
 const CONFIG_FILE_NAME = /^(?:ts|js)config.*\.json$/;
 
 export interface WalkUncertainty {
@@ -128,7 +129,7 @@ function isSkipped(walk: Walk, path: string, name: string): boolean {
 }
 
 /** A nested repository or a submodule, whose ignored paths the consumer root's git listing does not reach. */
-function holdsRepository(directory: string): boolean {
+export function holdsRepository(directory: string): boolean {
   try {
     return (
       lstatSync(join(directory, GIT_DIRECTORY), { throwIfNoEntry: false }) !==

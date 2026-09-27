@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessEvidence } from "../src/evidence.js";
+import { assessEvidence, assessFreshness } from "../src/evidence.js";
 
 describe("result freshness", () => {
   it("D001: an unexecuted test must not count as a pass", () => {
@@ -78,5 +78,9 @@ describe("result freshness", () => {
       freshness: "unknown",
       isCurrentPass: false,
     });
+  });
+
+  it("D1955: a record stored with an empty digest is unknown, not stale, against a present current fingerprint", () => {
+    expect(assessFreshness("", "revision-a")).toBe("unknown");
   });
 });

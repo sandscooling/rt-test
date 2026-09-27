@@ -44,7 +44,7 @@ const STATE_MEMBERS: Readonly<Record<TestState, true>> = {
 /** Every state, in the order an answer lists them. */
 export const TEST_STATES = Object.keys(STATE_MEMBERS) as TestState[];
 
-const CURRENT = "current" satisfies Freshness;
+export const CURRENT = "current" satisfies Freshness;
 export const STALE = "stale" satisfies Freshness;
 export const UNKNOWN = "unknown" satisfies Freshness;
 const FRESHNESS_MEMBERS: Readonly<Record<Freshness, true>> = {
@@ -71,6 +71,51 @@ export interface AdapterVersionFacts {
 
 export interface DiscoveryFacts extends AdapterVersionFacts {
   readonly discoveryId: string;
+  /**
+   * Stale when stored under another adapter version; otherwise current only when its stored digest equals the
+   * discovery's current input fingerprint, as for a result.
+   */
+  readonly freshness: Freshness;
+}
+
+export const RECONCILIATION_COMPLETE = "complete";
+export const RECONCILIATION_INCOMPLETE = "incomplete";
+export const WATCHER_HEALTHY = "healthy";
+export const WATCHER_UNHEALTHY = "unhealthy";
+
+export type ReconciliationFacts =
+  | { readonly state: typeof RECONCILIATION_COMPLETE }
+  | {
+      readonly state: typeof RECONCILIATION_INCOMPLETE;
+      readonly reason: string;
+    };
+
+export type WatcherFacts =
+  | { readonly state: typeof WATCHER_HEALTHY }
+  | { readonly state: typeof WATCHER_UNHEALTHY; readonly reason: string };
+
+/** The daemon's view of its inputs when it answered. */
+export interface InputFacts {
+  /** Rises each time an input is seen to change, by an event or a reconciliation. */
+  readonly revision: number;
+  readonly reconciliation: ReconciliationFacts;
+  /** When the last reconciliation ended, as an ISO time; absent before the first one ends. */
+  readonly lastReconciledAt?: string;
+  readonly watcher: WatcherFacts;
+  /** Paths an event named that the daemon has not yet read; while any remain, no result is current. */
+  readonly pendingChanges: number;
+  /**
+   * What of git could not be read, and what that cost: its ignored paths, so every file there counted as an input,
+   * or its HEAD and ignore-rule files, read or watched, so a branch change went unwatched. Empty when git was read in
+   * full.
+   */
+  readonly gitUnread: readonly string[];
+}
+
+/** A workspace whose current input fingerprint cannot be computed, so none of its results reads current. */
+export interface UnfingerprintedWorkspace {
+  readonly workspacePath: string;
+  readonly reason: string;
 }
 
 export const WORKSPACE_UNSUPPORTED_VITEST = "workspace-unsupported-vitest";
@@ -146,6 +191,9 @@ export interface AnswerContext {
   readonly consumerRoot: string;
   readonly currentAdapterVersion: number;
   readonly discovery: DiscoveryFacts;
+  readonly inputs: InputFacts;
+  /** Only those whose own inputs failed; `inputs` says when none can be computed. */
+  readonly unfingerprintedWorkspaces: readonly UnfingerprintedWorkspace[];
   readonly activity: DaemonActivity;
   readonly unstoredJobs: readonly UnstoredJob[];
 }

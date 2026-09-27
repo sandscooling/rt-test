@@ -1,3 +1,6 @@
+import type { FingerprintResult } from "../inputs/fingerprint.js";
+import type { JobVerdict } from "../inputs/input-jobs.js";
+import type { TrackedInputs } from "../inputs/input-tracker.js";
 import type {
   NoAnswer,
   PathStatusAnswer,
@@ -6,14 +9,16 @@ import type {
 import { pathStatusAnswer } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
 import type { LatestResults, RtTestStore } from "../store/open-store.js";
-import { NOT_FINGERPRINTED } from "../store/schema.js";
+import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "../store/schema.js";
 import type { StoreBindings, StoreScope } from "../store/stored-records.js";
 import {
   confirmedEntry,
   type ConfirmedStart,
 } from "../vitest/confirmed-start.js";
-import type { TestDiscovery } from "../vitest/discover-tests.js";
-import type { VitestWorkspace } from "../vitest/find-workspaces.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../vitest/discover-tests.js";
 import type { DaemonLog } from "./daemon-log.js";
 import type { Executor } from "./executor.js";
 import type {
@@ -27,6 +32,8 @@ const DISCOVERY_STOPPED_REASON =
   "the stop arrived during the discovery, so it was not stored";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
+const MOVED_DURING_RUN_REASON =
+  "its workspace's input fingerprint at its end differs from the one at its start";
 
 export interface LifecycleParts {
   readonly identity: DaemonIdentity;
@@ -35,15 +42,20 @@ export interface LifecycleParts {
   readonly store: RtTestStore;
   readonly log: DaemonLog;
   readonly executor: Executor;
+  /** Started with the start sequence and stopped before the store closes. */
+  readonly inputs: TrackedInputs;
   /** Stops accepting connections and resolves once the endpoint is closed. */
   readonly closeEndpoint: () => Promise<void>;
 }
 
-/** Discovers once, runs each confirmed workspace once, then idles until a stop, answering status and queries throughout. */
+/**
+ * Once the first reconciliation of the inputs has ended, discovers once, runs each confirmed workspace once, then
+ * idles until a stop, answering status and queries throughout. Each job is stored under the input fingerprint it
+ * started from, or not fingerprinted when its inputs moved while it ran.
+ */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;
   readonly #parts: LifecycleParts;
-  readonly #bindings: StoreBindings;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJob[] = [];
   #sequence: Promise<void> = Promise.resolve();
@@ -57,13 +69,10 @@ export class DaemonLifecycle implements DaemonHandlers {
     this.#whenStopped = new Promise((resolve) => {
       this.#markStopped = resolve;
     });
-    this.#bindings = {
-      ...parts.scope,
-      inputFingerprint: { kind: NOT_FINGERPRINTED },
-    };
   }
 
   begin(): void {
+    this.#parts.inputs.start();
     this.#sequence = this.#startSequence()
       .catch((error: unknown) => {
         this.#parts.log.error("the start sequence failed", error);
@@ -86,11 +95,20 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   summary(): SummaryAnswer | NoAnswer {
-    return summaryAnswer(this.#latestResults(), this.#view());
+    return summaryAnswer(
+      this.#latestResults(),
+      this.#view(),
+      this.#parts.inputs.current(),
+    );
   }
 
   pathStatus(path: string): PathStatusAnswer | NoAnswer {
-    return pathStatusAnswer(path, this.#latestResults(), this.#view());
+    return pathStatusAnswer(
+      path,
+      this.#latestResults(),
+      this.#view(),
+      this.#parts.inputs.current(),
+    );
   }
 
   isStopping(): boolean {
@@ -116,9 +134,14 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   async #startSequence(): Promise<void> {
-    const { log, executor, start } = this.#parts;
+    const { log, executor, start, inputs } = this.#parts;
+    await inputs.firstReconciled();
+    if (this.isStopping()) return;
     log.entry("discovery started");
+    const mark = inputs.beginJob();
+    const startedAt = Date.now();
     const outcome = await executor.discover(start);
+    const verdict = await inputs.endJob(mark);
     if (!outcome.ended) {
       this.#nothingStored(undefined, outcome.reason);
       return;
@@ -128,22 +151,30 @@ export class DaemonLifecycle implements DaemonHandlers {
       return;
     }
     const discovery = outcome.value;
+    const bindings = this.#bindings("the discovery", verdict, () => {
+      const current = inputs.current();
+      const changed = current.testModuleChangedSince(discovery, startedAt);
+      return changed === undefined
+        ? current.discoveryFingerprint(discovery)
+        : { ok: false, reason: changed };
+    });
     this.#store("the discovery", undefined, () =>
-      this.#parts.store.writeDiscovery(this.#bindings, discovery),
+      this.#parts.store.writeDiscovery(bindings, discovery),
     );
     log.entry(`discovery ended: ${discoverySummary(discovery)}`);
     this.#logMissingConfirmed(discovery);
     for (const entry of discovery.workspaces) {
       if (this.isStopping()) break;
       if (entry.status === "not-confirmed") continue;
-      await this.#run(entry.workspace);
+      await this.#run(entry);
     }
     if (!this.isStopping())
       log.entry("idle: every confirmed workspace has run");
   }
 
-  async #run(workspace: VitestWorkspace): Promise<void> {
-    const { log, executor, start } = this.#parts;
+  async #run(entry: WorkspaceDiscovery): Promise<void> {
+    const { log, executor, start, inputs } = this.#parts;
+    const { workspace } = entry;
     const confirmed = confirmedEntry(start, workspace);
     if (confirmed === undefined) {
       this.#nothingStored(workspace.path, UNCONFIRMED_RUN_REASON);
@@ -151,7 +182,10 @@ export class DaemonLifecycle implements DaemonHandlers {
     }
     this.#activity = { state: "running", workspacePath: workspace.path };
     log.entry(`run started: ${workspace.path}`);
+    const mark = inputs.beginJob();
+    const started = inputs.current().workspaceFingerprint(entry);
     const outcome = await executor.run(workspace, confirmed.configFile);
+    const verdict = await inputs.endJob(mark);
     if (!outcome.ended) {
       this.#nothingStored(workspace.path, outcome.reason);
       return;
@@ -161,16 +195,41 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#nothingStored(workspace.path, run.reason);
       return;
     }
+    const bindings = this.#bindings(
+      `the run of ${workspace.path}`,
+      verdict,
+      () => unmoved(started, inputs.current().workspaceFingerprint(entry)),
+    );
     const stored = this.#store(
       `the run of ${workspace.path}`,
       workspace.path,
-      () => this.#parts.store.writeRun(this.#bindings, run),
+      () => this.#parts.store.writeRun(bindings, run),
     );
     if (stored) {
       log.entry(
         `run ended: ${workspace.path} ${run.status}${"execution" in run ? ` ${run.execution}` : ""}`,
       );
     }
+  }
+
+  /** The job's record is bound to its fingerprint only when its inputs held still from its start to its end. */
+  #bindings(
+    job: string,
+    verdict: JobVerdict,
+    fingerprint: () => FingerprintResult,
+  ): StoreBindings {
+    const { scope, log } = this.#parts;
+    const print: FingerprintResult = verdict.fingerprinted
+      ? fingerprint()
+      : { ok: false, reason: verdict.reason };
+    if (print.ok) {
+      return {
+        ...scope,
+        inputFingerprint: { kind: FINGERPRINT_DIGEST, digest: print.digest },
+      };
+    }
+    log.entry(`${job} is stored not fingerprinted: ${print.reason}`);
+    return { ...scope, inputFingerprint: { kind: NOT_FINGERPRINTED } };
   }
 
   /** Returns whether the record was stored; a failed write is logged and listed, and the sequence goes on. */
@@ -212,9 +271,10 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   async #stopSequence(): Promise<void> {
-    const { log, executor, store, closeEndpoint } = this.#parts;
+    const { log, executor, store, closeEndpoint, inputs } = this.#parts;
     log.entry("stop requested");
     executor.abort();
+    await inputs.stop();
     await this.#sequence;
     await executor.close();
     try {
@@ -229,6 +289,18 @@ export class DaemonLifecycle implements DaemonHandlers {
     }
     log.entry("stopped");
   }
+}
+
+/** A run's fingerprint at its start, when its workspace's fingerprint at its end is the same one. */
+function unmoved(
+  started: FingerprintResult,
+  ended: FingerprintResult,
+): FingerprintResult {
+  if (!started.ok) return started;
+  if (!ended.ok) return ended;
+  return started.digest === ended.digest
+    ? started
+    : { ok: false, reason: MOVED_DURING_RUN_REASON };
 }
 
 function discoverySummary(discovery: TestDiscovery): string {

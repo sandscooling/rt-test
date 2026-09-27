@@ -1219,24 +1219,24 @@
   },
   {
     "id": "D1650",
-    "defect": "Git inherits the caller's GIT_* environment, so a GIT_DIR naming another repository decides what the walk skips.",
+    "defect": "Both git readers inherit the caller's GIT_* environment through their shared spawn options, so a GIT_DIR naming another repository decides what the walk skips.",
     "file": "packages/daemon/src/selection/git-ignored.ts",
-    "old": "    env: environmentWithoutGit(),\n",
-    "new": "    env: process.env,\n"
+    "old": "    env: environmentWithoutGit(),\n    timeout: GIT_TIMEOUT_MS,",
+    "new": "    env: process.env,\n    timeout: GIT_TIMEOUT_MS,"
   },
   {
     "id": "D1651",
     "defect": "core.fsmonitor is left as the repository configures it, so listing ignored paths runs a program the consumer's git config names.",
     "file": "packages/daemon/src/selection/git-ignored.ts",
-    "old": "  \"-c\",\n  \"core.fsmonitor=false\",\n",
-    "new": ""
+    "old": "const FSMONITOR_OFF = [\"-c\", \"core.fsmonitor=false\"];",
+    "new": "const FSMONITOR_OFF: string[] = [];"
   },
   {
     "id": "D1652",
     "defect": "When git cannot list ignored paths, the walk falls back to reading .gitignore itself, so outside a git repository it skips paths it must walk.",
     "file": "packages/daemon/src/selection/git-ignored.ts",
-    "old": "  if (listed.error !== undefined || listed.status !== 0) return new Set();",
-    "new": "  if (listed.error !== undefined || listed.status !== 0) {\n    const excluded = process.getBuiltinModule(\"node:fs\").readFileSync(resolve(root, \".gitignore\"), \"utf8\");\n    return new Set(excluded.split(\"\\n\").filter((line) => line !== \"\").map((line) => resolve(root, line)));\n  }"
+    "old": "  if (listed === undefined) return new Set();",
+    "new": "  if (listed === undefined) {\n    const excluded = process.getBuiltinModule(\"node:fs\").readFileSync(resolve(root, \".gitignore\"), \"utf8\");\n    return new Set(excluded.split(\"\\n\").filter((line) => line !== \"\").map((line) => resolve(root, line)));\n  }"
   },
   {
     "id": "D1666",
@@ -1305,8 +1305,8 @@
     "id": "D1675",
     "defect": "Git runs from the consumer root, so an executable named git committed there runs in place of git while ignored paths are listed.",
     "file": "packages/daemon/src/selection/git-ignored.ts",
-    "old": "      cwd: tmpdir(),",
-    "new": "      cwd: absoluteRoot,"
+    "old": "    ...gitSpawnOptions(),\n    encoding: \"utf8\",",
+    "new": "    ...gitSpawnOptions(),\n    cwd: directory,\n    encoding: \"utf8\","
   },
   {
     "id": "D1676",
@@ -1349,5 +1349,12 @@
     "file": "packages/daemon/src/selection/source-walk.ts",
     "old": "      lstatSync(join(directory, GIT_DIRECTORY), { throwIfNoEntry: false }) !==\n      undefined",
     "new": "      lstatSync(join(directory, GIT_DIRECTORY), { throwIfNoEntry: false })?.isDirectory() ===\n      true"
+  },
+  {
+    "id": "D1954",
+    "defect": "The synchronous git reader keeps a directory git listed only because every entry in it was ignored, though git does not ignore the directory itself, so the walk skips what may be read.",
+    "file": "packages/daemon/src/selection/git-ignored.ts",
+    "old": "    ...(checked === undefined ? [] : listedEntries(checked).files),",
+    "new": "    ...directories,"
   }
 ]

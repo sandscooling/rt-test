@@ -1,7 +1,10 @@
 import {
   activityText,
   FRESHNESS_VALUES,
+  RECONCILIATION_INCOMPLETE,
   TEST_STATES,
+  WATCHER_UNHEALTHY,
+  type InputFacts,
   type NotDiscoveredEntry,
   type PathStatusResponse,
   type SummaryResponse,
@@ -20,6 +23,9 @@ const TRAILING_LINE_BREAKS = /(\r?\n)+$/;
 const ERRORS_SUFFIX = "errors";
 const NONE = "none";
 const NOT_DISCOVERED_HEADING = "Not discovered:";
+const UNFINGERPRINTED_HEADING =
+  "No current input fingerprint, so no result of these reads current:";
+const NOT_YET_RECONCILED = "none has ended yet";
 
 /** The answer's fields for `--json`, without the daemon protocol's own. */
 export function answerFields(answer: Answer): Record<string, unknown> {
@@ -43,7 +49,10 @@ export function countLines(counts: TestCounts): string[] {
   ];
 }
 
-/** The discovery's adapter version when it is not current, then the daemon's activity and each job it stored nothing for. */
+/**
+ * The discovery's adapter version when it is not current and its freshness, the inputs the answer was given from,
+ * then the daemon's activity and each job it stored nothing for.
+ */
 export function contextLines(answer: Answer): string[] {
   const { discovery, currentAdapterVersion } = answer;
   const adapter = discovery.adapterVersionCurrent
@@ -55,12 +64,40 @@ export function contextLines(answer: Answer): string[] {
     (job) =>
       `${INDENT}${job.workspacePath === undefined ? "the discovery" : `the run of ${oneLine(job.workspacePath)}`}: ${firstLine(job.reason)}`,
   );
+  const unfingerprinted = answer.unfingerprintedWorkspaces.map(
+    (workspace) =>
+      `${INDENT}${oneLine(workspace.workspacePath)}: ${firstLine(workspace.reason)}`,
+  );
   return [
     ...adapter,
+    `Discovery freshness: ${discovery.freshness}`,
+    ...inputLines(answer.inputs),
+    ...(unfingerprinted.length === 0
+      ? []
+      : [UNFINGERPRINTED_HEADING, ...unfingerprinted]),
     `Daemon: ${oneLine(activityText(answer.activity))}`,
     ...(unstored.length === 0
       ? []
       : ["Ended with nothing stored:", ...unstored]),
+  ];
+}
+
+/** The input revision, reconciliation, watcher and pending changes an answer was given from, with their reasons. */
+function inputLines(inputs: InputFacts): string[] {
+  const { reconciliation, watcher } = inputs;
+  const reconciled =
+    inputs.lastReconciledAt === undefined
+      ? NOT_YET_RECONCILED
+      : `ended ${inputs.lastReconciledAt}`;
+  return [
+    `Input revision: ${inputs.revision}`,
+    `Reconciliation: ${reconciliation.state === RECONCILIATION_INCOMPLETE ? `${reconciliation.state}: ${firstLine(reconciliation.reason)}` : reconciliation.state}`,
+    `Last reconciliation: ${reconciled}`,
+    `Watcher: ${watcher.state === WATCHER_UNHEALTHY ? `${watcher.state}: ${firstLine(watcher.reason)}` : watcher.state}`,
+    ...(inputs.pendingChanges === 0
+      ? []
+      : [`Changed paths not yet read: ${inputs.pendingChanges}`]),
+    ...inputs.gitUnread.map((reason) => `Warning: ${firstLine(reason)}`),
   ];
 }
 

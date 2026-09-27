@@ -56,8 +56,11 @@ export {
 export {
   activityText,
   FRESHNESS_VALUES,
+  RECONCILIATION_INCOMPLETE,
   TEST_STATES,
+  WATCHER_UNHEALTHY,
   type FileCounts,
+  type InputFacts,
   type LatestRunFacts,
   type NotDiscoveredEntry,
   type TestCounts,

@@ -3,7 +3,7 @@ import type { TestDiscovery } from "../vitest/discover-tests.js";
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
 import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "./schema.js";
 
-/** The inputs a result was produced from; until inputs are tracked every caller passes the not-fingerprinted value. */
+/** The inputs a result was produced from, or not fingerprinted when the daemon could not vouch for them from the job's start to its end. */
 export type InputFingerprint =
   | { readonly kind: typeof FINGERPRINT_DIGEST; readonly digest: string }
   | { readonly kind: typeof NOT_FINGERPRINTED };

@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import type { Socket } from "node:net";
+import { InputTracker } from "../inputs/input-tracker.js";
 import { consumerIdentity } from "../store/consumer-identity.js";
 import { openStore, type RtTestStore } from "../store/open-store.js";
 import type { StoreScope } from "../store/stored-records.js";
@@ -117,6 +118,11 @@ async function serve(
     store,
     log,
     executor: new Executor(log),
+    inputs: new InputTracker({
+      consumerRoot: request.start.consumerRoot,
+      exclusions: [directory, log.file],
+      log,
+    }),
     closeEndpoint: async () => {
       server.closeConnections();
       await listening.close();

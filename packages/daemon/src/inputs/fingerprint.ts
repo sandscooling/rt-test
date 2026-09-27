@@ -1,0 +1,243 @@
+import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
+import { posix } from "node:path";
+import { SELECTION_POLICY_VERSION } from "../selection/selection-types.js";
+import { VITEST_ADAPTER_VERSION } from "../vitest/adapter-version.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../vitest/discover-tests.js";
+import { errorText } from "../vitest/error-text.js";
+import { resolveWorkspaceVitest } from "../vitest/load-vitest.js";
+import { absoluteInputPath } from "./input-filter.js";
+import {
+  DIGEST_ALGORITHM,
+  DIGEST_ENCODING,
+  type InputDigests,
+} from "./input-inventory.js";
+
+const ENTRY_SEPARATOR = "\n";
+const MISSING_CODE = "ENOENT";
+/** Stands for a listed test module that no longer exists, so its deletion changes the digest. */
+const ABSENT_MODULE = "absent";
+/** The coarsest modification-time step a supported file system records, FAT's two seconds. */
+const MODIFIED_TIME_RESOLUTION_MS = 2000;
+
+export type FingerprintResult =
+  | { readonly ok: true; readonly digest: string }
+  | { readonly ok: false; readonly reason: string };
+
+/** The project's inputs at one revision; their digest is computed once, on first use. */
+export class ProjectInputs {
+  readonly root: string;
+  readonly digests: InputDigests;
+  #digest: string | undefined;
+
+  constructor(root: string, digests: InputDigests) {
+    this.root = root;
+    this.digests = digests;
+  }
+
+  /** One digest over every input's path and content digest, in path order, whatever order they were read in. */
+  digest(): string {
+    this.#digest ??= digestOfEntries(this.digests);
+    return this.#digest;
+  }
+}
+
+/** The inputs of one Vitest workspace: those of the project its results can depend on, and its own test modules. */
+export interface WorkspaceInputs {
+  readonly selected: ProjectInputs;
+  /** Root-relative, `/`-separated. */
+  readonly testModules: readonly string[];
+}
+
+/**
+ * Maps a Vitest workspace to its inputs: every input of the project, whose narrowing to what the workspace's
+ * selection reads replaces this body. Whatever it narrows to, it returns each test module the latest discovery
+ * lists for the workspace, whatever git ignores, so a stored result can match only while its tests' positions in
+ * their modules are unchanged.
+ */
+function workspaceInputs(
+  project: ProjectInputs,
+  testModules: readonly string[],
+): WorkspaceInputs {
+  return { selected: project, testModules };
+}
+
+/** A Vitest workspace's current input fingerprint, or why none can be computed. */
+export function workspaceFingerprint(
+  project: ProjectInputs,
+  entry: WorkspaceDiscovery,
+): FingerprintResult {
+  const inputs = workspaceInputs(project, listedTestModules(entry));
+  const modules = unselectedModuleDigests(inputs);
+  if (!modules.ok) return modules;
+  return {
+    ok: true,
+    digest: digestOf({
+      ...sharedParts(),
+      inputs: inputs.selected.digest(),
+      testModules: modules.digests,
+      vitestVersion: vitestVersion(entry.workspace.directory),
+    }),
+  };
+}
+
+/** The discovery's current fingerprint: a workspace's parts, with every listed workspace's Vitest version. */
+export function discoveryFingerprint(
+  project: ProjectInputs,
+  discovery: TestDiscovery,
+): FingerprintResult {
+  const inputs = workspaceInputs(
+    project,
+    discovery.workspaces.flatMap(listedTestModules),
+  );
+  const modules = unselectedModuleDigests(inputs);
+  if (!modules.ok) return modules;
+  return {
+    ok: true,
+    digest: digestOf({
+      ...sharedParts(),
+      inputs: inputs.selected.digest(),
+      testModules: modules.digests,
+      vitestVersions: discovery.workspaces.map((entry) => [
+        entry.workspace.path,
+        vitestVersion(entry.workspace.directory),
+      ]),
+    }),
+  };
+}
+
+/** A test module's path relative to the consumer root; its module path is relative to its workspace's directory. */
+export function testModuleFile(
+  workspacePath: string,
+  modulePath: string,
+): string {
+  return posix.normalize(posix.join(workspacePath, modulePath));
+}
+
+function listedTestModules(entry: WorkspaceDiscovery): string[] {
+  if (entry.status !== "discovered") return [];
+  const modulePaths = [
+    ...entry.tests.map((test) => test.identity.modulePath),
+    ...entry.failedModules.map((module) => module.modulePath),
+    ...entry.typecheckModules.map((module) => module.modulePath),
+  ];
+  return [
+    ...new Set(
+      modulePaths.map((path) => testModuleFile(entry.workspace.path, path)),
+    ),
+  ];
+}
+
+type ModuleDigests =
+  | { readonly ok: true; readonly digests: readonly (readonly string[])[] }
+  | { readonly ok: false; readonly reason: string };
+
+/** Reads each listed test module the selected inputs leave out, such as one git ignores, since no watch covers it. */
+function unselectedModuleDigests(inputs: WorkspaceInputs): ModuleDigests {
+  const digests: string[][] = [];
+  for (const path of [...new Set(inputs.testModules)].sort()) {
+    if (inputs.selected.digests.has(path)) continue;
+    const read = moduleDigest(absoluteInputPath(inputs.selected.root, path));
+    if (!read.ok) {
+      return {
+        ok: false,
+        reason: `the test module ${path} cannot be read: ${read.reason}`,
+      };
+    }
+    digests.push([path, read.digest]);
+  }
+  return { ok: true, digests };
+}
+
+function moduleDigest(path: string): FingerprintResult {
+  try {
+    return {
+      ok: true,
+      digest: createHash(DIGEST_ALGORITHM)
+        .update(readFileSync(path))
+        .digest(DIGEST_ENCODING),
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {
+      return { ok: true, digest: ABSENT_MODULE };
+    }
+    return { ok: false, reason: errorText(error) };
+  }
+}
+
+/** Absent when no Vitest resolves from the directory, which is itself a state the digest must tell apart. */
+function vitestVersion(directory: string): string | null {
+  return resolveWorkspaceVitest(directory).version ?? null;
+}
+
+/**
+ * Why a listed test module the selected inputs leave out may have changed at or after `since`, a time in ms, or
+ * undefined when none did. No watch covers such a module, so a job reading it cannot learn of an edit any other way.
+ */
+export function testModuleChangedSince(
+  project: ProjectInputs,
+  discovery: TestDiscovery,
+  since: number,
+): string | undefined {
+  const inputs = workspaceInputs(
+    project,
+    discovery.workspaces.flatMap(listedTestModules),
+  );
+  for (const path of inputs.testModules) {
+    if (inputs.selected.digests.has(path)) continue;
+    const modified = modifiedAt(absoluteInputPath(project.root, path));
+    if (
+      modified === undefined ||
+      modified >= since - MODIFIED_TIME_RESOLUTION_MS
+    ) {
+      return `the test module ${path}, which no watch covers, may have changed while the job ran`;
+    }
+  }
+  return undefined;
+}
+
+/** Undefined when it cannot be read, which cannot vouch that it held still. */
+function modifiedAt(path: string): number | undefined {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+let environmentDigest: string | undefined;
+
+/** The parts every fingerprint shares; the environment enters as a digest, never as values. */
+function sharedParts(): Record<string, unknown> {
+  environmentDigest ??= digestOfEntries(
+    new Map(
+      Object.entries(process.env).map(([name, value]) => [name, value ?? ""]),
+    ),
+  );
+  return {
+    environment: environmentDigest,
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    adapterVersion: VITEST_ADAPTER_VERSION,
+    selectionPolicyVersion: SELECTION_POLICY_VERSION,
+  };
+}
+
+function digestOfEntries(entries: ReadonlyMap<string, string>): string {
+  const hash = createHash(DIGEST_ALGORITHM);
+  for (const key of [...entries.keys()].sort()) {
+    hash.update(`${JSON.stringify([key, entries.get(key)])}${ENTRY_SEPARATOR}`);
+  }
+  return hash.digest(DIGEST_ENCODING);
+}
+
+/** Each part is named, so no two part lists can produce the same text by concatenation. */
+function digestOf(parts: Record<string, unknown>): string {
+  return createHash(DIGEST_ALGORITHM)
+    .update(JSON.stringify(parts))
+    .digest(DIGEST_ENCODING);
+}

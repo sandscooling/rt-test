@@ -1,5 +1,7 @@
 import { statSync, type Stats } from "node:fs";
 import { basename, dirname, join, posix } from "node:path";
+import { testModuleFile } from "../inputs/fingerprint.js";
+import type { CurrentInputs } from "../inputs/input-tracker.js";
 import type { LatestResults } from "../store/open-store.js";
 import {
   liesInside,
@@ -37,10 +39,11 @@ export function pathStatusAnswer(
   absolutePath: string,
   results: LatestResults,
   daemon: DaemonView,
+  inputs: CurrentInputs,
 ): PathStatusAnswer | NoAnswer {
   const target = rootRelativePath(absolutePath, daemon.consumerRoot);
   if (!target.ok) return { noAnswer: target.reason };
-  const basis = queryBasis(results, daemon);
+  const basis = queryBasis(results, daemon, inputs);
   if ("noAnswer" in basis) return basis;
   const standings = basis.standings.filter((standing) =>
     liesAtOrUnder(testFile(standing), target.path),
@@ -135,14 +138,9 @@ function liesAtOrUnder(path: string, target: string): boolean {
   );
 }
 
-/** A module path is relative to its workspace's real directory, so the join can hold a `..` to normalize away. */
-function moduleFile(workspacePath: string, modulePath: string): string {
-  return posix.normalize(posix.join(workspacePath, modulePath));
-}
-
 function testFile(standing: TestStanding): string {
   const { workspacePath, modulePath } = standing.test.identity;
-  return moduleFile(workspacePath, modulePath);
+  return testModuleFile(workspacePath, modulePath);
 }
 
 function entryPath(entry: NotDiscoveredEntry): string {
@@ -155,7 +153,7 @@ function entryPath(entry: NotDiscoveredEntry): string {
     case UNSUPPORTED_PROJECT:
       return entry.workspacePath;
     default:
-      return moduleFile(entry.workspacePath, entry.modulePath);
+      return testModuleFile(entry.workspacePath, entry.modulePath);
   }
 }
 

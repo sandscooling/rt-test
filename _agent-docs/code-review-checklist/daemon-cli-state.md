@@ -87,6 +87,8 @@ C157. **Ignore events from a replaced resource**: A handler bound to a child pro
 
 C158. **Spawn a program from outside the consumer**: A program the daemon or its helpers start runs from a working directory outside the consumer's tree, or by an absolute path, because Windows resolves a bare command name in the child's working directory before `PATH`, so a same-named executable the project commits would run instead.
 
+C159. **Watch a path by its real path**: Every `fs.watch` opens the canonical real path (`realpathSync.native`) of what it watches, never a path as a caller or argument spelled it, because on Windows a watch opened through a short (8.3) name aborts the whole process on its first event.
+
 ## Backend independence
 
 C143. **Keep the daemon and store backend-free**: The daemon, state store and core packages import no backend adapter or backend SDK; adapters plug in through the adapter interface.
