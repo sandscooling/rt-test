@@ -35,19 +35,20 @@ A lane is one unit of agreed work. Its **group** is a short slug (`m1-store`, `v
 
 Names and groups use letters, digits, dots, underscores, and hyphens only. **Your own group is `orchestrator`** (or none, when the owner started you by hand); never give it to a lane, because that is how a member recognizes it is not in one.
 
-**Members are sessions, never subagents.** A subagent vanishes with your turn and nobody can see it. A member is spawned with `session_spawn`, messaged with `SendMessage` while live, and found with `session_list`. Its name survives restarts.
+**Members are sessions, never subagents.** A subagent vanishes with your turn and nobody can see it. A member is spawned with `session_spawn`, messaged with `session_wake` on its threadId, and found with `session_list`. Its name survives restarts.
 
 **`stopped` is a state, not a loss.** A stopped member keeps its whole history, and `session_wake` restarts it under the same name. **A member exists only from the stage that needs it**: spawn it once, when the lane reaches its role, and wake it after that.
 
 **Dispatch means the member's arrival carries the work.** Run `session_list({ group })` immediately before every dispatch, then:
 
 - name absent: `session_spawn({ name, group, message })`
-- `stopped`: `session_wake({ name: <its threadId>, message })`
-- live: `SendMessage({ to: name, message })`
+- present, whether live or `stopped`: `session_wake({ name: <its threadId>, message })`
+
+**Every message between sessions goes by `session_wake` on the recipient's threadId, never by `SendMessage` and never by name.** `SendMessage` only queues for the recipient's next turn, so a report to an idle session sits unread until something else wakes it. `session_wake` starts a turn on an idle or stopped session, and on a busy one it lands right after the tool call in hand. Three sessions on this machine are named "Orchestrator", and a threadId survives renames; it changes only on a handoff, so a successor re-addresses its crew.
 
 Never send a standby or roll-call message: a settled member answers it by going idle, which stalls the lane with nothing reporting why.
 
-**To PAUSE a live member, `SendMessage` it**: finish the tool call in hand, stop every background agent it started and check the files those touched, end the turn, keep the claims, and wait for your wake. `SendMessage` lands at its next tool round; `session_wake` would queue behind a running turn. **A pause does not hold while the member has a question open in its own thread**: the owner's answer starts a new turn. Before a window where the tree must stay still, ask the owner to hold thread answers until you say it is over.
+**To PAUSE a live member, `session_wake` it** with: finish the tool call in hand, stop every background agent it started and check the files those touched, end the turn, keep the claims, and wait for your wake. It lands right after the tool call in hand. **A pause does not hold while the member has a question open in its own thread**: the owner's answer starts a new turn. Before a window where the tree must stay still, ask the owner to hold thread answers until you say it is over.
 
 **Spawn on your own model** by omitting `model` and `options`. Escalate a problem the default has already failed on by spawning a NEW session on a stronger model with a written brief (the record, every measured attempt, every traced failure and what was ruled out), never by switching a live session's model, which drops its reasoning. The next round of that work goes back to a default-model member.
 
