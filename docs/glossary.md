@@ -38,6 +38,18 @@ _Avoid_: trusted list, allowlist
 A digest of every input that can change a test's result.
 _Avoid_: hash, cache key
 
+**Input**:
+A file whose edit RT Test treats as able to change a test's result.
+_Avoid_: source, dependency
+
+**Input revision**:
+The number naming a worktree's inputs as the daemon last observed them, raised by each change it observes.
+_Avoid_: version, generation
+
+**Reconciliation**:
+Reading every input again to establish the current input fingerprints, without relying on change events.
+_Avoid_: rescan, resync
+
 **Run**:
 One execution of a selection by the daemon, under its own run identity.
 _Avoid_: job, pass

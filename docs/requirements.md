@@ -19,7 +19,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - FR3: Persist results bound to project, worktree, run identity, input fingerprint, and adapter version, and keep them available across a daemon restart. [Ticket 1.2]
 - FR4: Start and stop the daemon explicitly for one trusted project, and execute no project code before that start. [Tickets 1.3, 1.3b, 1.3c]
 - FR5: Answer summary and `status <path>` queries through a CLI with versioned `--json` output, reporting counts per state for files and folders, without starting a test. [Ticket 1.4]
-- FR6: Mark every result a saved edit could affect as stale, and reconcile inputs after a start, a missed event, or a branch change before reporting any result current. [Sprint 2]
+- FR6: Mark every result a saved edit could affect as stale, and reconcile inputs after a start, a missed event, or a branch change before reporting any result current. [Ticket 2.1]
 - FR7: Select the tests each change requires at workspace granularity, widening on uncertain dependencies, with a reason for each selected test, the trigger of each broad fallback, and selected and total counts. [Tickets 2.2, 2.2b]
 - FR8: Execute every selection in the daemon, and record a run whose inputs changed while it ran as invalidated and rerun it from stable inputs. [Sprint 2]
 - FR9: Answer `wait <files>` once every test covering those files has a current result or an explicit non-current state, or as superseded when a covering input changes after the call. [Sprint 2]
@@ -38,6 +38,6 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 
 - NFR1: Never execute a test while it holds a current result for the same input fingerprint, except to falsify it or to rerun an invalidated run. [Sprint 2]
 - NFR2: Find in every selected run each failure that a full run over the same input snapshot finds, across the controlled edit corpus. [Sprint 2]
-- NFR3: Never report a result as current unless its stored input fingerprint matches the current inputs. [Sprint 2]
+- NFR3: Never report a result as current unless its stored input fingerprint matches the current inputs. [Ticket 2.1]
 - NFR4: Keep state, logs, and results on the machine under the configured state directory, and send nothing off it. [Tickets 1.2, 1.3, 1.3b]
 - NFR5: Run on Node `^22.13.0`, `^24`, and `>=26`, on Windows and Linux. [Ticket 1.2]

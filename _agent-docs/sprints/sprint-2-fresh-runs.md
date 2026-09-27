@@ -8,7 +8,11 @@ The sprint's correctness targets are requirements measured over a controlled edi
 
 ## Ticket 2.1: Track inputs and invalidate
 
-Scope: watch saved inputs, fingerprint them, and mark every result an edit could affect as stale, reconciling after start, missed events, and branch changes before any result is reported current. Requirements: FR6, NFR3.
+Scope: watch saved inputs, fingerprint them, and mark every result an edit could affect as stale, reconciling after start, missed events, and branch changes before any result is reported current. Requirements: FR6, NFR3. Ticket file: [2-1-track-inputs](../tickets/2-1-track-inputs.md)
+
+## Ticket 2.1b: Declared non-inputs
+
+Scope: let the consumer declare files no test reads, such as documentation, in a list committed in the consumer and shown in the start plan. An edit to a declared file then changes no fingerprint and selects nothing, and a change to the list itself reconciles every input. Ticket 2.1 counts every file git does not ignore as an input, so until this lands a README edit stales every result (owner, 2026-09-27 10:08). It follows 2.1 and lands before the Fleet Cooling trial. Requirements: FR6.
 
 ## Ticket 2.2: Workspace-level selection
 
@@ -20,7 +24,7 @@ Scope: find statically the cross-workspace dependencies no `package.json` declar
 
 ## Ticket 2.3: Schedule and run selections
 
-Scope: run every selection in the daemon with debounce and deduplication, never re-executing a test that holds a current result, and invalidate and rerun a run whose inputs changed while it ran, leaving explicit interrupted states. Discovery reports each workspace's resolved setup files and config aliases, which ticket 2.2's selection takes as required inputs, and each workspace that cannot run (not confirmed at start, unsupported) is passed with its reason, so no selection runs it and every explanation and count stays true (orchestrator, 2026-09-26 18:07 and 18:22). It builds after 2.2 and 2.2b. Discovery converts Vitest's absolute setup and global setup paths to root-relative ones, credits the root config's `globalSetup` to each Vitest 5 project that extends the root config (Vitest 5 drops it from that project's resolved config), passes a RegExp alias `find` as its source text, and makes selection widen on an alias with a `customResolver` or a `find` of `/`, whose replacement is not the final import. Selection runs in a disposable child process, so a consumer file that crashes the source parser fails that one selection with a reason instead of ending the daemon (orchestrator, 2026-09-27 01:27; ticket 2.2b). Requirements: FR8, NFR1.
+Scope: run every selection in the daemon with debounce and deduplication, never re-executing a test that holds a current result, and invalidate and rerun a run whose inputs changed while it ran, leaving explicit interrupted states. Discovery reports each workspace's resolved setup files and config aliases, which ticket 2.2's selection takes as required inputs, and each workspace that cannot run (not confirmed at start, unsupported) is passed with its reason, so no selection runs it and every explanation and count stays true (orchestrator, 2026-09-26 18:07 and 18:22). It builds after 2.2 and 2.2b. Discovery converts Vitest's absolute setup and global setup paths to root-relative ones, credits the root config's `globalSetup` to each Vitest 5 project that extends the root config (Vitest 5 drops it from that project's resolved config), passes a RegExp alias `find` as its source text, and makes selection widen on an alias with a `customResolver` or a `find` of `/`, whose replacement is not the final import. Selection runs in a disposable child process, so a consumer file that crashes the source parser fails that one selection with a reason instead of ending the daemon (orchestrator, 2026-09-27 01:27; ticket 2.2b). Ticket 2.1 fingerprints every Vitest workspace over the whole project's inputs; this ticket narrows each workspace's fingerprint to the inputs whose selection includes it, from the same dependency information its selection uses, so staleness and selection never disagree. It turns a job 2.1 stores not fingerprinted, because an input changed or an event named one while it ran, into its invalidated state and reruns it (orchestrator, 2026-09-27 10:08). Requirements: FR8, NFR1.
 
 ## Ticket 2.4: Wait for files
 
