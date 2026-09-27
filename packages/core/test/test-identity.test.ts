@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   identifyModuleTests,
+  testIdentityKey,
   type TestModuleLocation,
 } from "../src/test-identity.js";
 
@@ -69,5 +70,33 @@ describe("test identity within one module", () => {
     ).not.toEqual(
       identifyModuleTests(LOCATION, [["after", "test"]])[0]?.identity,
     );
+  });
+});
+
+describe("the key of a whole test identity", () => {
+  it("D1791: two identities that differ only in their occurrence get different keys", () => {
+    const [first, second] = identifyModuleTests(LOCATION, [
+      ["twin"],
+      ["twin"],
+    ]).map((test) => testIdentityKey(test.identity));
+    expect(first).not.toBe(second);
+  });
+
+  it("D1861: two identities that differ only in their module path get different keys", () => {
+    const [first, second] = [
+      LOCATION,
+      { ...LOCATION, modulePath: "src/b.test.ts" },
+    ]
+      .flatMap((location) => identifyModuleTests(location, [["same"]]))
+      .map((test) => testIdentityKey(test.identity));
+    expect(first).not.toBe(second);
+  });
+
+  it("D1862: two identities that differ only in their name path get different keys", () => {
+    const [first, second] = identifyModuleTests(LOCATION, [
+      ["one"],
+      ["two"],
+    ]).map((test) => testIdentityKey(test.identity));
+    expect(first).not.toBe(second);
   });
 });

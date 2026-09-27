@@ -33,6 +33,17 @@ export function identifyModuleTests(
   });
 }
 
+/** Equal for two identities exactly when every field is equal, so a stored result is matched to its test by it alone. */
+export function testIdentityKey(identity: TestIdentity): string {
+  return JSON.stringify([
+    identity.workspacePath,
+    identity.projectName,
+    identity.modulePath,
+    identity.namePath,
+    identity.occurrence,
+  ]);
+}
+
 // JSON keeps ["a b", "c"] and ["a", "b c"] apart, which a joined string would not.
 function namePathKey(namePath: readonly string[]): string {
   return JSON.stringify(namePath);

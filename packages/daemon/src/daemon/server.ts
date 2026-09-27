@@ -1,4 +1,10 @@
 import type { Socket } from "node:net";
+import { isAbsolute } from "node:path";
+import type {
+  NoAnswer,
+  PathStatusAnswer,
+  SummaryAnswer,
+} from "../query/answer.js";
 import { errorText } from "../vitest/error-text.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
@@ -8,10 +14,16 @@ import {
   isStopRequest,
   LineDecoder,
   MAX_LINE_BYTES,
+  NOTHING_TO_ANSWER_CODE,
   parseLine,
+  PATH_STATUS_TYPE,
   PROTOCOL_VERSION,
+  QUERY_FAILED_CODE,
   STATUS_TYPE,
+  STOPPING_CODE,
   STOPPING_TYPE,
+  SUMMARY_TYPE,
+  UNKNOWN_REQUEST_CODE,
   VERSION_MISMATCH_CODE,
   type DaemonIdentity,
   type DecodedLine,
@@ -19,8 +31,10 @@ import {
   type ErrorResponse,
   type ProtocolMessage,
   type HelloResponse,
+  type PathStatusResponse,
   type StatusResponse,
   type StopAcknowledgement,
+  type SummaryResponse,
   type VersionMismatchError,
 } from "./protocol.js";
 
@@ -28,6 +42,10 @@ import {
 export interface DaemonHandlers {
   readonly identity: DaemonIdentity;
   status(): Pick<StatusResponse, "activity" | "stopping" | "unstoredJobs">;
+  /** Reads only: starts no job and changes no activity. */
+  summary(): SummaryAnswer | NoAnswer;
+  /** Reads only; `path` is absolute. */
+  pathStatus(path: string): PathStatusAnswer | NoAnswer;
   /** Begins the stop, or joins the one under way. */
   stop(): void;
   isStopping(): boolean;
@@ -167,10 +185,13 @@ function hello(
   return "mismatched";
 }
 
+type VersionedAnswer =
+  StatusResponse | SummaryResponse | PathStatusResponse | ErrorResponse;
+
 function versionedAnswer(
   message: ProtocolMessage,
   handlers: DaemonHandlers,
-): StatusResponse | ErrorResponse {
+): VersionedAnswer {
   if (message["protocolVersion"] !== PROTOCOL_VERSION) {
     return error(
       "invalid-request",
@@ -181,12 +202,64 @@ function versionedAnswer(
     return { type: STATUS_TYPE, ...handlers.identity, ...handlers.status() };
   }
   if (handlers.isStopping()) {
-    return error("stopping", "the daemon is stopping");
+    return error(STOPPING_CODE, "the daemon is stopping");
+  }
+  if (message["type"] === SUMMARY_TYPE) {
+    return queryResponse(() => withType(SUMMARY_TYPE, handlers.summary()));
+  }
+  if (message["type"] === PATH_STATUS_TYPE) {
+    return pathStatusResponse(message["path"], handlers);
   }
   return error(
-    "unknown-request",
+    UNKNOWN_REQUEST_CODE,
     `unknown request type ${JSON.stringify(message["type"] ?? null)}`,
   );
+}
+
+function pathStatusResponse(
+  path: unknown,
+  handlers: DaemonHandlers,
+): PathStatusResponse | ErrorResponse {
+  if (typeof path !== "string" || !isAbsolute(path)) {
+    return error(
+      "invalid-request",
+      `a ${PATH_STATUS_TYPE} request must carry an absolute path; got ${JSON.stringify(path ?? null)}`,
+    );
+  }
+  return queryResponse(() =>
+    withType(PATH_STATUS_TYPE, handlers.pathStatus(path)),
+  );
+}
+
+function withType<T extends string, A extends object>(
+  type: T,
+  answer: A | NoAnswer,
+): (A & { type: T; protocolVersion: number }) | NoAnswer {
+  if ("noAnswer" in answer) return answer;
+  return { ...answer, type, protocolVersion: PROTOCOL_VERSION };
+}
+
+/** A query that throws, has nothing to answer, or would pass the line limit is answered with an error saying why. */
+function queryResponse<R extends object>(
+  answer: () => R | NoAnswer,
+): R | ErrorResponse {
+  let response: R | NoAnswer;
+  try {
+    response = answer();
+  } catch (failure) {
+    return error(QUERY_FAILED_CODE, `the query failed: ${errorText(failure)}`);
+  }
+  if ("noAnswer" in response) {
+    return error(NOTHING_TO_ANSWER_CODE, response.noAnswer);
+  }
+  const size = Buffer.byteLength(JSON.stringify(response));
+  if (size > MAX_LINE_BYTES) {
+    return error(
+      NOTHING_TO_ANSWER_CODE,
+      `the answer is ${size} bytes, longer than the protocol's line limit of ${MAX_LINE_BYTES} bytes; ask status for a narrower path`,
+    );
+  }
+  return response;
 }
 
 function stopAcknowledgement(

@@ -1,0 +1,998 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, expect, it } from "vitest";
+import type {
+  NoAnswer,
+  PathStatusAnswer,
+  SummaryAnswer,
+  TestCounts,
+} from "../src/query/answer.js";
+import { pathStatusAnswer } from "../src/query/path-status.js";
+import { summaryAnswer, type DaemonView } from "../src/query/summary.js";
+import type { LatestResults } from "../src/store/open-store.js";
+import type {
+  InputFingerprint,
+  StoredDiscovery,
+  StoredRun,
+} from "../src/store/stored-records.js";
+import { VITEST_ADAPTER_VERSION } from "../src/vitest/adapter-version.js";
+import type {
+  DiscoveredTest,
+  WorkspaceDiscovery,
+} from "../src/vitest/discover-tests.js";
+import type { UnreadWorkspaceSource } from "../src/vitest/find-workspaces.js";
+import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
+import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
+import type { TestOutcome } from "@rt-test/core";
+import { inTempDir } from "./harness.js";
+
+type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
+type DiscoveredWorkspace = Extract<
+  WorkspaceDiscovery,
+  { status: "discovered" }
+>;
+
+const ROOT = "/consumer";
+const PROJECT = "unit";
+const WORKSPACE_A = "packages/a";
+const WORKSPACE_B = "packages/b";
+const MODULE = "src/a.test.ts";
+const UNFINGERPRINTED: InputFingerprint = { kind: "not-fingerprinted" };
+const DIGEST: InputFingerprint = {
+  kind: "digest",
+  digest: "sha256:9F86D081884C7D65",
+};
+/** Any adapter version but the daemon's current one. */
+const OTHER_ADAPTER_VERSION = VITEST_ADAPTER_VERSION + 1;
+const IDLE: DaemonView = {
+  consumerRoot: ROOT,
+  activity: { state: "idle" },
+  unstoredJobs: [],
+};
+
+interface TestPlace {
+  readonly workspacePath?: string;
+  readonly projectName?: string;
+  readonly modulePath?: string;
+  readonly isDuplicate?: boolean;
+}
+
+function discovered(name: string, place: TestPlace = {}): DiscoveredTest {
+  return {
+    identity: {
+      workspacePath: place.workspacePath ?? WORKSPACE_A,
+      projectName: place.projectName ?? PROJECT,
+      modulePath: place.modulePath ?? MODULE,
+      namePath: [name],
+      occurrence: 0,
+    },
+    isDuplicate: place.isDuplicate ?? false,
+    mode: "run",
+  };
+}
+
+function workspaceOf(path: string, root = ROOT) {
+  return { path, directory: join(root, path) };
+}
+
+function discoveredWorkspace(
+  path: string,
+  tests: readonly DiscoveredTest[],
+  more: Partial<DiscoveredWorkspace> = {},
+): DiscoveredWorkspace {
+  return {
+    status: "discovered",
+    workspace: workspaceOf(path),
+    vitestVersion: "5.0.1",
+    tests,
+    failedModules: [],
+    typecheckModules: [],
+    unsupportedProjects: [],
+    unhandledErrors: [],
+    ...more,
+  };
+}
+
+function storedDiscovery(
+  workspaces: readonly WorkspaceDiscovery[],
+  notRead: readonly UnreadWorkspaceSource[] = [],
+  adapterVersion = VITEST_ADAPTER_VERSION,
+): StoredDiscovery {
+  return {
+    projectIdentity: `${ROOT}/.git`,
+    worktreeIdentity: ROOT,
+    inputFingerprint: UNFINGERPRINTED,
+    adapterVersion,
+    discoveryId: "discovery-1",
+    discovery: { workspaces, notRead },
+  };
+}
+
+function finished(test: DiscoveredTest, outcome: TestOutcome): RecordedTest {
+  return {
+    identity: test.identity,
+    isDuplicate: test.isDuplicate,
+    execution: "finished",
+    outcome,
+    errors: [],
+  };
+}
+
+function ranModule(
+  tests: readonly RecordedTest[],
+  modulePath = MODULE,
+  projectName = PROJECT,
+): Extract<RecordedModule, { state: "ran" }> {
+  return { projectName, modulePath, state: "ran", tests, errors: [] };
+}
+
+function ranRun(
+  modules: readonly RecordedModule[],
+  more: Partial<RanRun> = {},
+  path = WORKSPACE_A,
+): RanRun {
+  return {
+    status: "ran",
+    workspace: workspaceOf(path),
+    vitestVersion: "5.0.1",
+    execution: "completed",
+    modules,
+    typecheckModules: [],
+    unsupportedProjects: [],
+    unhandledErrors: [],
+    forceStopped: false,
+    ...more,
+  };
+}
+
+function storedRun(
+  run: WorkspaceRun,
+  adapterVersion = VITEST_ADAPTER_VERSION,
+  inputFingerprint = UNFINGERPRINTED,
+): StoredRun {
+  return {
+    projectIdentity: `${ROOT}/.git`,
+    worktreeIdentity: ROOT,
+    inputFingerprint,
+    adapterVersion,
+    runId: `run-${run.workspace.path}`,
+    run,
+  };
+}
+
+function results(
+  discovery: StoredDiscovery | undefined,
+  latestRuns: readonly StoredRun[] = [],
+): LatestResults {
+  return { discovery, latestRuns };
+}
+
+function answered<A extends object>(answer: A | NoAnswer): A {
+  if ("noAnswer" in answer) throw new Error(answer.noAnswer);
+  return answer;
+}
+
+function summaryOf(
+  discovery: StoredDiscovery,
+  latestRuns: readonly StoredRun[] = [],
+): SummaryAnswer {
+  return answered(summaryAnswer(results(discovery, latestRuns), IDLE));
+}
+
+/** The counts of a set that are not zero, which is all a test of one state or freshness needs to read. */
+function nonZero(counts: Readonly<Record<string, number>>) {
+  return Object.fromEntries(
+    Object.entries(counts).filter(([, count]) => count !== 0),
+  );
+}
+
+/** The states of one test of workspace A, answered by `run`. */
+function statesOf(test: DiscoveredTest, run: WorkspaceRun) {
+  const summary = summaryOf(
+    storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
+    [storedRun(run)],
+  );
+  return nonZero(summary.counts.states);
+}
+
+function nonZeroCounts(counts: TestCounts) {
+  return {
+    states: nonZero(counts.states),
+    freshness: nonZero(counts.freshness),
+  };
+}
+
+describe("each discovered test's one state", () => {
+  it("D1792: a finished test's state is its own outcome, each outcome counted apart", () => {
+    const tests = (["passed", "failed", "skipped", "error"] as const).map(
+      (outcome) => [discovered(outcome), outcome] as const,
+    );
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(
+          WORKSPACE_A,
+          tests.map(([test]) => test),
+        ),
+      ]),
+      [
+        storedRun(
+          ranRun([
+            ranModule(tests.map(([test, outcome]) => finished(test, outcome))),
+          ]),
+        ),
+      ],
+    );
+    expect(nonZero(summary.counts.states)).toStrictEqual({
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      error: 1,
+    });
+  });
+
+  it("D1793: a test its latest run left unfinished is interrupted, with no outcome", () => {
+    const test = discovered("left");
+    const unfinished: RecordedTest = {
+      identity: test.identity,
+      isDuplicate: false,
+      execution: "interrupted",
+    };
+    expect(statesOf(test, ranRun([ranModule([unfinished])]))).toStrictEqual({
+      interrupted: 1,
+    });
+  });
+
+  it("D1794: a test whose module the latest run did not run is module-not-run", () => {
+    const test = discovered("later");
+    const module: RecordedModule = {
+      projectName: PROJECT,
+      modulePath: MODULE,
+      state: "not-run",
+    };
+    expect(statesOf(test, ranRun([module]))).toStrictEqual({
+      "module-not-run": 1,
+    });
+  });
+
+  it("D1795: a test whose module crashed in the latest run is module-crashed", () => {
+    const test = discovered("crashing");
+    const module: RecordedModule = {
+      projectName: PROJECT,
+      modulePath: MODULE,
+      state: "crashed",
+    };
+    expect(statesOf(test, ranRun([module]))).toStrictEqual({
+      "module-crashed": 1,
+    });
+  });
+
+  it("D1796: a test whose module failed to load in the latest run is module-failed-to-load", () => {
+    const test = discovered("broken");
+    const module: RecordedModule = {
+      projectName: PROJECT,
+      modulePath: MODULE,
+      state: "failed",
+      errors: ["SyntaxError: Unexpected token"],
+    };
+    expect(statesOf(test, ranRun([module]))).toStrictEqual({
+      "module-failed-to-load": 1,
+    });
+  });
+
+  it("D1797: a test whose workspace's latest run failed to load it is run-failed", () => {
+    const run: WorkspaceRun = {
+      status: "failed",
+      workspace: workspaceOf(WORKSPACE_A),
+      vitestVersion: "5.0.1",
+      error: "Error: config boom",
+    };
+    expect(statesOf(discovered("any"), run)).toStrictEqual({ "run-failed": 1 });
+  });
+
+  it("D1798: a test whose workspace's latest run found no supported Vitest is run-unsupported-vitest", () => {
+    const run: WorkspaceRun = {
+      status: "unsupported",
+      workspace: workspaceOf(WORKSPACE_A),
+      vitest: {
+        supported: false,
+        version: "3.2.4",
+        supportedRange: "^4.1.0 || ^5.0.0",
+        reason: "Vitest 3.2.4 is outside the supported range",
+      },
+    };
+    expect(statesOf(discovered("any"), run)).toStrictEqual({
+      "run-unsupported-vitest": 1,
+    });
+  });
+
+  it("D1799: a test whose workspace's latest run was interrupted before loading it is run-interrupted-before-load", () => {
+    const run: WorkspaceRun = {
+      status: "interrupted-before-load",
+      workspace: workspaceOf(WORKSPACE_A),
+    };
+    expect(statesOf(discovered("any"), run)).toStrictEqual({
+      "run-interrupted-before-load": 1,
+    });
+  });
+
+  it("D1800: a test the latest run does not hold, whether or not it holds the test's module, is not-in-latest-run and never passed", () => {
+    const added = discovered("added after the run");
+    const elsewhere = discovered("in a module the run lacks", {
+      modulePath: "src/new.test.ts",
+    });
+    const kept = discovered("kept");
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [added, elsewhere, kept]),
+      ]),
+      [storedRun(ranRun([ranModule([finished(kept, "failed")])]))],
+    );
+    expect(nonZero(summary.counts.states)).toStrictEqual({
+      failed: 1,
+      "not-in-latest-run": 2,
+    });
+  });
+
+  it("D1801: a test of a workspace with no stored run is never-run", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+        discoveredWorkspace(WORKSPACE_B, [
+          discovered("b", { workspacePath: WORKSPACE_B }),
+        ]),
+      ]),
+      [storedRun(ranRun([ranModule([finished(discovered("a"), "passed")])]))],
+    );
+    expect(nonZero(summary.counts.states)).toStrictEqual({
+      passed: 1,
+      "never-run": 1,
+    });
+  });
+
+  it("D1802: the answer lists every state by name, a state with no test included", () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+    );
+    expect(Object.keys(summary.counts.states).sort()).toStrictEqual([
+      "error",
+      "failed",
+      "interrupted",
+      "module-crashed",
+      "module-failed-to-load",
+      "module-not-run",
+      "never-run",
+      "not-in-latest-run",
+      "passed",
+      "run-failed",
+      "run-interrupted-before-load",
+      "run-unsupported-vitest",
+      "skipped",
+    ]);
+  });
+
+  it("D1803: a run's result for a same-named test of another project never answers the discovered test", () => {
+    const test = discovered("shared name");
+    const otherProject = discovered("shared name", { projectName: "e2e" });
+    const run = ranRun([
+      ranModule([]),
+      ranModule([finished(otherProject, "passed")], MODULE, "e2e"),
+    ]);
+    expect(statesOf(test, run)).toStrictEqual({ "not-in-latest-run": 1 });
+  });
+});
+
+describe("each test's freshness, beside its state", () => {
+  it("D1804: a finished result from a run of another adapter version keeps its outcome and is stale", () => {
+    const test = discovered("old");
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
+      [
+        storedRun(
+          ranRun([ranModule([finished(test, "passed")])]),
+          OTHER_ADAPTER_VERSION,
+        ),
+      ],
+    );
+    expect(nonZeroCounts(summary.counts)).toStrictEqual({
+      states: { passed: 1 },
+      freshness: { stale: 1 },
+    });
+  });
+
+  it("D1805: a test with no finished result is unknown, even from a run of another adapter version", () => {
+    const test = discovered("left");
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
+      [
+        storedRun(
+          ranRun([
+            ranModule([
+              {
+                identity: test.identity,
+                isDuplicate: false,
+                execution: "interrupted",
+              },
+            ]),
+          ]),
+          OTHER_ADAPTER_VERSION,
+        ),
+      ],
+    );
+    expect(nonZero(summary.counts.freshness)).toStrictEqual({ unknown: 1 });
+  });
+
+  it("D1806: a finished result of the current adapter version stored with a digest is unknown, since no current fingerprint exists", () => {
+    const test = discovered("fingerprinted");
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
+      [
+        storedRun(
+          ranRun([ranModule([finished(test, "passed")])]),
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      ],
+    );
+    expect(nonZero(summary.counts.freshness)).toStrictEqual({ unknown: 1 });
+  });
+
+  it("D1807: a discovery of another adapter version still counts its tests, and the answer says it is not current", () => {
+    const summary = summaryOf(
+      storedDiscovery(
+        [discoveredWorkspace(WORKSPACE_A, [discovered("a"), discovered("b")])],
+        [],
+        OTHER_ADAPTER_VERSION,
+      ),
+    );
+    expect({
+      tests: summary.counts.tests,
+      discovery: summary.discovery,
+    }).toStrictEqual({
+      tests: 2,
+      discovery: {
+        discoveryId: "discovery-1",
+        adapterVersion: OTHER_ADAPTER_VERSION,
+        adapterVersionCurrent: false,
+      },
+    });
+  });
+});
+
+describe("what the summary lists as not discovered", () => {
+  it("D1808: a workspace the start did not confirm is listed as not confirmed, by its status", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+        {
+          status: "not-confirmed",
+          workspace: workspaceOf(WORKSPACE_B),
+          reason: "not confirmed at start",
+        },
+      ]),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "workspace-not-confirmed",
+        workspacePath: WORKSPACE_B,
+        reason: "not confirmed at start",
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
+  it("D1809: a workspace whose discovery failed is listed with its error", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        {
+          status: "failed",
+          workspace: workspaceOf(WORKSPACE_B),
+          vitestVersion: "5.0.1",
+          error: "Error: config boom",
+        },
+      ]),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "workspace-discovery-failed",
+        workspacePath: WORKSPACE_B,
+        reason: "Error: config boom",
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
+  it("D1810: a workspace with no supported Vitest is listed with the reason", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        {
+          status: "unsupported",
+          workspace: workspaceOf(WORKSPACE_B),
+          vitest: {
+            supported: false,
+            version: "3.2.4",
+            supportedRange: "^4.1.0 || ^5.0.0",
+            reason: "Vitest 3.2.4 is outside the supported range",
+          },
+        },
+      ]),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "workspace-unsupported-vitest",
+        workspacePath: WORKSPACE_B,
+        reason: "Vitest 3.2.4 is outside the supported range",
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
+  it("D1811: a module that failed to load during discovery is listed with its errors and their count", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [], {
+          failedModules: [
+            {
+              projectName: PROJECT,
+              modulePath: "src/broken.test.ts",
+              errors: ["SyntaxError: one", "Error: two"],
+            },
+          ],
+        }),
+      ]),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "failed-module",
+        workspacePath: WORKSPACE_A,
+        projectName: PROJECT,
+        modulePath: "src/broken.test.ts",
+        errorCount: 2,
+        reason: "SyntaxError: one\nError: two",
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
+  it("D1812: a typecheck module is listed as not discovered", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [discovered("a")], {
+          typecheckModules: [
+            { projectName: PROJECT, modulePath: "src/types.test-d.ts" },
+          ],
+        }),
+      ]),
+    );
+    expect(
+      summary.notDiscovered.map((entry) => [
+        entry.kind,
+        "modulePath" in entry ? entry.modulePath : undefined,
+      ]),
+    ).toStrictEqual([["typecheck-module", "src/types.test-d.ts"]]);
+  });
+
+  it("D1813: an unsupported project is listed with its reason", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [discovered("a")], {
+          unsupportedProjects: [
+            { projectName: "browser", reason: "browser mode is not supported" },
+          ],
+        }),
+      ]),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "unsupported-project",
+        workspacePath: WORKSPACE_A,
+        projectName: "browser",
+        reason: "browser mode is not supported",
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
+  it("D1814: each workspace source that was not read, outside the root or a duplicate, is listed with its reason", () => {
+    const notRead: UnreadWorkspaceSource[] = [
+      { source: "../elsewhere", reason: "it lies outside the consumer root" },
+      { source: "packages/a", reason: "it was reached twice" },
+    ];
+    const summary = summaryOf(
+      storedDiscovery(
+        [discoveredWorkspace(WORKSPACE_A, [discovered("a")])],
+        notRead,
+      ),
+    );
+    expect(summary.notDiscovered).toStrictEqual(
+      notRead.map((unread) => ({
+        kind: "source-not-read",
+        ...unread,
+        omittedCharacters: 0,
+      })),
+    );
+  });
+
+  it("D1815: a reason past 1,000 characters is cut by code point, keeping a character that straddles the cut whole", () => {
+    const kept = `${"a".repeat(999)}\u{1F600}`;
+    const summary = summaryOf(
+      storedDiscovery([
+        {
+          status: "failed",
+          workspace: workspaceOf(WORKSPACE_A),
+          vitestVersion: "5.0.1",
+          error: `${kept}bbbbb`,
+        },
+      ]),
+    );
+    const [entry] = summary.notDiscovered;
+    expect({
+      kept: entry?.reason === kept,
+      omittedCharacters: entry?.omittedCharacters,
+    }).toStrictEqual({ kept: true, omittedCharacters: 5 });
+  });
+
+  it("D1816: a reason of exactly 1,000 characters is kept whole", () => {
+    const reason = "r".repeat(1000);
+    const summary = summaryOf(
+      storedDiscovery([
+        {
+          status: "failed",
+          workspace: workspaceOf(WORKSPACE_A),
+          vitestVersion: "5.0.1",
+          error: reason,
+        },
+      ]),
+    );
+    const [entry] = summary.notDiscovered;
+    expect({
+      whole: entry?.reason === reason,
+      omittedCharacters: entry?.omittedCharacters,
+    }).toStrictEqual({ whole: true, omittedCharacters: 0 });
+  });
+
+  it("D1817: the answer counts the discovered tests marked duplicate", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [
+          discovered("twin", { isDuplicate: true }),
+          discovered("twin", { isDuplicate: true }),
+          discovered("alone"),
+        ]),
+      ]),
+    );
+    expect(summary.duplicateTests).toBe(2);
+  });
+});
+
+describe("each workspace's latest run", () => {
+  it("D1818: each workspace of the discovery gives its latest run's facts, or that none is stored", () => {
+    const test = discovered("a");
+    const run = ranRun([ranModule([finished(test, "passed")])], {
+      execution: "interrupted",
+      forceStopped: true,
+      unhandledErrors: ["Error: leaked timer"],
+    });
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [test]),
+        discoveredWorkspace(WORKSPACE_B, []),
+      ]),
+      [storedRun(run)],
+    );
+    expect(summary.workspaces).toStrictEqual([
+      {
+        workspacePath: WORKSPACE_A,
+        latestRun: {
+          runId: `run-${WORKSPACE_A}`,
+          adapterVersion: VITEST_ADAPTER_VERSION,
+          adapterVersionCurrent: true,
+          status: "ran",
+          execution: "interrupted",
+          forceStopped: true,
+          nothingRan: null,
+          unhandledErrors: 1,
+          moduleErrors: 0,
+        },
+      },
+      { workspacePath: WORKSPACE_B, latestRun: null },
+    ]);
+  });
+
+  it("D1819: a run's module errors count every error its modules recorded", () => {
+    const test = discovered("a");
+    const run = ranRun([
+      { ...ranModule([finished(test, "passed")]), errors: ["Error: afterAll"] },
+      {
+        projectName: PROJECT,
+        modulePath: "src/broken.test.ts",
+        state: "failed",
+        errors: ["SyntaxError: one", "Error: two"],
+      },
+    ]);
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [test])]),
+      [storedRun(run)],
+    );
+    const latestRun = summary.workspaces[0]?.latestRun;
+    expect(
+      latestRun !== null &&
+        latestRun !== undefined &&
+        "moduleErrors" in latestRun
+        ? latestRun.moduleErrors
+        : latestRun,
+    ).toBe(3);
+  });
+
+  it("D1864: a workspace's latest run gives the reason nothing ran", () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+      [storedRun(ranRun([], { nothingRan: "no-module" }))],
+    );
+    const latestRun = summary.workspaces[0]?.latestRun;
+    expect(
+      latestRun !== null && latestRun !== undefined && "nothingRan" in latestRun
+        ? latestRun.nothingRan
+        : latestRun,
+    ).toBe("no-module");
+  });
+
+  it("D1865: a workspace whose latest run failed to load it gives that run's status and adapter version", () => {
+    const run: WorkspaceRun = {
+      status: "failed",
+      workspace: workspaceOf(WORKSPACE_A),
+      vitestVersion: "5.0.1",
+      error: "Error: config boom",
+    };
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+      [storedRun(run, OTHER_ADAPTER_VERSION)],
+    );
+    expect(summary.workspaces).toStrictEqual([
+      {
+        workspacePath: WORKSPACE_A,
+        latestRun: {
+          runId: `run-${WORKSPACE_A}`,
+          adapterVersion: OTHER_ADAPTER_VERSION,
+          adapterVersionCurrent: false,
+          status: "failed",
+        },
+      },
+    ]);
+  });
+});
+
+describe("a summary with nothing to answer", () => {
+  it("D1820: a latest discovery holding no test and nothing not discovered answers nothing", () => {
+    const answer = summaryAnswer(
+      results(storedDiscovery([discoveredWorkspace(WORKSPACE_A, [])])),
+      IDLE,
+    );
+    expect("noAnswer" in answer).toBe(true);
+  });
+
+  it("D1821: with no stored discovery, the reason names the daemon's activity", () => {
+    const answer = summaryAnswer(results(undefined), {
+      ...IDLE,
+      activity: { state: "running", workspacePath: WORKSPACE_A },
+    });
+    expect("noAnswer" in answer ? answer.noAnswer : answer).toMatch(
+      /running workspace packages\/a/,
+    );
+  });
+});
+
+/**
+ * A consumer tree under `root`: workspace A holds `src/a.test.ts` (two tests) and `src/b.test.ts` (one), a test file
+ * `src/gone.test.ts` that is deleted, a module `src/broken.test.ts`, deleted, that failed to load, and a module that
+ * reaches `packages/shared` through `..`. Workspace `packages/ab` shares A's name as a prefix, workspace B has an
+ * unsupported project, and the discovery of `packages/failed` failed.
+ */
+function consumerTree(root: string): LatestResults {
+  for (const file of [
+    "packages/a/src/a.test.ts",
+    "packages/a/src/b.test.ts",
+    "packages/ab/src/c.test.ts",
+    "packages/b/src/d.test.ts",
+    "packages/shared/x.test.ts",
+  ]) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), "");
+  }
+  mkdirSync(join(root, "packages/failed"));
+  const inA = (name: string, modulePath: string) =>
+    discovered(name, { modulePath });
+  const discovery: StoredDiscovery = {
+    ...storedDiscovery([
+      discoveredWorkspace(
+        WORKSPACE_A,
+        [
+          inA("one", "src/a.test.ts"),
+          inA("two", "src/a.test.ts"),
+          inA("three", "src/b.test.ts"),
+          inA("gone", "src/gone.test.ts"),
+          inA("shared", "../shared/x.test.ts"),
+        ],
+        {
+          failedModules: [
+            {
+              projectName: PROJECT,
+              modulePath: "src/broken.test.ts",
+              errors: ["SyntaxError: Unexpected token"],
+            },
+          ],
+        },
+      ),
+      discoveredWorkspace("packages/ab", [
+        discovered("c", {
+          workspacePath: "packages/ab",
+          modulePath: "src/c.test.ts",
+        }),
+      ]),
+      discoveredWorkspace(
+        WORKSPACE_B,
+        [
+          discovered("d", {
+            workspacePath: WORKSPACE_B,
+            modulePath: "src/d.test.ts",
+          }),
+        ],
+        {
+          unsupportedProjects: [
+            { projectName: "browser", reason: "browser mode is not supported" },
+          ],
+        },
+      ),
+      {
+        status: "failed",
+        workspace: workspaceOf("packages/failed", root),
+        vitestVersion: "5.0.1",
+        error: "Error: config boom",
+      },
+    ]),
+  };
+  return results(discovery);
+}
+
+/** Answers `status <path>` over the consumer tree, with `path` relative to its root. */
+function statusIn(
+  path: string,
+  work: (answer: PathStatusAnswer | NoAnswer, root: string) => unknown = (
+    answer,
+  ) => answer,
+): Promise<unknown> {
+  return inTempDir((root) => {
+    const answer = pathStatusAnswer(join(root, path), consumerTree(root), {
+      ...IDLE,
+      consumerRoot: root,
+    });
+    return work(answer, root);
+  });
+}
+
+function pathFacts(answer: PathStatusAnswer | NoAnswer) {
+  if ("noAnswer" in answer) return answer;
+  return {
+    path: answer.path,
+    pathKind: answer.pathKind,
+    tests: answer.counts.tests,
+  };
+}
+
+describe("the status of a file or folder", () => {
+  it("D1822: a test file answers for its own tests alone", async () => {
+    expect(await statusIn("packages/a/src/a.test.ts", pathFacts)).toStrictEqual(
+      {
+        path: "packages/a/src/a.test.ts",
+        pathKind: "file",
+        tests: 2,
+      },
+    );
+  });
+
+  it("D1823: a folder answers for the tests under it, not for a sibling folder its name prefixes", async () => {
+    expect(await statusIn("packages/a", pathFacts)).toStrictEqual({
+      path: "packages/a",
+      pathKind: "folder",
+      tests: 4,
+    });
+  });
+
+  it("D1824: a folder gives one entry per test file under it with that file's own counts", async () => {
+    expect(
+      await statusIn("packages/a", (answer) =>
+        "noAnswer" in answer
+          ? answer
+          : answer.files.map((file) => [file.file, file.counts.tests]),
+      ),
+    ).toStrictEqual([
+      ["packages/a/src/a.test.ts", 2],
+      ["packages/a/src/b.test.ts", 1],
+      ["packages/a/src/gone.test.ts", 1],
+    ]);
+  });
+
+  it("D1825: a module reached through .. from its workspace answers under the folder it lies in", async () => {
+    expect(await statusIn("packages/shared", pathFacts)).toStrictEqual({
+      path: "packages/shared",
+      pathKind: "folder",
+      tests: 1,
+    });
+  });
+
+  it("D1826: a deleted test file is decided through its nearest existing folder and answers as a file", async () => {
+    expect(
+      await statusIn("packages/a/src/gone.test.ts", pathFacts),
+    ).toStrictEqual({
+      path: "packages/a/src/gone.test.ts",
+      pathKind: "file",
+      tests: 1,
+    });
+  });
+
+  it("D1827: a deleted file known only as a module that failed to load answers as a file", async () => {
+    expect(
+      await statusIn("packages/a/src/broken.test.ts", pathFacts),
+    ).toStrictEqual({
+      path: "packages/a/src/broken.test.ts",
+      pathKind: "file",
+      tests: 0,
+    });
+  });
+
+  it("D1828: a folder lists each not-discovered entry under it", async () => {
+    expect(
+      await statusIn("packages/a", (answer) =>
+        "noAnswer" in answer
+          ? answer
+          : answer.notDiscovered.map((entry) => entry.kind),
+      ),
+    ).toStrictEqual(["failed-module"]);
+  });
+
+  it("D1829: a path outside the consumer root has no answer, and the reason says it lies outside", async () => {
+    expect(
+      await statusIn("../elsewhere", (answer) =>
+        "noAnswer" in answer ? answer.noAnswer : answer,
+      ),
+    ).toMatch(/lies outside the consumer root/);
+  });
+
+  it("D1830: a path with nothing at or under it inside a workspace whose discovery failed names that workspace", async () => {
+    expect(
+      await statusIn("packages/failed/src/x.test.ts", (answer) =>
+        "noAnswer" in answer ? answer.noAnswer : answer,
+      ),
+    ).toMatch(/workspace-discovery-failed packages\/failed/);
+  });
+
+  it("D1831: an answer names each not-discovered entry above the path, such as an unsupported project of its workspace", async () => {
+    expect(
+      await statusIn("packages/b/src/d.test.ts", (answer) =>
+        "noAnswer" in answer
+          ? answer
+          : answer.enclosingNotDiscovered.map((entry) => entry.kind),
+      ),
+    ).toStrictEqual(["unsupported-project"]);
+  });
+
+  it("D1866: the consumer root answers as a folder holding every test of the tree", async () => {
+    expect(await statusIn(".", pathFacts)).toStrictEqual({
+      path: ".",
+      pathKind: "folder",
+      tests: 7,
+    });
+  });
+
+  it("D1870: an entry at the path is listed at it and not above it", async () => {
+    expect(
+      await statusIn(WORKSPACE_B, (answer) =>
+        "noAnswer" in answer
+          ? answer
+          : {
+              at: answer.notDiscovered.map((entry) => entry.kind),
+              above: answer.enclosingNotDiscovered.map((entry) => entry.kind),
+            },
+      ),
+    ).toStrictEqual({ at: ["unsupported-project"], above: [] });
+  });
+});

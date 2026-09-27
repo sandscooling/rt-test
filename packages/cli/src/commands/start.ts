@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import {
+  alreadyServingReason,
   errorText,
   servingDaemon,
   startDaemon,
@@ -117,7 +118,7 @@ async function runningDaemonRefusal(
   }
   if (serving === undefined) return undefined;
   return {
-    reason: `${NOT_STARTED} a daemon, process ${serving.pid}, already serves the worktree at ${oneLine(root)}`,
+    reason: `${NOT_STARTED} ${alreadyServingReason(serving.pid, oneLine(root))}`,
     fields: { consumerRoot: root, pid: serving.pid },
   };
 }

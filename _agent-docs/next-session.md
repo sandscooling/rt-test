@@ -22,7 +22,7 @@ The product direction agreed with the owner is carried by `docs/plan.md`, `docs/
 
 ## Starter contents
 
-The repository includes documentation, strict TypeScript tooling, the result-freshness core and test identity in `packages/core`, Vitest test discovery and runs across workspaces a `node:sqlite` store of runs and discoveries, and a background daemon per worktree with its client in `packages/daemon`, the `rt-test` CLI that starts and stops it in `packages/cli`, and per-workspace defect records checked in disposable copies. There is no watcher, dependency graph, query command, or general falsification engine yet.
+The repository includes documentation, strict TypeScript tooling, the result-freshness core and test identity in `packages/core`, Vitest test discovery and runs across workspaces a `node:sqlite` store of runs and discoveries, and a background daemon per worktree with its client in `packages/daemon`, the `rt-test` CLI that starts, stops and queries it in `packages/cli`, and per-workspace defect records checked in disposable copies. There is no watcher, input fingerprinting, scheduled selection, or general falsification engine yet.
 
 The repository is a Bun workspace: the core lives in `packages/core` (`@rt-test/core`), `apps/*` is reserved for editor integrations, and repository tooling stays at the root. `packages/core/src/evidence.ts` trusts caller-supplied fingerprints. Completeness, hashing, project identity, revision ordering, and run ingestion remain M1/M2 work. `scripts/verify-defects.mjs` verifies this repository's own named defects, recorded in the `defects.json` beside each workspace's tests (`docs/testing.md`); it is not the product's falsification engine.
 
@@ -34,7 +34,7 @@ Run `bun install --frozen-lockfile` and `bun run check`. Inspect the committed s
 
 ## Next action
 
-Sprint 1's tickets 1.1 through 1.3c have landed, as have sprint 2's 2.2 and 2.2b (workspace selection), and the daemon hardening of ADR-0006. Next is 1.4 (the query CLI), which closes sprint 1, from `_agent-docs/sprints/sprint-1-queryable-results.md`; ticket state is in `_agent-docs/sprint-status.yaml`. Take each ticket through `create-ticket`, `dev-ticket`, `create-tests`, and `review-changes`, and land it only after `bun run check` passes on Windows and on Linux in WSL (orchestrator skill § Gates you run). The orchestrator's working state is in `_agent-docs/.scratch/orchestrator-state.md`.
+Sprint 1 is done: its tickets 1.1 through 1.4 have landed, the last being the `rt-test summary` and `rt-test status` queries. Sprint 2's 2.2 and 2.2b (workspace selection) and the daemon hardening of ADR-0006 have landed too. Next is 2.1 (track inputs), then 2.1b, 2.3, 2.4 and 2.5, from `_agent-docs/sprints/sprint-2-fresh-runs.md`; ticket state is in `_agent-docs/sprint-status.yaml`. Take each ticket through `create-ticket`, `dev-ticket`, `create-tests`, and `review-changes`, and land it only after `bun run check` passes on Windows and on Linux in WSL (orchestrator skill § Gates you run). The orchestrator's working state is in `_agent-docs/.scratch/orchestrator-state.md`.
 
 Work on `main`. Hand off to a successor instead of compacting, per `_agent-docs/handoff.md`. The owner's discussion session orchestrates: agreed changes go to lanes of child sessions (`.claude/skills/orchestrator/SKILL.md`, member half in `_agent-docs/crew.md` and `_agent-docs/code-change-standards.md` § Orchestrated Gate Delegation). No agent claims or persistent processes need to be resumed. No npm publication is authorized.
 

@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   daemonStatus,
+  queryPathStatus,
+  querySummary,
   startDaemon,
   stopDaemon,
   type DaemonIdentity,
@@ -1248,3 +1250,122 @@ function startWithStoreLockHeld() {
     return { start: await started(root, pids), lock };
   });
 }
+
+describe("a query to the worktree's daemon", () => {
+  it(
+    "D1844: a summary and a status sent while a workspace runs leave that run to complete and the next workspace still run",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        holdAt(root, "hold");
+        const identity = await started(root, pids, confirmEvery(root));
+        if ("thrown" in identity) return identity;
+        await atHoldPoint(root, "holding");
+        const summary = await settled(querySummary(root));
+        const status = await settled(
+          queryPathStatus(root, join(root, WORKSPACE_A)),
+        );
+        holdAt(root, "release");
+        return {
+          answered: !("thrown" in summary) && !("thrown" in status),
+          idle: await eventually(() => logged(identity.logFile, IDLE_ENTRY)),
+          runs: storedRuns(identity.stateDirectory, root),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        answered: true,
+        idle: true,
+        runs: [
+          [WORKSPACE_A, "completed"],
+          [WORKSPACE_B, "completed"],
+        ],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1845: a summary answered while a workspace runs carries the activity running that workspace",
+    async () => {
+      const activity = await withDaemonConsumer(async (root, pids) => {
+        holdAt(root, "hold");
+        try {
+          const identity = await started(root, pids, confirmEvery(root));
+          if ("thrown" in identity) return identity;
+          await atHoldPoint(root, "holding");
+          const summary = await settled(querySummary(root));
+          return "thrown" in summary ? summary : summary.activity;
+        } finally {
+          holdAt(root, "release");
+        }
+      });
+      expect(activity).toStrictEqual({
+        state: "running",
+        workspacePath: WORKSPACE_A,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  /** Holds `root`'s endpoint as a proving daemon that answers a summary with `error`, and asks it for a summary. */
+  function summaryFromDaemonAnswering(
+    root: string,
+    error: object,
+  ): Promise<unknown> {
+    const daemon = answerAs(exitedPid(), "key");
+    return withKeyedStandIn(
+      root,
+      (context) => (request, standIn) =>
+        request["type"] === "summary"
+          ? { type: "error", ...error }
+          : daemon(context)(request, standIn),
+      () => settled(querySummary(root)),
+    );
+  }
+
+  it("D1846: a daemon that predates the queries answers with its unknown-request error, and the reason says to stop it and start it again", async () => {
+    const outcome = await inTempDir(async (root) => ({
+      summary: await summaryFromDaemonAnswering(root, {
+        code: "unknown-request",
+        message: 'unknown request type "summary"',
+      }),
+      root,
+    }));
+    expect(outcome.summary).toStrictEqual({
+      thrown: `The daemon serving ${outcome.root} predates this query; stop it and start it again.`,
+    });
+  });
+
+  it("D1847: a daemon that is stopping answers with its stopping error, and the reason says it is stopping", async () => {
+    const outcome = await inTempDir(async (root) => ({
+      summary: await summaryFromDaemonAnswering(root, {
+        code: "stopping",
+        message: "the daemon is stopping",
+      }),
+      root,
+    }));
+    expect(outcome.summary).toStrictEqual({
+      thrown: `The daemon serving ${outcome.root} is stopping.`,
+    });
+  });
+
+  it("D1875: a daemon that proves its hello and then drops the connection before answering gives a reason naming the root", async () => {
+    const outcome = await inTempDir(async (root) => {
+      const daemon = answerAs(exitedPid(), "key");
+      const summary = await withKeyedStandIn(
+        root,
+        (context) => (request, standIn) => {
+          if (request["type"] !== "summary") {
+            return daemon(context)(request, standIn);
+          }
+          void standIn.close();
+          return undefined;
+        },
+        () => settled(querySummary(root)),
+      );
+      return { summary, root };
+    });
+    expect(outcome.summary).toStrictEqual({
+      thrown: expect.stringContaining(outcome.root),
+    });
+  });
+});

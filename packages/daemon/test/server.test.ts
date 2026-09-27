@@ -6,6 +6,7 @@ import {
   type DaemonVerifier,
 } from "../src/daemon/endpoint-proof.js";
 import type { DaemonIdentity } from "../src/daemon/protocol.js";
+import type { SummaryAnswer } from "../src/query/answer.js";
 import {
   connectionServer,
   type DaemonHandlers,
@@ -41,10 +42,17 @@ const STOP = { type: "stop" };
 /** One byte past the frozen 1 MiB line limit. */
 const OVERLONG_LINE = `${"a".repeat(1024 * 1024 + 1)}\n`;
 
-function handlers(stopping: boolean): DaemonHandlers {
+type Queries = Partial<Pick<DaemonHandlers, "summary" | "pathStatus">>;
+
+const NO_STAND_IN_ANSWER = { noAnswer: "the stand-in answers no query" };
+
+function handlers(stopping: boolean, queries: Queries = {}): DaemonHandlers {
   return {
     identity: IDENTITY,
     status: () => ({ activity: { state: "idle" }, stopping, unstoredJobs: [] }),
+    summary: () => NO_STAND_IN_ANSWER,
+    pathStatus: () => NO_STAND_IN_ANSWER,
+    ...queries,
     stop: () => undefined,
     isStopping: () => stopping,
   };
@@ -57,8 +65,13 @@ const NO_PROOF: Prover = () => undefined;
 function onServer<T>(
   body: (connection: RawConnection) => Promise<T>,
   stopping = false,
+  queries: Queries = {},
 ): Promise<T> {
-  const server = connectionServer(handlers(stopping), memoryLog(), NO_PROOF);
+  const server = connectionServer(
+    handlers(stopping, queries),
+    memoryLog(),
+    NO_PROOF,
+  );
   return withTestEndpoint(server.onConnection, (path) =>
     withConnection(path, body),
   );
@@ -192,6 +205,159 @@ describe("writing only in answer to a line", () => {
       type: "hello",
       protocolVersion: 1,
       pid: DAEMON_PID,
+    });
+  });
+});
+
+describe("answering a query", () => {
+  const SUMMARY = { type: "summary", protocolVersion: 1 };
+  /** The frozen 1 MiB line limit, in bytes. */
+  const LINE_LIMIT_BYTES = 1_048_576;
+
+  /** An answer whose summary response encodes to exactly `bytes` bytes. */
+  function answerOfSize(bytes: number): SummaryAnswer {
+    const empty = Buffer.byteLength(JSON.stringify({ pad: "", ...SUMMARY }));
+    return { pad: "x".repeat(bytes - empty) } as unknown as SummaryAnswer;
+  }
+
+  /** The error answering the summary sent after the hello, as its code and message. */
+  async function summaryError(queries: Queries): Promise<unknown> {
+    const line = await onServer(
+      async (connection) => {
+        connection.sendLine(HELLO);
+        connection.sendLine(SUMMARY);
+        await connection.next();
+        return connection.next();
+      },
+      false,
+      queries,
+    );
+    return line === CLOSED
+      ? line
+      : { type: line["type"], code: line["code"], message: line["message"] };
+  }
+
+  it("D1835: a query to a stopping daemon gets a stopping error, and the store is never read", async () => {
+    let reads = 0;
+    const kinds = await onServer(
+      (connection) => {
+        connection.sendLine(HELLO);
+        connection.sendLine(SUMMARY);
+        return answerKinds(connection, 2);
+      },
+      true,
+      {
+        summary: () => {
+          reads += 1;
+          return NO_STAND_IN_ANSWER;
+        },
+      },
+    );
+    expect({ kinds, reads }).toStrictEqual({
+      kinds: [{ type: "hello" }, { type: "error", code: "stopping" }],
+      reads: 0,
+    });
+  });
+
+  it("D1836: an answer one byte past the line limit is refused with a reason giving its size and the limit and naming status", async () => {
+    const answer = answerOfSize(LINE_LIMIT_BYTES + 1);
+    expect(await summaryError({ summary: () => answer })).toStrictEqual({
+      type: "error",
+      code: "nothing-to-answer",
+      message: expect.stringMatching(
+        /1048577 bytes.*1048576 bytes.*status for a narrower path/,
+      ),
+    });
+  });
+
+  it("D1837: an answer exactly at the line limit is sent", async () => {
+    const answer = answerOfSize(LINE_LIMIT_BYTES);
+    const kinds = await onServer(
+      (connection) => {
+        connection.sendLine(HELLO);
+        connection.sendLine(SUMMARY);
+        return answerKinds(connection, 2);
+      },
+      false,
+      { summary: () => answer },
+    );
+    expect(kinds).toStrictEqual([{ type: "hello" }, { type: "summary" }]);
+  });
+
+  it("D1838: a query that throws gets a query-failed error saying what went wrong, and the status after it is answered", async () => {
+    const answers = await onServer(
+      async (connection) => {
+        connection.sendLine(HELLO);
+        connection.sendLine(SUMMARY);
+        connection.sendLine(STATUS);
+        const lines = [];
+        for (let index = 0; index < 3; index += 1) {
+          const line = await connection.next();
+          lines.push(
+            line === CLOSED
+              ? CLOSED
+              : {
+                  type: line["type"],
+                  ...("code" in line
+                    ? { code: line["code"], message: line["message"] }
+                    : {}),
+                },
+          );
+        }
+        return lines;
+      },
+      false,
+      {
+        summary: () => {
+          throw new Error("the store is unreadable");
+        },
+      },
+    );
+    expect(answers).toStrictEqual([
+      { type: "hello" },
+      {
+        type: "error",
+        code: "query-failed",
+        message: expect.stringContaining("the store is unreadable"),
+      },
+      { type: "status" },
+    ]);
+  });
+
+  it("D1839: a query with nothing to answer gets a nothing-to-answer error carrying the reason", async () => {
+    const reason = "the latest discovery holds no test";
+    expect(
+      await summaryError({ summary: () => ({ noAnswer: reason }) }),
+    ).toStrictEqual({
+      type: "error",
+      code: "nothing-to-answer",
+      message: reason,
+    });
+  });
+
+  it("D1840: a path-status request carrying a relative path is refused as invalid, and never reaches the query", async () => {
+    const asked: string[] = [];
+    const kinds = await onServer(
+      (connection) => {
+        connection.sendLine(HELLO);
+        connection.sendLine({
+          type: "path-status",
+          protocolVersion: 1,
+          path: "packages/a",
+        });
+        return answerKinds(connection, 2);
+      },
+      false,
+      {
+        pathStatus: (path) => {
+          asked.push(path);
+          return NO_STAND_IN_ANSWER;
+        },
+      },
+    );
+    expect({ kinds, asked }).toStrictEqual({
+      kinds: [{ type: "hello" }, { type: "error", code: "invalid-request" }],
+      asked: [],
     });
   });
 });

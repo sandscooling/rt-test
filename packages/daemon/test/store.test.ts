@@ -1365,3 +1365,71 @@ describe("the adapter version a stored record carries", () => {
     expect(version).toBe(3);
   });
 });
+
+describe("the latest run of each workspace a query reads", () => {
+  const OTHER_WORKSPACE_RUN: WorkspaceRun = {
+    status: "interrupted-before-load",
+    workspace: OTHER_WORKSPACE,
+  };
+
+  /** The latest runs a query of `scope` reads, each named by the label of the written run it is. */
+  function latestRunLabels(
+    store: RtTestStore,
+    scope: StoreScope,
+    written: Readonly<Record<string, string>>,
+  ): string[] {
+    return store
+      .readLatestResults(scope)
+      .latestRuns.map((run) => written[run.runId] ?? run.runId);
+  }
+
+  it("D1832: a workspace's latest run is the one stored last, never an earlier one", async () => {
+    const labels = await inStore((store) => {
+      const first = store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      const last = store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+      return latestRunLabels(store, WORKTREE_A, {
+        [first.runId]: "first",
+        [last.runId]: "last",
+      });
+    });
+    expect(labels).toStrictEqual(["last"]);
+  });
+
+  it("D1833: each workspace path keeps its own latest run, whichever workspace ran last", async () => {
+    const labels = await inStore((store) => {
+      const first = store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      const other = store.writeRun(bound(WORKTREE_A), OTHER_WORKSPACE_RUN);
+      const last = store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+      return latestRunLabels(store, WORKTREE_A, {
+        [first.runId]: "first",
+        [other.runId]: "other workspace",
+        [last.runId]: "last",
+      });
+    });
+    expect(labels).toStrictEqual(["other workspace", "last"]);
+  });
+
+  it("D1834: another worktree's newer run of the same workspace never hides this worktree's latest run", async () => {
+    const labels = await inStore((store) => {
+      const own = store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      const other = store.writeRun(bound(WORKTREE_B), BEFORE_LOAD_RUN);
+      return latestRunLabels(store, WORKTREE_A, {
+        [own.runId]: "own",
+        [other.runId]: "other worktree",
+      });
+    });
+    expect(labels).toStrictEqual(["own"]);
+  });
+
+  it("D1863: another project's newer run of the same worktree and workspace never hides this project's latest run", async () => {
+    const labels = await inStore((store) => {
+      const own = store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      const other = store.writeRun(bound(OTHER_PROJECT), BEFORE_LOAD_RUN);
+      return latestRunLabels(store, WORKTREE_A, {
+        [own.runId]: "own",
+        [other.runId]: "other project",
+      });
+    });
+    expect(labels).toStrictEqual(["own"]);
+  });
+});

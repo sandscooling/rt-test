@@ -4,7 +4,7 @@ Test execution and falsification for Vitest projects, taken off coding agents.
 
 Coding agents spend most of their time running and falsifying the tests they write. RT Test is meant to do that work for them: a local daemon runs each edit's tests and proves them against their named defects, and agents query the answers instead of running anything. It answers three questions: does the code pass, are the results still current, and have the tests shown that they detect their intended defects?
 
-**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, and an `rt-test` CLI that starts and stops that daemon. It does not yet watch a project's inputs, build a dependency graph, falsify defects, or answer queries through the CLI. It is not published to npm.
+**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, and an `rt-test` CLI that starts and stops that daemon and asks it what its stored runs say about the worktree or a path. It does not yet watch a project's inputs, so no result is ever reported current, and it does not build a dependency graph for the daemon or falsify defects. It is not published to npm.
 
 ## Intended experience
 
@@ -37,6 +37,24 @@ rt-test stop [root] [--json]
 `rt-test stop` stops the daemon serving `root` and returns once its process has exited.
 
 With `--json`, stdout carries exactly one JSON document holding `schemaVersion` (1), `command`, `ok` and, on a failure, `reason`; the listing, the question and warnings go to stderr. Exit codes: 0 on success, 1 when the command failed or refused (a declined start included), and 2 on a usage error, which writes nothing to stdout.
+
+## Query
+
+```sh
+rt-test summary [root] [--json]
+rt-test status <path> [--root <dir>] [--json]
+```
+
+Both ask the daemon serving `root` (the current directory by default, never a parent) what its stored runs say. Neither starts a daemon, a discovery or a run. A query needs a running daemon: with none, it exits 1 and says to run `rt-test start`. A daemon started by an older RT Test answers that it predates the query; stop it and start it again.
+
+`rt-test summary` counts every test of the latest discovery. `rt-test status <path>` counts the tests whose file is `path` or lies under it, and for a folder gives each test file's own counts. `path` resolves against the current directory and must lie inside the root.
+
+- Each test is in exactly one state, from its workspace's latest stored run: `passed`, `failed`, `skipped` or `error` when it finished; `interrupted`; `module-not-run`, `module-crashed` or `module-failed-to-load`; `run-failed`, `run-unsupported-vitest` or `run-interrupted-before-load`; `not-in-latest-run`; or `never-run` when no run of its workspace is stored.
+- Beside the states, each test is `current`, `stale` or `unknown`. Until inputs are tracked no result is current: a result recorded under another version of RT Test's Vitest adapter is stale, and every other is unknown.
+- The answer lists what was not discovered, each with its reason: workspaces with no supported Vitest, a failed discovery or no confirmed start; modules that failed to load; typecheck modules; unsupported projects; and workspace sources not read. `summary` also gives each workspace's latest run, and every answer gives the daemon's activity and each job that ended with nothing stored.
+- No answer calls a worktree, folder or file passing or failing; read the counts.
+
+With `--json`, stdout carries one document with `schemaVersion` (1), `command`, `ok` and the answer's fields, such as `counts.states`, `counts.freshness` and `notDiscovered`. Exit codes: 0 when the query answered, whatever the tests' states; 1 when it could not, such as no daemon, a stopping or older daemon, no stored discovery, a discovery holding nothing to count, a path outside the root or with nothing at or under it, a query that failed inside the daemon, or an answer longer than the protocol allows, when you should ask `status` for a narrower path; and 2 on a usage error.
 
 ## Develop
 

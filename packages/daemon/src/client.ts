@@ -1,23 +1,26 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { resolve } from "node:path";
-import { consumerIdentity } from "./store/consumer-identity.js";
 import { BUSY_TIMEOUT_MS } from "./store/schema.js";
 import { resolvedStateDirectory } from "./start-plan.js";
 import type { ConfirmedStart } from "./vitest/confirmed-start.js";
 import { errorText, exitText } from "./vitest/error-text.js";
 import { DaemonConnection } from "./daemon/daemon-connection.js";
 import { daemonLogFile } from "./daemon/daemon-log.js";
-import { daemonVerifier, newChallenge } from "./daemon/endpoint-proof.js";
-import { clientEndpoint, WINDOWS, type Endpoint } from "./daemon/endpoint.js";
+import { WINDOWS } from "./daemon/endpoint.js";
 import { KEY_DIRECTORY_START_BOUND_MS } from "./daemon/windows-acl.js";
 import { daemonEntryPoint } from "./daemon/entry-point.js";
 import { EXECUTOR_BOUND_MS } from "./daemon/executor-jobs.js";
+import {
+  onProvenConnection,
+  provenRequest,
+  requireAnswer,
+  targetOf,
+  type DaemonTarget,
+} from "./daemon/proven-connection.js";
 import { isRunning } from "./daemon/runtime-directory.js";
 import {
   BEGIN_TYPE,
-  ERROR_TYPE,
-  HELLO_TYPE,
   PROTOCOL_VERSION,
   REFUSED_TYPE,
   SERVING_TYPE,
@@ -25,7 +28,6 @@ import {
   STATUS_TYPE,
   STOP_REQUEST,
   STOPPING_TYPE,
-  VERSION_MISMATCH_CODE,
   type DaemonIdentity,
   type StartupAcceptance,
   type StartupReport,
@@ -34,6 +36,7 @@ import {
   type StatusResponse,
 } from "./daemon/protocol.js";
 
+export { queryPathStatus, querySummary } from "./query-client.js";
 export { startPlan, type StartPlan } from "./start-plan.js";
 export type {
   ConfirmedStart,
@@ -45,9 +48,21 @@ export {
   PROTOCOL_VERSION,
   type DaemonActivity,
   type DaemonIdentity,
+  type PathStatusResponse,
   type StatusResponse,
+  type SummaryResponse,
   type UnstoredJob,
 } from "./daemon/protocol.js";
+export {
+  activityText,
+  FRESHNESS_VALUES,
+  TEST_STATES,
+  type FileCounts,
+  type LatestRunFacts,
+  type NotDiscoveredEntry,
+  type TestCounts,
+  type WorkspaceFacts,
+} from "./query/answer.js";
 
 export interface StartDaemonOptions {
   /** The caller states that the user trusts this project to execute: only an explicit, confirmed start sets it. */
@@ -191,6 +206,14 @@ export async function servingDaemon(
   return statusIfServing(targetOf(consumerRoot, "query"));
 }
 
+/** Why a start is refused while a daemon serves the worktree. */
+export function alreadyServingReason(
+  pid: number,
+  consumerRoot: string,
+): string {
+  return `a daemon, process ${pid}, already serves the worktree at ${consumerRoot}`;
+}
+
 /**
  * Stops the worktree's daemon, of any protocol version, and resolves once its process has exited and its endpoint
  * accepts no connection. A stop already under way is joined.
@@ -221,27 +244,6 @@ export async function stopDaemon(consumerRoot: string): Promise<StoppedDaemon> {
   return { pid };
 }
 
-/** A worktree's daemon as a client addresses it. */
-interface DaemonTarget {
-  readonly consumerRoot: string;
-  readonly worktreeIdentity: string;
-  readonly endpoint: Endpoint;
-}
-
-function targetOf(
-  consumerRoot: string,
-  action: "start" | "query" | "stop",
-): DaemonTarget {
-  const { worktreeIdentity } = consumerIdentity(consumerRoot);
-  const location = clientEndpoint(worktreeIdentity);
-  if (location.ok)
-    return { consumerRoot, worktreeIdentity, endpoint: location };
-  const verb = action === "start" ? "start" : "reach";
-  throw new Error(
-    `Cannot ${verb} a daemon for ${consumerRoot}: ${location.reason}.`,
-  );
-}
-
 async function connect(target: DaemonTarget): Promise<DaemonConnection> {
   const connected = await DaemonConnection.open(target.endpoint.path);
   if (connected.ok) return connected.connection;
@@ -249,30 +251,6 @@ async function connect(target: DaemonTarget): Promise<DaemonConnection> {
     connected.nothingListens
       ? `No daemon serves the worktree at ${target.consumerRoot}.`
       : `Cannot reach the daemon for ${target.consumerRoot}: ${connected.reason}.`,
-  );
-}
-
-/**
- * Sends a request carrying a fresh challenge, and resolves with the answer only once it proves it came from this
- * user's daemon for the worktree, so no process that took the endpoint can answer in its place.
- */
-async function provenRequest(
-  target: DaemonTarget,
-  connection: DaemonConnection,
-  request: (challenge: string) => object,
-): Promise<ProtocolMessage> {
-  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);
-  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);
-  const challenge = newChallenge();
-  const answer = await connection.request(request(challenge));
-  const refusal = verifier.verifier.refusal(challenge, answer);
-  if (refusal === undefined) return answer;
-  throw notTheDaemon(target, refusal);
-}
-
-function notTheDaemon(target: DaemonTarget, reason: string): Error {
-  return new Error(
-    `The process answering on ${target.endpoint.path} is not this user's daemon for ${target.consumerRoot}: ${reason}.`,
   );
 }
 
@@ -288,54 +266,14 @@ async function askStatus(target: DaemonTarget): Promise<StatusResponse> {
 async function statusIfServing(
   target: DaemonTarget,
 ): Promise<StatusResponse | undefined> {
-  const { consumerRoot } = target;
-  const connected = await DaemonConnection.open(target.endpoint.path);
-  if (!connected.ok) {
-    if (connected.nothingListens) return undefined;
-    throw new Error(
-      `Cannot reach the daemon for ${consumerRoot}: ${connected.reason}.`,
-    );
-  }
-  const { connection } = connected;
-  try {
-    requireAnswer(
-      consumerRoot,
-      await provenRequest(target, connection, (challenge) => ({
-        type: HELLO_TYPE,
-        protocolVersion: PROTOCOL_VERSION,
-        challenge,
-      })),
-      HELLO_TYPE,
-    );
+  return onProvenConnection(target, async (connection) => {
     const status = await connection.request({
       type: STATUS_TYPE,
       protocolVersion: PROTOCOL_VERSION,
     });
-    requireAnswer(consumerRoot, status, STATUS_TYPE);
+    requireAnswer(target.consumerRoot, status, STATUS_TYPE);
     return status as unknown as StatusResponse;
-  } finally {
-    connection.close();
-  }
-}
-
-/** A version mismatch names the daemon's process and version, and says it can be stopped. */
-function requireAnswer(
-  consumerRoot: string,
-  answer: ProtocolMessage,
-  type: string,
-): void {
-  if (answer["type"] === type) return;
-  if (
-    answer["type"] === ERROR_TYPE &&
-    answer["code"] === VERSION_MISMATCH_CODE
-  ) {
-    throw new Error(
-      `The daemon for ${consumerRoot}, process ${String(answer["pid"])}, speaks protocol version ${String(answer["protocolVersion"])}, not ${PROTOCOL_VERSION}. It can be stopped, and then started again.`,
-    );
-  }
-  throw new Error(
-    `The daemon for ${consumerRoot} answered a ${type} request with ${JSON.stringify(answer)}`,
-  );
+  });
 }
 
 /** Refuses when anything holds the endpoint: this user's daemon, one of another version, or an impostor. */
@@ -352,7 +290,7 @@ async function refuseRunningDaemon(target: DaemonTarget): Promise<void> {
   }
   if (status === undefined) return;
   throw new Error(
-    `A daemon, process ${status.pid}, already serves the worktree at ${consumerRoot}.`,
+    `Refusing to start: ${alreadyServingReason(status.pid, consumerRoot)}.`,
   );
 }
 

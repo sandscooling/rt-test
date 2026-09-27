@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   daemonStatus,
   servingDaemon,
+  type DaemonIdentity,
+  type NotDiscoveredEntry,
   type StartPlan,
 } from "@rt-test/daemon/client";
 import { daemonEntryPoint } from "../../daemon/src/daemon/entry-point.js";
@@ -18,7 +20,10 @@ import {
   IDLE_ENTRY,
   WORKSPACE_A,
   WORKSPACE_B,
+  atHoldPoint,
+  confirmNothing,
   eventually,
+  holdAt,
   logged,
   settled,
   started,
@@ -27,8 +32,9 @@ import {
   withStandIn,
   type Settled,
 } from "../../daemon/test/daemon-harness.js";
-import { REPO, inTempDir } from "../../daemon/test/harness.js";
+import { REPO, confirmEvery, inTempDir } from "../../daemon/test/harness.js";
 import type { CliIo } from "../src/command.js";
+import { notDiscoveredLines } from "../src/answer-text.js";
 import { main } from "../src/main.js";
 import { Output, type ExitCode } from "../src/output.js";
 import { decideTrust, type TrustDecision } from "../src/trust-prompt.js";
@@ -971,6 +977,385 @@ describe("a stop", () => {
   );
 });
 
+/** A test that fails, planted in the daemon fixture's workspace B beside its passing one. */
+const PLANTED_FAILURE = [
+  'it("planted", () => {',
+  '  throw new Error("a planted failure");',
+  "});",
+  "",
+].join("\n");
+/** Any word that reads as a verdict of passing or failing. */
+const VERDICT =
+  /\b(?:pass|passes|passed|passing|fail|fails|failed|failing|success|successful|succeeded)\b/i;
+/** The one kind of line that may name an outcome: a set's counts per state. */
+const STATES_LINE = /^\s*States: /;
+
+function plantFailure(root: string): void {
+  writeFileSync(join(root, WORKSPACE_B, "planted.test.mjs"), PLANTED_FAILURE);
+}
+
+/**
+ * A path or file name, which is the consumer's text, such as the fixture's `passes.test.mjs`: a token holding a path
+ * separator, or a dot followed by a letter. A word ending a sentence, as in `passed.`, is not one.
+ */
+const PATH_TOKEN = /\S*[/\\]\S*|\S+\.[A-Za-z]\S*/g;
+
+/** Each line of the output that speaks of passing or failing other than as a count of tests in a state. */
+function verdictLines(output: string): string[] {
+  return output
+    .split("\n")
+    .filter(
+      (line) =>
+        VERDICT.test(line.replace(PATH_TOKEN, "")) && !STATES_LINE.test(line),
+    );
+}
+
+/** Starts a daemon for `root` as `start` confirms, and resolves once it has stored its discovery and every confirmed run. */
+async function idleDaemon(
+  root: string,
+  pids: Set<number>,
+  start = confirmEvery(root),
+): Promise<Settled<DaemonIdentity>> {
+  const identity = await started(root, pids, start);
+  if ("thrown" in identity) return identity;
+  const idle = await eventually(() => logged(identity.logFile, IDLE_ENTRY));
+  return idle ? identity : { thrown: "the daemon never reached idle" };
+}
+
+function countsOf(run: CliRun): Document {
+  const counts = documentOf(run)["counts"];
+  return typeof counts === "object" && counts !== null
+    ? (counts as Document)
+    : {};
+}
+
+function nonZeroStates(run: CliRun): Document {
+  const states = countsOf(run)["states"] as Document | undefined;
+  return Object.fromEntries(
+    Object.entries(states ?? {}).filter(([, count]) => count !== 0),
+  );
+}
+
+function notDiscoveredKinds(run: CliRun): unknown[] {
+  const entries = documentOf(run)["notDiscovered"];
+  return Array.isArray(entries)
+    ? entries.map((entry: Document) => entry["kind"])
+    : [];
+}
+
+describe("a query", () => {
+  it(
+    "D1848: with no daemon serving the root, a summary exits 1 with one failure document whose reason names the root and says to run rt-test start",
+    async () => {
+      const outcome = await inTempDir(async (root) => {
+        const run = await runCli(["summary", "--json"], { cwd: root });
+        const document = documentOf(run);
+        const reason = String(document["reason"]);
+        return {
+          exit: run.exit,
+          schemaVersion: document["schemaVersion"],
+          command: document["command"],
+          ok: document["ok"],
+          namesRoot: reason.includes(root),
+          saysStart: reason.includes("rt-test start"),
+          reasonOnStderr: run.stderr.includes(reason),
+          servingAfter: await settled(servingDaemon(root)),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 1,
+        schemaVersion: 1,
+        command: "summary",
+        ok: false,
+        namesRoot: true,
+        saysStart: true,
+        reasonOnStderr: true,
+        servingAfter: undefined,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1849: a summary whose worktree holds a failed test exits 0, since it answered, with the failure counted",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        plantFailure(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary", "--json"], { cwd: root });
+        return {
+          exit: run.exit,
+          ok: documentOf(run)["ok"],
+          states: nonZeroStates(run),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        ok: true,
+        states: { passed: 2, failed: 1 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1850: a summary's human text describes the worktree by its counts, with no line of passing or failing for it",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        plantFailure(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary"], { cwd: root });
+        return {
+          exit: run.exit,
+          counted: run.stdout.includes("States: passed 2, failed 1"),
+          verdicts: verdictLines(run.stdout),
+        };
+      });
+      expect(outcome).toStrictEqual({ exit: 0, counted: true, verdicts: [] });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1851: a folder status's human text describes the folder and each file by counts, with no line of passing or failing for any",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        plantFailure(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["status", WORKSPACE_B], { cwd: root });
+        return {
+          exit: run.exit,
+          counted: run.stdout.includes("States: passed 1, failed 1"),
+          verdicts: verdictLines(run.stdout),
+        };
+      });
+      expect(outcome).toStrictEqual({ exit: 0, counted: true, verdicts: [] });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1852: a relative status path resolves against the command's directory, answering for that folder of the root",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await idleDaemon(root, pids, {
+          consumerRoot: root,
+          workspaces: [],
+        });
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["status", WORKSPACE_B, "--json"], {
+          cwd: root,
+        });
+        const document = documentOf(run);
+        return {
+          exit: run.exit,
+          path: document["path"],
+          pathKind: document["pathKind"],
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        path: WORKSPACE_B,
+        pathKind: "folder",
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1853: a summary listing no test but a workspace not confirmed at start exits 0 with that entry",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await idleDaemon(root, pids, {
+          consumerRoot: root,
+          workspaces: [],
+        });
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary", "--json"], { cwd: root });
+        return {
+          exit: run.exit,
+          tests: countsOf(run)["tests"],
+          kinds: notDiscoveredKinds(run),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        tests: 0,
+        kinds: ["workspace-not-confirmed", "workspace-not-confirmed"],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1854: a summary before the daemon has stored a discovery exits 1 with a reason naming the daemon's activity",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        holdAt(root, "hold-collect");
+        try {
+          const identity = await started(root, pids, confirmEvery(root));
+          if ("thrown" in identity) return identity;
+          await atHoldPoint(root, "collecting");
+          const run = await runCli(["summary", "--json"], { cwd: root });
+          return {
+            exit: run.exit,
+            ok: documentOf(run)["ok"],
+            namesActivity: reasonOf(run).includes("discovering"),
+          };
+        } finally {
+          holdAt(root, "release-collect");
+        }
+      });
+      expect(outcome).toStrictEqual({
+        exit: 1,
+        ok: false,
+        namesActivity: true,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1855: a missing status path, an extra argument, a missing --root value and an unknown option each exit 2 with the usage on stderr and nothing on stdout",
+    async () => {
+      const cases = [
+        ["status"],
+        ["status", "a", "b"],
+        ["status", "a", "--root"],
+        ["status", "a", "--bogus"],
+        ["summary", "a", "b"],
+        ["summary", "--bogus"],
+      ];
+      const outcomes = await usageOutcomes(cases, ([command]) => [
+        `rt-test ${command}`,
+      ]);
+      expect(outcomes).toStrictEqual(cases.map(() => USAGE_ERROR));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1867: a status path resolves against the command's directory, not against --root",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await idleDaemon(root, pids, confirmNothing(root));
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["status", "b", "--root", "..", "--json"], {
+          cwd: join(root, "packages"),
+        });
+        return { exit: run.exit, path: documentOf(run)["path"] };
+      });
+      expect(outcome).toStrictEqual({ exit: 0, path: WORKSPACE_B });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1868: a status with --root asks the daemon of that root, resolved against the command's directory",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await idleDaemon(root, pids, confirmNothing(root));
+        if ("thrown" in identity) return identity;
+        const name = basename(root);
+        const run = await runCli(
+          ["status", join(name, WORKSPACE_B), "--root", name, "--json"],
+          { cwd: dirname(root) },
+        );
+        return { exit: run.exit, path: documentOf(run)["path"] };
+      });
+      expect(outcome).toStrictEqual({ exit: 0, path: WORKSPACE_B });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1869: a summary's relative root resolves against the command's directory and asks that worktree's daemon",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await idleDaemon(root, pids, confirmNothing(root));
+        if ("thrown" in identity) return { actual: identity, expected: {} };
+        const run = await runCli(["summary", basename(root), "--json"], {
+          cwd: dirname(root),
+        });
+        return {
+          actual: {
+            exit: run.exit,
+            consumerRoot: documentOf(run)["consumerRoot"],
+          },
+          expected: { exit: 0, consumerRoot: root },
+        };
+      });
+      expect(outcome.actual).toStrictEqual(outcome.expected);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it("D1873: a human not-discovered line for a module that failed to load gives its error count", () => {
+    const entry: NotDiscoveredEntry = {
+      kind: "failed-module",
+      workspacePath: WORKSPACE_A,
+      projectName: "unit",
+      modulePath: "src/broken.test.ts",
+      errorCount: 2,
+      reason: "SyntaxError: one\nError: two",
+      omittedCharacters: 0,
+    };
+    expect(notDiscoveredLines([entry])[1]).toContain("2 errors");
+  });
+
+  it(
+    "D1874: a human summary of a workspace whose latest run could not load it reads no verdict on that workspace",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        writeFileSync(
+          join(root, WORKSPACE_B, "vitest.config.mjs"),
+          'throw new Error("a planted config error");\n',
+        );
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary"], { cwd: root });
+        const line = run.stdout
+          .split("\n")
+          .find((text) => text.startsWith(`  ${WORKSPACE_B}:`));
+        return {
+          exit: run.exit,
+          workspaceLine: line !== undefined,
+          verdict: VERDICT.test((line ?? "").replace(PATH_TOKEN, "")),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        workspaceLine: true,
+        verdict: false,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1876: a failed status document names the path it was asked for requestedPath, never the success's path key",
+    async () => {
+      const outcome = await inTempDir(async (root) => {
+        const run = await runCli(["status", "x", "--json"], { cwd: root });
+        const document = documentOf(run);
+        return {
+          actual: {
+            exit: run.exit,
+            requestedPath: document["requestedPath"],
+            hasPath: "path" in document,
+          },
+          expected: { exit: 1, requestedPath: join(root, "x"), hasPath: false },
+        };
+      });
+      expect(outcome.actual).toStrictEqual(outcome.expected);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
 describe("a usage error", () => {
   it(
     "D1737: an unknown option, a missing option value, and --trust or --state-dir given to stop each exit 2 with the usage on stderr and nothing on stdout",
@@ -1028,6 +1413,8 @@ describe("a usage error", () => {
       const outcomes = await usageOutcomes(cases, () => [
         "rt-test start",
         "rt-test stop",
+        "rt-test summary",
+        "rt-test status",
       ]);
       expect(outcomes).toStrictEqual(cases.map(() => USAGE_ERROR));
     },

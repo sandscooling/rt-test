@@ -264,5 +264,103 @@
     "file": "packages/cli/src/commands/stop.ts",
     "old": "absolutePath(io, rootArgument)",
     "new": "absolutePath({ ...io, cwd: process.cwd() }, rootArgument)"
+  },
+  {
+    "id": "D1848",
+    "defect": "With no daemon serving the root, the query's reason never says how to start one.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "start one with rt-test start.",
+    "new": "start one."
+  },
+  {
+    "id": "D1849",
+    "defect": "A summary holding a failed test exits 1, reading the exit code as a verdict on the tests instead of whether the query answered.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "        return output.succeed(answerFields(answer), summaryText(answer));",
+    "new": "        return answer.counts.states.failed > 0\n          ? output.fail(\"tests failed\")\n          : output.succeed(answerFields(answer), summaryText(answer));"
+  },
+  {
+    "id": "D1850",
+    "defect": "The human summary prints a pass or fail verdict for the whole worktree.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "    ...countLines(answer.counts),\n    \"Workspaces:\",",
+    "new": "    ...countLines(answer.counts),\n    \"All tests passed.\",\n    \"Workspaces:\","
+  },
+  {
+    "id": "D1851",
+    "defect": "The human status prints a pass or fail verdict for the folder.",
+    "file": "packages/cli/src/commands/status.ts",
+    "old": "    ...countLines(answer.counts),\n    ...(answer.files.length === 0",
+    "new": "    ...countLines(answer.counts),\n    \"Some tests failed.\",\n    ...(answer.files.length === 0"
+  },
+  {
+    "id": "D1852",
+    "defect": "A relative status path resolves against the process's directory instead of the command's.",
+    "file": "packages/cli/src/commands/status.ts",
+    "old": "        const path = absolutePath(io, pathArgument);",
+    "new": "        const path = absolutePath({ ...io, cwd: process.cwd() }, pathArgument);"
+  },
+  {
+    "id": "D1853",
+    "defect": "A summary holding no test exits 1 even when it lists entries RT Test could not discover.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  if (standings.length === 0 && notDiscovered.length === 0) {",
+    "new": "  if (standings.length === 0) {"
+  },
+  {
+    "id": "D1854",
+    "defect": "A query with nothing to answer drops the daemon's reason, so it never names the daemon's activity.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "      return `Nothing to answer: ${message}.`;",
+    "new": "      return \"Nothing to answer.\";"
+  },
+  {
+    "id": "D1855",
+    "defect": "A status with no path queries the current directory instead of refusing as a usage error.",
+    "file": "packages/cli/src/commands/status.ts",
+    "old": "  if (path === undefined) throw new UsageError(\"Missing path.\");\n",
+    "new": ""
+  },
+  {
+    "id": "D1867",
+    "defect": "A status path resolves against --root instead of the command's directory.",
+    "file": "packages/cli/src/commands/status.ts",
+    "old": "        const path = absolutePath(io, pathArgument);",
+    "new": "        const path = absolutePath({ ...io, cwd: root }, pathArgument);"
+  },
+  {
+    "id": "D1868",
+    "defect": "A status ignores --root and asks the daemon of the command's directory.",
+    "file": "packages/cli/src/commands/status.ts",
+    "old": "        const root = absolutePath(io, rootArgument);",
+    "new": "        const root = absolutePath(io, undefined);"
+  },
+  {
+    "id": "D1869",
+    "defect": "A summary ignores its root argument and asks the daemon of the command's directory.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "        const root = absolutePath(io, rootArgument);",
+    "new": "        const root = absolutePath(io, undefined);"
+  },
+  {
+    "id": "D1873",
+    "defect": "The human answer never gives a failed module's error count.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return \"errorCount\" in entry ? ` (${entry.errorCount} ${ERRORS_SUFFIX})` : \"\";",
+    "new": "  return \"\";"
+  },
+  {
+    "id": "D1874",
+    "defect": "A workspace whose latest run could not load it reads as failed in the human summary.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "  failed: \"latest run could not load the workspace\",",
+    "new": "  failed: \"latest run failed\","
+  },
+  {
+    "id": "D1876",
+    "defect": "A failed status document names the requested absolute path `path`, the key a success uses for the root-relative path.",
+    "file": "packages/cli/src/commands/status.ts",
+    "old": "            requestedPath: path,",
+    "new": "            path,"
   }
 ]

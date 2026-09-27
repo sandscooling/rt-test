@@ -5,7 +5,7 @@ export type {
   TestEvidence,
   TestOutcome,
 } from "./evidence.js";
-export { identifyModuleTests } from "./test-identity.js";
+export { identifyModuleTests, testIdentityKey } from "./test-identity.js";
 export type {
   IdentifiedTest,
   TestIdentity,

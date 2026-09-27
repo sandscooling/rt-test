@@ -1,4 +1,11 @@
-import type { RtTestStore } from "../store/open-store.js";
+import type {
+  NoAnswer,
+  PathStatusAnswer,
+  SummaryAnswer,
+} from "../query/answer.js";
+import { pathStatusAnswer } from "../query/path-status.js";
+import { summaryAnswer, type DaemonView } from "../query/summary.js";
+import type { LatestResults, RtTestStore } from "../store/open-store.js";
 import { NOT_FINGERPRINTED } from "../store/schema.js";
 import type { StoreBindings, StoreScope } from "../store/stored-records.js";
 import {
@@ -32,7 +39,7 @@ export interface LifecycleParts {
   readonly closeEndpoint: () => Promise<void>;
 }
 
-/** Discovers once, runs each confirmed workspace once, then idles until a stop, answering status throughout. */
+/** Discovers once, runs each confirmed workspace once, then idles until a stop, answering status and queries throughout. */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;
   readonly #parts: LifecycleParts;
@@ -78,8 +85,25 @@ export class DaemonLifecycle implements DaemonHandlers {
     };
   }
 
+  summary(): SummaryAnswer | NoAnswer {
+    return summaryAnswer(this.#latestResults(), this.#view());
+  }
+
+  pathStatus(path: string): PathStatusAnswer | NoAnswer {
+    return pathStatusAnswer(path, this.#latestResults(), this.#view());
+  }
+
   isStopping(): boolean {
     return this.#stopping !== undefined;
+  }
+
+  #latestResults(): LatestResults {
+    return this.#parts.store.readLatestResults(this.#parts.scope);
+  }
+
+  #view(): DaemonView {
+    const { activity, unstoredJobs } = this.status();
+    return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };
   }
 
   stop(): void {

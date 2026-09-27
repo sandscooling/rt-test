@@ -59,12 +59,20 @@ export function readLatestDiscovery(
   scope: StoreScope,
 ): StoredDiscovery | undefined {
   requireScope(scope);
-  return inReadTransaction(database, () => {
-    const row = database
-      .prepare(SELECT_LATEST_DISCOVERY)
-      .get(scope.projectIdentity, scope.worktreeIdentity);
-    return row === undefined ? undefined : storedDiscovery(database, row);
-  });
+  return inReadTransaction(database, () =>
+    selectLatestDiscovery(database, scope),
+  );
+}
+
+/** Reads inside the caller's transaction, so it shares that transaction's snapshot. */
+export function selectLatestDiscovery(
+  database: DatabaseSync,
+  scope: StoreScope,
+): StoredDiscovery | undefined {
+  const row = database
+    .prepare(SELECT_LATEST_DISCOVERY)
+    .get(scope.projectIdentity, scope.worktreeIdentity);
+  return row === undefined ? undefined : storedDiscovery(database, row);
 }
 
 /** Reads inside the caller's transaction, so a writer can read back what it has not yet committed. */

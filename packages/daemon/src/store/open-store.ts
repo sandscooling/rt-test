@@ -3,8 +3,11 @@ import { join } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
-import { readLatestDiscovery } from "./read-discovery.js";
-import { readRun, readRuns } from "./read-runs.js";
+import {
+  readLatestDiscovery,
+  selectLatestDiscovery,
+} from "./read-discovery.js";
+import { readRun, readRuns, selectLatestRuns } from "./read-runs.js";
 import {
   BUSY_TIMEOUT_MS,
   MIGRATED_SCHEMA_VERSION,
@@ -14,15 +17,23 @@ import {
   STORE_SCHEMA,
   STORE_SCHEMA_VERSION,
 } from "./schema.js";
-import type {
-  StoreBindings,
-  StoredDiscovery,
-  StoredRun,
-  StoreScope,
+import {
+  requireScope,
+  type StoreBindings,
+  type StoredDiscovery,
+  type StoredRun,
+  type StoreScope,
 } from "./stored-records.js";
-import { inWriteTransaction } from "./transaction.js";
+import { inReadTransaction, inWriteTransaction } from "./transaction.js";
 import { writeDiscovery } from "./write-discovery.js";
 import { writeRun } from "./write-run.js";
+
+/** What a query counts from, read from one snapshot. */
+export interface LatestResults {
+  readonly discovery: StoredDiscovery | undefined;
+  /** The run stored last for each workspace path, in stored order. */
+  readonly latestRuns: readonly StoredRun[];
+}
 
 export interface RtTestStore {
   readonly file: string;
@@ -35,6 +46,7 @@ export interface RtTestStore {
   readRuns(scope: StoreScope): StoredRun[];
   readRun(scope: StoreScope, runId: string): StoredRun | undefined;
   readLatestDiscovery(scope: StoreScope): StoredDiscovery | undefined;
+  readLatestResults(scope: StoreScope): LatestResults;
   close(): void;
 }
 
@@ -178,6 +190,18 @@ function storeHandle(database: DatabaseSync, file: string): RtTestStore {
     readRuns: (scope) => readRuns(database, scope),
     readRun: (scope, runId) => readRun(database, scope, runId),
     readLatestDiscovery: (scope) => readLatestDiscovery(database, scope),
+    readLatestResults: (scope) => readLatestResults(database, scope),
     close: () => database.close(),
   };
+}
+
+function readLatestResults(
+  database: DatabaseSync,
+  scope: StoreScope,
+): LatestResults {
+  requireScope(scope);
+  return inReadTransaction(database, () => ({
+    discovery: selectLatestDiscovery(database, scope),
+    latestRuns: selectLatestRuns(database, scope),
+  }));
 }

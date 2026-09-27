@@ -82,6 +82,10 @@ const SELECT_SCOPE_TESTS = `SELECT ${TEST_COLUMNS} FROM run_tests t
   JOIN runs r ON r.sequence = t.run_sequence WHERE ${IN_SCOPE}
   ORDER BY t.run_sequence, t.module_index, t.test_index`;
 const SELECT_RUN = `SELECT ${RUN_COLUMNS} FROM runs r WHERE ${IN_SCOPE} AND run_id = ?`;
+const SELECT_LATEST_RUN_IDS = `SELECT r.run_id FROM runs r WHERE ${IN_SCOPE}
+  AND r.sequence = (SELECT max(l.sequence) FROM runs l WHERE l.project_identity = r.project_identity
+    AND l.worktree_identity = r.worktree_identity AND l.workspace_path = r.workspace_path)
+  ORDER BY r.sequence`;
 const SELECT_MODULES = `SELECT ${MODULE_COLUMNS} FROM run_modules m
   WHERE m.run_sequence = ? ORDER BY m.module_index`;
 const SELECT_TESTS = `SELECT ${TEST_COLUMNS} FROM run_tests t
@@ -138,6 +142,22 @@ export function selectRun(
     modules: database.prepare(SELECT_MODULES).all(sequence),
     tests: database.prepare(SELECT_TESTS).all(sequence),
   });
+}
+
+/** The run stored last for each workspace path, in stored order; reads inside the caller's transaction. */
+export function selectLatestRuns(
+  database: DatabaseSync,
+  scope: StoreScope,
+): StoredRun[] {
+  return database
+    .prepare(SELECT_LATEST_RUN_IDS)
+    .all(scope.projectIdentity, scope.worktreeIdentity)
+    .map((row) => {
+      const runId = text(row, "run_id");
+      const run = selectRun(database, scope, runId);
+      if (run === undefined) throw unreadable("runs.run_id", runId);
+      return run;
+    });
 }
 
 function storedRun(row: Row, children: RunChildren): StoredRun {

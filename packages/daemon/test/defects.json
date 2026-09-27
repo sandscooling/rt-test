@@ -1941,7 +1941,7 @@
   {
     "id": "D1503",
     "defect": "A start that meets a daemon of another protocol version does not read the mismatch error, so it neither names that daemon's version nor says it can be stopped.",
-    "file": "packages/daemon/src/client.ts",
+    "file": "packages/daemon/src/daemon/proven-connection.ts",
     "old": "    answer[\"type\"] === ERROR_TYPE &&",
     "new": "    answer[\"type\"] === \"never\" &&"
   },
@@ -2186,7 +2186,7 @@
   {
     "id": "D1571",
     "defect": "The client reads the daemon key after the answer arrives, when a stopping daemon has already removed it, so every stop of the client's own daemon fails.",
-    "file": "packages/daemon/src/client.ts",
+    "file": "packages/daemon/src/daemon/proven-connection.ts",
     "old": "  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);\n  const challenge = newChallenge();\n  const answer = await connection.request(request(challenge));",
     "new": "  const challenge = newChallenge();\n  const answer = await connection.request(request(challenge));\n  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);"
   },
@@ -2427,5 +2427,453 @@
     "file": "packages/daemon/src/client.ts",
     "old": "  await acceptStart(child, report.pid, logFile);\n",
     "new": ""
+  },
+  {
+    "id": "D1792",
+    "defect": "Every finished test reads passed, whatever outcome its latest run recorded.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "    ? { outcome: test.outcome }",
+    "new": "    ? { outcome: \"passed\" as const }"
+  },
+  {
+    "id": "D1793",
+    "defect": "A test its latest run left unfinished is counted failed instead of interrupted.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "    : { state: INTERRUPTED };",
+    "new": "    : { outcome: \"failed\" as const };"
+  },
+  {
+    "id": "D1794",
+    "defect": "A test whose module was not run is folded into not-in-latest-run.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  \"not-run\": MODULE_NOT_RUN,",
+    "new": "  \"not-run\": NOT_IN_LATEST_RUN,"
+  },
+  {
+    "id": "D1795",
+    "defect": "A test whose module crashed is folded into module-not-run.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  crashed: MODULE_CRASHED,",
+    "new": "  crashed: MODULE_NOT_RUN,"
+  },
+  {
+    "id": "D1796",
+    "defect": "A test whose module failed to load is folded into module-not-run.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  failed: MODULE_FAILED_TO_LOAD,",
+    "new": "  failed: MODULE_NOT_RUN,"
+  },
+  {
+    "id": "D1797",
+    "defect": "A test whose workspace's latest run failed to load is folded into not-in-latest-run.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  failed: RUN_FAILED,",
+    "new": "  failed: NOT_IN_LATEST_RUN,"
+  },
+  {
+    "id": "D1798",
+    "defect": "A test whose workspace's latest run found no supported Vitest is folded into run-failed.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  unsupported: RUN_UNSUPPORTED_VITEST,",
+    "new": "  unsupported: RUN_FAILED,"
+  },
+  {
+    "id": "D1799",
+    "defect": "A test whose workspace's latest run was interrupted before loading reads never-run, as if no run were stored.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  \"interrupted-before-load\": RUN_INTERRUPTED_BEFORE_LOAD,",
+    "new": "  \"interrupted-before-load\": NEVER_RUN,"
+  },
+  {
+    "id": "D1800",
+    "defect": "A discovered test the latest run does not hold is counted passed.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "    return { state: NOT_IN_LATEST_RUN };",
+    "new": "    return { outcome: \"passed\" as const };"
+  },
+  {
+    "id": "D1801",
+    "defect": "A test of a workspace with no stored run reads not-in-latest-run instead of never-run.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "      state: NEVER_RUN,",
+    "new": "      state: NOT_IN_LATEST_RUN,"
+  },
+  {
+    "id": "D1802",
+    "defect": "The answer lists only the states some test is in, so a reader cannot tell a zero from a state it does not report.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  const states = zeroCounts(TEST_STATES);",
+    "new": "  const states = zeroCounts<TestState>([]);"
+  },
+  {
+    "id": "D1803",
+    "defect": "The test-identity key leaves out the project, so a same-named test of another project answers the discovered test.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "    identity.projectName,\n",
+    "new": ""
+  },
+  {
+    "id": "D1804",
+    "defect": "A finished result from a run of another adapter version reads unknown instead of stale.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  if (!isCurrentAdapterVersion(stored.adapterVersion)) return STALE;\n",
+    "new": ""
+  },
+  {
+    "id": "D1805",
+    "defect": "A test with no finished result reads stale instead of unknown.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "      : { test, state: found.state, freshness: UNKNOWN };",
+    "new": "      : { test, state: found.state, freshness: STALE };"
+  },
+  {
+    "id": "D1806",
+    "defect": "A fingerprinted result is compared with its own digest as the current fingerprint, so it reads current.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "    CURRENT_FINGERPRINT,\n  ).freshness;",
+    "new": "    fingerprint.kind === NOT_FINGERPRINTED ? undefined : fingerprint.digest,\n  ).freshness;"
+  },
+  {
+    "id": "D1807",
+    "defect": "A discovery of another adapter version is reported current.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    adapterVersionCurrent: isCurrentAdapterVersion(adapterVersion),",
+    "new": "    adapterVersionCurrent: true,"
+  },
+  {
+    "id": "D1808",
+    "defect": "A workspace not confirmed at start is listed as a failed discovery.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "          kind: WORKSPACE_NOT_CONFIRMED,",
+    "new": "          kind: WORKSPACE_DISCOVERY_FAILED,"
+  },
+  {
+    "id": "D1809",
+    "defect": "A workspace whose discovery failed is listed as having no supported Vitest.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "          kind: WORKSPACE_DISCOVERY_FAILED,",
+    "new": "          kind: WORKSPACE_UNSUPPORTED_VITEST,"
+  },
+  {
+    "id": "D1810",
+    "defect": "A workspace with no supported Vitest is listed without its reason.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "...cutReason(entry.vitest.reason),",
+    "new": "...cutReason(\"\"),"
+  },
+  {
+    "id": "D1811",
+    "defect": "A failed module's error count is always 1, whatever it recorded.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      errorCount: module.errors.length,",
+    "new": "      errorCount: 1,"
+  },
+  {
+    "id": "D1812",
+    "defect": "Typecheck modules are left out of the not-discovered list.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "...entry.typecheckModules.map(",
+    "new": "...[].map("
+  },
+  {
+    "id": "D1813",
+    "defect": "Unsupported projects are left out of the not-discovered list.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "...entry.unsupportedProjects.map(",
+    "new": "...[].map("
+  },
+  {
+    "id": "D1814",
+    "defect": "Workspace sources that were not read are left out of the not-discovered list.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "...discovery.notRead.map(",
+    "new": "...[].map("
+  },
+  {
+    "id": "D1815",
+    "defect": "A reason is cut by UTF-16 unit, splitting a character that straddles the cut and miscounting what was left out.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "const characters = Array.from(text);",
+    "new": "const characters = text.split(\"\");"
+  },
+  {
+    "id": "D1816",
+    "defect": "The reason bound is one short, so a reason of exactly 1,000 characters loses its last one.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "const MAX_REASON_CHARACTERS = 1000;",
+    "new": "const MAX_REASON_CHARACTERS = 999;"
+  },
+  {
+    "id": "D1817",
+    "defect": "The duplicate count counts the tests not marked duplicate.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "standing.test.isDuplicate",
+    "new": "!standing.test.isDuplicate"
+  },
+  {
+    "id": "D1818",
+    "defect": "A workspace's latest run never reports that Vitest was force-stopped.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    forceStopped: run.forceStopped,",
+    "new": "    forceStopped: false,"
+  },
+  {
+    "id": "D1819",
+    "defect": "A run's module errors count the modules holding errors, not the errors.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "total + (\"errors\" in module ? module.errors.length : 0),",
+    "new": "total + (\"errors\" in module ? 1 : 0),"
+  },
+  {
+    "id": "D1820",
+    "defect": "A summary of a discovery holding no test and nothing not discovered answers an empty, success-shaped result.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  if (standings.length === 0 && notDiscovered.length === 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1821",
+    "defect": "With no stored discovery, the reason says the daemon is idle whatever it is doing.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "it is ${activityText(daemon.activity)}",
+    "new": "it is idle"
+  },
+  {
+    "id": "D1822",
+    "defect": "A path matches only what lies under it, so a test file's own tests never answer for it.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "    path === target ||\n",
+    "new": ""
+  },
+  {
+    "id": "D1823",
+    "defect": "A folder matches any path its name prefixes, so packages/a also counts packages/ab.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "    path.startsWith(`${target}${POSIX_SEPARATOR}`)",
+    "new": "    path.startsWith(target)"
+  },
+  {
+    "id": "D1824",
+    "defect": "A folder answer gives no per-file entries.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "    files: pathKind === FOLDER_PATH ? fileCounts(standings) : [],",
+    "new": "    files: [],"
+  },
+  {
+    "id": "D1825",
+    "defect": "A module path holding .. is joined without normalizing, so its test never lies under the folder it is in.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  return posix.normalize(posix.join(workspacePath, modulePath));",
+    "new": "  return `${workspacePath}/${modulePath}`;"
+  },
+  {
+    "id": "D1826",
+    "defect": "A deleted path resolves to its nearest existing ancestor and drops its own segments, so a deleted test file answers as its folder.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "if (real.ok) return { ok: true, path: join(real.path, ...missing) };",
+    "new": "if (real.ok) return { ok: true, path: join(real.path) };"
+  },
+  {
+    "id": "D1827",
+    "defect": "A deleted file known only as a module that failed to load is reported as a folder.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "      (entry) => isModuleEntry(entry) && entryPath(entry) === target,",
+    "new": "      () => false,"
+  },
+  {
+    "id": "D1828",
+    "defect": "A path answer lists none of the not-discovered entries under it.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "    liesAtOrUnder(entryPath(entry), target.path),",
+    "new": "    false,"
+  },
+  {
+    "id": "D1829",
+    "defect": "A path outside the consumer root is not refused as outside it.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  if (!liesInside(root.path, path.path)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1830",
+    "defect": "A path with nothing at or under it never names the not-discovered workspace, project or source it lies in.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  if (enclosing.length === 0) return nothing;",
+    "new": "  return nothing;"
+  },
+  {
+    "id": "D1831",
+    "defect": "An answer never names the not-discovered entries above its path.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  return liesAtOrUnder(target, path) && !liesAtOrUnder(path, target);",
+    "new": "  return false;"
+  },
+  {
+    "id": "D1864",
+    "defect": "A workspace's latest run never reports the reason nothing ran.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    nothingRan: run.nothingRan ?? null,",
+    "new": "    nothingRan: null,"
+  },
+  {
+    "id": "D1865",
+    "defect": "A workspace whose latest run failed to load it, found no supported Vitest, or was interrupted before loading reports no run at all.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  if (run.status !== \"ran\") return { ...base, status: run.status };",
+    "new": "  if (run.status !== \"ran\") return null;"
+  },
+  {
+    "id": "D1866",
+    "defect": "A status of the consumer root itself answers that nothing lies at or under it.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "    target === ROOT_PATH ||\n",
+    "new": ""
+  },
+  {
+    "id": "D1870",
+    "defect": "An entry at the path is listed both at and above it.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  return liesAtOrUnder(target, path) && !liesAtOrUnder(path, target);",
+    "new": "  return liesAtOrUnder(target, path);"
+  },
+  {
+    "id": "D1832",
+    "defect": "The latest run of a workspace is chosen as the earliest stored, so an older run answers its tests.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "SELECT max(l.sequence) FROM runs l",
+    "new": "SELECT min(l.sequence) FROM runs l"
+  },
+  {
+    "id": "D1833",
+    "defect": "The latest run is chosen across every workspace path, so only the workspace that ran last has a latest run.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": " AND l.workspace_path = r.workspace_path)",
+    "new": ")"
+  },
+  {
+    "id": "D1834",
+    "defect": "The latest run is chosen across worktrees, so another worktree's newer run of the same workspace hides this worktree's.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "\n    AND l.worktree_identity = r.worktree_identity AND",
+    "new": "\n    AND"
+  },
+  {
+    "id": "D1863",
+    "defect": "The latest run is chosen across projects, so another project's newer run of the same worktree and workspace path hides this project's.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "FROM runs l WHERE l.project_identity = r.project_identity\n    AND l.worktree_identity",
+    "new": "FROM runs l WHERE l.worktree_identity"
+  },
+  {
+    "id": "D1835",
+    "defect": "A query to a stopping daemon reads the store the stop is closing and answers it.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (handlers.isStopping()) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1836",
+    "defect": "An answer longer than the line limit is sent anyway, as a line no client can read.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (size > MAX_LINE_BYTES) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D1837",
+    "defect": "An answer exactly at the line limit is refused as too long.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (size > MAX_LINE_BYTES) {",
+    "new": "  if (size >= MAX_LINE_BYTES) {"
+  },
+  {
+    "id": "D1838",
+    "defect": "A query that throws is answered without what went wrong, so the reason never says why it failed.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    return error(QUERY_FAILED_CODE, `the query failed: ${errorText(failure)}`);",
+    "new": "    return error(QUERY_FAILED_CODE, \"the query failed\");"
+  },
+  {
+    "id": "D1839",
+    "defect": "A query with nothing to answer loses its reason, so the client cannot say why.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    return error(NOTHING_TO_ANSWER_CODE, response.noAnswer);",
+    "new": "    return error(NOTHING_TO_ANSWER_CODE, \"nothing to answer\");"
+  },
+  {
+    "id": "D1840",
+    "defect": "A path-status request with a relative path reaches the query, which resolves it against the daemon's own directory.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (typeof path !== \"string\" || !isAbsolute(path)) {",
+    "new": "  if (typeof path !== \"string\") {"
+  },
+  {
+    "id": "D1841",
+    "defect": "A query's answer says the daemon is idle while it runs a workspace.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };",
+    "new": "return { consumerRoot: this.identity.consumerRoot, activity: { state: \"idle\" as const }, unstoredJobs };"
+  },
+  {
+    "id": "D1842",
+    "defect": "A query's answer leaves out the jobs that ended with nothing stored.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };",
+    "new": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs: [] };"
+  },
+  {
+    "id": "D1843",
+    "defect": "A summary aborts the job in progress.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "  summary(): SummaryAnswer | NoAnswer {\n    return summaryAnswer(",
+    "new": "  summary(): SummaryAnswer | NoAnswer {\n    this.#parts.executor.abort();\n    return summaryAnswer("
+  },
+  {
+    "id": "D1871",
+    "defect": "A summary resets the daemon's activity to idle while a run continues.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "  summary(): SummaryAnswer | NoAnswer {\n    return summaryAnswer(",
+    "new": "  summary(): SummaryAnswer | NoAnswer {\n    this.#activity = { state: \"idle\" };\n    return summaryAnswer("
+  },
+  {
+    "id": "D1872",
+    "defect": "A path-status answer leaves out the jobs that ended with nothing stored.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return pathStatusAnswer(path, this.#latestResults(), this.#view());",
+    "new": "    return pathStatusAnswer(path, this.#latestResults(), { ...this.#view(), unstoredJobs: [] });"
+  },
+  {
+    "id": "D1844",
+    "defect": "A path status aborts the run in progress, so a query interrupts the workspace it was sent during.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    return pathStatusAnswer(",
+    "new": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    this.#parts.executor.abort();\n    return pathStatusAnswer("
+  },
+  {
+    "id": "D1845",
+    "defect": "A real daemon's answer says it is idle while it runs a workspace: D1841's defect and mutation, re-proved end to end through the protocol and client.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };",
+    "new": "return { consumerRoot: this.identity.consumerRoot, activity: { state: \"idle\" as const }, unstoredJobs };"
+  },
+  {
+    "id": "D1846",
+    "defect": "A daemon that predates the queries reads as one that could not answer, so the reason never says to restart it.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    case UNKNOWN_REQUEST_CODE:",
+    "new": "    case \"never-unknown\":"
+  },
+  {
+    "id": "D1847",
+    "defect": "A stopping daemon's error reads as one that could not answer, so the reason never says it is stopping.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    case STOPPING_CODE:",
+    "new": "    case \"never-stopping\":"
+  },
+  {
+    "id": "D1875",
+    "defect": "A query whose connection fails mid-request rejects without naming the root.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "`Cannot get an answer from the daemon for ${consumerRoot}: ${errorText(failure)}.`",
+    "new": "`Cannot get an answer from the daemon: ${errorText(failure)}.`"
   }
 ]

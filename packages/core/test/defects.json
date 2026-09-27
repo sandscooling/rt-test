@@ -96,5 +96,26 @@
     "file": "packages/core/src/test-identity.ts",
     "old": "identity: { ...location, namePath: [...namePath], occurrence },",
     "new": "identity: { ...location, namePath: namePath.slice(-1), occurrence },"
+  },
+  {
+    "id": "D1791",
+    "defect": "The whole-identity key leaves out the occurrence, so a stored result of the first of two same-named tests also answers the second.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "    identity.namePath,\n    identity.occurrence,\n  ]);",
+    "new": "    identity.namePath,\n  ]);"
+  },
+  {
+    "id": "D1861",
+    "defect": "The whole-identity key leaves out the module path, so a same-named test in another module of the project answers the discovered test.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "    identity.modulePath,\n    identity.namePath,",
+    "new": "    identity.namePath,"
+  },
+  {
+    "id": "D1862",
+    "defect": "The whole-identity key leaves out the name path, so every first-occurrence test of a module shares one key and one result answers them all.",
+    "file": "packages/core/src/test-identity.ts",
+    "old": "    identity.namePath,\n    identity.occurrence,\n  ]);",
+    "new": "    identity.occurrence,\n  ]);"
   }
 ]

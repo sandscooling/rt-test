@@ -1,0 +1,167 @@
+import {
+  assessEvidence,
+  testIdentityKey,
+  type Freshness,
+  type TestIdentity,
+  type TestOutcome,
+} from "@rt-test/core";
+import { NOT_FINGERPRINTED } from "../store/schema.js";
+import type { StoredDiscovery, StoredRun } from "../store/stored-records.js";
+import { VITEST_ADAPTER_VERSION } from "../vitest/adapter-version.js";
+import type { DiscoveredTest } from "../vitest/discover-tests.js";
+import type { RecordedModule, RecordedTest } from "../vitest/run-states.js";
+import {
+  FRESHNESS_VALUES,
+  INTERRUPTED,
+  MODULE_CRASHED,
+  MODULE_FAILED_TO_LOAD,
+  MODULE_NOT_RUN,
+  NEVER_RUN,
+  NOT_IN_LATEST_RUN,
+  RUN_FAILED,
+  RUN_INTERRUPTED_BEFORE_LOAD,
+  RUN_UNSUPPORTED_VITEST,
+  STALE,
+  TEST_STATES,
+  UNKNOWN,
+  type TestCounts,
+  type TestState,
+} from "./answer.js";
+
+/** A discovered test with its one state and its freshness. */
+export interface TestStanding {
+  readonly test: DiscoveredTest;
+  readonly state: TestState;
+  readonly freshness: Freshness;
+}
+
+/** What a run holds for one test: a finished outcome, or the state that stands in for one. */
+type RunAnswer =
+  | { readonly outcome: TestOutcome }
+  | { readonly state: Exclude<TestState, TestOutcome> };
+
+/** The evidence of an unfingerprinted result, which `assessEvidence` rates unknown. */
+const NO_FINGERPRINT = "";
+/** No input fingerprint is computed yet, so no result is current. */
+const CURRENT_FINGERPRINT: string | undefined = undefined;
+
+const RUN_STATES = {
+  failed: RUN_FAILED,
+  unsupported: RUN_UNSUPPORTED_VITEST,
+  "interrupted-before-load": RUN_INTERRUPTED_BEFORE_LOAD,
+} as const;
+const MODULE_STATES = {
+  "not-run": MODULE_NOT_RUN,
+  crashed: MODULE_CRASHED,
+  failed: MODULE_FAILED_TO_LOAD,
+} as const;
+
+/** Every test of every discovered workspace of the discovery, each answered only by its workspace's latest run. */
+export function testStandings(
+  discovery: StoredDiscovery,
+  latestRuns: readonly StoredRun[],
+): TestStanding[] {
+  const runs = new Map(latestRuns.map((run) => [run.run.workspace.path, run]));
+  return discovery.discovery.workspaces.flatMap((entry) =>
+    entry.status === "discovered"
+      ? workspaceStandings(entry.tests, runs.get(entry.workspace.path))
+      : [],
+  );
+}
+
+function workspaceStandings(
+  tests: readonly DiscoveredTest[],
+  stored: StoredRun | undefined,
+): TestStanding[] {
+  if (stored === undefined) {
+    return tests.map((test) => ({
+      test,
+      state: NEVER_RUN,
+      freshness: UNKNOWN,
+    }));
+  }
+  const answer = runAnswerer(stored);
+  return tests.map((test) => {
+    const found = answer(test.identity);
+    return "outcome" in found
+      ? {
+          test,
+          state: found.outcome,
+          freshness: finishedFreshness(found.outcome, stored),
+        }
+      : { test, state: found.state, freshness: UNKNOWN };
+  });
+}
+
+/** A finished result's freshness; a test with no finished result is unknown, so it never reaches here. */
+function finishedFreshness(outcome: TestOutcome, stored: StoredRun): Freshness {
+  if (!isCurrentAdapterVersion(stored.adapterVersion)) return STALE;
+  const fingerprint = stored.inputFingerprint;
+  return assessEvidence(
+    {
+      fingerprint:
+        fingerprint.kind === NOT_FINGERPRINTED
+          ? NO_FINGERPRINT
+          : fingerprint.digest,
+      outcome,
+    },
+    CURRENT_FINGERPRINT,
+  ).freshness;
+}
+
+/** A record stored under another adapter version was recorded under another meaning. */
+export function isCurrentAdapterVersion(adapterVersion: number): boolean {
+  return adapterVersion === VITEST_ADAPTER_VERSION;
+}
+
+function runAnswerer(stored: StoredRun): (identity: TestIdentity) => RunAnswer {
+  const run = stored.run;
+  if (run.status !== "ran") {
+    const state = RUN_STATES[run.status];
+    return () => ({ state });
+  }
+  const modules = new Map(
+    run.modules.map((module) => [moduleKey(module), module]),
+  );
+  const tests = new Map(
+    run.modules
+      .flatMap((module) => (module.state === "ran" ? module.tests : []))
+      .map((test) => [testIdentityKey(test.identity), test]),
+  );
+  return (identity) => {
+    const test = tests.get(testIdentityKey(identity));
+    if (test !== undefined) return recordedAnswer(test);
+    const module = modules.get(moduleKey(identity));
+    if (module !== undefined && module.state !== "ran") {
+      return { state: MODULE_STATES[module.state] };
+    }
+    return { state: NOT_IN_LATEST_RUN };
+  };
+}
+
+function recordedAnswer(test: RecordedTest): RunAnswer {
+  return test.execution === "finished"
+    ? { outcome: test.outcome }
+    : { state: INTERRUPTED };
+}
+
+function moduleKey(
+  module: Pick<RecordedModule, "projectName" | "modulePath">,
+): string {
+  return JSON.stringify([module.projectName, module.modulePath]);
+}
+
+/** Counts each standing once by state and once by freshness, listing every state and freshness, zero or not. */
+export function countStandings(standings: readonly TestStanding[]): TestCounts {
+  const states = zeroCounts(TEST_STATES);
+  const freshness = zeroCounts(FRESHNESS_VALUES);
+  for (const standing of standings) {
+    states[standing.state] += 1;
+    freshness[standing.freshness] += 1;
+  }
+  return { tests: standings.length, states, freshness };
+}
+
+function zeroCounts<K extends string>(keys: readonly K[]): Record<K, number> {
+  return Object.fromEntries(keys.map((key) => [key, 0])) as Record<K, number>;
+}

@@ -1,9 +1,16 @@
 import { isUsageError, type CliIo, type Command } from "./command.js";
 import { startCommand } from "./commands/start.js";
+import { statusCommand } from "./commands/status.js";
 import { stopCommand } from "./commands/stop.js";
+import { summaryCommand } from "./commands/summary.js";
 import { EXIT_USAGE, type ExitCode } from "./output.js";
 
-const COMMANDS: readonly Command[] = [startCommand, stopCommand];
+const COMMANDS: readonly Command[] = [
+  startCommand,
+  stopCommand,
+  summaryCommand,
+  statusCommand,
+];
 
 /** Writes nothing to stdout on a usage error, since a strict parse that fails never reached `--json`. */
 export async function main(

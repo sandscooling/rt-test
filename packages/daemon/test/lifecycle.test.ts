@@ -1,8 +1,13 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Executor, JobOutcome } from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
 import type { DaemonIdentity } from "../src/daemon/protocol.js";
-import { openStore, type RtTestStore } from "../src/store/open-store.js";
+import {
+  openStore,
+  type LatestResults,
+  type RtTestStore,
+} from "../src/store/open-store.js";
 import type {
   StoreBindings,
   StoredDiscovery,
@@ -53,7 +58,9 @@ function confirmed(...paths: readonly string[]): ConfirmedStart {
   };
 }
 
-function discovered(path: string): WorkspaceDiscovery {
+function discovered(
+  path: string,
+): Extract<WorkspaceDiscovery, { status: "discovered" }> {
   return {
     status: "discovered",
     workspace: workspace(path),
@@ -63,6 +70,26 @@ function discovered(path: string): WorkspaceDiscovery {
     typecheckModules: [],
     unsupportedProjects: [],
     unhandledErrors: [],
+  };
+}
+
+/** A discovered workspace holding one test, so a query has something to count. */
+function discoveredWithTest(path: string): WorkspaceDiscovery {
+  return {
+    ...discovered(path),
+    tests: [
+      {
+        identity: {
+          workspacePath: path,
+          projectName: "unit",
+          modulePath: "a.test.ts",
+          namePath: ["counts"],
+          occurrence: 0,
+        },
+        isDuplicate: false,
+        mode: "run",
+      },
+    ],
   };
 }
 
@@ -169,6 +196,33 @@ class RecordingStore implements RtTestStore {
     return undefined;
   }
 
+  /** The discovery written last, and the run written last for each workspace. */
+  readLatestResults(scope: StoreScope): LatestResults {
+    const bindings: StoreBindings = {
+      ...scope,
+      inputFingerprint: { kind: "not-fingerprinted" },
+    };
+    const discovery = this.discoveries.at(-1);
+    const latest = new Map(this.runs.map((run) => [run.workspace.path, run]));
+    return {
+      discovery:
+        discovery === undefined
+          ? undefined
+          : {
+              ...bindings,
+              adapterVersion: 3,
+              discoveryId: "discovery",
+              discovery,
+            },
+      latestRuns: [...latest.values()].map((run) => ({
+        ...bindings,
+        adapterVersion: 3,
+        runId: `run-${run.workspace.path}`,
+        run,
+      })),
+    };
+  }
+
   close(): void {
     this.closed = true;
   }
@@ -186,11 +240,12 @@ function daemon(
   start: ConfirmedStart,
   executor: ScriptedExecutor,
   store: RtTestStore = new RecordingStore(),
+  identity: DaemonIdentity = IDENTITY,
 ): Daemon {
   const log = memoryLog();
   const endpointCloses = { count: 0 };
   const lifecycle = new DaemonLifecycle({
-    identity: IDENTITY,
+    identity,
     scope: SCOPE,
     start,
     store,
@@ -227,10 +282,11 @@ async function begun(started: Daemon): Promise<Daemon> {
 function heldAt(
   path: string,
   paths: readonly string[],
+  entryOf: (path: string) => WorkspaceDiscovery = discovered,
 ): { readonly started: Daemon; readonly held: Deferred<RunOutcome> } {
   const held = new Deferred<RunOutcome>();
   const executor = new ScriptedExecutor(
-    { ended: true, value: discovery(...paths.map(discovered)) },
+    { ended: true, value: discovery(...paths.map(entryOf)) },
     (runPath) =>
       runPath === path
         ? held.promise
@@ -401,6 +457,76 @@ describe("the activity and the jobs that stored nothing", () => {
     const executor = new ScriptedExecutor({ ended: false, reason });
     const { lifecycle } = await begun(daemon(confirmed("a"), executor));
     expect(lifecycle.status().unstoredJobs).toStrictEqual([{ reason }]);
+  });
+});
+
+describe("answering a query", () => {
+  it("D1841: a summary during a run carries the activity running that workspace", async () => {
+    const { started } = heldAt("b", ["a", "b"], discoveredWithTest);
+    const { lifecycle } = await begun(started);
+    const answer = lifecycle.summary();
+    expect("activity" in answer ? answer.activity : answer).toStrictEqual({
+      state: "running",
+      workspacePath: "b",
+    });
+  });
+
+  it("D1842: a summary carries each job that ended with nothing stored, with its reason", async () => {
+    const executor = new ScriptedExecutor({
+      ended: true,
+      value: discovery(discoveredWithTest("a"), discoveredWithTest("b")),
+    });
+    const { lifecycle } = await begun(
+      daemon(confirmed("a", "b"), executor, new RecordingStore(["a"])),
+    );
+    const answer = lifecycle.summary();
+    expect(
+      "unstoredJobs" in answer ? answer.unstoredJobs : answer,
+    ).toStrictEqual([{ workspacePath: "a", reason: "the store write failed" }]);
+  });
+
+  it("D1843: a summary and a path status during a run neither interrupt it nor change which jobs run after it", async () => {
+    const { started, held } = heldAt("a", ["a", "b"], discoveredWithTest);
+    const { lifecycle, executor } = await begun(started);
+    lifecycle.summary();
+    lifecycle.pathStatus("/consumer/a");
+    held.resolve({ ended: true, value: interrupted("a") });
+    await flush();
+    expect({ runs: executor.runs, aborts: executor.aborts }).toStrictEqual({
+      runs: ["a", "b"],
+      aborts: 0,
+    });
+  });
+
+  it("D1871: a summary and a path status during a run leave the activity running that workspace", async () => {
+    const { started } = heldAt("a", ["a", "b"], discoveredWithTest);
+    const { lifecycle } = await begun(started);
+    lifecycle.summary();
+    lifecycle.pathStatus("/consumer/a");
+    expect(lifecycle.status().activity).toStrictEqual({
+      state: "running",
+      workspacePath: "a",
+    });
+  });
+
+  it("D1872: a path status carries each job that ended with nothing stored, with its reason", async () => {
+    const jobs = await inTempDir(async (root) => {
+      const executor = new ScriptedExecutor({
+        ended: true,
+        value: discovery(discoveredWithTest("a"), discoveredWithTest("b")),
+      });
+      const { lifecycle } = await begun(
+        daemon(confirmed("a", "b"), executor, new RecordingStore(["a"]), {
+          ...IDENTITY,
+          consumerRoot: root,
+        }),
+      );
+      const answer = lifecycle.pathStatus(join(root, "b"));
+      return "unstoredJobs" in answer ? answer.unstoredJobs : answer;
+    });
+    expect(jobs).toStrictEqual([
+      { workspacePath: "a", reason: "the store write failed" },
+    ]);
   });
 });
 

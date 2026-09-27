@@ -8,6 +8,7 @@
  * versioned and may change with `PROTOCOL_VERSION`.
  */
 
+import type { PathStatusAnswer, SummaryAnswer } from "../query/answer.js";
 import { BUSY_TIMEOUT_MS } from "../store/schema.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText } from "../vitest/error-text.js";
@@ -36,6 +37,9 @@ export const VERSION_MISMATCH_CODE = "protocol-version-mismatch";
 /** Frozen: a daemon of any version answers a hello, or its version-mismatch error, with a proof. */
 export const HELLO_TYPE = "hello";
 export const STATUS_TYPE = "status";
+
+export const SUMMARY_TYPE = "summary";
+export const PATH_STATUS_TYPE = "path-status";
 
 export const START_TYPE = "start";
 export const SERVING_TYPE = "serving";
@@ -89,13 +93,22 @@ export interface StatusRequest {
   readonly protocolVersion: number;
 }
 
+export const UNKNOWN_REQUEST_CODE = "unknown-request";
+export const STOPPING_CODE = "stopping";
+/** A query the daemon understood but cannot answer, including one whose answer would pass the line limit; its message says why. */
+export const NOTHING_TO_ANSWER_CODE = "nothing-to-answer";
+/** A query that threw while the daemon answered it. */
+export const QUERY_FAILED_CODE = "query-failed";
+
 export type ErrorCode =
   | "invalid-json"
   | "invalid-request"
-  | "unknown-request"
+  | typeof UNKNOWN_REQUEST_CODE
   | "hello-required"
   | "line-too-long"
-  | "stopping";
+  | typeof STOPPING_CODE
+  | typeof NOTHING_TO_ANSWER_CODE
+  | typeof QUERY_FAILED_CODE;
 
 export interface ErrorResponse {
   readonly type: typeof ERROR_TYPE;
@@ -138,6 +151,28 @@ export interface StatusResponse extends DaemonIdentity {
   readonly stopping: boolean;
   readonly unstoredJobs: readonly UnstoredJob[];
 }
+
+export interface SummaryRequest {
+  readonly type: typeof SUMMARY_TYPE;
+  readonly protocolVersion: number;
+}
+
+export interface PathStatusRequest {
+  readonly type: typeof PATH_STATUS_TYPE;
+  readonly protocolVersion: number;
+  /** Absolute. */
+  readonly path: string;
+}
+
+export type SummaryResponse = SummaryAnswer & {
+  readonly type: typeof SUMMARY_TYPE;
+  readonly protocolVersion: number;
+};
+
+export type PathStatusResponse = PathStatusAnswer & {
+  readonly type: typeof PATH_STATUS_TYPE;
+  readonly protocolVersion: number;
+};
 
 export type DecodedLine =
   | { readonly tooLong: false; readonly text: string }
