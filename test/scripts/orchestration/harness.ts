@@ -13,6 +13,8 @@ import { PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 export const FIXTURES = join(REPO, "test/fixtures/orchestration");
+// The prompt header's clock, `[YYYY-MM-DD HH:MM Day]`, standing alone.
+export const CLOCK_ONLY = /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Z][a-z]{2}\]$/;
 
 export function withTemp<T>(run: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "rt-test-orchestration-"));

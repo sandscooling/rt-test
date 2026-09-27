@@ -1,5 +1,5 @@
 // UserPromptSubmit hook: prepends local time, context use, and rate-limit windows to each prompt.
-//   --post-tool  PostToolUse hook: silent below the handoff line, a handoff instruction above it.
+//   --post-tool  PostToolUse and PostToolUseFailure hook: local time after every tool call, plus a handoff instruction above the handoff line.
 //   --self       prints this session's context line on demand.
 // Fields are dropped rather than faked when a source is unavailable, and any error fails open.
 const { readFileSync } = require("node:fs");
@@ -38,8 +38,11 @@ async function main(argv) {
   }
   const payload = JSON.parse(readFileSync(0, "utf8") || "{}");
   if (argv.includes("--post-tool")) {
-    const warning = gauge.postToolWarning(payload);
-    if (warning) emit("PostToolUse", warning);
+    const event =
+      payload.hook_event_name === "PostToolUseFailure"
+        ? "PostToolUseFailure"
+        : "PostToolUse";
+    emit(event, gauge.postToolContext(payload));
     return 0;
   }
   emit("UserPromptSubmit", gauge.promptHeader(payload, { home: os.homedir() }));

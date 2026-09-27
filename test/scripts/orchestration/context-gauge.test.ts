@@ -5,12 +5,14 @@ import {
   compactReminder,
   lastUsage,
   limitsFromCache,
-  postToolWarning,
+  postToolContext,
   promptHeader,
 } from "../../../scripts/lib/orchestration/context-gauge.mjs";
-import { withTemp, writeIn } from "./harness.js";
+import { CLOCK_ONLY, withTemp, writeIn } from "./harness.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Local time, so the stamp reads the same in every time zone.
+const CALL_TIME = new Date(2026, 8, 27, 12, 52);
 
 const usageLine = (tokens: number, extra: Record<string, unknown> = {}) =>
   JSON.stringify({ ...extra, message: { usage: { input_tokens: tokens } } });
@@ -41,18 +43,37 @@ describe("context gauge", () => {
     expect(lastUsage(JSON.stringify({ message: { usage } }))).toBe(4321);
   });
 
-  it("D342: warns once the session reaches 60% of its context", () => {
-    const warning = withTranscript([usageLine(600_000)], (path) =>
-      postToolWarning({ transcript_path: path }),
+  it("D1925: stamps the local time on a tool call below the handoff line", () => {
+    const context = withTranscript([usageLine(599_999)], (path) =>
+      postToolContext({ transcript_path: path }),
     );
-    expect(warning).not.toBeNull();
+    expect(context).toMatch(CLOCK_ONLY);
   });
 
-  it("D343: stays silent for a subagent's tool call", () => {
-    const warning = withTranscript([usageLine(900_000)], (path) =>
-      postToolWarning({ transcript_path: path, agent_id: "agent-1" }),
+  it("D1926: stamps the time of the call in the prompt header's format", () => {
+    const context = withTranscript([usageLine(1000)], (path) =>
+      postToolContext({ transcript_path: path }, { now: CALL_TIME }),
     );
-    expect(warning).toBeNull();
+    expect(context).toBe("[2026-09-27 12:52 Sun]");
+  });
+
+  it("D1927: gives a subagent's tool call past the line the stamp without the handoff warning", () => {
+    const context = withTranscript([usageLine(900_000)], (path) =>
+      postToolContext(
+        { transcript_path: path, agent_id: "agent-1" },
+        { now: CALL_TIME },
+      ),
+    );
+    expect(context).toBe("[2026-09-27 12:52 Sun]");
+  });
+
+  it("D1929: follows the stamp with the handoff warning once the session reaches 60% of its context", () => {
+    const context = withTranscript([usageLine(600_000)], (path) =>
+      postToolContext({ transcript_path: path }, { now: CALL_TIME }),
+    );
+    expect(context).toMatch(
+      /^\[2026-09-27 12:52 Sun\] ctx 600k\/1M \(60%\): past the 60% handoff line\. /,
+    );
   });
 
   it("D344: drops a rate-limit cache older than a day rather than report it as current", () => {

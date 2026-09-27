@@ -8,7 +8,14 @@ import {
   GIT_TIMEOUT_MS,
 } from "../../../scripts/lib/orchestration/doc-integrity.mjs";
 import { PROCESS_SCENARIO, PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
-import { FIXTURES, initRepo, REPO, withTemp, writeIn } from "./harness.js";
+import {
+  CLOCK_ONLY,
+  FIXTURES,
+  initRepo,
+  REPO,
+  withTemp,
+  writeIn,
+} from "./harness.js";
 
 const ADR = "docs/adr/0001-first.md";
 const HOOKS = ".claude/hooks";
@@ -65,12 +72,12 @@ function copyEntries(root: string): void {
 function runEntry(
   root: string,
   entry: string,
-  input: Record<string, unknown>,
+  input: Record<string, unknown> | string,
   args: string[] = [],
 ) {
   return spawnSync("node", [join(root, HOOKS, entry), ...args], {
     cwd: root,
-    input: JSON.stringify(input),
+    input: typeof input === "string" ? input : JSON.stringify(input),
     encoding: "utf8",
     timeout: PROCESS_SCENARIO_TIMEOUT_MS,
   });
@@ -104,7 +111,12 @@ function runDocIntegrity(
   });
 }
 
-function hookOutput(entry: string, tokens: number, args: string[] = []) {
+function hookOutput(
+  entry: string,
+  tokens: number,
+  args: string[] = [],
+  payload: Record<string, unknown> = {},
+) {
   const run = withTemp((root) => {
     copyEntries(root);
     const usage = { message: { usage: { input_tokens: tokens } } };
@@ -112,7 +124,7 @@ function hookOutput(entry: string, tokens: number, args: string[] = []) {
     return runEntry(
       root,
       entry,
-      { transcript_path: join(root, "session.jsonl") },
+      { transcript_path: join(root, "session.jsonl"), ...payload },
       args,
     );
   });
@@ -122,8 +134,15 @@ function hookOutput(entry: string, tokens: number, args: string[] = []) {
     );
   }
   return JSON.parse(run.stdout || "{}") as {
-    hookSpecificOutput?: { hookEventName?: string };
+    hookSpecificOutput?: { hookEventName?: string; additionalContext?: string };
   };
+}
+
+function runMalformedPostTool() {
+  return withTemp((root) => {
+    copyEntries(root);
+    return runEntry(root, "prompt-context.cjs", "{not json", ["--post-tool"]);
+  });
 }
 
 describe("hook entries", PROCESS_SCENARIO, () => {
@@ -143,9 +162,46 @@ describe("hook entries", PROCESS_SCENARIO, () => {
     expect(runDocIntegrity({}, { dropConfig: true }).status).toBe(0);
   });
 
-  it("D361: labels the handoff warning as PostToolUse context", () => {
-    const out = hookOutput("prompt-context.cjs", 700_000, ["--post-tool"]);
-    expect(out.hookSpecificOutput?.hookEventName).toBe("PostToolUse");
+  it("D1933: carries the handoff warning after the stamp above the handoff line", () => {
+    const out = hookOutput("prompt-context.cjs", 700_000, ["--post-tool"], {
+      hook_event_name: "PostToolUse",
+    });
+    expect(out.hookSpecificOutput).toEqual({
+      hookEventName: "PostToolUse",
+      additionalContext: expect.stringMatching(
+        /^\[[^\]]+\] ctx 700k\/1M \(70%\): past the 60% handoff line\. /,
+      ),
+    });
+  });
+
+  it("D1928: emits the local time as PostToolUse context below the handoff line", () => {
+    const out = hookOutput("prompt-context.cjs", 1000, ["--post-tool"], {
+      hook_event_name: "PostToolUse",
+    });
+    expect(out.hookSpecificOutput).toEqual({
+      hookEventName: "PostToolUse",
+      additionalContext: expect.stringMatching(CLOCK_ONLY),
+    });
+  });
+
+  it("D1932: labels a failed tool call's stamp as PostToolUseFailure context", () => {
+    const out = hookOutput("prompt-context.cjs", 1000, ["--post-tool"], {
+      hook_event_name: "PostToolUseFailure",
+    });
+    expect(out.hookSpecificOutput).toEqual({
+      hookEventName: "PostToolUseFailure",
+      additionalContext: expect.stringMatching(CLOCK_ONLY),
+    });
+  });
+
+  it("D1930: prints nothing on a malformed post-tool payload", () => {
+    const run = runMalformedPostTool();
+    expect(run.stdout).toBe("");
+  });
+
+  it("D1934: exits 0 on a malformed post-tool payload", () => {
+    const run = runMalformedPostTool();
+    expect(run.status).toBe(0);
   });
 
   it("D362: labels the prompt header as UserPromptSubmit context", () => {
@@ -184,6 +240,16 @@ describe("hook settings", () => {
         entryOf(hook.command) === `${HOOKS}/compact-reminder.cjs`,
     );
     expect(reminders).toHaveLength(1);
+  });
+
+  it("D1931: stamps the clock after a failed tool call too", () => {
+    const clocks = hookCommands().filter(
+      (hook) =>
+        hook.event === "PostToolUseFailure" &&
+        entryOf(hook.command) === `${HOOKS}/prompt-context.cjs` &&
+        hook.command.endsWith(" --post-tool"),
+    );
+    expect(clocks).toHaveLength(1);
   });
 
   it("D367: gives the Stop hook time to run every doc gate", () => {

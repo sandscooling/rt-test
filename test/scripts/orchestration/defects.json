@@ -294,20 +294,6 @@
     "new": ""
   },
   {
-    "id": "D342",
-    "defect": "The handoff warning waits past the 60% line.",
-    "file": "scripts/lib/orchestration/context-gauge.mjs",
-    "old": "export const HANDOFF_PERCENT = 60;",
-    "new": "export const HANDOFF_PERCENT = 65;"
-  },
-  {
-    "id": "D343",
-    "defect": "A subagent's tool call gets the parent's handoff warning.",
-    "file": "scripts/lib/orchestration/context-gauge.mjs",
-    "old": "if (payload.agent_id) return null;",
-    "new": "if (false) return null;"
-  },
-  {
     "id": "D344",
     "defect": "A rate-limit cache older than a day is reported as current.",
     "file": "scripts/lib/orchestration/context-gauge.mjs",
@@ -425,13 +411,6 @@
     "file": ".claude/hooks/doc-integrity.cjs",
     "old": "    return 0;\n",
     "new": "    return 2;\n"
-  },
-  {
-    "id": "D361",
-    "defect": "The handoff warning is labeled for the wrong event, so the harness drops it.",
-    "file": ".claude/hooks/prompt-context.cjs",
-    "old": "if (warning) emit(\"PostToolUse\", warning);",
-    "new": "if (warning) emit(\"UserPromptSubmit\", warning);"
   },
   {
     "id": "D362",
@@ -558,5 +537,75 @@
     "file": "scripts/lib/orchestration/stage.mjs",
     "old": "(change) => !hunkPaths.has(comparable(change.path)),",
     "new": "() => true,"
+  },
+  {
+    "id": "D1925",
+    "defect": "A tool call below the handoff line gets no clock, so the session writes times from memory.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "return [clock(now), handoffWarning(payload)]",
+    "new": "return [handoffWarning(payload)]"
+  },
+  {
+    "id": "D1926",
+    "defect": "The post-tool stamp shows a fixed time instead of the time of the call.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "const clock = (now) => `[${stamp(now)}]`;",
+    "new": "const clock = () => `[${stamp(new Date(0))}]`;"
+  },
+  {
+    "id": "D1927",
+    "defect": "A subagent's tool call gets the parent's handoff warning.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "if (payload.agent_id) return null;",
+    "new": "if (false) return null;"
+  },
+  {
+    "id": "D1928",
+    "defect": "The post-tool hook entry prints nothing below the handoff line, so no clock reaches the session.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "emit(event, gauge.postToolContext(payload));",
+    "new": "const text = gauge.postToolContext(payload);\n    if (text.includes(\"handoff\")) emit(event, text);"
+  },
+  {
+    "id": "D1929",
+    "defect": "The handoff warning waits past the 60% line.",
+    "file": "scripts/lib/orchestration/context-gauge.mjs",
+    "old": "export const HANDOFF_PERCENT = 60;",
+    "new": "export const HANDOFF_PERCENT = 65;"
+  },
+  {
+    "id": "D1930",
+    "defect": "A post-tool hook error prints a line, which reaches every session as hook output.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "if (!process.argv.includes(\"--post-tool\")) console.log(\"{}\");",
+    "new": "console.log(\"{}\");"
+  },
+  {
+    "id": "D1931",
+    "defect": "A failed tool call gets no clock, because nothing wires the post-tool entry to PostToolUseFailure.",
+    "file": ".claude/settings.json",
+    "old": "\"PostToolUseFailure\": [",
+    "new": "\"PostToolUseFailed\": ["
+  },
+  {
+    "id": "D1932",
+    "defect": "A failed tool call's stamp is labeled PostToolUse, so Claude Code drops it.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "payload.hook_event_name === \"PostToolUseFailure\"",
+    "new": "false"
+  },
+  {
+    "id": "D1933",
+    "defect": "The post-tool entry drops the payload, so the handoff warning never reaches a session above the line.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "emit(event, gauge.postToolContext(payload));",
+    "new": "emit(event, gauge.postToolContext({}));"
+  },
+  {
+    "id": "D1934",
+    "defect": "A post-tool hook error exits non-zero, so every tool call shows a hook error.",
+    "file": ".claude/hooks/prompt-context.cjs",
+    "old": "if (!process.argv.includes(\"--post-tool\")) console.log(\"{}\");",
+    "new": "process.exitCode = 1;\n    if (!process.argv.includes(\"--post-tool\")) console.log(\"{}\");"
   }
 ]

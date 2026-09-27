@@ -27,6 +27,8 @@ export function stamp(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} ${DAYS[d.getDay()]}`;
 }
 
+const clock = (now) => `[${stamp(now)}]`;
+
 function resetAt(value) {
   if (value == null) return "";
   const d =
@@ -141,12 +143,16 @@ function contextPart(payload) {
 }
 
 export function promptHeader(payload, { now = new Date(), home }) {
-  const parts = [`[${stamp(now)}]`, contextPart(payload)];
+  const parts = [clock(now), contextPart(payload)];
   const limits = payload.rate_limits || limitsFromCache(home, now.getTime());
   return [...parts, ...rateLimitParts(limits)].filter(Boolean).join(" | ");
 }
 
-export function postToolWarning(payload) {
+export function postToolContext(payload, { now = new Date() } = {}) {
+  return [clock(now), handoffWarning(payload)].filter(Boolean).join(" ");
+}
+
+function handoffWarning(payload) {
   // A subagent's call carries the parent's transcript, and a subagent cannot hand the parent off.
   if (payload.agent_id) return null;
   const used = usedTokens(payload.transcript_path);

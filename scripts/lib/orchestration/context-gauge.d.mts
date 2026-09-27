@@ -39,7 +39,10 @@ export declare function promptHeader(
   payload: GaugePayload,
   options: { readonly now?: Date; readonly home: string },
 ): string;
-export declare function postToolWarning(payload: GaugePayload): string | null;
+export declare function postToolContext(
+  payload: GaugePayload,
+  options?: { readonly now?: Date },
+): string;
 export declare function compactReminder(): string;
 export declare function ownTranscriptPath(
   home: string,
