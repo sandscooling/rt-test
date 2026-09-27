@@ -33,9 +33,13 @@ export declare function vitestArgs(
   request: RunRequest & { readonly entry: string; readonly config: string },
 ): string[];
 
+export declare const IDLE_WINDOW_MS: number;
+
 export declare function createVitestRunner(options: {
   readonly root: string;
   readonly entry?: string;
+  /** How long a run may go without progress before it is stopped; `IDLE_WINDOW_MS` unless given. */
+  readonly idleWindowMs?: number;
 }): RunTests;
 
 export declare function testFilesOf(defects: readonly Defect[]): string[];

@@ -698,5 +698,110 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "    .join(\"; \") || \"none\";",
     "new": "    .join(\"; \");"
+  },
+  {
+    "id": "D1701",
+    "defect": "Progress no longer restarts the idle window, so a long run that keeps progressing is stopped as if it were a fixed whole-run budget.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "      clearTimeout(idle);\n      idle = setTimeout(stopStalled, idleWindowMs);",
+    "new": ""
+  },
+  {
+    "id": "D1702",
+    "defect": "Any stdout line counts as progress, so a hung run that keeps printing ordinary output is never stopped.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (!log.read(line) || stalled) return;",
+    "new": "log.read(line);\n      if (stalled) return;"
+  },
+  {
+    "id": "D1703",
+    "defect": "A malformed reporter line counts as progress, so a run printing one repeatedly is never stopped.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "  } catch {\n    return undefined;\n  }",
+    "new": "  } catch {\n    return { event: \"malformed\" };\n  }"
+  },
+  {
+    "id": "D1704",
+    "defect": "A stopped run's pool workers are listed but never ended, so they outlive the stopped Vitest.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "for (const worker of workers) endProcess(worker.pid);",
+    "new": ""
+  },
+  {
+    "id": "D1705",
+    "defect": "A stopped run's watchdog is ended with its workers, so the daemons it would clean up are left running.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "(worker) => !isRunWatchdog(worker.commandLine)",
+    "new": "() => true"
+  },
+  {
+    "id": "D1706",
+    "defect": "A stopped Vitest that ignores SIGTERM is never killed, so the stopped run never ends.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "const escalate = setTimeout(() => child.kill(KILL_SIGNAL), KILL_GRACE_MS);",
+    "new": "const escalate = undefined;"
+  },
+  {
+    "id": "D1707",
+    "defect": "When a stopped run's workers cannot be listed, the stall report does not say that any may have been left running.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "problem = `its workers could not be listed, so any still running were left: ${error.message}`;",
+    "new": "problem = undefined;"
+  },
+  {
+    "id": "D1708",
+    "defect": "A run holding a test whose timeout exceeds LONGEST_TEST_TIMEOUT_MS passes, so the idle window can be shorter than a legitimate silence.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "else if (log.overLong.length > 0) fail(new Error(overLongText(log)));\n      else done",
+    "new": "else done"
+  },
+  {
+    "id": "D1709",
+    "defect": "A project hook timeout above LONGEST_TEST_TIMEOUT_MS is not checked, so a legitimately silent hook can be stopped as a stall.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "checkLimit(`the hooks of project ${hooks.project}`, hooks.timeout);",
+    "new": ""
+  },
+  {
+    "id": "D1710",
+    "defect": "A retry given in object form counts as no retries, so a retried test's silence bound is too short.",
+    "file": "scripts/lib/defects/progress-reporter.mjs",
+    "old": "typeof retry === \"number\" ? retry : (retry?.count ?? 0)",
+    "new": "typeof retry === \"number\" ? retry : 0"
+  },
+  {
+    "id": "D1746",
+    "defect": "A test whose timeout equals LONGEST_TEST_TIMEOUT_MS is refused as over-long.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (timeoutMs > LONGEST_TEST_TIMEOUT_MS) {",
+    "new": "if (timeoutMs >= LONGEST_TEST_TIMEOUT_MS) {"
+  },
+  {
+    "id": "D1782",
+    "defect": "A reporter line naming no known event counts as progress, so a run printing one repeatedly is never stopped.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "return PROGRESS_EVENTS.has(entry?.event) ? entry : undefined;",
+    "new": "return entry;"
+  },
+  {
+    "id": "D1783",
+    "defect": "A stopped run's workers are ended only once its output closes, so a worker holding the main process's output open is never ended.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "  child.once(\"exit\", () => {",
+    "new": "  child.once(\"close\", () => {"
+  },
+  {
+    "id": "D1784",
+    "defect": "A run that finished leaves its idle timer armed, so the window later stops, and lists the children of, a process that has exited.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "    child.on(\"close\", (status, signal) => {\n      clearTimeout(idle);",
+    "new": "    child.on(\"close\", (status, signal) => {"
+  },
+  {
+    "id": "D1785",
+    "defect": "A stalled Vitest is killed outright with no grace to act on the stop.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "const KILL_GRACE_MS = 10_000;",
+    "new": "const KILL_GRACE_MS = 0;"
   }
 ]

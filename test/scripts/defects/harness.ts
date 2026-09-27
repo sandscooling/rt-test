@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import {
   buildCatalog,
   SANDBOX_DIRS,
@@ -19,10 +20,11 @@ import {
   verifyInSandboxes,
   type PoolResult,
 } from "../../../scripts/lib/defects/pool.mjs";
-import type {
-  RunRequest,
-  RunResult,
-  RunTests,
+import {
+  createVitestRunner,
+  type RunRequest,
+  type RunResult,
+  type RunTests,
 } from "../../../scripts/lib/defects/vitest.mjs";
 
 export type Tree = Readonly<Record<string, string>>;
@@ -178,6 +180,43 @@ export async function withScratch<T>(
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** A stand-in for Vitest's entry that follows the script a test writes; see the fixture for its fields. */
+export const STAND_IN = fileURLToPath(
+  new URL("../../fixtures/defects-runner/stand-in.mjs", import.meta.url),
+);
+
+export interface StandInScript {
+  readonly lines?: readonly string[];
+  readonly repeat?: { readonly line: string; readonly forMs: number };
+  readonly children?: readonly (readonly string[])[];
+  readonly childStdio?: "ignore" | "inherit";
+  readonly finish?: boolean;
+}
+
+export interface StandInRun {
+  /** `read` when the runner returned the report, otherwise the runner's error. */
+  readonly outcome: Promise<string>;
+  /** The ids of the idle children the stand-in started, once it has started them. */
+  readonly children: () => number[];
+}
+
+/** Runs the stand-in under the defect verifier's runner in `dir`, stopping it after `idleWindowMs` without progress. */
+export function runStandIn(
+  dir: string,
+  script: StandInScript,
+  idleWindowMs: number,
+): StandInRun {
+  writeFileSync(join(dir, "stand-in.json"), JSON.stringify(script));
+  const run = createVitestRunner({ root: dir, entry: STAND_IN, idleWindowMs });
+  const outcome = run({ sandbox: dir, report: join(dir, "report.json") }).then(
+    () => "read",
+    (error: Error) => error.message,
+  );
+  const children = () =>
+    JSON.parse(readFileSync(join(dir, "children.json"), "utf8")) as number[];
+  return { outcome, children };
 }
 
 export function inSandboxes(
