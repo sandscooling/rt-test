@@ -48,6 +48,26 @@ async function nextSpawnIgnoresSigterm(signals: string[]): Promise<() => void> {
   return () => kill();
 }
 
+/** Makes the next spawned process be killed outright once it has written to stdout, so it closes on a signal. */
+async function nextSpawnKilledAfterOutput(): Promise<void> {
+  const actual =
+    await vi.importActual<typeof import("node:child_process")>(
+      "node:child_process",
+    );
+  vi.mocked(spawn).mockImplementationOnce(((
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions,
+  ) => {
+    const child = actual.spawn(command, args, options);
+    child.stdout?.once("data", () => child.kill("SIGKILL"));
+    return child;
+  }) as typeof spawn);
+}
+
+/** Long enough that a run killed on its first output is never stopped as stalled first. */
+const UNSTALLED_WINDOW_MS = 30_000;
+
 /** A millisecond short of the runner's 10 s kill grace. */
 const JUST_UNDER_KILL_GRACE_MS = 9_999;
 
@@ -118,6 +138,21 @@ describe("stopping a stalled Vitest run", PROCESS_SCENARIO, () => {
     );
     expect(outcome).toMatch(
       /workers could not be listed.*the process table cannot be read/,
+    );
+  });
+
+  it("D2063: ends a run interrupted by a signal with its stderr and stdout tail", async () => {
+    await nextSpawnKilledAfterOutput();
+    const outcome = await withScratch(
+      (dir) =>
+        runStandIn(
+          dir,
+          { lines: ["said before the signal"] },
+          UNSTALLED_WINDOW_MS,
+        ).outcome,
+    );
+    expect(outcome).toBe(
+      "Bootstrap runner interrupted: SIGKILL; stderr: (empty); stdout tail: said before the signal",
     );
   });
 });

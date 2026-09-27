@@ -18,6 +18,10 @@ export interface VitestReport {
 export interface RunResult {
   readonly status: number | null;
   readonly report: VitestReport;
+  /** The run's whole stderr, unbounded. */
+  readonly stderr: string;
+  /** The last non-blank stdout lines that were not progress, cut to a bounded length. */
+  readonly stdout: string;
 }
 
 export interface RunRequest {
@@ -45,14 +49,14 @@ export declare function createVitestRunner(options: {
 export declare function testFilesOf(defects: readonly Defect[]): string[];
 
 export declare function baselineProblem(
-  result: RunResult,
+  run: RunResult,
   sandbox: string,
   defects: readonly Defect[],
   files?: readonly string[],
 ): string | null;
 
 export declare function detectionProblem(
-  result: RunResult,
+  run: RunResult,
   sandbox: string,
   defect: Defect,
 ): string | null;

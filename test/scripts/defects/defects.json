@@ -752,8 +752,8 @@
     "id": "D1708",
     "defect": "A run holding a test whose timeout exceeds LONGEST_TEST_TIMEOUT_MS passes, so the idle window can be shorter than a legitimate silence.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "else if (log.overLong.length > 0) fail(new Error(overLongText(log)));",
-    "new": "else if (false) fail(new Error(overLongText(log)));"
+    "old": "else if (log.overLong.length > 0) failWithOutput(overLongText(log));",
+    "new": "else if (false) failWithOutput(overLongText(log));"
   },
   {
     "id": "D1709",
@@ -901,5 +901,68 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "...outputEvidence(output),",
     "new": ""
+  },
+  {
+    "id": "D2056",
+    "defect": "A run that wrote a valid report comes back without its stderr, so a verdict on that run cannot quote what Vitest said.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "stderr: run.stderr,",
+    "new": ""
+  },
+  {
+    "id": "D2057",
+    "defect": "A mutated run that fails without its named assertion failure is reported with no stderr or stdout tail, so its cause goes unsaid.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "export function detectionProblem(run, sandbox, defect) {",
+    "new": "export function detectionProblem(run, sandbox, defect, withOutputEvidence = (problem) => problem) {"
+  },
+  {
+    "id": "D2058",
+    "defect": "A baseline that fails to pass every named test is reported with no stderr or stdout tail, so its cause goes unsaid.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "export function baselineProblem(run, sandbox, defects, files) {",
+    "new": "export function baselineProblem(run, sandbox, defects, files, withOutputEvidence = (problem) => problem) {"
+  },
+  {
+    "id": "D2059",
+    "defect": "A run that wrote a valid report comes back without its stdout tail, so a verdict on that run cannot quote what Vitest printed.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "stdout: run.stdout,",
+    "new": ""
+  },
+  {
+    "id": "D2060",
+    "defect": "A verdict on a run with no stderr or stdout tail quotes nothing after each label instead of (empty), so an empty stream reads like a cut-off message.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "output || \"(empty)\"",
+    "new": "output"
+  },
+  {
+    "id": "D2061",
+    "defect": "A mutated run that collected another test file is reported with no stderr or stdout tail, so why Vitest ran more than the one file goes unsaid.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "return withOutputEvidence(`expected a run of ${defect.test} alone`, run);",
+    "new": "return `expected a run of ${defect.test} alone`;"
+  },
+  {
+    "id": "D2062",
+    "defect": "A baseline that ran a different set of test files is reported with no stderr or stdout tail, so why Vitest collected them goes unsaid.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (files && reportedFiles(report, sandbox).join() !== files.join()) {",
+    "new": "if (files && reportedFiles(report, sandbox).join() !== files.join()) { return \"the baseline ran a different set of test files\";"
+  },
+  {
+    "id": "D2063",
+    "defect": "A run interrupted by a signal fails with no stderr or stdout tail, so what Vitest said before it was killed is lost.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "failWithOutput(`Bootstrap runner interrupted: ${signal}`);",
+    "new": "fail(new Error(`Bootstrap runner interrupted: ${signal}`));"
+  },
+  {
+    "id": "D2064",
+    "defect": "A run holding an over-long timeout fails with no stderr or stdout tail, so what Vitest said alongside it is lost.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "failWithOutput(overLongText(log));",
+    "new": "fail(new Error(overLongText(log)));"
   }
 ]

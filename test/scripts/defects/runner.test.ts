@@ -38,6 +38,7 @@ const test = (
 function result(
   status: number | null,
   files: Readonly<Record<string, readonly AssertionResult[]>>,
+  output: Pick<RunResult, "stderr" | "stdout"> = { stderr: "", stdout: "" },
 ): RunResult {
   const tests = Object.values(files).flat();
   const count = (state: string) =>
@@ -52,8 +53,11 @@ function result(
         assertionResults,
       })),
     },
+    ...output,
   };
 }
+
+const RUN_OUTPUT = { stderr: "vitest broke here\n", stdout: "last words" };
 
 const defect = (id: string) =>
   catalogOf().defects.find((each) => each.id === id)!;
@@ -115,27 +119,36 @@ function afterStall<T>(
 }
 
 /**
- * Runs the entry script `source` writes for a report path under the runner, stopping it after `idleWindowMs`
- * without progress when given; `read`, or the runner's error.
+ * Runs the entry script `source` writes, in `dir`, for a report path under the runner, stopping it after
+ * `idleWindowMs` without progress when given.
  */
+function runEntryIn(
+  dir: string,
+  source: (report: string) => string,
+  idleWindowMs?: number,
+): Promise<RunResult> {
+  const entry = join(dir, "entry.mjs");
+  const report = join(dir, "report.json");
+  writeFileSync(entry, source(report));
+  const run = createVitestRunner({
+    root: dir,
+    entry,
+    ...(idleWindowMs === undefined ? {} : { idleWindowMs }),
+  });
+  return run({ sandbox: dir, report });
+}
+
+/** Runs the entry script `source` writes under the runner; `read`, or the runner's error. */
 function runEntry(
   source: (report: string) => string,
   idleWindowMs?: number,
 ): Promise<string> {
-  return withScratch(async (dir) => {
-    const entry = join(dir, "entry.mjs");
-    const report = join(dir, "report.json");
-    writeFileSync(entry, source(report));
-    const run = createVitestRunner({
-      root: dir,
-      entry,
-      ...(idleWindowMs === undefined ? {} : { idleWindowMs }),
-    });
-    return run({ sandbox: dir, report }).then(
+  return withScratch((dir) =>
+    runEntryIn(dir, source, idleWindowMs).then(
       () => "read",
       (error: Error) => error.message,
-    );
-  });
+    ),
+  );
 }
 
 const writesReport = (report: string, text: string) =>
@@ -143,6 +156,20 @@ const writesReport = (report: string, text: string) =>
 
 const writesStdout = (text: string) =>
   `process.stdout.write(${JSON.stringify(text)});\n`;
+
+/** The output the runner hands back from a run that writes a valid report, stderr, and stdout around a progress line. */
+function validRunOutput(): Promise<Pick<RunResult, "stderr" | "stdout">> {
+  return withScratch(async (dir) => {
+    const { stderr, stdout } = await runEntryIn(
+      dir,
+      (report) =>
+        writesReport(report, JSON.stringify(result(0, {}).report)) +
+        `process.stderr.write(${JSON.stringify("warned here\n")});\n` +
+        writesStdout(`said first\n${collected}\nsaid last\n`),
+    );
+    return { stderr, stdout };
+  });
+}
 
 const TAIL_LABEL = "; stdout tail: ";
 
@@ -342,6 +369,27 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     expect(outcome).toMatch(
       /made no progress.*; stderr: hung here\n; stdout tail: said before hanging$/s,
     );
+  });
+
+  it("D2056: hands back a run's whole stderr with a valid report", async () => {
+    const { stderr } = await validRunOutput();
+    expect(stderr).toBe("warned here\n");
+  });
+
+  it("D2064: ends an over-long timeout failure with the run's stderr and stdout tail", async () => {
+    const outcome = await runEntry(
+      () =>
+        `process.stderr.write(${JSON.stringify("warned here\n")});\n` +
+        writesStdout(`said first\n${startedAndFinished(120_001).join("\n")}\n`),
+    );
+    expect(outcome).toBe(
+      "slow > D9 (120001 ms) declares a timeout above LONGEST_TEST_TIMEOUT_MS (120000 ms) in test/scripts/longest-test-timeout.mjs, which the verifier's idle window is sized from; raise that constant; stderr: warned here\n; stdout tail: said first",
+    );
+  });
+
+  it("D2059: hands back a run's stdout tail that is not progress with a valid report", async () => {
+    const { stdout } = await validRunOutput();
+    expect(stdout).toBe("said first\nsaid last");
   });
 
   it("D946: rejects a run whose only failure is a different test", () => {
@@ -587,6 +635,65 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     });
     expect(baselineProblem(run, SANDBOX, defects)).toContain(
       "failed: D1: behaves: AssertionError: expected 0 to be 1)",
+    );
+  });
+
+  it("D2057: ends an undetected run's verdict with its stderr and stdout tail", () => {
+    const run = result(
+      1,
+      { [CALC_TEST]: [test("D1", "skipped"), test("D2", "skipped")] },
+      RUN_OUTPUT,
+    );
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toBe(
+      "expected one named assertion failure; inspect the mutation (exit 1; passed 0; failed: none); stderr: vitest broke here\n; stdout tail: last words",
+    );
+  });
+
+  it("D2058: ends a failed baseline's verdict with its stderr and stdout tail", () => {
+    const { defects } = catalogOf();
+    const run = result(1, { [CALC_TEST]: [], [OTHER_TEST]: [] }, RUN_OUTPUT);
+    expect(baselineProblem(run, SANDBOX, defects)).toBe(
+      `the unmodified baseline must pass every named test and no other (passed 0 for ${defects.length} named; failed: none); stderr: vitest broke here\n; stdout tail: last words`,
+    );
+  });
+
+  it("D2060: quotes a run with no stderr or stdout tail as (empty) in its verdict", () => {
+    const run = result(1, {
+      [CALC_TEST]: [test("D1", "skipped"), test("D2", "skipped")],
+    });
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toBe(
+      "expected one named assertion failure; inspect the mutation (exit 1; passed 0; failed: none); stderr: (empty); stdout tail: (empty)",
+    );
+  });
+
+  it("D2061: ends the verdict on a run that collected another file with its stderr and stdout tail", () => {
+    const run = result(
+      1,
+      {
+        [CALC_TEST]: [test("D1", "failed"), test("D2", "skipped")],
+        [OTHER_TEST]: [test("D3", "skipped")],
+      },
+      RUN_OUTPUT,
+    );
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toBe(
+      "expected a run of test/calc/calc.test.ts alone; stderr: vitest broke here\n; stdout tail: last words",
+    );
+  });
+
+  it("D2062: ends the verdict on a baseline that ran a different set of test files with its stderr and stdout tail", () => {
+    const { defects } = catalogOf();
+    const run = result(
+      0,
+      {
+        [CALC_TEST]: [test("D1", "passed"), test("D2", "passed")],
+        [OTHER_TEST]: [test("D3", "passed")],
+        "test/extra/extra.test.ts": [],
+      },
+      RUN_OUTPUT,
+    );
+    const scope = [CALC_TEST, OTHER_TEST].sort();
+    expect(baselineProblem(run, SANDBOX, defects, scope)).toBe(
+      "the baseline ran a different set of test files; stderr: vitest broke here\n; stdout tail: last words",
     );
   });
 });

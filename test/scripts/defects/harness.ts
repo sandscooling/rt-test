@@ -167,6 +167,8 @@ export function fakeVitest(catalog: Catalog, hooks: FakeHooks = {}): RunTests {
         numFailedTests: count("failed"),
         testResults,
       },
+      stderr: "",
+      stdout: "",
     };
   };
 }

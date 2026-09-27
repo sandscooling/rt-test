@@ -157,6 +157,9 @@ const outputEvidence = (run) => [
   `stdout tail: ${orEmpty(run.stdout)}`,
 ];
 
+const withOutputEvidence = (problem, run) =>
+  [problem, ...outputEvidence(run)].join("; ");
+
 function stallText(log, idleWindowMs, stopProblem, output) {
   const running =
     log.running().join("; ") ||
@@ -226,15 +229,11 @@ function spawnRun(args, cwd, idleWindowMs) {
       clearTimeout(idle);
       fail(error);
     });
+    const runOutput = () => ({ stderr, stdout: tail.text() });
     const failStalled = () =>
-      fail(
-        new Error(
-          stallText(log, idleWindowMs, stopProblem, {
-            stderr,
-            stdout: tail.text(),
-          }),
-        ),
-      );
+      fail(new Error(stallText(log, idleWindowMs, stopProblem, runOutput())));
+    const failWithOutput = (problem) =>
+      fail(new Error(withOutputEvidence(problem, runOutput())));
     // A worker still holding the stopped process's pipes delays "close" until the worker is ended.
     child.on("exit", () => {
       exitedAt = performance.now();
@@ -245,8 +244,8 @@ function spawnRun(args, cwd, idleWindowMs) {
       const closedAt = performance.now();
       if (stalled) failStalled();
       else if (signal)
-        fail(new Error(`Bootstrap runner interrupted: ${signal}`));
-      else if (log.overLong.length > 0) fail(new Error(overLongText(log)));
+        failWithOutput(`Bootstrap runner interrupted: ${signal}`);
+      else if (log.overLong.length > 0) failWithOutput(overLongText(log));
       else
         done({
           status,
@@ -273,7 +272,12 @@ export function createVitestRunner({
     const run = await spawnRun(args, root, idleWindowMs);
     const read = readReport(report);
     if (read.problem === undefined) {
-      return { status: run.status, report: read.report };
+      return {
+        status: run.status,
+        report: read.report,
+        stderr: run.stderr,
+        stdout: run.stdout,
+      };
     }
     throw new Error(noReportText(run, read.problem), { cause: read.error });
   };
@@ -337,7 +341,8 @@ const failedLines = (report) =>
     )
     .join("; ") || "none";
 
-export function baselineProblem({ status, report }, sandbox, defects, files) {
+export function baselineProblem(run, sandbox, defects, files) {
+  const { status, report } = run;
   const passed = testsOf(report)
     .filter((test) => test.status === "passed")
     .map((test) => idOf(test.title));
@@ -348,19 +353,26 @@ export function baselineProblem({ status, report }, sandbox, defects, files) {
     report.numPassedTests !== ids.length ||
     [...passed].sort().join() !== [...ids].sort().join()
   ) {
-    return `the unmodified baseline must pass every named test and no other (passed ${report.numPassedTests} for ${ids.length} named; failed: ${failedLines(report)})`;
+    return withOutputEvidence(
+      `the unmodified baseline must pass every named test and no other (passed ${report.numPassedTests} for ${ids.length} named; failed: ${failedLines(report)})`,
+      run,
+    );
   }
   if (files && reportedFiles(report, sandbox).join() !== files.join()) {
-    return "the baseline ran a different set of test files";
+    return withOutputEvidence(
+      "the baseline ran a different set of test files",
+      run,
+    );
   }
   return null;
 }
 
-export function detectionProblem({ status, report }, sandbox, defect) {
+export function detectionProblem(run, sandbox, defect) {
+  const { status, report } = run;
   const failures = testsOf(report).filter((test) => test.status === "failed");
   const target = failures[0];
   if (reportedFiles(report, sandbox).join() !== defect.test) {
-    return `expected a run of ${defect.test} alone`;
+    return withOutputEvidence(`expected a run of ${defect.test} alone`, run);
   }
   if (
     status !== 1 ||
@@ -370,7 +382,10 @@ export function detectionProblem({ status, report }, sandbox, defect) {
     !target?.title.startsWith(`${defect.id}:`) ||
     !target.failureMessages.some((message) => ASSERTION_FAILURE.test(message))
   ) {
-    return `expected one named assertion failure; inspect the mutation (exit ${status}; passed ${report.numPassedTests}; failed: ${failedLines(report)})`;
+    return withOutputEvidence(
+      `expected one named assertion failure; inspect the mutation (exit ${status}; passed ${report.numPassedTests}; failed: ${failedLines(report)})`,
+      run,
+    );
   }
   return null;
 }
