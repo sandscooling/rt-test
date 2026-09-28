@@ -101,7 +101,7 @@ Glossary (`docs/glossary.md`), verbatim:
 
 Asked by `session_wake` at 06:07 on 2026-09-28, answered at 06:09; decider the orchestrator, holding the owner's calls overnight. Each reason is the orchestrator's.
 
-- Q6 (AC1, AC2): every answer carries each workspace's execution state with its queue reason, and the latest selection's explanation (the reason per changed path, broad fallbacks, selected and total counts), in `--json`, the CLI text and the log. Reason: AGENTS.md requires explaining each selection and each broad fallback and reporting selected and total counts, and 2.4 and 2.7 need queued told apart from idle.
+- Q6 (AC1, AC2): every answer carries each workspace's execution state with its queue reason, and the latest selection's explanation (the reason per changed path, broad fallbacks, selected and total counts), in `--json`, the CLI text and the log. Reason: AGENTS.md requires explaining each selection and each broad fallback and reporting selected and total counts, and 2.4b and 2.7 need queued told apart from idle.
 - Q7 (AC3): the invalidated state lives in memory for the daemon's life, with no schema change. Reason: after a restart the run is not current and reruns at start, so a stored reason would carry nothing a user could act on.
 - Q2 (2.3h's, AC1 here): the workspace a change interrupted shows interrupted, then queued.
 - H2 (06:18): Q7's in-memory state lives in this ticket, beside its only reader (C59).
@@ -113,18 +113,18 @@ Asked by `session_wake` at 06:07 on 2026-09-28, answered at 06:09; decider the o
 - **Reasons per workspace, not per test.** Selection is at workspace granularity, so every test of a selected workspace shares its workspace's reasons (`SelectedWorkspace.reasons`); the answer carries them once per workspace and the counts per test, never `Selection.tests`, which would repeat the same reasons for every test and could pass the protocol's 1 MiB line limit on a large consumer.
 - **A bounded changed-path list.** A branch switch can change thousands of paths; the answer names a bounded number and counts the rest, while the counts and fallbacks cover them all (C24: the flag derives from the bound that cut).
 - **`activity` stays.** It keeps meaning what the daemon is doing now; the schedule adds per workspace what it will do. Removing it would change the `--json` schema.
-- **The status response is unchanged.** `status` reports the daemon's identities, activity and unstored jobs; the schedule belongs to answers about results, which 2.4 and 2.7 read.
+- **The status response is unchanged.** `status` reports the daemon's identities, activity and unstored jobs; the schedule belongs to answers about results, which 2.4b and 2.7 read.
 
 #### Design notes
 
 - **Why an idle workspace says why.** A workspace that is stale and idle, because 2.3f AC2 already ran it at this revision and list of test modules (a run that could not be fingerprinted), would otherwise look like one whose rerun was forgotten; the reason tells `wait` and the hook that nothing will change until the next input change.
-- **Scope of the analysis.** Analyzed: each execution state and each due reason 2.3f and 2.3h produce, the label's life, and the answer's size. Not analyzed: what `wait` (2.4) and `changes` (2.6) do with these fields.
+- **Scope of the analysis.** Analyzed: each execution state and each due reason 2.3f and 2.3h produce, the label's life, and the answer's size. Not analyzed: what `wait` (2.4b) and `changes` (2.6) do with these fields.
 
 #### Pending siblings and their routing
 
 - **2.3f and 2.3h** (build before this ticket): the scheduler and interruption whose state this ticket shows.
 - **2.3g** (builds before them): adds an input fact beside `nonInputsUnusable` to `answer.ts`, `summary.ts` and `answer-text.ts`, the same files this ticket writes later.
-- **2.4, 2.6, 2.7** (backlog): read these fields; they name no file here.
+- **2.4b, 2.6, 2.7** (backlog): read these fields; they name no file here.
 
 #### Sizing
 
