@@ -24,6 +24,7 @@ import {
   type UnreadWorkspaceSource,
 } from "../../src/vitest/find-workspaces.js";
 import {
+  DISCOVERED_VITEST_VERSION,
   discoveredWorkspace,
   inTempDir,
   projectFacts,
@@ -32,8 +33,6 @@ import {
 } from "../harness.js";
 
 const DEFAULT_MODULES = ["unit.test.ts"];
-/** The Vitest a failed discovery loaded before it failed. */
-const DISCOVERED_VITEST_VERSION = "5.0.1";
 
 /** A Vitest workspace as discovery would hand it to selection. */
 export interface TreeWorkspace {
@@ -105,17 +104,25 @@ function identity(workspacePath: string, modulePath: string): TestIdentity {
   };
 }
 
+/** A workspace whose tests are not known failed its discovery, which reports no selection facts. */
 function selectable(root: string, tree: TreeWorkspace): SelectableWorkspace {
   const tests = tree.tests ?? DEFAULT_MODULES;
+  const workspace = { path: tree.path, directory: join(root, tree.path) };
+  if (typeof tests === "string") {
+    return {
+      workspace,
+      tests: { known: false, reason: tests },
+      setupFiles: [],
+      globalSetupFiles: [],
+      aliases: [],
+    };
+  }
   return {
-    workspace: { path: tree.path, directory: join(root, tree.path) },
-    tests:
-      typeof tests === "string"
-        ? { known: false, reason: tests }
-        : {
-            known: true,
-            tests: tests.map((module) => identity(tree.path, module)),
-          },
+    workspace,
+    tests: {
+      known: true,
+      tests: tests.map((module) => identity(tree.path, module)),
+    },
     setupFiles: tree.setupFiles ?? [],
     globalSetupFiles: tree.globalSetupFiles ?? [],
     aliases: (tree.aliases?.(root) ?? []).map((alias) => ({

@@ -24,6 +24,7 @@ import {
   EDGE_PRODUCER,
   UNCERTAINTY,
   type EdgeProducerKind,
+  type UncertaintyKind,
 } from "./selection-types.js";
 
 const URL_SCHEME = /^[A-Za-z][A-Za-z\d+.-]+:/;
@@ -145,17 +146,12 @@ export function addSpecifierEdges(
   const producer = producers.path;
   if (FILE_URL.test(text)) {
     const unconverted = addFileUrlEdges(scan, reference, specifier, producer);
-    const key = [
-      reference.dependent,
-      UNCERTAINTY.unresolvableSpecifier,
-      reference.detail,
-    ].join(KEY_SEPARATOR);
-    if (unconverted !== undefined && once(scan, key)) {
-      uncertain(
-        scan.graph,
-        reference.dependent,
+    if (unconverted !== undefined) {
+      widenOnce(
+        scan,
+        reference,
         UNCERTAINTY.unresolvableSpecifier,
-        `${reference.detail}, ${unconverted}`,
+        unconverted,
       );
     }
     return;
@@ -178,6 +174,23 @@ export function addSpecifierEdges(
   } else {
     addPathEdges(scan, reference, withoutSuffix(text), producer);
   }
+}
+
+/** Each quote widens its workspace once for each kind of uncertainty. */
+export function widenOnce(
+  scan: Scan,
+  reference: Reference,
+  kind: UncertaintyKind,
+  cause: string,
+): void {
+  const key = [reference.dependent, kind, reference.detail].join(KEY_SEPARATOR);
+  if (!once(scan, key)) return;
+  uncertain(
+    scan.graph,
+    reference.dependent,
+    kind,
+    `${reference.detail}, ${cause}`,
+  );
 }
 
 type FileUrlPath =

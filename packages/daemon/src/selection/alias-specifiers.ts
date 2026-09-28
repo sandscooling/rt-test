@@ -19,11 +19,10 @@ import {
   addSpecifierEdges,
   CURRENT_DIRECTORY,
   FILE_URL,
-  KEY_SEPARATOR,
-  once,
   type Reference,
   type Scan,
   type SpecifierProducers,
+  widenOnce,
 } from "./specifier-edges.js";
 import {
   aliasDetail,
@@ -207,14 +206,6 @@ function addViteFsEdges(
   addSpecifierEdges(scan, reference, path, ALIAS_PRODUCERS);
 }
 
-/** Each quote widens its Vitest workspace once. */
 function widen(scan: Scan, reference: Reference, cause: string): void {
-  const key = [reference.dependent, reference.detail].join(KEY_SEPARATOR);
-  if (!once(scan, key)) return;
-  uncertain(
-    scan.graph,
-    reference.dependent,
-    UNCERTAINTY.unresolvableAlias,
-    `${reference.detail}, ${cause}`,
-  );
+  widenOnce(scan, reference, UNCERTAINTY.unresolvableAlias, cause);
 }

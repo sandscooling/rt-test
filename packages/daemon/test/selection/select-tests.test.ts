@@ -24,7 +24,12 @@ import {
   type ProjectSelectionFacts,
   type ReportedAlias,
 } from "../../src/vitest/selection-facts.js";
-import { discoveredWorkspace, onPlatform, projectFacts } from "../harness.js";
+import {
+  DISCOVERED_VITEST_VERSION,
+  discoveredWorkspace,
+  onPlatform,
+  projectFacts,
+} from "../harness.js";
 import {
   manifest,
   rootManifest,
@@ -1269,7 +1274,7 @@ describe("selection's input, built from the discovery in effect", () => {
         {
           status: "failed",
           workspace: vitestWorkspace(root, APP_PATH),
-          vitestVersion: "5.0.1",
+          vitestVersion: DISCOVERED_VITEST_VERSION,
           error: LOAD_ERROR,
         },
       ],

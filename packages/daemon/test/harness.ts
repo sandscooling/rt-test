@@ -396,6 +396,9 @@ export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
   };
 }
 
+/** The Vitest a hand-built discovery reports having loaded. */
+export const DISCOVERED_VITEST_VERSION = "5.0.1";
+
 /** A discovered workspace listing one test in each of `modules`, relative to it, and reporting `facts`. */
 export function discoveredWorkspace(
   workspace: VitestWorkspace,
@@ -405,7 +408,7 @@ export function discoveredWorkspace(
   return {
     status: "discovered",
     workspace,
-    vitestVersion: "5.0.1",
+    vitestVersion: DISCOVERED_VITEST_VERSION,
     tests: modules.map((modulePath) => ({
       identity: {
         workspacePath: workspace.path,

@@ -2067,9 +2067,9 @@
   {
     "id": "D2419",
     "defect": "Without the once guard, a file importing one widened specifier twice records two identical widenings.",
-    "file": "packages/daemon/src/selection/alias-specifiers.ts",
-    "old": "  if (!once(scan, key)) return;",
-    "new": ""
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const key = [reference.dependent, kind, reference.detail].join(KEY_SEPARATOR);\n  if (!once(scan, key)) return;",
+    "new": "  const key = [reference.dependent, kind, reference.detail].join(KEY_SEPARATOR);\n  if (kind !== UNCERTAINTY.unresolvableAlias && !once(scan, key)) return;"
   },
   {
     "id": "D2422",
@@ -2278,15 +2278,15 @@
     "id": "D2466",
     "defect": "A file: URL written in source that converts to no path is dropped without widening its workspace.",
     "file": "packages/daemon/src/selection/specifier-edges.ts",
-    "old": "    if (unconverted !== undefined && once(scan, key)) {",
-    "new": "    if (false) {"
+    "old": "    if (unconverted !== undefined) {\n      widenOnce(",
+    "new": "    if (false) {\n      widenOnce("
   },
   {
     "id": "D2467",
     "defect": "An unconvertible file: URL widens once per occurrence rather than once per quote, so a file importing it twice records two widenings.",
     "file": "packages/daemon/src/selection/specifier-edges.ts",
-    "old": "    if (unconverted !== undefined && once(scan, key)) {",
-    "new": "    if (unconverted !== undefined) {"
+    "old": "  const key = [reference.dependent, kind, reference.detail].join(KEY_SEPARATOR);\n  if (!once(scan, key)) return;",
+    "new": "  const key = [reference.dependent, kind, reference.detail].join(KEY_SEPARATOR);\n  if (kind !== UNCERTAINTY.unresolvableSpecifier && !once(scan, key)) return;"
   },
   {
     "id": "D2468",
@@ -2376,8 +2376,8 @@
     "id": "D2484",
     "defect": "The file: widening is deduped per dependent rather than per quote, so a file quoting two distinct unconvertible URLs records one widening.",
     "file": "packages/daemon/src/selection/specifier-edges.ts",
-    "old": "      reference.dependent,\n      UNCERTAINTY.unresolvableSpecifier,\n      reference.detail,\n    ].join(KEY_SEPARATOR);",
-    "new": "      reference.dependent,\n    ].join(KEY_SEPARATOR);"
+    "old": "  const key = [reference.dependent, kind, reference.detail].join(KEY_SEPARATOR);",
+    "new": "  const key = [reference.dependent].join(KEY_SEPARATOR);"
   },
   {
     "id": "D2485",
