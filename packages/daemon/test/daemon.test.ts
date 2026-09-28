@@ -56,6 +56,7 @@ import {
   storedRuns,
   trustedStart,
   until,
+  withConnection,
   withDaemonConsumer,
   withDaemonKey,
   withDaemons,
@@ -1412,6 +1413,52 @@ describe("a query to the worktree's daemon", () => {
     });
     expect(outcome.summary).toStrictEqual({
       thrown: expect.stringContaining(outcome.root),
+    });
+  });
+});
+
+describe("a stand-in on the endpoint", () => {
+  /**
+   * How a test holding a stand-in that echoes each request settles once it has sent `line` and handed the answer to
+   * `afterAnswer`.
+   */
+  function afterSending(
+    line: string,
+    afterAnswer: (answer: unknown) => unknown = (answer) => answer,
+  ) {
+    return inTempDir((root) =>
+      settled(
+        withStandIn(
+          consumerIdentity(root).worktreeIdentity,
+          (request) => ({ echoed: request }),
+          (standIn) =>
+            withConnection(standIn.endpoint.path, async (connection) => {
+              connection.send(`${line}\n`);
+              return afterAnswer(await connection.next());
+            }),
+        ),
+      ),
+    );
+  }
+
+  it("D2411: a request line that is not JSON fails the test that holds the stand-in, naming the line", async () => {
+    expect(await afterSending("not json")).toStrictEqual({
+      thrown: "the stand-in read a line that is not a JSON object: not json",
+    });
+  });
+
+  it("D2415: a request line that is JSON but not an object fails the test that holds the stand-in, naming the line", async () => {
+    expect(await afterSending("null")).toStrictEqual({
+      thrown: "the stand-in read a line that is not a JSON object: null",
+    });
+  });
+
+  it("D2414: a test body that fails after the stand-in read an unreadable line fails naming that line", async () => {
+    const outcome = await afterSending("not json", () => {
+      throw new Error("the test body's own failure");
+    });
+    expect(outcome).toStrictEqual({
+      thrown: "the stand-in read a line that is not a JSON object: not json",
     });
   });
 });
