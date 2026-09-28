@@ -76,7 +76,7 @@ could catch only in the criteria themselves; create-tests decides which tests ea
 
 #### Where this sits
 
-The third of the three tickets the unsplit 2.3f became (orchestrator, 2026-09-28 06:10). Ticket 2.3f schedules discoveries and runs of what is not current and logs each round's selection; ticket 2.3h judges a run by its workspace's inputs and interrupts one a change inside them touched; this ticket puts both into every answer. Build order: 2.3d, 2.3e, 2.3g, 2.3f, 2.3h, 2.3i. Tickets 2.4 (`wait`) and 2.7 (the agent hook) read what it adds.
+The third of the three tickets the unsplit 2.3f became (orchestrator, 2026-09-28 06:10). Ticket 2.3f schedules discoveries and runs of what is not current and logs each round's selection; ticket 2.3h judges a run by its workspace's inputs and interrupts one a change inside them touched; this ticket puts both into every answer. Build order: 2.3d, 2.3e, 2.3g, 2.3f, 2.3h, 2.3i. Tickets 2.4b (`wait`) and 2.7 (the agent hook) read what it adds.
 
 Requirements this ticket serves (`docs/requirements.md`):
 

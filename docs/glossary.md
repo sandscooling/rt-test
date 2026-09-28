@@ -115,12 +115,16 @@ Running a test again while it holds a current result for the same input fingerpr
 _Avoid_: rerun
 
 **Wait**:
-A query that returns once every test covering the given files has a current result or an explicit non-current state.
+A query that returns once every test covering the given files has a current result or an explicit non-current state, or earlier as superseded or unsettled.
 _Avoid_: block, poll
 
 **Superseded**:
 A wait's answer when a covering input changed after the call, naming the newer input revision to wait on.
 _Avoid_: cancelled, timed out
+
+**Unsettled**:
+A wait's answer when its time limit passed before every covering test had a current result or an explicit non-current state, naming what each covering workspace is still doing.
+_Avoid_: timed out, failed
 
 ### Falsification
 
