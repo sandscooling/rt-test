@@ -332,9 +332,10 @@ function closedAfterAnnouncing(pid: number): Promise<ChildConnection> {
 /** The process id a stand-in heartbeat child announces. */
 const ANNOUNCED_PID = 4242;
 
-/** What asking a stand-in heartbeat child reads when it answers `answer`. */
+/** What asking a stand-in heartbeat child reads when it announces itself as a real one does, then answers `answer`. */
 function askedAnswering(answer: string) {
   return withHeldConnection((connection, _served, child) => {
+    child.write(`${ANNOUNCED_PID}\n`);
     child.on("data", () => child.write(`${answer}\n`));
     return settled(connection.ask());
   });
