@@ -1,7 +1,8 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { DependencyInformation } from "../../src/selection/selection-types.js";
+import { POSIX_SEPARATOR } from "../../src/vitest/find-workspaces.js";
 import {
   REGEXP_FIND,
   STRING_FIND,
@@ -28,6 +29,7 @@ import {
   widenedAt,
   type AppCase,
   type Settled,
+  type TreeAlias,
 } from "./harness.js";
 
 const B_CHANGE = "packages/b/src/index.ts";
@@ -87,6 +89,54 @@ function alias(
     },
   ];
 }
+
+const WINDOWS_DRIVE = /^[A-Za-z]:/;
+const ALIAS_WIDENING = "unresolvable-alias";
+
+/** The path `/`-separated, as Vite spells a path in an id. */
+function slashed(path: string): string {
+  return path.split(sep).join(POSIX_SEPARATOR);
+}
+
+/** The path `/`-separated with no Windows drive, so it begins with `/` on either host. */
+function driveless(path: string): string {
+  return slashed(path.replace(WINDOWS_DRIVE, ""));
+}
+
+/** The app's alias edges and widening kinds under `aliasList`, over the app tree with `files` added. */
+function aliasScan(
+  aliasList: (root: string) => readonly TreeAlias[],
+  files: Readonly<Record<string, string>> = {},
+) {
+  return graphInTree(
+    appTree({ vitest: { aliases: aliasList }, files, change: "" }),
+  ).then(appScan);
+}
+
+/** One alias over `STRING_ALIAS` for each replacement. */
+function replacedBy(
+  ...replacements: string[]
+): (root: string) => readonly ReportedAlias[] {
+  return () =>
+    replacements.map((replacement) => ({ ...STRING_ALIAS, replacement }));
+}
+
+/** One RegExp alias for each flag set, whose replacement reaches into `packages/b`. */
+function regexpAlias(
+  find: string,
+  ...flagSets: string[]
+): (root: string) => readonly ReportedAlias[] {
+  return (root) =>
+    (flagSets.length === 0 ? [""] : flagSets).map((flags) => ({
+      ...STRING_ALIAS,
+      find,
+      findKind: REGEXP_FIND,
+      flags,
+      replacement: join(root, "packages/b/src"),
+    }));
+}
+
+const REACHES_B = { edges: ["alias packages/b"], widenings: [] };
 
 /** The steps of the first reason the app was selected for when `change` changed, under `aliasList`. */
 function aliasReasonSteps(
@@ -801,6 +851,138 @@ describe("an explanation quotes an alias's find as the kind of find it is", () =
         detail: expect.stringContaining("config alias /^@b\\/(.*)$/ to "),
       },
     ]);
+  });
+});
+
+describe("an alias replaced by a path beginning with / reaches it under the Vite root and on the file system", () => {
+  it("D2263: a root-relative replacement reaches the workspace it names under the project's Vite root", async () => {
+    expect(
+      await aliasScan((root) => [
+        { ...STRING_ALIAS, replacement: "/packages/b/src", viteRoot: root },
+      ]),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2264: a replacement beginning with / that names a file-system path outside the Vite root reaches the workspace there, with no drive on Windows", async () => {
+    expect(
+      await aliasScan((root) =>
+        replacedBy(driveless(join(root, "packages/b/src")))(root),
+      ),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2265: Vite's own client alias, a /@fs/ replacement, reaches the workspace holding its file and never widens", async () => {
+    expect(
+      await aliasScan((root) => [
+        {
+          ...STRING_ALIAS,
+          find: "^\\/?@vite\\/client",
+          findKind: REGEXP_FIND,
+          replacement: posix.join(
+            "/@fs/",
+            slashed(join(root, "packages/b/dist/client.mjs")),
+          ),
+        },
+      ]),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2266: after /@fs/, a path naming no volume gets back the / Vite strips from it", async () => {
+    expect(
+      await aliasScan((root) =>
+        replacedBy(`/@fs/${driveless(join(root, "packages/b/src")).slice(1)}`)(
+          root,
+        ),
+      ),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2267: /@fs/ with nothing after it, or only a drive with or without its colon, widens", async () => {
+    expect(await aliasScan(replacedBy("/@fs/", "/@fs/C:", "/@fs/c"))).toEqual({
+      edges: [],
+      widenings: [ALIAS_WIDENING, ALIAS_WIDENING, ALIAS_WIDENING],
+    });
+  });
+
+  it("D2268: a replacement of exactly / widens, naming what it fixes", async () => {
+    expect(
+      await graphInTree(
+        appTree({ vitest: { aliases: replacedBy("/") }, change: "" }),
+      ).then(appWidenings),
+    ).toEqual(widenedAt(ALIAS_WIDENING, "fixes only / before"));
+  });
+
+  it("D2269: a replacement beginning with // or /@id/ widens rather than being read as a path", async () => {
+    expect(
+      await aliasScan(replacedBy("//cdn.example/lib", "/@id/lib")),
+    ).toEqual({ edges: [], widenings: [ALIAS_WIDENING, ALIAS_WIDENING] });
+  });
+
+  it("D2291: $$ ends an alias's fixed prefix, so the replacement reaches the directory whose name holds the $ it inserts", async () => {
+    expect(
+      await aliasScan(
+        (root) => replacedBy(`${join(root, "packages")}/pay$$/src`)(root),
+        { "packages/pay$/package.json": pkg("@x/pay") },
+      ),
+    ).toEqual({ edges: ["alias .", "alias packages/pay$"], widenings: [] });
+  });
+
+  it("D2292: a prefix ending in a separator does not reach a sibling directory whose name it begins", async () => {
+    expect(
+      await aliasScan(
+        (root) => replacedBy(`${join(root, "packages", "b")}/$1`)(root),
+        plainPackages("bb"),
+      ),
+    ).toEqual(REACHES_B);
+  });
+});
+
+describe("a RegExp alias is analyzed by its replacement only when every match begins at the import's start", () => {
+  it("D2270: a RegExp find not anchored with ^ widens, naming the text it keeps", async () => {
+    expect(
+      await graphInTree(
+        appTree({
+          vitest: { aliases: regexpAlias("@b\\/(.*)$") },
+          change: "",
+        }),
+      ).then(appWidenings),
+    ).toEqual(widenedAt(ALIAS_WIDENING, "can match after the import's start"));
+  });
+
+  it("D2271: a RegExp find with a top-level alternative widens, though it begins with ^", async () => {
+    expect(await aliasScan(regexpAlias("^@b\\/(.*)$|@c"))).toEqual({
+      edges: [],
+      widenings: [ALIAS_WIDENING],
+    });
+  });
+
+  it("D2293: an escaped ( opens no group, so the top-level alternative after it widens", async () => {
+    expect(await aliasScan(regexpAlias("^\\(@b|@c"))).toEqual({
+      edges: [],
+      widenings: [ALIAS_WIDENING],
+    });
+  });
+
+  it("D2272: an alternative inside a group leaves the RegExp find analyzed", async () => {
+    expect(await aliasScan(regexpAlias("^(@b|@c)\\/(.*)$"))).toEqual(REACHES_B);
+  });
+
+  it("D2288: a | inside a character class leaves the RegExp find analyzed", async () => {
+    expect(await aliasScan(regexpAlias("^[|@]b\\/(.*)$"))).toEqual(REACHES_B);
+  });
+
+  it("D2289: without the v flag, a [ inside a character class opens no nested class, so the | after the class is top-level and widens", async () => {
+    expect(await aliasScan(regexpAlias("^[[]b|@c"))).toEqual({
+      edges: [],
+      widenings: [ALIAS_WIDENING],
+    });
+  });
+
+  it("D2290: the m or the y flag widens an anchored RegExp find", async () => {
+    expect(await aliasScan(regexpAlias("^@b\\/(.*)$", "m", "y"))).toEqual({
+      edges: [],
+      widenings: [ALIAS_WIDENING, ALIAS_WIDENING],
+    });
   });
 });
 

@@ -41,6 +41,7 @@ import {
 } from "../src/vitest/run-workspace.js";
 import type {
   ProjectSelectionFacts,
+  ReportedAlias,
   SelectionFacts,
 } from "../src/vitest/selection-facts.js";
 
@@ -363,11 +364,16 @@ export function settle<T>(run: () => T): T | { thrown: string } {
   }
 }
 
-/** One project's selection facts; a pattern list left out is empty, and the pattern directory is the consumer root. */
+/**
+ * One project's selection facts; a list left out is empty, the pattern directory is the consumer root, and the Vite
+ * root is the pattern directory, as Vite roots a project at its config's directory.
+ */
 export interface FactsCase {
   readonly projectName?: string;
+  readonly viteRoot?: string;
   readonly setupFiles?: readonly string[];
   readonly globalSetupFiles?: readonly string[];
+  readonly aliases?: readonly ReportedAlias[];
   readonly directory?: string;
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
@@ -377,9 +383,10 @@ export interface FactsCase {
 export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
   return {
     projectName: facts.projectName ?? "unit",
+    viteRoot: facts.viteRoot ?? facts.directory ?? ".",
     setupFiles: facts.setupFiles ?? [],
     globalSetupFiles: facts.globalSetupFiles ?? [],
-    aliases: [],
+    aliases: facts.aliases ?? [],
     testFilePatterns: {
       directory: facts.directory ?? ".",
       include: facts.include ?? [],

@@ -35,6 +35,8 @@ export interface TestFilePatterns {
 
 export interface ProjectSelectionFacts {
   readonly projectName: string;
+  /** Where Vite resolves an import beginning with `/`, such as an alias replacement `/src`, before the file system. */
+  readonly viteRoot: string;
   /** Without RT Test's snapshot guard. */
   readonly setupFiles: readonly string[];
   /** The project's own, then the root project's, which Vitest runs on every run. */
@@ -81,6 +83,7 @@ function projectFacts(
   const ownGlobalSetup = asList(config.globalSetup);
   return {
     projectName: project.name,
+    viteRoot: rootRelative(project.vite.config.root),
     setupFiles: config.setupFiles
       .filter((file) => file !== SNAPSHOT_GUARD_FILE)
       .map(rootRelative),

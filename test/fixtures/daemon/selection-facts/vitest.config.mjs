@@ -48,6 +48,15 @@ export default {
         },
       },
       {
+        // Its Vite root is its own folder, where the other projects share the consumer root.
+        test: {
+          name: "rooted",
+          globals: true,
+          root: "./rooted",
+          include: ["*.test.mjs"],
+        },
+      },
+      {
         // Vitest follows a link only in a relative setup path, so these absolute ones keep the link's spelling.
         test: {
           name: "absolute",

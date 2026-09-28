@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   NON_INPUTS_ABSENT,
@@ -776,12 +776,12 @@ describe("declared non-inputs", () => {
     ).toEqual(DECLARATION_FALLBACK);
   });
 
-  it("D2014: a selection carries policy version 5", async () => {
+  it("D2014: a selection carries policy version 6", async () => {
     const outcome = await select({ vitest: { app: {} } }, [
       "packages/app/src/x.ts",
     ]);
     expect("policyVersion" in outcome ? outcome.policyVersion : outcome).toBe(
-      5,
+      6,
     );
   });
 
@@ -1003,7 +1003,16 @@ describe("each changed path on its own", () => {
 });
 
 const INPUT_ROOT = join("/", "consumer");
+/** The input root as an absolute path on this host, which on Windows carries the current drive. */
+const ABSOLUTE_INPUT_ROOT = resolve(INPUT_ROOT);
 const APP_PATH = "packages/app";
+const LIB_ALIAS: ReportedAlias = {
+  find: "@lib",
+  findKind: STRING_FIND,
+  flags: "",
+  replacement: "/src",
+  hasCustomResolver: false,
+};
 const NO_DECLARATION: NonInputsDeclaration = {
   file: NON_INPUTS_FILE,
   state: NON_INPUTS_ABSENT,
@@ -1157,7 +1166,58 @@ describe("selection's input, built from the discovery in effect", () => {
       ]),
     );
     expect(selectableField(build, "aliases")).toStrictEqual([
-      [alias, elsewhere],
+      [
+        { ...alias, viteRoot: ABSOLUTE_INPUT_ROOT },
+        { ...elsewhere, viteRoot: ABSOLUTE_INPUT_ROOT },
+      ],
+    ]);
+  });
+
+  it("D2287: each alias carries its own project's Vite root as an absolute path", () => {
+    const build = inputFrom(
+      appDiscovered({}, [
+        projectFacts({
+          viteRoot: "packages/app/web",
+          aliases: [LIB_ALIAS],
+        }),
+      ]),
+    );
+    expect(selectableField(build, "aliases")).toStrictEqual([
+      [
+        {
+          ...LIB_ALIAS,
+          viteRoot: join(ABSOLUTE_INPUT_ROOT, "packages", "app", "web"),
+        },
+      ],
+    ]);
+  });
+
+  it("D2262: two projects' identical aliases under different Vite roots both reach the workspace, each with its own root", () => {
+    const build = inputFrom(
+      appDiscovered({}, [
+        projectFacts({
+          projectName: "unit",
+          viteRoot: "packages/app",
+          aliases: [LIB_ALIAS],
+        }),
+        projectFacts({
+          projectName: "e2e",
+          viteRoot: "packages/app/e2e",
+          aliases: [LIB_ALIAS],
+        }),
+      ]),
+    );
+    expect(selectableField(build, "aliases")).toStrictEqual([
+      [
+        {
+          ...LIB_ALIAS,
+          viteRoot: join(ABSOLUTE_INPUT_ROOT, "packages", "app"),
+        },
+        {
+          ...LIB_ALIAS,
+          viteRoot: join(ABSOLUTE_INPUT_ROOT, "packages", "app", "e2e"),
+        },
+      ],
     ]);
   });
 

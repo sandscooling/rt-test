@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { NonInputsDeclaration } from "../inputs/non-inputs.js";
 import { protection, ROOT_WORKSPACE } from "../inputs/protection.js";
 import type {
@@ -5,13 +6,11 @@ import type {
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import { ROOT_PATH } from "../vitest/find-workspaces.js";
-import type {
-  ProjectSelectionFacts,
-  ReportedAlias,
-} from "../vitest/selection-facts.js";
+import type { ProjectSelectionFacts } from "../vitest/selection-facts.js";
 import type {
   NotRunnableWorkspace,
   SelectableWorkspace,
+  SelectionAlias,
   SelectionInput,
   WorkspaceTests,
 } from "./selection-types.js";
@@ -77,7 +76,7 @@ export function buildSelectionInput(
         workspaces.push({
           workspace: entry.workspace,
           tests: discoveredTests(entry),
-          ...mergedFacts(entry.selectionFacts.projects),
+          ...mergedFacts(entry.selectionFacts.projects, consumerRoot),
         });
         break;
       }
@@ -137,29 +136,38 @@ function discoveredTests(entry: DiscoveredWorkspace): WorkspaceTests {
 /** Every project's facts apply to the whole workspace, which only adds edges. */
 function mergedFacts(
   projects: readonly ProjectSelectionFacts[],
+  consumerRoot: string,
 ): WorkspaceFacts {
   return {
     setupFiles: [...new Set(projects.flatMap(({ setupFiles }) => setupFiles))],
     globalSetupFiles: [
       ...new Set(projects.flatMap(({ globalSetupFiles }) => globalSetupFiles)),
     ],
-    aliases: withoutRepeats(projects.flatMap(({ aliases }) => aliases)),
+    aliases: withoutRepeats(
+      projects.flatMap(({ aliases, viteRoot }) =>
+        aliases.map((alias) => ({
+          ...alias,
+          viteRoot: resolve(consumerRoot, viteRoot),
+        })),
+      ),
+    ),
   };
 }
 
-function withoutRepeats(aliases: readonly ReportedAlias[]): ReportedAlias[] {
+function withoutRepeats(aliases: readonly SelectionAlias[]): SelectionAlias[] {
   return aliases.filter(
     (alias, index) =>
       aliases.findIndex((earlier) => sameAlias(alias, earlier)) === index,
   );
 }
 
-function sameAlias(left: ReportedAlias, right: ReportedAlias): boolean {
+function sameAlias(left: SelectionAlias, right: SelectionAlias): boolean {
   return (
     left.find === right.find &&
     left.findKind === right.findKind &&
     left.flags === right.flags &&
     left.replacement === right.replacement &&
-    left.hasCustomResolver === right.hasCustomResolver
+    left.hasCustomResolver === right.hasCustomResolver &&
+    left.viteRoot === right.viteRoot
   );
 }

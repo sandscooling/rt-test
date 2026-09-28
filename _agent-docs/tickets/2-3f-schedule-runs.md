@@ -156,7 +156,7 @@ Asked by `session_wake` at 06:07 on 2026-09-28, answered at 06:09; decider the o
 
 - **2.3g** (authored, not built): the per-revision dependency builds, the build wait before a run, the revision signal from the tracker, and each workspace's narrowed fingerprint. This ticket calls them, and re-verifies their names first.
 - **2.3e** (done): `buildSelectionInput` in `selection/selection-input.ts`, the selection-input builder AC6's selection reads.
-- **2.3d** (in review): `selectTests`' alias widening and `SELECTION_POLICY_VERSION` 5; this ticket only calls `selectTests`.
+- **2.3d** (done) and **change request #26**: `selectTests`' alias widening, each alias with its project's Vite root, and `SELECTION_POLICY_VERSION` 6; this ticket only calls `selectTests`.
 - **2.3h and 2.3i** (backlog, split from this ticket): 2.3h writes `input-jobs.ts`, `input-tracker.ts`, `current-inputs.ts`, `executor.ts` and the scheduler after this ticket; 2.3i writes the answer and CLI files and reads the scheduler's state.
 - Two change requests land before 2.3g (orchestrator's dispatch): a crashed idle-tracker child counted as a detection (a test-file fix), and a root-relative alias replacement (`/src`) that may add no edge. Neither touches this ticket's files.
 

@@ -182,6 +182,7 @@ export function unreadWorkspaceSource(value: unknown): UnreadWorkspaceSource {
 export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
   return {
     projectName: jsonText(value, "projectName"),
+    viteRoot: jsonText(value, "viteRoot"),
     setupFiles: stringArray(jsonField(value, "setupFiles")),
     globalSetupFiles: stringArray(jsonField(value, "globalSetupFiles")),
     aliases: arrayOf(jsonField(value, "aliases"), reportedAlias),

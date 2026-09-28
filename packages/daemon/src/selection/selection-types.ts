@@ -9,7 +9,7 @@ import type {
 import type { ReportedAlias } from "../vitest/selection-facts.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 5;
+export const SELECTION_POLICY_VERSION = 6;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -83,8 +83,13 @@ export interface SelectableWorkspace {
   readonly setupFiles: readonly string[];
   /** Root-relative and `/`-separated. */
   readonly globalSetupFiles: readonly string[];
-  /** As discovery reports them: a replacement may be any string, and a find may be a RegExp's source. */
-  readonly aliases: readonly ReportedAlias[];
+  /** As discovery reports them, each with its project's Vite root: a replacement may be any string, and a find may be a RegExp's source. */
+  readonly aliases: readonly SelectionAlias[];
+}
+
+export interface SelectionAlias extends ReportedAlias {
+  /** Absolute: the Vite root of the project whose config holds the alias. */
+  readonly viteRoot: string;
 }
 
 export interface NotRunnableWorkspace {

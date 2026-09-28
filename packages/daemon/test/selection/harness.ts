@@ -10,6 +10,7 @@ import type { ParseObserver } from "../../src/selection/specifier-edges.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
+  SelectionAlias,
   SelectionOutcome,
 } from "../../src/selection/selection-types.js";
 import { buildDependencyInformation } from "../../src/selection/workspace-graph.js";
@@ -40,7 +41,7 @@ export interface TreeWorkspace {
   readonly setupFiles?: readonly string[];
   readonly globalSetupFiles?: readonly string[];
   /** Given the consumer root selection sees, so a replacement can be an absolute path into it. */
-  readonly aliases?: (root: string) => readonly ReportedAlias[];
+  readonly aliases?: (root: string) => readonly TreeAlias[];
   /** The reason the caller will not run it. */
   readonly notRunnable?: string;
   /** Its one project's test file patterns, matched from the workspace's directory unless they name another. */
@@ -51,6 +52,10 @@ export interface TreeWorkspace {
   /** Its discovery reports no selection facts, as one stored before the store kept them does. */
   readonly factsUnreported?: boolean;
 }
+
+/** An alias as its project reports it, under the workspace's own directory as its Vite root unless it names one. */
+export type TreeAlias = ReportedAlias &
+  Partial<Pick<SelectionAlias, "viteRoot">>;
 
 export interface TreeCase {
   readonly files: Readonly<Record<string, string>>;
@@ -111,7 +116,10 @@ function selectable(root: string, tree: TreeWorkspace): SelectableWorkspace {
           },
     setupFiles: tree.setupFiles ?? [],
     globalSetupFiles: tree.globalSetupFiles ?? [],
-    aliases: tree.aliases?.(root) ?? [],
+    aliases: (tree.aliases?.(root) ?? []).map((alias) => ({
+      viteRoot: join(root, tree.path),
+      ...alias,
+    })),
   };
 }
 

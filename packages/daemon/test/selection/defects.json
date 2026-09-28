@@ -227,7 +227,7 @@
     "id": "D1378",
     "defect": "A capture reference is not recognized, so an alias replaced by a bare $1 is read as a package named $1 and widens nothing.",
     "file": "packages/daemon/src/selection/vitest-edges.ts",
-    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|')/;",
+    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|'|\\$)/;",
     "new": "const REPLACEMENT_REFERENCE = /\\$(?:never)/;"
   },
   {
@@ -633,15 +633,15 @@
     "id": "D1513",
     "defect": "A $<name> reference is read as literal text, so an alias through it reaches only the root.",
     "file": "packages/daemon/src/selection/vitest-edges.ts",
-    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|')/;",
-    "new": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|`|')/;"
+    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|'|\\$)/;",
+    "new": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|`|'|\\$)/;"
   },
   {
     "id": "D1514",
     "defect": "An alias path prefix holding .. is compared as written, so it reaches no workspace below the directory it names.",
     "file": "packages/daemon/src/selection/vitest-edges.ts",
-    "old": "comparable(normalize(prefix))",
-    "new": "comparable(prefix)"
+    "old": "  const resolved = resolve(prefix);",
+    "new": "  const resolved = prefix;"
   },
   {
     "id": "D1515",
@@ -1394,10 +1394,10 @@
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 4, so a selection reports the version from before aliases widened and rt-test.json was recognized as the host compares names.",
+    "defect": "The selection policy version stays at 5, so a selection reports the version from before aliases were read under their project's Vite root and unanchored RegExp finds widened.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 5;",
-    "new": "export const SELECTION_POLICY_VERSION = 4;"
+    "old": "export const SELECTION_POLICY_VERSION = 6;",
+    "new": "export const SELECTION_POLICY_VERSION = 5;"
   },
   {
     "id": "D2045",
@@ -1466,8 +1466,8 @@
     "id": "D2195",
     "defect": "Every RegExp alias widens, as Vite's own client aliases would, so a workspace depends on every package workspace on every change.",
     "file": "packages/daemon/src/selection/vitest-edges.ts",
-    "old": "  if (alias.findKind !== STRING_FIND) return undefined;",
-    "new": "  if (alias.findKind !== STRING_FIND) return \"has a RegExp find\";"
+    "old": "    return anchoredAtStart(alias.find, alias.flags)",
+    "new": "    return false"
   },
   {
     "id": "D2196",
@@ -1720,5 +1720,131 @@
     "file": "packages/daemon/src/selection/workspace-graph.ts",
     "old": "  const scan = newScan(graph, root.directory, observer);",
     "new": "  const scan = newScan(graph, root.directory, undefined);"
+  },
+  {
+    "id": "D2262",
+    "defect": "Aliases are told apart without their Vite root, so a second project's identical alias under another root is dropped as a repeat and only the first root is ever searched.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "    left.hasCustomResolver === right.hasCustomResolver &&\n    left.viteRoot === right.viteRoot",
+    "new": "    left.hasCustomResolver === right.hasCustomResolver"
+  },
+  {
+    "id": "D2287",
+    "defect": "Each alias is given the consumer root as its Vite root rather than its own project's, so a replacement beginning with / is searched under the wrong directory.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "          viteRoot: resolve(consumerRoot, viteRoot),",
+    "new": "          viteRoot: resolve(consumerRoot),"
+  },
+  {
+    "id": "D2263",
+    "defect": "A replacement beginning with / is read only as a file-system path, so '/packages/b/src' under a Vite root reaches nothing and adds no widening.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  const paths = aliasPathTargets(graph, join(viteRoot, prefix));",
+    "new": "  const paths: string[] = [];"
+  },
+  {
+    "id": "D2264",
+    "defect": "A replacement beginning with / is read only under the Vite root, so a file-system path outside it reaches nothing and adds no widening.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  for (const path of aliasPathTargets(graph, prefix)) {\n    if (!paths.includes(path)) paths.push(path);\n  }",
+    "new": ""
+  },
+  {
+    "id": "D2265",
+    "defect": "A /@fs/ replacement is taken for another id Vite serves specially, so Vite's own client alias widens every workspace on every change.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (prefix.startsWith(VITE_FS_PREFIX)) {",
+    "new": "  if (prefix.startsWith(`${VITE_FS_PREFIX}never`)) {"
+  },
+  {
+    "id": "D2266",
+    "defect": "The / Vite strips after /@fs/ is not restored, so a path naming no volume resolves against the working directory and reaches nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    ? rest\n    : `${POSIX_SEPARATOR}${rest}`;",
+    "new": "    ? rest\n    : rest;"
+  },
+  {
+    "id": "D2267",
+    "defect": "A /@fs/ replacement holding only a drive is read as a path, so it adds no widening though a reference can complete it to any file on that drive.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (rest === \"\" || PARTIAL_VOLUME.test(rest)) {",
+    "new": "  if (rest === \"\") {"
+  },
+  {
+    "id": "D2268",
+    "defect": "A replacement of exactly / is read as a path, so it adds edges to whatever lies under the root and no widening naming it.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (prefix === POSIX_SEPARATOR) return unboundedPath(prefix);\n",
+    "new": ""
+  },
+  {
+    "id": "D2269",
+    "defect": "A replacement beginning with // or /@id/ is read as a path, so it reaches nothing and adds no widening.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    prefix.startsWith(SCHEME_RELATIVE_PREFIX) ||\n    prefix.startsWith(VITE_SPECIAL_PREFIX)",
+    "new": "    false"
+  },
+  {
+    "id": "D2270",
+    "defect": "A RegExp find without ^ is analyzed by its replacement's prefix, though the import's text before its match is kept.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (!source.startsWith(START_ANCHOR) || MOVED_START_FLAGS.test(flags)) {",
+    "new": "  if (MOVED_START_FLAGS.test(flags)) {"
+  },
+  {
+    "id": "D2271",
+    "defect": "A top-level alternative is missed, so a RegExp find beginning with ^ whose other alternative can match mid-import is analyzed by prefix.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  return !hasTopLevelAlternative(source, flags.includes(CLASS_SET_FLAG));",
+    "new": "  return true;"
+  },
+  {
+    "id": "D2272",
+    "defect": "A | inside a group is read as top-level, so an anchored RegExp find with a grouped alternative widens.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    } else if (character === ALTERNATION && groupDepth === 0) {",
+    "new": "    } else if (character === ALTERNATION) {"
+  },
+  {
+    "id": "D2288",
+    "defect": "A | inside a character class is read as top-level, so an anchored RegExp find whose class holds | widens.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    } else if (classDepth > 0) {",
+    "new": "    } else if (classDepth > 1) {"
+  },
+  {
+    "id": "D2289",
+    "defect": "Without the v flag a [ inside a class is read as opening a nested class, so the class seems to close later and swallows a top-level | that should widen.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  return nestedClasses && character === CLASS_OPEN ? 1 : 0;",
+    "new": "  return character === CLASS_OPEN ? 1 : 0;"
+  },
+  {
+    "id": "D2290",
+    "defect": "The m and y flags are ignored, so an anchored RegExp find that can match after a line break or where a previous match ended is analyzed by prefix.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (!source.startsWith(START_ANCHOR) || MOVED_START_FLAGS.test(flags)) {",
+    "new": "  if (!source.startsWith(START_ANCHOR)) {"
+  },
+  {
+    "id": "D2291",
+    "defect": "$$ is read as literal text, so the analyzed prefix keeps it and the replacement reaches no directory whose name holds the $ it inserts.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|'|\\$)/;",
+    "new": "const REPLACEMENT_REFERENCE = /\\$(?:\\d|&|<|`|')/;"
+  },
+  {
+    "id": "D2292",
+    "defect": "A prefix ending in a separator loses it when resolved, so it also begins a longer sibling's name and reaches that workspace.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    ENDS_IN_SEPARATOR.test(prefix) && !resolved.endsWith(sep)",
+    "new": "    false"
+  },
+  {
+    "id": "D2293",
+    "defect": "The scanner does not skip the character after a \\, so an escaped ( opens a group that never closes and hides a top-level |, and the RegExp find is analyzed as anchored.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    if (character === ESCAPE) {\n      index++;\n",
+    "new": "    if (character === ESCAPE) {\n"
   }
 ]

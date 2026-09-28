@@ -1,11 +1,13 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
 /** Written to `PRAGMA user_version`. A change to the tables below raises it and gives each older version in `STORE_MIGRATIONS` a path to it, since the opener refuses every version it cannot migrate. */
-export const STORE_SCHEMA_VERSION = 3;
+export const STORE_SCHEMA_VERSION = 4;
 /** Its code never force-stopped a run and never kept a workspace's selection facts. */
 const FORCE_STOP_UNAWARE_SCHEMA_VERSION = 1;
 /** Its code never kept a workspace's selection facts. */
 const SELECTION_FACTS_UNAWARE_SCHEMA_VERSION = 2;
+/** Its code kept a workspace's selection facts without each project's Vite root. */
+const VITE_ROOT_UNAWARE_SCHEMA_VERSION = 3;
 export const STORE_FILE_NAME = "store.sqlite";
 /** How long a write waits for another process's write on the same file before it fails whole. */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -129,6 +131,9 @@ UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';`;
 /** Each workspace stored before keeps a NULL report, so it reads as not reporting its selection facts. */
 const ADD_SELECTION_FACTS = `
 ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN};`;
+/** A report without each project's Vite root is dropped rather than given a guessed one, so it reads as never made. */
+const DROP_VITE_ROOTLESS_FACTS = `
+UPDATE discovery_workspaces SET selection_facts = NULL;`;
 const SET_SCHEMA_VERSION = `
 PRAGMA user_version = ${STORE_SCHEMA_VERSION};`;
 
@@ -141,5 +146,9 @@ export const STORE_MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
     SELECTION_FACTS_UNAWARE_SCHEMA_VERSION,
     `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,
+  ],
+  [
+    VITE_ROOT_UNAWARE_SCHEMA_VERSION,
+    `${DROP_VITE_ROOTLESS_FACTS}${SET_SCHEMA_VERSION}`,
   ],
 ]);

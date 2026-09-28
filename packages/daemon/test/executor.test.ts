@@ -518,6 +518,7 @@ function appWorkspace(root: string): SelectableWorkspace {
         flags: "",
         replacement: join(root, "packages/b/src"),
         hasCustomResolver: false,
+        viteRoot: join(root, "packages/app"),
       },
     ],
   };

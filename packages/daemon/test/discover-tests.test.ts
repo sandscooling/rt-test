@@ -2473,4 +2473,26 @@ describe("reporting each workspace's selection facts", () => {
     },
     DISCOVERY_TIMEOUT_MS,
   );
+
+  it(
+    "D2257: on Vitest 5, a nested workspace's project reports its Vite root relative to the consumer root",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, "packages/solo", "", (facts) => facts.viteRoot),
+      ).toBe("packages/solo");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2258: on Vitest 4.1, a project that sets its own root reports that root, not the root project's",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(discovery, ".", "rooted", (facts) => facts.viteRoot),
+      ).toBe("rooted");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
 });

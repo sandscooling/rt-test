@@ -73,6 +73,8 @@ database.close();
 const FORCE_STOP_UNAWARE_VERSION = 1;
 /** The schema version before discovered workspaces kept their selection facts. */
 const SELECTION_FACTS_UNAWARE_VERSION = 2;
+/** The schema version before each project's selection facts carried its Vite root. */
+const VITE_ROOT_UNAWARE_VERSION = 3;
 
 const WORKTREE_A: StoreScope = {
   projectIdentity: "/work/shop/.git",
@@ -263,6 +265,7 @@ const REGEXP_ALIAS: ReportedAlias = {
 };
 const CART_PROJECT_FACTS: ProjectSelectionFacts = {
   projectName: PROJECT_NAME,
+  viteRoot: "packages/cart/web",
   setupFiles: ["packages/cart/test/setup.ts", "../shared/setup.ts"],
   globalSetupFiles: ["test/global-setup.ts"],
   aliases: [
@@ -285,6 +288,7 @@ const CART_PROJECT_FACTS: ProjectSelectionFacts = {
 /** A project with no setup files, global setup files or aliases, matching from the consumer root. */
 const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
   projectName: "empty",
+  viteRoot: ".",
   setupFiles: [],
   globalSetupFiles: [],
   aliases: [],
@@ -598,6 +602,39 @@ function writeSelectionFactsUnawareStore(
       "ALTER TABLE discovery_workspaces DROP COLUMN selection_facts",
     );
     database.exec(`PRAGMA user_version = ${SELECTION_FACTS_UNAWARE_VERSION}`);
+  });
+  return file;
+}
+
+/** Writes the discoveries through a store, then strips each stored project's Vite root and takes the header back to version 3, as a store from before the root was kept holds them. */
+function writeViteRootUnawareStore(
+  stateDirectory: string,
+  discoveries: readonly TestDiscovery[],
+): string {
+  withOpenStore(stateDirectory, (store) => {
+    for (const discovery of discoveries) {
+      store.writeDiscovery(bound(WORKTREE_A), discovery);
+    }
+  });
+  const file = join(stateDirectory, STORE_FILE_NAME);
+  withRawDatabase(file, (database) => {
+    const rows = database
+      .prepare(
+        "SELECT rowid, selection_facts FROM discovery_workspaces WHERE selection_facts IS NOT NULL",
+      )
+      .all();
+    const update = database.prepare(
+      "UPDATE discovery_workspaces SET selection_facts = ? WHERE rowid = ?",
+    );
+    for (const row of rows) {
+      const projects = JSON.parse(String(row["selection_facts"])) as Record<
+        string,
+        unknown
+      >[];
+      const rootless = projects.map(({ viteRoot: _dropped, ...rest }) => rest);
+      update.run(JSON.stringify(rootless), Number(row["rowid"]));
+    }
+    database.exec(`PRAGMA user_version = ${VITE_ROOT_UNAWARE_VERSION}`);
   });
   return file;
 }
@@ -1414,7 +1451,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 3 once opened", async () => {
+  it("D1280: the store is at schema version 4 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1422,7 +1459,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -1542,6 +1579,27 @@ describe("storing each discovered workspace's selection facts", () => {
     expect(facts).toStrictEqual([{ reported: false }]);
   });
 
+  it("D2259: each project's Vite root reads back as written after the store is reopened", async () => {
+    const roots = await acrossReopen(
+      (store) => {
+        store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      },
+      (store) =>
+        discoveredFacts(store)?.flatMap((facts) =>
+          facts.reported ? facts.projects.map(({ viteRoot }) => viteRoot) : [],
+        ),
+    );
+    expect(roots).toStrictEqual(["packages/cart/web", "."]);
+  });
+
+  it("D2261: a stored project with no Vite root is refused as unreadable, never read with a guessed root", async () => {
+    const { viteRoot: _dropped, ...withoutViteRoot } = CART_PROJECT_FACTS;
+    const reason = await readingStoredFacts([withoutViteRoot]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field viteRoot",
+    );
+  });
+
   it("D2099: stored selection facts that are not JSON are refused as unreadable, naming the column", async () => {
     const reason = await readingStoredFacts("[{");
     expect(reason).toContain(
@@ -1625,7 +1683,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 3 once opened", async () => {
+  it("D2097: the store is at schema version 4 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1636,7 +1694,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -1680,6 +1738,22 @@ describe("opening a store written before selection facts", () => {
       discovery: withoutReportedFacts(DISCOVERY),
       runs: [{ ...RAN_RUN, forceStopped: false }],
     });
+  });
+});
+
+describe("opening a store written before each project's Vite root", () => {
+  it("D2260: each discovered workspace reads back as not reporting selection facts, rather than its root-less report being read", async () => {
+    const discovery = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        writeViteRootUnawareStore(stateDirectory, [DISCOVERY]);
+        return withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+      }),
+    );
+    expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 });
 

@@ -1,4 +1,4 @@
-import { isAbsolute, normalize, posix, resolve, sep } from "node:path";
+import { isAbsolute, join, posix, resolve, sep } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import {
   POSIX_SEPARATOR,
@@ -19,19 +19,42 @@ import {
   unlistedWhileIncomplete,
   type Graph,
   type TargetResolution,
+  type Unresolved,
 } from "./graph-state.js";
 import { isLocalPath } from "./package-specs.js";
 import {
   EDGE_PRODUCER,
   UNCERTAINTY,
   type SelectableWorkspace,
+  type SelectionAlias,
 } from "./selection-types.js";
 
-const REPLACEMENT_REFERENCE = /\$(?:\d|&|<|`|')/;
+const REPLACEMENT_REFERENCE = /\$(?:\d|&|<|`|'|\$)/;
+/** A trailing separator ends a directory name, so the prefix must not also begin a longer sibling name. */
+const ENDS_IN_SEPARATOR = /[/\\]$/;
 const WINDOWS_PLATFORM = "win32";
 const ROOT_FIND = "/";
 /** A consumer's own empty find, or what Vite makes of a `/` find whose replacement ends in `/`. */
 const EMPTY_FIND = "";
+/** Vite reads the rest of an import beginning with it as a file-system path, as its own client aliases use. */
+const VITE_FS_PREFIX = "/@fs/";
+const VOLUME_PATH = /^[A-Z]:/i;
+/** A drive letter, or a drive with no path yet, which a replacement reference can complete to any path on it. */
+const PARTIAL_VOLUME = /^[A-Z]:?$/i;
+/** Begins every other id Vite serves specially, such as `/@id/`. */
+const VITE_SPECIAL_PREFIX = "/@";
+const SCHEME_RELATIVE_PREFIX = "//";
+const START_ANCHOR = "^";
+/** `m` lets `^` match after a line break, and `y` starts a match where the last one ended. */
+const MOVED_START_FLAGS = /[my]/;
+/** Lets a character class nest another. */
+const CLASS_SET_FLAG = "v";
+const ESCAPE = "\\";
+const CLASS_OPEN = "[";
+const CLASS_CLOSE = "]";
+const GROUP_OPEN = "(";
+const GROUP_CLOSE = ")";
+const ALTERNATION = "|";
 
 export function addVitestEdges(
   graph: Graph,
@@ -107,7 +130,7 @@ function addSetupEdge(
 function addAliasEdges(
   graph: Graph,
   dependent: string,
-  alias: ReportedAlias,
+  alias: SelectionAlias,
 ): void {
   const detail = `config alias ${quotedFind(alias)} to ${JSON.stringify(alias.replacement)}`;
   const unbounded = unboundedAliasCause(alias);
@@ -125,7 +148,7 @@ function addAliasEdges(
     reference === -1
       ? alias.replacement
       : alias.replacement.slice(0, reference);
-  const resolution = aliasResolution(graph, prefix);
+  const resolution = aliasResolution(graph, prefix, alias.viteRoot);
   if (!resolution.ok) {
     uncertain(
       graph,
@@ -152,7 +175,11 @@ function unboundedAliasCause(alias: ReportedAlias): string | undefined {
   if (alias.hasCustomResolver) {
     return "has a customResolver, which picks the module after the replacement";
   }
-  if (alias.findKind !== STRING_FIND) return undefined;
+  if (alias.findKind !== STRING_FIND) {
+    return anchoredAtStart(alias.find, alias.flags)
+      ? undefined
+      : "has a RegExp find that can match after the import's start, which keeps the import's text before the match";
+  }
   if (alias.find === EMPTY_FIND) {
     return "has an empty find, which rewrites every import that begins with /";
   }
@@ -163,10 +190,60 @@ function unboundedAliasCause(alias: ReportedAlias): string | undefined {
 }
 
 /**
+ * Every match of the RegExp begins at the import's start: its source opens with `^`, no top-level alternative
+ * can match elsewhere, and no flag moves where `^` or a match may start.
+ */
+function anchoredAtStart(source: string, flags: string): boolean {
+  if (!source.startsWith(START_ANCHOR) || MOVED_START_FLAGS.test(flags)) {
+    return false;
+  }
+  return !hasTopLevelAlternative(source, flags.includes(CLASS_SET_FLAG));
+}
+
+function hasTopLevelAlternative(
+  source: string,
+  nestedClasses: boolean,
+): boolean {
+  let groupDepth = 0;
+  let classDepth = 0;
+  for (let index = 0; index < source.length; index++) {
+    const character = source.charAt(index);
+    if (character === ESCAPE) {
+      index++;
+    } else if (classDepth > 0) {
+      classDepth += classDepthChange(character, nestedClasses);
+    } else if (character === ALTERNATION && groupDepth === 0) {
+      return true;
+    } else {
+      classDepth = character === CLASS_OPEN ? 1 : 0;
+      groupDepth += groupDepthChange(character);
+    }
+  }
+  return false;
+}
+
+function classDepthChange(character: string, nestedClasses: boolean): number {
+  if (character === CLASS_CLOSE) return -1;
+  return nestedClasses && character === CLASS_OPEN ? 1 : 0;
+}
+
+function groupDepthChange(character: string): number {
+  if (character === GROUP_OPEN) return 1;
+  return character === GROUP_CLOSE ? -1 : 0;
+}
+
+/**
  * An alias replaces only the part of an import it matched and keeps the rest, and a replacement reference
  * inserts more of the import, so it reaches every workspace whose path or name its fixed prefix begins.
  */
-function aliasResolution(graph: Graph, prefix: string): TargetResolution {
+function aliasResolution(
+  graph: Graph,
+  prefix: string,
+  viteRoot: string,
+): TargetResolution {
+  if (prefix.startsWith(POSIX_SEPARATOR)) {
+    return rootAbsoluteResolution(graph, prefix, viteRoot);
+  }
   if (isAbsolute(prefix)) {
     return { ok: true, paths: aliasPathTargets(graph, prefix) };
   }
@@ -184,6 +261,55 @@ function aliasResolution(graph: Graph, prefix: string): TargetResolution {
   return { ok: true, paths };
 }
 
+/** Vite resolves an import beginning with `/` under its root first, and then as a file-system path. */
+function rootAbsoluteResolution(
+  graph: Graph,
+  prefix: string,
+  viteRoot: string,
+): TargetResolution {
+  if (prefix.startsWith(VITE_FS_PREFIX)) {
+    return viteFsResolution(graph, prefix.slice(VITE_FS_PREFIX.length));
+  }
+  if (prefix === POSIX_SEPARATOR) return unboundedPath(prefix);
+  if (
+    prefix.startsWith(SCHEME_RELATIVE_PREFIX) ||
+    prefix.startsWith(VITE_SPECIAL_PREFIX)
+  ) {
+    return {
+      ok: false,
+      kind: UNCERTAINTY.unresolvableAlias,
+      cause: `begins with ${prefix}, which Vite may read as a URL or an id it serves specially rather than a path under its root`,
+    };
+  }
+  const paths = aliasPathTargets(graph, join(viteRoot, prefix));
+  for (const path of aliasPathTargets(graph, prefix)) {
+    if (!paths.includes(path)) paths.push(path);
+  }
+  return { ok: true, paths };
+}
+
+function viteFsResolution(graph: Graph, rest: string): TargetResolution {
+  if (rest === "" || PARTIAL_VOLUME.test(rest)) {
+    return unboundedPath(`${VITE_FS_PREFIX}${rest}`);
+  }
+  return { ok: true, paths: aliasPathTargets(graph, viteFsPath(rest)) };
+}
+
+function unboundedPath(prefix: string): Unresolved {
+  return {
+    ok: false,
+    kind: UNCERTAINTY.unresolvableAlias,
+    cause: `fixes only ${prefix} before the rest of the import, which can then name any file`,
+  };
+}
+
+/** What follows `/@fs/` is absolute already when it names a volume, and otherwise lost its leading `/`. */
+function viteFsPath(rest: string): string {
+  return rest.startsWith(POSIX_SEPARATOR) || VOLUME_PATH.test(rest)
+    ? rest
+    : `${POSIX_SEPARATOR}${rest}`;
+}
+
 function namesBegunBy(graph: Graph, prefix: string): string[] {
   return [...graph.names]
     .filter(
@@ -194,9 +320,15 @@ function namesBegunBy(graph: Graph, prefix: string): string[] {
     .flatMap(([, workspaces]) => workspaces);
 }
 
+/** The prefix is matched as resolved, so a path without a Windows drive gains the one `resolve` gives it. */
 function aliasPathTargets(graph: Graph, prefix: string): string[] {
-  const paths = holdersOf(graph, resolve(prefix));
-  const comparablePrefix = comparable(normalize(prefix));
+  const resolved = resolve(prefix);
+  const paths = holdersOf(graph, resolved);
+  const comparablePrefix = comparable(
+    ENDS_IN_SEPARATOR.test(prefix) && !resolved.endsWith(sep)
+      ? `${resolved}${sep}`
+      : resolved,
+  );
   for (const { path, directories } of graph.holders) {
     const begun = directories.some((directory) =>
       comparable(directory).startsWith(comparablePrefix),

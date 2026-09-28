@@ -4380,5 +4380,40 @@
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "    } catch (error) {\n      this.#log.entry(\n        `${RECORD_NOT_REMOVED_REASON} (${parseRecord}): ${errorText(error)}`,\n      );\n    }",
     "new": "    } catch (error) {\n      throw error;\n    }"
+  },
+  {
+    "id": "D2259",
+    "defect": "The store reads each project's Vite root from the wrong field, so a report read back names its project where its root belongs.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    viteRoot: jsonText(value, \"viteRoot\"),",
+    "new": "    viteRoot: jsonText(value, \"projectName\"),"
+  },
+  {
+    "id": "D2260",
+    "defect": "The version 3 migration keeps each stored report without its Vite root, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    `${DROP_VITE_ROOTLESS_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D2261",
+    "defect": "A stored project with no Vite root reads back with the consumer root as a guessed one instead of being refused.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    viteRoot: jsonText(value, \"viteRoot\"),",
+    "new": "    viteRoot: typeof jsonField(value, \"viteRoot\") === \"string\" ? jsonText(value, \"viteRoot\") : \".\","
+  },
+  {
+    "id": "D2257",
+    "defect": "A project's Vite root is reported as Vite holds it, absolute, rather than relative to the consumer root like the project's other facts.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    viteRoot: rootRelative(project.vite.config.root),",
+    "new": "    viteRoot: project.vite.config.root,"
+  },
+  {
+    "id": "D2258",
+    "defect": "Every project reports the root project's Vite root, so a project that sets its own root reports the consumer root.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    viteRoot: rootRelative(project.vite.config.root),",
+    "new": "    viteRoot: rootRelative(session.instance.getRootProject().vite.config.root),"
   }
 ]
