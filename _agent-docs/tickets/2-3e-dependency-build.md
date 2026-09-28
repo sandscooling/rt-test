@@ -317,7 +317,7 @@ Review session: threadId 2f058f5b-3fa2-4e4b-b591-33088b28c59e
 
 Fixed in review: `selection-input.ts` `FAILED_MODULES_REASON` read "discovery could not collect these of its test modules:"; it now reads "discovery could not collect these test modules:". No test quotes the text.
 
-Undisposed tech debt, triaged at Step 9 against the commit:
+Tech debt, triaged at Step 9 against 224269c. Rulings by the orchestrator, 2026-09-28 09:09: T5 is closed with no change, since `selectInTree` is the seam for protection's not-reported path and `selectFromDiscovery` already covers the builder. F6, T1 to T4, T6 and T7 are queued as change request #30, to run after #26 lands, over the tree #26 leaves. #26 claimed `selection-input.ts` at 09:07. The Step 9 triage sent to the orchestrator at 09:08 is #30's brief. No open GitHub issue bears on any item. The items as found:
 
 - T1: `packages/daemon/test/daemon-harness.ts` `withNodeOptions` appends its argument to `NODE_OPTIONS`, which Node splits on spaces, and sets it for the whole worker while its body runs. Both callers pass a `pathToFileURL` href, which encodes spaces, so both are safe; a later caller passing a raw Windows path with a space would fail the child at startup and read as an executor crash.
 - T2: `packages/daemon/test/executor.test.ts` `withBuildHook` repeats `withNodeOptions`' save, set and restore-or-delete of an environment variable for `RT_FIXTURE_BUILD_HOOK`; one shared helper in `daemon-harness.ts` would hold the restore once.
