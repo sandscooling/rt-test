@@ -2363,6 +2363,67 @@ describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
     expect(outcome).toStrictEqual({ reconciled: true, unchanged: true });
   });
 
+  it("D2218: an edit to the file a linked rt-test.json points to is read by the time a later edit beside it is, without waiting for the periodic reconciliation", async () => {
+    const outcome = await inTempDir((root) => {
+      const target = join(root, "config/declaration.json");
+      const sentinel = join(root, "config/sentinel.ts");
+      writeTree(root, {
+        "config/declaration.json": declaring("docs/**"),
+        "config/sentinel.ts": "export const sentinel = 0;\n",
+      });
+      symlinkSync(target, join(root, DECLARATION_FILE), "file");
+      return tracking(root, async (tracked) => {
+        const original = tracked.fingerprint();
+        writeFileSync(sentinel, "export const sentinel = 1;\n");
+        const sentinelEdited = await movesFrom(tracked, original);
+        const withEditedSentinel = tracked.fingerprint();
+        writeFileSync(target, declaring("docs/**", "notes/**"));
+        // The sentinel lies beside the target so one watch reports both in order, and no fingerprint is computed while
+        // an event is unread, so once the restoration is read a target edit that counts as an input has moved it.
+        writeFileSync(sentinel, "export const sentinel = 0;\n");
+        const sentinelRestored = await movesFrom(tracked, withEditedSentinel);
+        return {
+          baselineRead: original !== undefined,
+          sentinelEdited,
+          sentinelRestored,
+          targetEditRead: tracked.fingerprint() !== original,
+        };
+      });
+    });
+    expect(outcome).toStrictEqual({
+      baselineRead: true,
+      sentinelEdited: true,
+      sentinelRestored: true,
+      targetEditRead: true,
+    });
+  });
+
+  it("D2219: an edit to a file under a directory named rt-test.json moves the fingerprint once the reconciliation it requests ends", async () => {
+    const outcome = await inTempDir((root) => {
+      const inner = join(root, DECLARATION_FILE, "inner.ts");
+      writeTree(root, {
+        [`${DECLARATION_FILE}/inner.ts`]: "export const inner = 0;\n",
+        "src/a.ts": "",
+      });
+      return tracking(root, async ({ tracker, fingerprint }) => {
+        const original = fingerprint();
+        const reconciled = await reconciledAfter(tracker, () =>
+          writeFileSync(inner, "export const inner = 1;\n"),
+        );
+        return {
+          baselineRead: original !== undefined,
+          reconciled,
+          innerEditRead: fingerprint() !== original,
+        };
+      });
+    });
+    expect(outcome).toStrictEqual({
+      baselineRead: true,
+      reconciled: true,
+      innerEditRead: true,
+    });
+  });
+
   it("D1995: an edit to a declared file leaves the fingerprint as it was", async () => {
     const unchanged = await inTempDir((root) => {
       writeTree(root, {

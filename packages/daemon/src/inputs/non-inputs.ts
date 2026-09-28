@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { lstatSync, type Stats } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
 import type {
   TestDiscovery,
@@ -29,6 +29,9 @@ const ANY_RUN = "*";
 const ANY_CHARACTER = "?";
 const FORBIDDEN_CHARACTERS = ["\\", "[", "]", "{", "}", "!"];
 const INVALID_SEGMENTS = ["", ".", ".."];
+const SYMBOLIC_LINK_PROBLEM =
+  "it is a symbolic link, and only a regular file at the consumer root is read";
+const NOT_A_FILE_PROBLEM = "it is not a regular file";
 const WILDCARD_CHARACTERS = [ANY_RUN, ANY_CHARACTER];
 
 export const NON_INPUTS_ABSENT = "absent";
@@ -175,15 +178,22 @@ export function testModuleFile(
   return posix.normalize(posix.join(workspacePath, modulePath));
 }
 
-/** True when the file exists; otherwise the declaration its absence, or the failure to tell, makes. */
+/**
+ * True when a regular file is there; otherwise the declaration its absence, another kind of entry, or the failure
+ * to tell, makes. A symbolic link is never followed, and a FIFO or device is never read, since its read can block.
+ */
 function presence(file: string): true | NonInputsDeclaration {
+  let stats: Stats | undefined;
   try {
-    return lstatSync(file, { throwIfNoEntry: false }) === undefined
-      ? { file: NON_INPUTS_FILE, state: NON_INPUTS_ABSENT }
-      : true;
+    stats = lstatSync(file, { throwIfNoEntry: false });
   } catch (error) {
     return unusable(`it cannot be read: ${errorText(error)}`);
   }
+  if (stats === undefined) {
+    return { file: NON_INPUTS_FILE, state: NON_INPUTS_ABSENT };
+  }
+  if (stats.isSymbolicLink()) return unusable(SYMBOLIC_LINK_PROBLEM);
+  return stats.isFile() ? true : unusable(NOT_A_FILE_PROBLEM);
 }
 
 function unusable(why: string): NonInputsDeclaration {

@@ -143,7 +143,7 @@ export class InputTracker implements TrackedInputs {
   constructor({ consumerRoot, exclusions, log }: InputTrackerOptions) {
     this.#root = realpathSync.native(consumerRoot);
     this.#declarationFile = join(this.#root, NON_INPUTS_FILE);
-    this.#exclusions = [...exclusions, this.#declarationFile];
+    this.#exclusions = exclusions;
     this.#log = log;
     this.#declared = new DeclaredNonInputs(this.#root, log);
     this.#state = new InputState(this.#root);
