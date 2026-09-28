@@ -1,8 +1,21 @@
-import { fork, spawn, spawnSync, type ChildProcess } from "node:child_process";
+import {
+  fork,
+  spawn,
+  spawnSync,
+  type ChildProcess,
+  type StdioOptions,
+} from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  crashError,
+  listedModules,
+  syncChildEnd,
+  WatchedChild,
+  type ChildEnd,
+} from "../../../test/scripts/child-end.js";
 import {
   daemonStatus,
   queryPathStatus,
@@ -68,6 +81,17 @@ const HOLD_LIFETIME_MS = EXECUTOR_BOUND_MS + LOADED_MARGIN_MS;
 /** The marker the fixture writes once a hold's lifetime has run out. */
 const HELD_OUT = "held-out";
 const NEXT_PROTOCOL_VERSION = 2;
+const STARTER = "the starter";
+const FORKED_DAEMON = "the forked daemon";
+const EXECUTOR = "the executor";
+/** A forked child's stderr is kept, so a child that crashes names its cause. */
+const FORKED_STDIO: StdioOptions = ["ignore", "ignore", "pipe", "ipc"];
+/** The line Node ends its report of an uncaught exception or a failed startup with. */
+const FATAL_ERROR_TRAILER = /^Node\.js v\d+\.\d+\.\d+/m;
+/** How the executor exits once it has ended its own tree: `process.exit()` on Linux, `taskkill /F` on Windows. */
+const OWN_TREE_EXIT_CODES: ReadonlySet<number> = new Set([0, 1]);
+/** How a daemon exits once it has abandoned a start its starter never accepted. */
+const ABANDONED_EXIT_CODES: ReadonlySet<number> = new Set([1]);
 /** A module of the Vitest package, as opposed to this package's own `src/vitest/`. */
 const VITEST_PACKAGE_URL =
   /\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?vitest\//;
@@ -188,6 +212,60 @@ function answerAs(pid: number, proving: Proving) {
     };
 }
 
+/** The identity a starter that exited cleanly printed; any other end of the starter is a crash. */
+function starterIdentity(end: ChildEnd): DaemonIdentity {
+  if (end.code === 0 && end.signal === null) {
+    try {
+      const identity = JSON.parse(end.stdout) as DaemonIdentity | null;
+      if (typeof identity?.pid === "number") return identity;
+    } catch {
+      // Stdout that is not JSON is reported with the crash below.
+    }
+  }
+  throw crashError(STARTER, end);
+}
+
+/**
+ * Whether `end` is an exit with one of `codes`, by no signal and with no report of an uncaught error on stderr. An
+ * uncaught error exits with code 1 too, so only that report tells it from a deliberate exit 1.
+ */
+function exitedCleanWith(end: ChildEnd, codes: ReadonlySet<number>): boolean {
+  return (
+    end.signal === null &&
+    end.code !== null &&
+    codes.has(end.code) &&
+    !FATAL_ERROR_TRAILER.test(end.stderr)
+  );
+}
+
+/** Throws unless the executor ended by ending its own tree. */
+function endedItsOwnTree(end: ChildEnd): void {
+  if (!exitedCleanWith(end, OWN_TREE_EXIT_CODES)) {
+    throw crashError(EXECUTOR, end);
+  }
+}
+
+/** Whether the daemon has exited as an abandoned start does; any other exit is a crash. */
+async function exitedAbandoned(watched: WatchedChild): Promise<boolean> {
+  if (!(await eventually(() => watched.settled))) return false;
+  const end = await watched.end;
+  if (exitedCleanWith(end, ABANDONED_EXIT_CODES)) return true;
+  throw crashError(FORKED_DAEMON, end);
+}
+
+/** A forked daemon's first startup report; a daemon that ends before sending one has crashed. */
+function firstReport(
+  daemon: ChildProcess,
+  watched: WatchedChild,
+): Promise<unknown> {
+  return Promise.race([
+    new Promise<unknown>((resolve) => daemon.once("message", resolve)),
+    watched.end.then((end) => {
+      throw crashError(FORKED_DAEMON, end);
+    }),
+  ]);
+}
+
 /** Whether the daemon's process has exited and its endpoint accepts no connection. */
 async function gone(identity: DaemonIdentity): Promise<boolean> {
   if (isRunning(identity.pid)) return false;
@@ -234,14 +312,16 @@ describe("a client with no daemon to talk to", () => {
       ],
       { encoding: "utf8", windowsHide: true },
     );
-    const modules = JSON.parse(listed.stdout || "[]") as string[];
+    const label = "the process that loads the client";
+    const end = syncChildEnd(label, listed);
+    if (end.code !== 0 || end.signal !== null) throw crashError(label, end);
+    const modules = listedModules(label, end);
     expect({
-      status: listed.status,
       clientLoaded: modules.includes(pathToFileURL(CLIENT).href),
       forbidden: modules.filter(
         (url) => url === "node:sqlite" || VITEST_PACKAGE_URL.test(url),
       ),
-    }).toStrictEqual({ status: 0, clientLoaded: true, forbidden: [] });
+    }).toStrictEqual({ clientLoaded: true, forbidden: [] });
   });
 
   it(
@@ -405,17 +485,14 @@ describe("starting a daemon", () => {
             CLIENT,
             JSON.stringify({ trusted: true, start: confirmNothing(root) }),
           ],
-          { stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+          { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
         );
-        let printed = "";
-        starter.stdout.on("data", (chunk: Buffer) => {
-          printed += chunk.toString("utf8");
-        });
+        const watched = new WatchedChild(starter, STARTER);
         try {
-          const exited = await eventually(() => starter.exitCode !== null);
-          const identity = JSON.parse(
-            printed || "null",
-          ) as DaemonIdentity | null;
+          const exited = await eventually(() => watched.settled);
+          const identity = exited
+            ? starterIdentity(await watched.end)
+            : (JSON.parse(watched.stdout || "null") as DaemonIdentity | null);
           if (identity !== null) pids.add(identity.pid);
           const status = await settled(daemonStatus(root));
           return {
@@ -439,14 +516,14 @@ describe("starting a daemon", () => {
         const daemon = fork(entry.file, [root, join(root, "state")], {
           cwd: root,
           execArgv: [...entry.execArgv],
-          stdio: ["ignore", "ignore", "ignore", "ipc"],
+          stdio: FORKED_STDIO,
           windowsHide: true,
         });
         try {
-          const answered = new Promise<unknown>((resolve) => {
-            daemon.once("message", resolve);
-            daemon.once("exit", () => resolve("exited without a report"));
-          });
+          const answered = firstReport(
+            daemon,
+            new WatchedChild(daemon, FORKED_DAEMON),
+          );
           daemon.send({ type: "start" });
           return await answered;
         } finally {
@@ -519,7 +596,11 @@ interface DaemonFiles {
 async function withServingFork<T>(
   root: string,
   pids: Set<number>,
-  body: (daemon: ChildProcess, files: DaemonFiles) => Promise<T>,
+  body: (
+    daemon: ChildProcess,
+    files: DaemonFiles,
+    watched: WatchedChild,
+  ) => Promise<T>,
 ): Promise<T | { report: unknown }> {
   const stateDirectory = join(root, ".rt-test");
   mkdirSync(stateDirectory, { recursive: true });
@@ -527,34 +608,30 @@ async function withServingFork<T>(
   const daemon = fork(entry.file, [root, stateDirectory], {
     cwd: root,
     execArgv: [...entry.execArgv],
-    stdio: ["ignore", "ignore", "ignore", "ipc"],
+    stdio: FORKED_STDIO,
     windowsHide: true,
   });
   if (daemon.pid !== undefined) pids.add(daemon.pid);
+  const watched = new WatchedChild(daemon, FORKED_DAEMON);
   try {
-    const reported = new Promise<unknown>((resolve) => {
-      daemon.once("message", resolve);
-      daemon.once("exit", () => resolve("exited without a report"));
-    });
+    const reported = firstReport(daemon, watched);
     daemon.send({ type: "start", start: confirmEvery(root) });
     const report = await reported;
     if ((report as { type?: unknown } | null)?.type !== "serving") {
       return { report };
     }
     const worktree = consumerIdentity(root).worktreeIdentity;
-    return await body(daemon, {
-      logFile: daemonLogFile(stateDirectory, worktree),
-      lockFile: storeLockOf(stateDirectory, worktree),
-    });
+    return await body(
+      daemon,
+      {
+        logFile: daemonLogFile(stateDirectory, worktree),
+        lockFile: storeLockOf(stateDirectory, worktree),
+      },
+      watched,
+    );
   } finally {
     if (daemon.connected) daemon.disconnect();
   }
-}
-
-function exitedOf(daemon: ChildProcess): Promise<boolean> {
-  return eventually(
-    () => daemon.exitCode !== null || daemon.signalCode !== null,
-  );
 }
 
 /** What a daemon whose start was never accepted leaves: it has exited, ran nothing and holds no lock. */
@@ -580,9 +657,9 @@ describe("a start its starter never accepted", () => {
     "D1764: a daemon whose startup channel closes after its serving report, with no acceptance, exits having run nothing and holding no lock",
     async () => {
       const outcome = await withDaemonConsumer((root, pids) =>
-        withServingFork(root, pids, async (daemon, files) => {
+        withServingFork(root, pids, async (daemon, files, watched) => {
           daemon.disconnect();
-          return abandonment(await exitedOf(daemon), files);
+          return abandonment(await exitedAbandoned(watched), files);
         }),
       );
       expect(outcome).toStrictEqual(ABANDONED);
@@ -594,9 +671,9 @@ describe("a start its starter never accepted", () => {
     "D1765: a daemon sent anything but the acceptance after its serving report exits having run nothing and holding no lock",
     async () => {
       const outcome = await withDaemonConsumer((root, pids) =>
-        withServingFork(root, pids, async (daemon, files) => {
+        withServingFork(root, pids, async (daemon, files, watched) => {
           daemon.send({ type: "not-begin" });
-          return abandonment(await exitedOf(daemon), files);
+          return abandonment(await exitedAbandoned(watched), files);
         }),
       );
       expect(outcome).toStrictEqual(ABANDONED);
@@ -865,9 +942,10 @@ describe("the executor process", () => {
         const executor = fork(entry.file, [], {
           cwd: root,
           execArgv: [...entry.execArgv],
-          stdio: ["ignore", "ignore", "ignore", "ipc"],
+          stdio: FORKED_STDIO,
           windowsHide: true,
         });
+        const watched = new WatchedChild(executor, EXECUTOR);
         try {
           executor.send({
             type: "run",
@@ -877,13 +955,18 @@ describe("the executor process", () => {
             },
             configFile: `${WORKSPACE_A}/vitest.config.mjs`,
           });
-          await atHoldPoint(root, "holding");
+          const holding = () => existsSync(fixtureFile(root, "holding"));
+          await until(() => watched.settled || holding());
+          const endedBeforeDisconnect = watched.settled || !executor.connected;
+          if (endedBeforeDisconnect) {
+            throw crashError(EXECUTOR, await watched.end);
+          }
           executor.disconnect();
-          const exited = () =>
-            executor.exitCode !== null || executor.signalCode !== null;
           const heldOut = () => existsSync(fixtureFile(root, HELD_OUT));
-          await until(() => exited() || heldOut());
-          return { exited: exited(), heldOut: heldOut() };
+          await until(() => watched.settled || heldOut());
+          const held = heldOut();
+          if (!held) endedItsOwnTree(await watched.end);
+          return { exited: watched.settled, heldOut: held };
         } finally {
           executor.kill("SIGKILL");
         }

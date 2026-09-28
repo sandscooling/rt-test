@@ -3382,10 +3382,10 @@
   },
   {
     "id": "D1994",
-    "defect": "rt-test.json is not on the tracker's exclusions, so it is itself an input and a reformatting edit that declares the same patterns changes every fingerprint.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    this.#exclusions = [...exclusions, this.#declarationFile];",
-    "new": "    this.#exclusions = [...exclusions];"
+    "defect": "rt-test.json is not on the input filter's exclusions, so it is itself an input and a reformatting edit that declares the same patterns changes every fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "      this.#isDeclarationFile(path) ||\n",
+    "new": ""
   },
   {
     "id": "D1995",
@@ -4240,5 +4240,54 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    const changed = unwatched ?? released;\n",
     "new": "    const changed = unwatched;\n"
+  },
+  {
+    "id": "D2211",
+    "defect": "The selection policy version is left out of the fingerprint's shared parts, so raising it leaves every stored result's fingerprint unchanged and results stored under the old policy read current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    selectionPolicyVersion: SELECTION_POLICY_VERSION,\n",
+    "new": ""
+  },
+  {
+    "id": "D2214",
+    "defect": "A symbolically linked rt-test.json is read through the link, so the target's declaration applies although an edit to the target is seen only at the next periodic reconciliation.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  if (stats.isSymbolicLink()) return unusable(SYMBOLIC_LINK_PROBLEM);",
+    "new": "  if (stats.isSymbolicLink()) return true;"
+  },
+  {
+    "id": "D2215",
+    "defect": "The input filter resolves rt-test.json through a link, so a linked rt-test.json is not excluded and is itself an input.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    this.#declarationFile = join(root, NON_INPUTS_FILE);",
+    "new": "    this.#declarationFile = canonicalPath(join(root, NON_INPUTS_FILE));"
+  },
+  {
+    "id": "D2216",
+    "defect": "The input filter resolves rt-test.json through a link, so the file it points to is excluded and an edit to that file stales nothing.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    this.#declarationFile = join(root, NON_INPUTS_FILE);",
+    "new": "    this.#declarationFile = canonicalPath(join(root, NON_INPUTS_FILE));"
+  },
+  {
+    "id": "D2217",
+    "defect": "An rt-test.json that is not a regular file is opened for reading, so a FIFO there blocks the reconciliation and a directory is refused only for the read error rather than for what it is.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  return stats.isFile() ? true : unusable(NOT_A_FILE_PROBLEM);",
+    "new": "  return true;"
+  },
+  {
+    "id": "D2218",
+    "defect": "The input filter resolves rt-test.json through a link, so an edit to the file it points to raises an event only on an excluded path and results read current until the periodic reconciliation.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    this.#declarationFile = join(root, NON_INPUTS_FILE);",
+    "new": "    this.#declarationFile = canonicalPath(join(root, NON_INPUTS_FILE));"
+  },
+  {
+    "id": "D2219",
+    "defect": "The input filter excludes rt-test.json at the root even when it is a directory, so the walk never enters it, a file under it is not an input, and its edit moves no fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "      lstatSync(path, { throwIfNoEntry: false })?.isDirectory() !== true",
+    "new": "      true"
   }
 ]

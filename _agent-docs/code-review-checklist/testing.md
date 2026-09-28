@@ -66,6 +66,8 @@ C91. **Price the full worst case in a ceiling assertion**: A `worstCase <= LIMIT
 
 C92. **Test type-level guards with a failing fixture**: A type-level assertion ships with an `@ts-expect-error` line proving it rejects the case it exists to catch, checked by `tsc`.
 
+C161. **Classify a child's end by its positive signature**: A test that tells the end of a child process it launched apart from a crash checks the exit code and signal that end produces on each platform, and reads a crash marker on stderr only in addition, never alone, since a signal death, an abort or an out-of-memory exit prints no marker.
+
 ## Inputs, fixtures and mocks
 
 C93. **Call the production function**: A test drives the real function, script or CLI entry, never a reimplementation of its logic inside the test.

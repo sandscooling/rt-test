@@ -1382,22 +1382,22 @@
     "id": "D2012",
     "defect": "A change to rt-test.json raises no trigger of its own, so the results a changed declaration stales are not reselected by an explained fallback.",
     "file": "packages/daemon/src/selection/select-tests.ts",
-    "old": "  if (path === NON_INPUTS_FILE) kinds.push(TRIGGER.nonInputsFile);\n",
+    "old": "  if (namesDeclarationFile(path)) kinds.push(TRIGGER.nonInputsFile);\n",
     "new": ""
   },
   {
     "id": "D2013",
     "defect": "A declared pattern can make rt-test.json itself a declared non-input, so a change to it selects nothing.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "      path === NON_INPUTS_FILE ||\n",
+    "old": "      namesDeclarationFile(path) ||\n",
     "new": ""
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 3, so results stored before setup files and test file patterns were protected are not staled once.",
+    "defect": "The selection policy version stays at 4, so a selection reports the version from before aliases widened and rt-test.json was recognized as the host compares names.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 4;",
-    "new": "export const SELECTION_POLICY_VERSION = 3;"
+    "old": "export const SELECTION_POLICY_VERSION = 5;",
+    "new": "export const SELECTION_POLICY_VERSION = 4;"
   },
   {
     "id": "D2045",
@@ -1440,5 +1440,145 @@
     "file": "packages/daemon/src/inputs/protection.ts",
     "old": "    if (!entry.selectionFacts.reported) {\n      return {\n        applies: false,",
     "new": "    if (!entry.selectionFacts.reported) {\n      continue;\n      return {\n        applies: false,"
+  },
+  {
+    "id": "D2192",
+    "defect": "An alias with a customResolver is analyzed by its replacement's prefix, so a change to a workspace the resolver can pick selects nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (alias.hasCustomResolver) {\n    return \"has a customResolver, which picks the module after the replacement\";\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2193",
+    "defect": "An alias whose string find is empty, the form Vite makes of a / find with a /-ending replacement, is analyzed by its replacement's prefix, so a change to another workspace selects nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (alias.find === EMPTY_FIND) {\n    return \"has an empty find, which rewrites every import that begins with /\";\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2194",
+    "defect": "An alias whose string find is / is analyzed by its replacement's prefix, so a change to another workspace selects nothing.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (alias.find === ROOT_FIND) {\n    return \"maps /, which Vite warns against, and rewrites / and every import that begins with //\";\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2195",
+    "defect": "Every RegExp alias widens, as Vite's own client aliases would, so a workspace depends on every package workspace on every change.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (alias.findKind !== STRING_FIND) return undefined;",
+    "new": "  if (alias.findKind !== STRING_FIND) return \"has a RegExp find\";"
+  },
+  {
+    "id": "D2196",
+    "defect": "A customResolver widens only a string find, so a RegExp alias with a customResolver is analyzed by its replacement's prefix.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (alias.hasCustomResolver) {",
+    "new": "  if (alias.hasCustomResolver && alias.findKind === STRING_FIND) {"
+  },
+  {
+    "id": "D2197",
+    "defect": "Every string find beginning with / is taken as the / find, so an ordinary alias such as /src widens instead of reaching by its prefix.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (alias.find === ROOT_FIND) {",
+    "new": "  if (alias.find.startsWith(ROOT_FIND)) {"
+  },
+  {
+    "id": "D2198",
+    "defect": "A customResolver alias's widening does not say that its customResolver is why it widens.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    return \"has a customResolver, which picks the module after the replacement\";",
+    "new": "    return \"\";"
+  },
+  {
+    "id": "D2199",
+    "defect": "An empty-find alias's widening does not say that its empty find is why it widens.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    return \"has an empty find, which rewrites every import that begins with /\";",
+    "new": "    return \"\";"
+  },
+  {
+    "id": "D2200",
+    "defect": "A / find alias's widening does not say that it maps / as why it widens.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    return \"maps /, which Vite warns against, and rewrites / and every import that begins with //\";",
+    "new": "    return \"\";"
+  },
+  {
+    "id": "D2201",
+    "defect": "The widening of a customResolver, empty or / find alias does not quote the alias, so a reader cannot tell which config alias widened.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "      `${detail} ${unbounded}`,",
+    "new": "      unbounded,"
+  },
+  {
+    "id": "D2202",
+    "defect": "An alias edge quotes a RegExp find as a JSON string, so it reads like a string find of the same text.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  return alias.findKind === REGEXP_FIND\n",
+    "new": "  return alias.findKind !== alias.findKind\n"
+  },
+  {
+    "id": "D2203",
+    "defect": "A RegExp find is quoted without its flags, so /x/i and /x/ read alike though they match differently.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "    ? `/${alias.find}/${alias.flags}`",
+    "new": "    ? `/${alias.find}/`"
+  },
+  {
+    "id": "D2204",
+    "defect": "A string find is quoted as a regular expression literal, so it reads like a RegExp find of the same text.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  return alias.findKind === REGEXP_FIND\n",
+    "new": "  return alias.findKind === alias.findKind\n"
+  },
+  {
+    "id": "D2205",
+    "defect": "The widening for a replacement that is neither an absolute path nor a bare package name quotes a RegExp find as a JSON string rather than through the shared quote.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "      `${detail} ${resolution.cause}`,",
+    "new": "      `config alias ${JSON.stringify(alias.find)} to ${JSON.stringify(alias.replacement)} ${resolution.cause}`,"
+  },
+  {
+    "id": "D2206",
+    "defect": "Selection compares a changed path with rt-test.json exactly, so on Windows a change to RT-Test.json raises no non-inputs-file fallback.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "  if (namesDeclarationFile(path)) kinds.push(TRIGGER.nonInputsFile);",
+    "new": "  if (path === NON_INPUTS_FILE) kinds.push(TRIGGER.nonInputsFile);"
+  },
+  {
+    "id": "D2207",
+    "defect": "The declared-non-input decision exempts rt-test.json only by its exact name, so on Windows a declared pattern makes RT-Test.json a declared non-input whose change selects nothing.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "      namesDeclarationFile(path) ||\n",
+    "new": "      path === NON_INPUTS_FILE ||\n"
+  },
+  {
+    "id": "D2208",
+    "defect": "Only rt-test.json itself is recognized as the declaration file, so a changed path under it raises no non-inputs-file fallback, unlike the tracker.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  return liesInsideOnHost(\n",
+    "new": "  return !path.includes(POSIX_SEPARATOR) && liesInsideOnHost(\n"
+  },
+  {
+    "id": "D2209",
+    "defect": "The declaration file's name is case-folded on every host, so on Linux RT-Test.json is exempt from the declared patterns and raises the fallback instead of being an ordinary path.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    `${POSIX_SEPARATOR}${path}`,\n",
+    "new": "    `${POSIX_SEPARATOR}${path.toLowerCase()}`,\n"
+  },
+  {
+    "id": "D2210",
+    "defect": "The declaration file is recognized by its base name, so an rt-test.json inside a workspace raises the project-wide fallback instead of selecting its own workspace.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    `${POSIX_SEPARATOR}${path}`,\n",
+    "new": "    `${POSIX_SEPARATOR}${posix.basename(path)}`,\n"
+  },
+  {
+    "id": "D2212",
+    "defect": "The widening of a customResolver, empty or / find alias quotes a RegExp find as a JSON string, so it reads like a string find of the same text.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "      `${detail} ${unbounded}`,",
+    "new": "      `config alias ${JSON.stringify(alias.find)} to ${JSON.stringify(alias.replacement)} ${unbounded}`,"
   }
 ]

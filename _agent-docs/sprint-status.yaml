@@ -17,7 +17,7 @@ sprint-2: in-progress
 2-3-access-time-events: done
 2-3b-selection-facts: done
 2-3c-protect-selection-inputs: done
-2-3d-alias-widening: ready-for-dev
+2-3d-alias-widening: done
 2-3e-narrow-inputs: backlog
 2-3f-schedule-runs: backlog
 2-4-wait-for-files: backlog

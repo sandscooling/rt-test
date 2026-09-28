@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import {
   basename,
   dirname,
@@ -25,14 +25,16 @@ import {
   POSIX_SEPARATOR,
   relativePosixPath,
 } from "../vitest/find-workspaces.js";
-import type { NonInputMatch } from "./non-inputs.js";
+import { NON_INPUTS_FILE, type NonInputMatch } from "./non-inputs.js";
 
 const UNREAD_IGNORED_PREFIX =
   "git's ignored paths could not be read, so every file there counts as an input";
 
 /**
  * Decides which paths under the consumer root are inputs. A path is excluded when a segment of it is a skipped
- * directory name, when it is or lies under one of the exclusions, or when git ignores it or a directory above it.
+ * directory name, when it is or lies under one of the exclusions, when it is `rt-test.json` at the root, or when git
+ * ignores it or a directory above it. `rt-test.json` is excluded as the entry itself, never a link's target, and never
+ * when it is a directory.
  * A file is also not an input when `declares` names the pattern that makes it a declared non-input. One filter
  * serves one reconciliation: git's listing is read when it opens, and a path created later is asked about through
  * `check`.
@@ -40,6 +42,7 @@ const UNREAD_IGNORED_PREFIX =
 export class InputFilter {
   readonly #root: string;
   readonly #exclusions: readonly string[];
+  readonly #declarationFile: string;
   readonly #ignored = new Set<string>();
   /** Directories git listed but does not itself ignore, so what lies under them must be asked about. */
   readonly #unconfirmed = new Set<string>();
@@ -57,12 +60,13 @@ export class InputFilter {
   ) {
     this.#root = root;
     this.#exclusions = exclusions.map(canonicalPath);
+    this.#declarationFile = join(root, NON_INPUTS_FILE);
     this.#declared = declared;
   }
 
   /**
-   * `root` is the consumer root's real path; `exclusions` are absolute paths, each excluded with all it holds;
-   * `declared` names the consumer's declared non-inputs, as it stands whenever it is asked.
+   * `root` is the consumer root's real path; `exclusions` are absolute paths, each resolved through any link and
+   * excluded with all it holds; `declared` names the consumer's declared non-inputs, as it stands whenever it is asked.
    */
   static async open(
     root: string,
@@ -106,10 +110,21 @@ export class InputFilter {
     ) {
       return true;
     }
-    if (this.#exclusions.some((excluded) => liesInsideOnHost(excluded, path))) {
+    if (
+      this.#isDeclarationFile(path) ||
+      this.#exclusions.some((excluded) => liesInsideOnHost(excluded, path))
+    ) {
       return true;
     }
     return this.#isIgnored(path);
+  }
+
+  /** `rt-test.json` at the root, unless a directory stands there, which declares nothing and is walked for inputs. */
+  #isDeclarationFile(path: string): boolean {
+    return (
+      namesSameEntryOnHost(this.#declarationFile, path) &&
+      lstatSync(path, { throwIfNoEntry: false })?.isDirectory() !== true
+    );
   }
 
   /**
@@ -246,11 +261,20 @@ function canonicalPath(path: string): string {
  * Windows. The path module is chosen at call time, so the exclusions and the `rt-test.json` trigger agree.
  */
 export function liesInsideOnHost(directory: string, path: string): boolean {
-  const host = process.platform === WINDOWS ? win32 : posix;
+  const host = hostPath();
   const fromDirectory = host.relative(directory, path);
   return !(
     climbsOut(fromDirectory, host.sep) || host.isAbsolute(fromDirectory)
   );
+}
+
+/** Whether `path` names `entry` itself, compared as `liesInsideOnHost` compares. */
+function namesSameEntryOnHost(entry: string, path: string): boolean {
+  return hostPath().relative(entry, path) === "";
+}
+
+function hostPath(): typeof posix {
+  return process.platform === WINDOWS ? win32 : posix;
 }
 
 /** The absolute path of an input path, which is root-relative or, on another Windows drive, already absolute. */

@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { lstatSync, type Stats } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
 import type {
   TestDiscovery,
@@ -16,6 +16,7 @@ import {
   VITE_CONFIG_FILES,
   VITEST_CONFIG_FILES,
 } from "../vitest/find-workspaces.js";
+import { liesInsideOnHost } from "./input-filter.js";
 import type { Protection } from "./protection.js";
 
 /** The consumer's RT Test settings file, at the consumer root and committed with the project. */
@@ -28,6 +29,9 @@ const ANY_RUN = "*";
 const ANY_CHARACTER = "?";
 const FORBIDDEN_CHARACTERS = ["\\", "[", "]", "{", "}", "!"];
 const INVALID_SEGMENTS = ["", ".", ".."];
+const SYMBOLIC_LINK_PROBLEM =
+  "it is a symbolic link, and only a regular file at the consumer root is read";
+const NOT_A_FILE_PROBLEM = "it is not a regular file";
 const WILDCARD_CHARACTERS = [ANY_RUN, ANY_CHARACTER];
 
 export const NON_INPUTS_ABSENT = "absent";
@@ -93,9 +97,21 @@ export function unusableReason(
 }
 
 /**
+ * Whether a root-relative, `/`-separated path is `rt-test.json` or lies under it, its name compared as the host
+ * compares names. Both are anchored at `/`, so on POSIX the comparison never reads the working directory, which may
+ * no longer exist, and on Windows both sides take the same drive from it.
+ */
+export function namesDeclarationFile(path: string): boolean {
+  return liesInsideOnHost(
+    `${POSIX_SEPARATOR}${NON_INPUTS_FILE}`,
+    `${POSIX_SEPARATOR}${path}`,
+  );
+}
+
+/**
  * Decides declared non-inputs for one declaration and one protection. No pattern applies while the protection says
- * none does. `rt-test.json` itself, every manifest, workspace list, lockfile, Vitest or Vite config, tsconfig or
- * jsconfig file, and each file the protection protects is never one.
+ * none does. `rt-test.json` itself or a path under it, every manifest, workspace list, lockfile, Vitest or Vite
+ * config, tsconfig or jsconfig file, and each file the protection protects is never one.
  */
 export function declaredNonInputs(
   declaration: NonInputsDeclaration,
@@ -114,7 +130,7 @@ export function declaredNonInputs(
   }));
   return (path) => {
     if (
-      path === NON_INPUTS_FILE ||
+      namesDeclarationFile(path) ||
       TYPESCRIPT_CONFIG_NAME.test(posix.basename(path)) ||
       PROTECTED_NAMES.has(posix.basename(path))
     ) {
@@ -162,15 +178,22 @@ export function testModuleFile(
   return posix.normalize(posix.join(workspacePath, modulePath));
 }
 
-/** True when the file exists; otherwise the declaration its absence, or the failure to tell, makes. */
+/**
+ * True when a regular file is there; otherwise the declaration its absence, another kind of entry, or the failure
+ * to tell, makes. A symbolic link is never followed, and a FIFO or device is never read, since its read can block.
+ */
 function presence(file: string): true | NonInputsDeclaration {
+  let stats: Stats | undefined;
   try {
-    return lstatSync(file, { throwIfNoEntry: false }) === undefined
-      ? { file: NON_INPUTS_FILE, state: NON_INPUTS_ABSENT }
-      : true;
+    stats = lstatSync(file, { throwIfNoEntry: false });
   } catch (error) {
     return unusable(`it cannot be read: ${errorText(error)}`);
   }
+  if (stats === undefined) {
+    return { file: NON_INPUTS_FILE, state: NON_INPUTS_ABSENT };
+  }
+  if (stats.isSymbolicLink()) return unusable(SYMBOLIC_LINK_PROBLEM);
+  return stats.isFile() ? true : unusable(NOT_A_FILE_PROBLEM);
 }
 
 function unusable(why: string): NonInputsDeclaration {

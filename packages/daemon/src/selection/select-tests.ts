@@ -9,6 +9,7 @@ import {
 } from "../vitest/find-workspaces.js";
 import {
   declaredNonInputs,
+  namesDeclarationFile,
   NON_INPUTS_FILE,
   type NonInputMatch,
 } from "../inputs/non-inputs.js";
@@ -264,7 +265,7 @@ function projectWideKinds(
   const kinds: TriggerKind[] = [];
   if (LOCKFILES.includes(name)) kinds.push(TRIGGER.lockfile);
   if (name === PACKAGE_JSON) kinds.push(TRIGGER.manifest);
-  if (path === NON_INPUTS_FILE) kinds.push(TRIGGER.nonInputsFile);
+  if (namesDeclarationFile(path)) kinds.push(TRIGGER.nonInputsFile);
   if (owner === ROOT_PATH && dependencies.packageWorkspaces.length > 1) {
     kinds.push(TRIGGER.rootOwnedPath);
   }
