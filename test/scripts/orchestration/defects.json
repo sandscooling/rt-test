@@ -775,5 +775,677 @@
     "file": "scripts/lib/orchestration/context-gauge.mjs",
     "old": "return block.content.map((part) => part.text ?? \"\").join(\"\");",
     "new": "return \"\";"
+  },
+  {
+    "id": "D2273",
+    "defect": "A waiter behind the queue head takes a free lease, so runs no longer take turns in arrival order.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (position !== 0 || holder) {",
+    "new": "if (position === -1 || holder) {"
+  },
+  {
+    "id": "D2274",
+    "defect": "The queue head replaces a live lease, so two heavy runs overlap.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "const holder = current && !isStale(current, now, running) ? current : null;",
+    "new": "const holder = null;"
+  },
+  {
+    "id": "D2275",
+    "defect": "A lease whose heartbeat is exactly 60 s old is reclaimed, one beat before it has lapsed.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "now - record.heartbeatAt > STALE_AFTER_MS",
+    "new": "now - record.heartbeatAt >= STALE_AFTER_MS"
+  },
+  {
+    "id": "D2276",
+    "defect": "A lease whose holder process is gone stays held until its heartbeat lapses, so a crashed wrapper blocks every lane for a minute.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "return !running(record.pid) ||",
+    "new": "return false ||"
+  },
+  {
+    "id": "D2277",
+    "defect": "A lease whose wrapper was killed is reclaimed while the run it started still loads the machine.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (record.childPid !== undefined && running(record.childPid)) return false;",
+    "new": ""
+  },
+  {
+    "id": "D2278",
+    "defect": "A lease operation runs without taking the lock, so it can replace or remove the lease while another process is mid-check.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "      mkdirSync(lock);\n      break;",
+    "new": "      break;"
+  },
+  {
+    "id": "D2279",
+    "defect": "A lock left by a process that died holding it is never broken, so every later lease operation waits forever.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (Date.now() - heldSince <= LOCK_BROKEN_AFTER_MS) return;",
+    "new": "return;"
+  },
+  {
+    "id": "D2280",
+    "defect": "A waiting run reports its queue position counted from 0, so the head reads as position 0.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "position ${turn.position + 1}",
+    "new": "position ${turn.position}"
+  },
+  {
+    "id": "D2281",
+    "defect": "The lease records the worktree with its trailing slash, so it never matches the worktree path other tools compare.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": ".replace(TRAILING_SLASHES, \"\")",
+    "new": ""
+  },
+  {
+    "id": "D2282",
+    "defect": "The lease never records the run's pid, so a killed wrapper's still-running run loses the lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "JSON.stringify({ ...storedFields(current), childPid }),",
+    "new": "JSON.stringify(storedFields(current)),"
+  },
+  {
+    "id": "D2283",
+    "defect": "A run that reclaims a stale lease says nothing, so the dead holder it displaced goes unreported.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (turn.reclaimed) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2284",
+    "defect": "The holder never renews its heartbeat mid-run, so any run over 60 s is reclaimed while it still runs.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (readLease(ctx.dir)?.pid === pid) beat(file, ctx.now());",
+    "new": "if (readLease(ctx.dir)?.pid === pid) void file;"
+  },
+  {
+    "id": "D2285",
+    "defect": "The run's exit code is flattened to 1, so a caller cannot tell a failing suite from any other failure.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (code !== null) return code;",
+    "new": "if (code !== null) return code === 0 ? 0 : 1;"
+  },
+  {
+    "id": "D2286",
+    "defect": "A program that cannot start exits 1, like a failing run, instead of 127.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "resolveCode(EXIT.NOT_STARTED);",
+    "new": "resolveCode(EXIT.FAILED);"
+  },
+  {
+    "id": "D2294",
+    "defect": "A Windows .cmd shim that cannot start gets a bare ENOENT with no bun x remedy.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "ctx.platform === \"win32\" && SHIM_START_ERRORS.has(error.code)",
+    "new": "false"
+  },
+  {
+    "id": "D2295",
+    "defect": "On Windows the run's temp folder is passed through TMPDIR, which Node there ignores, so the run writes to the shared temp directory.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (platform === \"win32\") {",
+    "new": "if (platform === \"windows\") {"
+  },
+  {
+    "id": "D2296",
+    "defect": "Off Windows the run's temp folder sits under the system temp directory, which WSL clears on its next boot.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "const dir = join(home, RUNS_FOLDER_HOME, name);",
+    "new": "const dir = join(tmp, RUNS_FOLDER_HOME, name);"
+  },
+  {
+    "id": "D2297",
+    "defect": "A passing run's temp folder is left behind, so every run leaks a folder.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "rmSync(dir, { recursive: true, force: true });",
+    "new": "void dir;"
+  },
+  {
+    "id": "D2298",
+    "defect": "A failing run's temp folder is removed, destroying the evidence of the failure.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (code !== EXIT.OK) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2299",
+    "defect": "A leading NAME=value word is run as the program instead of setting the run's environment.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "const at = command.findIndex((word) => !ASSIGNMENT.test(word));",
+    "new": "const at = 0;"
+  },
+  {
+    "id": "D2300",
+    "defect": "A signal to the wrapper is not passed on, so the run keeps loading the machine after its wrapper is told to stop.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "const forward = (signal) => child.kill(signal);",
+    "new": "const forward = () => undefined;"
+  },
+  {
+    "id": "D2301",
+    "defect": "The wrapper releases the lease as soon as it is signalled, so the next run starts while the stopping run still runs.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "const forward = (signal) => child.kill(signal);",
+    "new": "const forward = (signal) => {\n    child.kill(signal);\n    releaseOwn(ctx.dir, ctx.pid);\n  };"
+  },
+  {
+    "id": "D2302",
+    "defect": "A run by the lane holding a manual acquire queues behind its own hold and never starts.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "return own ? current : null;",
+    "new": "return null;"
+  },
+  {
+    "id": "D2303",
+    "defect": "acquire exits right after ACQUIRED, so nothing beats the lease and it goes stale while the lane believes it holds it.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "  await new Promise((resolveHold) =>\n    keepAlive(ctx, file, ctx.pid, resolveHold),\n  );\n",
+    "new": ""
+  },
+  {
+    "id": "D2304",
+    "defect": "release by the holding lane reports RELEASED but leaves the lease in place.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "removeIfPresent(current.file);\n    return { status: RELEASE.RELEASED, holder: current };",
+    "new": "return { status: RELEASE.RELEASED, holder: current };"
+  },
+  {
+    "id": "D2305",
+    "defect": "release removes another lane's lease, so a lane can end a run it does not own.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (current.lane !== lane) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2306",
+    "defect": "release with nothing held exits 1, failing a cleanup step that had nothing to do.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "ctx.out(\"NONE no lease is held\");\n    return EXIT.OK;",
+    "new": "ctx.out(\"NONE no lease is held\");\n    return EXIT.FAILED;"
+  },
+  {
+    "id": "D2307",
+    "defect": "status reports a dead holder's stale lease as BUSY, so lanes wait on a run that ended.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "holder: stale ? null : current,",
+    "new": "holder: current,"
+  },
+  {
+    "id": "D2308",
+    "defect": "status numbers waiters from 0, so the next run in line reads as QUEUED 0.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "QUEUED ${i + 1}",
+    "new": "QUEUED ${i}"
+  },
+  {
+    "id": "D2309",
+    "defect": "bun run check is not judged heavy, so the repo-wide check starts without taking its turn.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const HEAVY_SCRIPTS = new Set([\n  \"check\",\n",
+    "new": "const HEAVY_SCRIPTS = new Set([\n"
+  },
+  {
+    "id": "D2310",
+    "defect": "A bun flag before run is read as the script name, so bun --silent run test:run escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const at = afterOptions(args, 0, BUN_VALUE_FLAGS);",
+    "new": "const at = 0;"
+  },
+  {
+    "id": "D2311",
+    "defect": "npm test runs the full suite without being judged heavy.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (NPM_TEST_VERBS.has(verb)) return judgePackageScript(\"test\", rest, ctx);",
+    "new": ""
+  },
+  {
+    "id": "D2312",
+    "defect": "A pnpm or yarn script named without run is not judged, so pnpm test:defects escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "return anyWordIsScript ? judgePackageScript(verb, rest, ctx) : null;",
+    "new": "return null;"
+  },
+  {
+    "id": "D2313",
+    "defect": "Running the defect verifier directly with node is not judged heavy.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (name === DEFECTS_ENTRY) return VERDICT.HEAVY;",
+    "new": ""
+  },
+  {
+    "id": "D2314",
+    "defect": "A directory or name filter counts as a scoped Vitest target, so a run over a whole folder escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": ": (target) => isTestFile(target, ctx);",
+    "new": ": () => true;"
+  },
+  {
+    "id": "D2315",
+    "defect": "A Vitest run naming only test files is judged heavy, against the owner's ruling that a named test file is never heavy.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "targets.length > 0 && targets.every(scopedTarget(args[0], ctx));",
+    "new": "false;"
+  },
+  {
+    "id": "D2316",
+    "defect": "A Vitest target naming an existing file without a .test name is judged heavy.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const isTestFile = (word, ctx) => TEST_FILE.test(word) || ctx.isFile(word);",
+    "new": "const isTestFile = (word) => TEST_FILE.test(word);"
+  },
+  {
+    "id": "D2317",
+    "defect": "A Vitest run with no target, which runs every test, counts as scoped.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "targets.length > 0 && targets.every",
+    "new": "targets.every"
+  },
+  {
+    "id": "D2318",
+    "defect": "vitest list, bench and init are judged heavy, though they run no suite.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (first !== undefined && VITEST_OTHER_SUBCOMMANDS.has(first)) return null;",
+    "new": ""
+  },
+  {
+    "id": "D2319",
+    "defect": "bun test, Bun's own runner, is read as the package test script and judged heavy.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "  \"exec\",\n  \"test\",\n",
+    "new": "  \"exec\",\n"
+  },
+  {
+    "id": "D2320",
+    "defect": "A bun --filter run, which runs each workspace's own script, is judged heavy when the filter is spelled with =.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (args.some(isBunFilter)) return null;",
+    "new": ""
+  },
+  {
+    "id": "D2321",
+    "defect": "A heavy script inside bash -c is not judged, so wrapping it in a shell escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const script = flag === -1 ? undefined : args[flag + 1];",
+    "new": "const script = undefined;"
+  },
+  {
+    "id": "D2322",
+    "defect": "A heavy script inside pwsh -Command is not judged.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (flag === -1 || flag + 1 >= args.length) return null;",
+    "new": "return null;"
+  },
+  {
+    "id": "D2323",
+    "defect": "A heavy command run through wsl is not judged, so the Linux gate escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "  [\"wsl\", judgeWsl],\n",
+    "new": ""
+  },
+  {
+    "id": "D2324",
+    "defect": "A heavy command inside cmd /c is not judged.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "  [\"cmd\", judgeCmd],\n",
+    "new": ""
+  },
+  {
+    "id": "D2325",
+    "defect": "A prefix command such as env, timeout or xargs is read as the program, so a heavy command behind it escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const prefix = PREFIX_COMMANDS.get(words[i]);",
+    "new": "const prefix = undefined;"
+  },
+  {
+    "id": "D2326",
+    "defect": "A shell keyword or a variable assignment is read as the program, so a heavy command behind it escapes the lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (ASSIGNMENT.test(words[i]) || KEYWORDS.has(words[i])) return i + 1;",
+    "new": ""
+  },
+  {
+    "id": "D2327",
+    "defect": "A Bash comment is scanned as commands, so a comment naming a heavy script is denied.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "  [\"#\", skipComment],\n",
+    "new": ""
+  },
+  {
+    "id": "D2328",
+    "defect": "A PowerShell block comment is scanned as commands.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "if (!s.powershell || !s.text.startsWith(BLOCK_COMMENT_OPEN, i)) return null;",
+    "new": "return null;"
+  },
+  {
+    "id": "D2329",
+    "defect": "A heredoc body is scanned as commands, so a file written through a heredoc that names a heavy script is denied.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "s.pending.push(match[2]);",
+    "new": ""
+  },
+  {
+    "id": "D2330",
+    "defect": "A PowerShell here-string body is scanned as commands.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "  [\"@\", readHereString],\n",
+    "new": ""
+  },
+  {
+    "id": "D2331",
+    "defect": "A command substitution inside double quotes is split at its inner quotes, so a commit message naming a heavy script is denied.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "} else if (quote === '\"' && s.text.startsWith(SUBSTITUTION_OPEN, j)) {",
+    "new": "} else if (false) {"
+  },
+  {
+    "id": "D2332",
+    "defect": "A <<< here-string is read as a heredoc, so the heavy command on the next line is skipped.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "if (text[i - 1] === \"<\") return null;",
+    "new": ""
+  },
+  {
+    "id": "D2333",
+    "defect": "A shift inside $((...)) is read as a heredoc, so the heavy command on the next line is skipped.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "  [\"$\", readArithmetic],\n",
+    "new": ""
+  },
+  {
+    "id": "D2334",
+    "defect": "PowerShell commands are read with Bash's backslash escape, so a backtick-escaped separator splits and a backslash path hides one.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "const ESCAPE = { [SHELL.BASH]: \"\\\\\", [SHELL.POWERSHELL]: \"`\" };",
+    "new": "const ESCAPE = { [SHELL.BASH]: \"\\\\\", [SHELL.POWERSHELL]: \"\\\\\" };"
+  },
+  {
+    "id": "D2335",
+    "defect": "The denial never names the live holder, so the lane retries instead of waiting.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (!holder || isStale(holder, options.now, options.running)) return queue;",
+    "new": "return queue;"
+  },
+  {
+    "id": "D2336",
+    "defect": "The denial names a dead holder's stale lease as held, telling the lane to wait on a run that ended.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (!holder || isStale(holder, options.now, options.running)) return queue;",
+    "new": "if (!holder) return queue;"
+  },
+  {
+    "id": "D2337",
+    "defect": "vitest related over an existing source file counts as scoped, though it runs every test that depends on that source.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "subcommand === RELATED",
+    "new": "false"
+  },
+  {
+    "id": "D2338",
+    "defect": "The hook lets a bare heavy command through, so runs overlap without taking turns.",
+    "file": ".claude/hooks/run-lease.cjs",
+    "old": "if (heavy === undefined) return;",
+    "new": "return;"
+  },
+  {
+    "id": "D2339",
+    "defect": "The hook reads a PowerShell command with Bash's escapes, so a backtick-escaped separator is denied as a heavy run.",
+    "file": ".claude/hooks/run-lease.cjs",
+    "old": "input.tool_name === POWERSHELL_TOOL ? SHELL.POWERSHELL : SHELL.BASH",
+    "new": "SHELL.BASH"
+  },
+  {
+    "id": "D2340",
+    "defect": "A hook error blocks the tool call instead of failing open.",
+    "file": ".claude/hooks/run-lease.cjs",
+    "old": "process.stderr.write(`run-lease hook skipped: ${error.message}\\n`);",
+    "new": "throw error;"
+  },
+  {
+    "id": "D2341",
+    "defect": "The run-lease hook is registered for Bash alone, so a heavy run started from PowerShell is never gated.",
+    "file": ".claude/settings.json",
+    "old": "\"matcher\": \"Bash|PowerShell\",",
+    "new": "\"matcher\": \"Bash\","
+  },
+  {
+    "id": "D2342",
+    "defect": "A command substitution's body is kept as text, so out=\"$(bun run check)\" or a backtick span runs the check unleased.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "s.substitutions.push(s.text.slice(body, close));",
+    "new": ""
+  },
+  {
+    "id": "D2343",
+    "defect": "A redirect glued to the script name joins it, so bun run check>out.txt runs the check unleased.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "if (c === \">\" || c === \"<\") splitBeforeRedirect(s);",
+    "new": ""
+  },
+  {
+    "id": "D2344",
+    "defect": "PowerShell's *> is read as a Vitest target, so a run naming one test file with its output redirected is denied.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const REDIRECT = /^(?:\\d+|\\*)?(?:[<>]|&>)/;",
+    "new": "const REDIRECT = /^\\d*(?:[<>]|&>)/;"
+  },
+  {
+    "id": "D2345",
+    "defect": "A spaced PowerShell assignment is read as the program, so $out = bun run check runs unleased.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "PS_VARIABLE.test(words[i] ?? \"\") &&",
+    "new": "false &&"
+  },
+  {
+    "id": "D2347",
+    "defect": "A PowerShell assignment joined to its variable hides the program, so $r=bun run check runs unleased.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const joined = PS_JOINED_ASSIGNMENT.exec(words[i] ?? \"\");",
+    "new": "const joined = null;"
+  },
+  {
+    "id": "D2348",
+    "defect": "bun running the defect verifier as a file is read as a package script, so it runs unleased.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "? judgeScriptFile(name, rest, ctx)",
+    "new": "? null"
+  },
+  {
+    "id": "D2349",
+    "defect": "node --run check is not judged, so the repo-wide check runs unleased.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (run !== -1) return judgeNodeRun(args, run, ctx);",
+    "new": ""
+  },
+  {
+    "id": "D2350",
+    "defect": "An unlisted Vitest option swallows the next word, so a directory behind --typecheck reads as a scoped run.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (VITEST_VALUE_FLAGS.has(word)) i++;",
+    "new": "if (word.startsWith(\"--\")) i++;"
+  },
+  {
+    "id": "D2351",
+    "defect": "A glob or a stemless .test name counts as a named test file, and a :line filter does not.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const TEST_FILE = /^[^*?[{]*[^*?[{/\\\\]\\.(?:test|spec)\\.[cm]?[jt]sx?(?::\\d+)?$/;",
+    "new": "const TEST_FILE = /\\.(?:test|spec)\\.[cm]?[jt]sx?$/;"
+  },
+  {
+    "id": "D2352",
+    "defect": "The rest of a here-string's closing line is skipped, so a heavy command after '@; runs unleased.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "  return s.text.startsWith(close, lineStart)\n    ? lineStart + close.length - 1\n    : lineEnd;",
+    "new": "  return lineEnd;"
+  },
+  {
+    "id": "D2353",
+    "defect": "A shift by a number inside (( )) opens a heredoc that hides every later line.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "const HEREDOC = /^<<(?!<)-?[ \\t]*(['\"]?)([A-Za-z_]\\w*)\\1/;",
+    "new": "const HEREDOC = /^<<(?!<)-?[ \\t]*(['\"]?)(\\w+)\\1/;"
+  },
+  {
+    "id": "D2354",
+    "defect": "The command eval runs is not judged.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "  [\"eval\", (args, ctx) => judgeScript(args.join(\" \"), SHELL.BASH, ctx)],\n",
+    "new": ""
+  },
+  {
+    "id": "D2355",
+    "defect": "The command iex or Invoke-Expression runs is not judged.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const judgeInvokeExpression = (args, ctx) =>\n  judgeScript(args.join(\" \"), SHELL.POWERSHELL, ctx);",
+    "new": "const judgeInvokeExpression = () => null;"
+  },
+  {
+    "id": "D2356",
+    "defect": "A pipe or a parenthesis does not end a command, so the heavy command after it is read as arguments.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "if (c === \";\" || c === \"|\" || c === \"(\" || c === \")\") return true;",
+    "new": "if (c === \";\") return true;"
+  },
+  {
+    "id": "D2357",
+    "defect": "A brace group's brace is read as the program, so { bun run check; } runs unleased.",
+    "file": "scripts/lib/orchestration/shell-segments.mjs",
+    "old": "if (c === \"{\" || c === \"}\") return !s.inWord && isBlank(s.text[i + 1]);",
+    "new": ""
+  },
+  {
+    "id": "D2358",
+    "defect": "A redirect written before the command is read as the program, so >log bun run check runs unleased.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "    if (!REDIRECT.test(words[i])) kept.push(words[i]);\n    else if (BARE_REDIRECT.test(words[i])) i++;",
+    "new": "    kept.push(words[i]);"
+  },
+  {
+    "id": "D2359",
+    "defect": "A runner's own option before vitest hides it, so bunx --bun vitest runs the whole suite unleased.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "const at = afterOptions(args, 0, new Set());\n  return args[at] === \"vitest\"",
+    "new": "const at = 0;\n  return args[at] === \"vitest\""
+  },
+  {
+    "id": "D2360",
+    "defect": "A killed wrapper's run keeps the lease at exactly 60 min, one beat past its bound.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "now - record.heartbeatAt > ORPHANED_RUN_LIMIT_MS",
+    "new": "now - record.heartbeatAt >= ORPHANED_RUN_LIMIT_MS"
+  },
+  {
+    "id": "D2361",
+    "defect": "A lease whose recorded run has ended is held forever, since any recorded child keeps it.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (record.childPid !== undefined && running(record.childPid)) return false;",
+    "new": "if (record.childPid !== undefined) return false;"
+  },
+  {
+    "id": "D2362",
+    "defect": "status reports a lease kept only by its recorded run as BUSY, hiding that its wrapper is gone.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "orphaned: !stale && current !== null && !running(current.pid),",
+    "new": "orphaned: false,"
+  },
+  {
+    "id": "D2363",
+    "defect": "A dead waiter at the head of the queue blocks every waiter behind it.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (!isStale(entry, now, running)) live.push(entry);",
+    "new": "if (true) live.push(entry);"
+  },
+  {
+    "id": "D2364",
+    "defect": "A wrapper that lost its lease deletes its successor's lease when it releases.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (current?.pid !== pid) return false;\n    removeIfPresent(current.file);\n    return true;",
+    "new": "removeIfPresent(current.file);\n    return true;"
+  },
+  {
+    "id": "D2365",
+    "defect": "A wrapper that lost its lease writes its run's pid into its successor's lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (current?.pid !== pid) return false;\n    writeFileSync(",
+    "new": "if (current === null) return false;\n    writeFileSync("
+  },
+  {
+    "id": "D2366",
+    "defect": "A run killed by a signal exits 0, so its failure reads as a pass and its temp folder is deleted.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "  if (code !== null) return code;\n  return EXIT.FAILED;",
+    "new": "  if (code !== null) return code;\n  return EXIT.OK;"
+  },
+  {
+    "id": "D2367",
+    "defect": "A run skips the queue under a dead acquire's hold, so it overlaps whoever reclaims that hold.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "    !isStale(current, ctx.now(), ctx.running);",
+    "new": "    true;"
+  },
+  {
+    "id": "D2368",
+    "defect": "A run skips the queue under its lane's hold taken from another thread.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "    current.thread === owner.thread &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2369",
+    "defect": "A run under a hold records nothing in it, so the hold's death lets the next waiter overlap the run, and a hold gone before recording lets the run go unleased.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "return hold !== null && recordChild(ctx.dir, hold.pid, ctx.pid, ctx.now());",
+    "new": "return hold !== null;"
+  },
+  {
+    "id": "D2370",
+    "defect": "A spawn that throws EINVAL for a Windows .cmd crashes the wrapper instead of exiting 127 with the bun x remedy.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "    return { error };",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D2371",
+    "defect": "An error after the run started ends the wrapper with 127 and releases the lease while the run still runs.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "      if (started) {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D2372",
+    "defect": "A file-system error in a heartbeat tick is thrown out of the timer and kills the wrapper mid-run.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "    try {\n      tick();\n    } catch (error) {\n      ctx.err(`${PROG}: could not beat the lease: ${error.message}`);\n    }",
+    "new": "    tick();"
+  },
+  {
+    "id": "D2373",
+    "defect": "A file-system error recording the run's pid is thrown out of the spawn handler and kills the wrapper.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "  try {\n    recordChild(ctx.dir, ctx.pid, childPid, ctx.now());\n  } catch (error) {\n    ctx.err(\n      `${PROG}: could not record run pid ${childPid} in the lease: ${error.message}`,\n    );\n  }",
+    "new": "  recordChild(ctx.dir, ctx.pid, childPid, ctx.now());"
+  },
+  {
+    "id": "D2374",
+    "defect": "An acquire whose hold was taken by another holder says RELEASED, hiding who took it.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (current === null) ctx.out(",
+    "new": "if (true) ctx.out("
+  },
+  {
+    "id": "D2375",
+    "defect": "The temp folder is made while the run still waits, so a waiter killed in the queue leaves one behind.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "  const env = { dir: temp.dir, vars: { ...temp.env, ...vars } };\n",
+    "new": "  const env = { dir: temp.dir, vars: { ...temp.env, ...vars } };\n  mkdirSync(temp.dir, { recursive: true });\n"
+  },
+  {
+    "id": "D2376",
+    "defect": "A take runs without the lock, so two waiters can both replace a stale lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "  return withLock(dir, () => {\n    const current = readLease(dir);\n    const holder",
+    "new": "  return ((fn) => fn())(() => {\n    const current = readLease(dir);\n    const holder"
   }
 ]

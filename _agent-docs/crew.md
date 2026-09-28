@@ -59,8 +59,9 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 - format: `bun x prettier --check <paths>` over every file you changed other than through Edit or Write (a script, a generator, a shell command, a git operation), since the save hook formats only those two tools' saves and the gate's first step fails on any one
 - typecheck: `bun run --filter <workspace> typecheck`, or `bun x tsc --noEmit` for root tooling
 - named defects: `bun run test:defects`, which requires one record per `D###` test in the `defects.json` beside your tests
+- a heavy run (`bun run check`, `test:run`, `test:defects`, `vitest related`, or an unscoped `vitest run`) goes through `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- <command>`, which waits its turn; a bare one is denied by the lease hook. A named test file needs no lease. `node scripts/run-lease.mjs status` names the holder and the queue.
 
-**A fix round re-proves the defects it can have moved before it reports.** Any round that edits code a defect record anchors in or mutates (a review's fixes, a debt round, a test repair) asks the orchestrator for a slot and runs `bun run test:defects:changed` over its final tree, then reports the result. A fix that silently stops a defect from being detected is otherwise found only by the orchestrator's full check, at the cost of another full run.
+**A fix round re-proves the defects it can have moved before it reports.** Any round that edits code a defect record anchors in or mutates (a review's fixes, a debt round, a test repair) runs `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- bun run test:defects:changed` over its final tree, then reports the result. A fix that silently stops a defect from being detected is otherwise found only by the orchestrator's full check, at the cost of another full run.
 
 **Keep every log of a run until the orchestrator has closed it**, a failed one above all: the log is the only evidence of a failure that does not reproduce.
 
