@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -21,13 +22,24 @@ import {
   type PoolResult,
 } from "../../../scripts/lib/defects/pool.mjs";
 import {
+  EXIT_ENTRY,
+  readExitRecord,
+} from "../../../scripts/lib/defects/run-evidence.mjs";
+import {
   createVitestRunner,
   type RunRequest,
   type RunResult,
   type RunTests,
 } from "../../../scripts/lib/defects/vitest.mjs";
+import { childProcessesOf } from "../run-cleanup.mjs";
 
 export type Tree = Readonly<Record<string, string>>;
+
+/** The exit witness's record beside a report is named for the report with this suffix. */
+const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
+// How Windows refuses to remove a folder that is still some process's working directory.
+const FOLDER_IN_USE = new Set(["EBUSY", "EPERM"]);
+const RUN_TREE_POLL_MS = 50;
 
 /** How a run that ended cleanly with `status` says it ended: Vitest reported no unhandled error, and its process exited. */
 export const cleanEnd = (
@@ -198,8 +210,36 @@ export async function withScratch<T>(
   try {
     return await run(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await removeScratch(dir);
   }
+}
+
+/** The pid of each Vitest process a run in `dir` started, from the exit witness's records there. */
+function recordedRunPids(dir: string): number[] {
+  return readdirSync(dir)
+    .filter((name) => name.endsWith(EXIT_RECORD_SUFFIX))
+    .flatMap((name) => readExitRecord(join(dir, name)).entries)
+    .filter((entry) => entry.kind === EXIT_ENTRY.STARTED)
+    .map((entry) => Number(entry.pid));
+}
+
+/**
+ * Removes a scratch folder. On Windows a Vitest process can exit while a process it started, such as Vite's
+ * `net use` shell, still has the folder as its working directory; that holds the folder until the process ends.
+ */
+async function removeScratch(dir: string): Promise<void> {
+  const pids = recordedRunPids(dir);
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    return;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    if (!FOLDER_IN_USE.has(code) || pids.length === 0) throw error;
+  }
+  while (pids.some((pid) => childProcessesOf(pid).length > 0)) {
+    await delay(RUN_TREE_POLL_MS);
+  }
+  rmSync(dir, { recursive: true, force: true });
 }
 
 /** A stand-in for Vitest's entry that follows the script a test writes; see the fixture for its fields. */
