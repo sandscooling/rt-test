@@ -32,7 +32,10 @@ export async function withDaemonRunSetup<T>(
   try {
     return await body(runRoot, teardown);
   } finally {
-    endRecorded(watchdogsOf(runRoot));
-    rmSync(runRoot, { recursive: true, force: true });
+    try {
+      endRecorded(watchdogsOf(runRoot));
+    } finally {
+      rmSync(runRoot, { recursive: true, force: true });
+    }
   }
 }

@@ -191,6 +191,25 @@ describe("reading which process holds an id", () => {
     expect(killed).toEqual([]);
   });
 
+  it("D2500: spares a process naming a sibling path that begins with the run root", async () => {
+    const killed = await onWindowsAnswering(
+      [entry(EARLIER_CHILD, 4, "5", `node ${ROOT}-2/daemon.mjs`)],
+      () => killedBy(() => endOwnedProcesses([ROOT], [EARLIER_CHILD])),
+    );
+    expect(killed).toEqual([]);
+  });
+
+  it("D2501: ends a Windows process naming the run root with forward slashes", async () => {
+    const killed = await onWindowsAnswering(
+      [entry(EARLIER_CHILD, 4, "5", "node C:/Runs/rt-test-run/daemon.mjs")],
+      () =>
+        killedBy(() =>
+          endOwnedProcesses(["C:\\Runs\\rt-test-run"], [EARLIER_CHILD]),
+        ),
+    );
+    expect(killed).toEqual([EARLIER_CHILD]);
+  });
+
   it("D2475: lists as a live parent's children only the processes started no earlier than it", async () => {
     const children = await onWindowsAnswering(
       [

@@ -179,7 +179,7 @@ function withChildEndpoint<T>(
  * each one reaches every child: a live one answers however slowly it runs, and an ended one cannot. Throws naming each
  * child that could not connect or lost its connection.
  */
-async function stillRunning(
+async function answeringHeartbeats(
   root: string,
   children: readonly ChildConnection[],
 ): Promise<number[]> {
@@ -413,7 +413,7 @@ describe("what a job starts ends with the job", () => {
         const idle = await eventually(() =>
           logged(identity.logFile, IDLE_ENTRY),
         );
-        const alive = await stillRunning(root, children);
+        const alive = await answeringHeartbeats(root, children);
         endOwnedProcesses([root], alive);
         const status = await settled(daemonStatus(root));
         return {
@@ -442,9 +442,9 @@ describe("what a job starts ends with the job", () => {
               failedHeartbeats(root).length > 0,
           );
           requireConnectedHeartbeats(root);
-          const stuckWith = await stillRunning(root, children);
+          const stuckWith = await answeringHeartbeats(root, children);
           const stop = await settled(stopDaemon(root));
-          const alive = await stillRunning(root, children);
+          const alive = await answeringHeartbeats(root, children);
           endOwnedProcesses([root], alive);
           return {
             pid: identity.pid,
@@ -644,7 +644,7 @@ describe("the test's connection to a heartbeat child", () => {
             if (checked === pid && !served.writableEnded) served.end();
           };
           try {
-            return await settled(stillRunning(root, [connection]));
+            return await settled(answeringHeartbeats(root, [connection]));
           } finally {
             runningChecks.observe = undefined;
           }

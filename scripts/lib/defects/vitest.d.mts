@@ -45,6 +45,7 @@ export declare function vitestArgs(
 ): string[];
 
 export declare const IDLE_WINDOW_MS: number;
+export declare const EXIT_RECORD_SUFFIX: string;
 
 export declare function createVitestRunner(options: {
   readonly root: string;

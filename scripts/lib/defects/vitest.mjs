@@ -34,8 +34,8 @@ const PROGRESS_REPORTER = fileURLToPath(
   new URL("./progress-reporter.mjs", import.meta.url),
 );
 const EXIT_WITNESS = new URL("./exit-witness.mjs", import.meta.url).href;
-/** Beside the report, so whatever removes the report's folder removes the record too. */
-const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
+/** Names the exit record beside the report, so whatever removes the report's folder removes the record too. */
+export const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
 const PROGRESS_EVENTS = new Set(Object.values(PROGRESS_EVENT));
 const ASSERTION_FAILURE = /^AssertionError: /;
 const NO_MESSAGE = "no failure message";

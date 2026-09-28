@@ -77,7 +77,7 @@ async function inRunRoot<T>(
   }
 }
 
-/** Starts `pids` processes, hands them to `body`, and ends whichever still run however `body` ends. */
+/** Runs `body`, then ends whichever of `pids` still run however `body` ends. */
 async function withProcesses<T>(
   pids: readonly number[],
   body: () => Promise<T>,

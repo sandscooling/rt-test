@@ -10,7 +10,7 @@
     "id": "D1748",
     "defect": "Every recorded process that still runs counts as the run's, so a process that reused a recorded id is ended.",
     "file": "test/scripts/run-cleanup.mjs",
-    "old": "return forms.some((form) => text.includes(form));",
+    "old": "return forms.some((form) => namesPath(text, form));",
     "new": "return true;"
   },
   {
@@ -278,5 +278,19 @@
     "file": "test/scripts/run-cleanup.mjs",
     "old": "![parent, startedAt].every(",
     "new": "![startedAt].every("
+  },
+  {
+    "id": "D2500",
+    "defect": "A run root counts as named by a command line naming a longer sibling path, so a process of a sibling root such as <root>-2 is ended.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (PATH_END.test(text.slice(at + root.length))) return true;",
+    "new": "return true;"
+  },
+  {
+    "id": "D2501",
+    "defect": "On Windows a command line naming the run root with forward slashes is not matched, so that process is never ended.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "path.toLowerCase().replaceAll(\"\\\\\", \"/\")",
+    "new": "path.toLowerCase()"
   }
 ]
