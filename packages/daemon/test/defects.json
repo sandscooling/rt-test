@@ -4462,8 +4462,8 @@
     "id": "D2409",
     "defect": "Asking which heartbeat children still run checks the failure files as soon as every connection has answered or closed, so a child whose close the test saw before the child wrote why reads as a child the job ended.",
     "file": "packages/daemon/test/job-tree.test.ts",
-    "old": "      failedHeartbeats(root).length > 0 || everySilentChildExited(root, alive),",
-    "new": "      failedHeartbeats(root).length > 0 || true,"
+    "old": "    return failedHeartbeats(root).length > 0 || running.length === 0;",
+    "new": "    return failedHeartbeats(root).length > 0 || true;"
   },
   {
     "id": "D2410",
@@ -4513,5 +4513,26 @@
     "file": "packages/daemon/test/job-tree.test.ts",
     "old": "      if (this.#closed) this.#settle(undefined);",
     "new": "      if (this.#closed) resolve(undefined);"
+  },
+  {
+    "id": "D2423",
+    "defect": "A heartbeat child that outlives its lifetime exits without writing why, so a child the job failed to end reads as one it ended.",
+    "file": "test/fixtures/daemon/daemon-lifecycle/packages/a/heartbeat.mjs",
+    "old": "setTimeout(() => fail(`outlived its ${LIFETIME_MS} ms lifetime`), LIFETIME_MS);",
+    "new": "setTimeout(() => process.exit(), LIFETIME_MS);"
+  },
+  {
+    "id": "D2424",
+    "defect": "A heartbeat child's announcement also answers a question asked before it arrived, so a child that announced itself and then ended before answering reads as still running.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "    if (this.#pid === undefined) this.#pid = pid;\n    else this.#settle(pid);",
+    "new": "    this.#pid ??= pid;\n    this.#settle(pid);"
+  },
+  {
+    "id": "D2425",
+    "defect": "A heartbeat child does not announce its process id on connecting, so once it goes silent the test has no process id to wait on, and its first answer is taken as the announcement.",
+    "file": "test/fixtures/daemon/daemon-lifecycle/packages/a/heartbeat.mjs",
+    "old": "  socket.write(`${process.pid}\\n`);\n",
+    "new": ""
   }
 ]

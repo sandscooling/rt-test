@@ -66,15 +66,6 @@ function heartbeatCount(root: string): number {
   return fixtureFilesNamed(root, HEARTBEAT_PREFIX).length;
 }
 
-/** The process id each heartbeat file names, or undefined for a file read while its child rewrites it. */
-function heartbeatPids(root: string): (number | undefined)[] {
-  return fixtureFilesNamed(root, HEARTBEAT_PREFIX).map((name) => {
-    const beat = readFileSync(join(root, WORKSPACE_A, name), "utf8");
-    const pid = /^\d+(?= )/.exec(beat)?.[0];
-    return pid === undefined ? undefined : Number(pid);
-  });
-}
-
 /** The reason of each heartbeat child that could not connect to the test or lost its connection. */
 function failedHeartbeats(root: string): string[] {
   return fixtureFilesNamed(root, FAILED_PREFIX).map((name) =>
@@ -111,6 +102,7 @@ class ChildConnection {
   #waiting: Waiting | undefined;
   #closed = false;
   #failure: Error | undefined;
+  #pid: number | undefined;
 
   constructor(socket: Socket) {
     this.#socket = socket;
@@ -139,15 +131,26 @@ class ChildConnection {
     });
   }
 
+  /** The process id the child announced on connecting, or undefined when that line never arrived. */
+  get pid(): number | undefined {
+    return this.#pid;
+  }
+
   #answer(line: string): void {
     if (PROCESS_ID.test(line)) {
-      this.#settle(Number(line));
+      this.#heard(Number(line));
       return;
     }
     this.#failure ??= new Error(
       `a heartbeat child answered "${line}" rather than its process id`,
     );
     this.#socket.destroy();
+  }
+
+  /** The child's first line announces its process id; each later one answers a question. */
+  #heard(pid: number): void {
+    if (this.#pid === undefined) this.#pid = pid;
+    else this.#settle(pid);
   }
 
   #settle(pid: number | undefined): void {
@@ -170,39 +173,62 @@ function withChildEndpoint<T>(
 }
 
 /**
- * The process ids of the heartbeat children still running. Every child connects before it writes its first beat, so
- * once the test has accepted as many connections as there are heartbeat files, asking each one reaches every child: a
- * live one answers however slowly it runs, and an ended one cannot. Throws naming each child that could not connect
- * or lost its connection.
+ * The process ids of the heartbeat children still running. Every child connects and announces its process id before
+ * it writes its first beat, so once the test has accepted as many connections as there are heartbeat files, asking
+ * each one reaches every child: a live one answers however slowly it runs, and an ended one cannot. Throws naming each
+ * child that could not connect or lost its connection.
  */
 async function stillRunning(
   root: string,
   children: readonly ChildConnection[],
 ): Promise<number[]> {
-  await until(
+  const connected = await eventually(
     () =>
       children.length >= heartbeatCount(root) ||
       failedHeartbeats(root).length > 0,
   );
   requireConnectedHeartbeats(root);
+  if (!connected) {
+    throw new Error(
+      `the test accepted ${children.length} heartbeat connections for ${heartbeatCount(root)} heartbeat files`,
+    );
+  }
   const answers = await Promise.all(children.map((child) => child.ask()));
   const alive = answers.filter((pid) => pid !== undefined);
-  await until(
-    () =>
-      failedHeartbeats(root).length > 0 || everySilentChildExited(root, alive),
-  );
+  const silent = children.filter((_, index) => answers[index] === undefined);
+  let running: number[] = [];
+  const exited = await eventually(() => {
+    running = silentStillRunning(silent);
+    return failedHeartbeats(root).length > 0 || running.length === 0;
+  });
   requireConnectedHeartbeats(root);
+  if (!exited) {
+    throw new Error(
+      `a heartbeat child that did not answer still runs by its process id: ${running.join(", ")}; the heartbeat files hold ${heartbeatContents(root)}`,
+    );
+  }
   return alive;
 }
 
 /**
- * Whether every heartbeat child that did not answer has exited. A child that lost its connection writes its reason
- * before it exits, so once it has exited the reason is on disk, however late the test saw the connection close.
+ * The announced process id of each heartbeat child that did not answer and still runs, empty once every one has
+ * exited. A child that lost its connection writes its reason before it exits, so once it has exited the reason is on
+ * disk, however late the test saw the connection close. A child whose announcement never arrived is not waited on.
  */
-function everySilentChildExited(root: string, answered: number[]): boolean {
-  return heartbeatPids(root).every(
-    (pid) => pid !== undefined && (answered.includes(pid) || !isRunning(pid)),
+function silentStillRunning(silent: readonly ChildConnection[]): number[] {
+  return silent.flatMap(({ pid }) =>
+    pid !== undefined && isRunning(pid) ? [pid] : [],
   );
+}
+
+/** Each heartbeat file's name and content, so a failure shows every child's last beat beside the process ids. */
+function heartbeatContents(root: string): string {
+  return fixtureFilesNamed(root, HEARTBEAT_PREFIX)
+    .map(
+      (name) =>
+        `${name} ${JSON.stringify(readFileSync(join(root, WORKSPACE_A, name), "utf8"))}`,
+    )
+    .join(", ");
 }
 
 /** The heartbeat child the connection tests start themselves, outside any job. */
@@ -211,6 +237,11 @@ const LOST_CHILD = "lost";
 /** The reason a heartbeat child gives when the test ends its connection with no error on it. */
 const ENDED_BY_THE_TEST =
   "lost its connection to the test: the test's endpoint closed it";
+/** A preload that ends a heartbeat child's lifetime the first time the test writes to its connection. */
+const END_LIFETIME_ON_FIRST_LINE = new URL(
+  "../../../test/fixtures/daemon/end-lifetime-on-first-line.mjs",
+  import.meta.url,
+).href;
 /** A preload that resets a heartbeat child's connection the first time the test writes to it. */
 const RESET_ON_FIRST_LINE = new URL(
   "../../../test/fixtures/daemon/reset-on-first-line.mjs",
@@ -281,6 +312,25 @@ function afterConnectionError(error: NodeJS.ErrnoException) {
     return { thrown, answer: await answer };
   });
 }
+
+/**
+ * A view of a heartbeat child's connection that heard the child announce `pid` and then closed, while the child's own
+ * connection stays open: the test has seen the close before the child knows of it.
+ */
+function closedAfterAnnouncing(pid: number): Promise<ChildConnection> {
+  return withTestEndpoint(
+    (socket) => socket.end(`${pid}\n`),
+    async (endpoint) => {
+      const seen = createConnection(endpoint);
+      const connection = new ChildConnection(seen);
+      await new Promise((resolve) => seen.once("close", resolve));
+      return connection;
+    },
+  );
+}
+
+/** The process id a stand-in heartbeat child announces. */
+const ANNOUNCED_PID = 4242;
 
 /** What asking a stand-in heartbeat child reads when it answers `answer`. */
 function askedAnswering(answer: string) {
@@ -485,6 +535,20 @@ describe("the test's connection to a heartbeat child", () => {
     });
   });
 
+  it("D2424: a child that announces itself after the test asked, then ends before answering, reads as ended", async () => {
+    const outcome = await withHeldConnection(
+      async (connection, _served, child) => {
+        child.once("data", () => child.end(`${ANNOUNCED_PID}\n`));
+        const answer = await settled(connection.ask());
+        return { answer, announced: connection.pid };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      answer: undefined,
+      announced: ANNOUNCED_PID,
+    });
+  });
+
   it("D2407: an answer that is not a positive process id fails the question, naming the answer", async () => {
     expect(await askedAnswering("-1")).toStrictEqual({
       thrown: 'a heartbeat child answered "-1" rather than its process id',
@@ -513,6 +577,43 @@ describe("the test's connection to a heartbeat child", () => {
   );
 
   it(
+    "D2425: a heartbeat child announces its process id on connecting, before the test asks it anything",
+    async () => {
+      const outcome = await withHeartbeatChild(async ({ pid, served }) => {
+        const lines: string[] = [];
+        readLines(served, () => undefined).on("line", (line) =>
+          lines.push(line),
+        );
+        const closed = new Promise((resolve) => served.once("close", resolve));
+        served.end();
+        await closed;
+        return { lines, pid: String(pid) };
+      });
+      expect(outcome.lines).toStrictEqual([outcome.pid]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2423: a heartbeat child that outlives its lifetime writes that to its failure file, then exits",
+    async () => {
+      const outcome = await withHeartbeatChild(
+        async ({ root, served, exited }) => {
+          served.write(QUESTION);
+          const code = await exited;
+          return { code, failed: failedHeartbeats(root) };
+        },
+        ["--import", END_LIFETIME_ON_FIRST_LINE],
+      );
+      expect(outcome).toStrictEqual({
+        code: 1,
+        failed: ["outlived its 60000 ms lifetime"],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "D2420: a heartbeat child whose connection is reset writes the error to its failure file, then exits",
     async () => {
       const outcome = await withHeartbeatChild(
@@ -535,13 +636,8 @@ describe("the test's connection to a heartbeat child", () => {
     "D2409: a child whose connection the test saw close before the child wrote why is reported, not read as ended",
     async () => {
       const outcome = await withHeartbeatChild(
-        async ({ root, endpoint, pid, served }) => {
-          const seen = createConnection(endpoint);
-          const connection = new ChildConnection(seen);
-          await once(seen, "connect");
-          const seenClosed = once(seen, "close");
-          seen.destroy();
-          await seenClosed;
+        async ({ root, pid, served }) => {
+          const connection = await closedAfterAnnouncing(pid);
           runningChecks.observe = (checked) => {
             if (checked === pid && !served.writableEnded) served.end();
           };
