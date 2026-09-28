@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { crashError, WatchedChild } from "../child-end.js";
 import { clientEndpoint } from "../../../packages/daemon/src/daemon/endpoint.js";
+import { createDaemonKey } from "../../../packages/daemon/src/daemon/endpoint-proof.js";
 import { consumerIdentity } from "../../../packages/daemon/src/store/consumer-identity.js";
 import {
   confirmNothing,
@@ -25,7 +26,10 @@ import {
 } from "../../../packages/daemon/test/daemon-harness.js";
 import {
   cleanUpRun,
+  endOwnedProcesses,
+  endRecorded,
   guardRun,
+  processRecords,
   recordStarted,
   STARTED_FILE,
   sweepEndedRuns,
@@ -116,9 +120,8 @@ async function providingRunRoot<T>(
   }
 }
 
-/** The guarded run's first stdout line; a run that ends before writing one has crashed. */
-function firstLine(child: ChildProcess): Promise<string> {
-  const label = "the guarded run";
+/** The child's first stdout line; a child that ends before writing one has crashed. */
+function firstLine(child: ChildProcess, label: string): Promise<string> {
   const watched = new WatchedChild(child, label);
   return Promise.race([
     new Promise<string>((resolveLine) => {
@@ -128,6 +131,39 @@ function firstLine(child: ChildProcess): Promise<string> {
       throw crashError(label, end);
     }),
   ]);
+}
+
+const IDLE_SCRIPT = "setInterval(() => {}, 1000);";
+
+/**
+ * Starts an idle child whose command line names nothing, as a daemon starts an executor, writes its id, and ends it
+ * through its own handle once its stdin closes, so a child the code under test spares never outlives the test.
+ */
+const STARTS_IDLE_CHILD = [
+  'const { spawn } = require("node:child_process");',
+  `const child = spawn(process.execPath, ["-e", ${JSON.stringify(IDLE_SCRIPT)}], { stdio: "ignore", windowsHide: true });`,
+  "console.log(child.pid);",
+  'process.stdin.on("end", () => { child.kill("SIGKILL"); process.exit(0); });',
+  "process.stdin.resume();",
+].join("\n");
+
+/** Starts a process naming `root` on its command line, working outside it, that starts an idle child. */
+function childStarter(root: string): ChildProcess {
+  return spawn(process.execPath, ["-e", STARTS_IDLE_CHILD, root], {
+    cwd: tmpdir(),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+}
+
+/** Has the starter end its idle child and exit, and waits for it to go. */
+async function endStarter(starter: ChildProcess): Promise<void> {
+  if (starter.exitCode !== null || starter.signalCode !== null) return;
+  const exited = new Promise((resolveExit) =>
+    starter.once("exit", resolveExit),
+  );
+  starter.stdin?.end();
+  await exited;
 }
 
 describe("cleaning up a test run", PROCESS_SCENARIO, () => {
@@ -256,7 +292,7 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
       });
       let daemon: number | undefined;
       try {
-        daemon = Number(await firstLine(run));
+        daemon = Number(await firstLine(run, "the guarded run"));
         run.kill("SIGKILL");
         const ended = await endsWithin(daemon, WATCHDOG_WAIT_MS);
         const removed =
@@ -265,7 +301,7 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
         return [ended, removed];
       } finally {
         run.kill("SIGKILL");
-        if (daemon !== undefined) endAll([daemon]);
+        if (daemon !== undefined) endOwnedProcesses([runRoot], [daemon]);
       }
     });
     expect(cleaned).toEqual([true, true]);
@@ -340,6 +376,60 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
   });
 });
 
+describe("ending a recorded process", PROCESS_SCENARIO, () => {
+  it("D2440: spares a live process whose start time no longer matches its record, as one that took a recorded id", async () => {
+    const ended = await inRunRoot(async (runRoot) => {
+      const holder = idleProcess([runRoot]);
+      return withProcesses([holder], async () => {
+        const record = processRecords([holder]).get(holder)!;
+        endRecorded([{ ...record, startedAt: record.startedAt + 1n }]);
+        return endsWithin(holder, SPARE_WAIT_MS);
+      });
+    });
+    expect(ended).toBe(false);
+  });
+
+  it("D2441: ends a live process whose start time matches its record", async () => {
+    const ended = await inRunRoot(async (runRoot) => {
+      const recorded = idleProcess([runRoot]);
+      return withProcesses([recorded], async () => {
+        endRecorded([processRecords([recorded]).get(recorded)!]);
+        return endsWithin(recorded, STOP_WAIT_MS);
+      });
+    });
+    expect(ended).toBe(true);
+  });
+
+  it("D2443: ends a process naming nothing of the run while the live process that started it lies inside the run", async () => {
+    const ended = await inRunRoot(async (runRoot) => {
+      const starter = childStarter(runRoot);
+      try {
+        const executor = Number(await firstLine(starter, "the child starter"));
+        endOwnedProcesses([runRoot], [executor]);
+        return await endsWithin(executor, STOP_WAIT_MS);
+      } finally {
+        await endStarter(starter);
+      }
+    });
+    expect(ended).toBe(true);
+  });
+
+  it("D2445: leaves alone a running process that no idle process handle of its own started", async () => {
+    const other = spawn(process.execPath, ["-e", IDLE_SCRIPT], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    let ended: boolean;
+    try {
+      endAll([other.pid!]);
+      ended = await endsWithin(other.pid!, SPARE_WAIT_MS);
+    } finally {
+      other.kill("SIGKILL");
+    }
+    expect(ended).toBe(false);
+  });
+});
+
 describe(
   "the daemon harness's record of what a run starts",
   PROCESS_SCENARIO,
@@ -348,7 +438,7 @@ describe(
       const result = await inRunRoot((runRoot, consumer) =>
         providingRunRoot(runRoot, () =>
           withDaemons([consumer], async (pids) => {
-            const daemon = idleProcess();
+            const daemon = idleProcess([consumer]);
             pids.add(daemon);
             const ids = recorded(runRoot).flatMap((entry) => entry.pids ?? []);
             return { daemon, ids };
@@ -438,6 +528,78 @@ describe(
         }),
       );
       expect(result.keys).toEqual([result.key]);
+    });
+
+    it("D2442: spares a recorded daemon id that a process outside the consumer now holds", async () => {
+      const ended = await inRunRoot((runRoot, consumer) =>
+        providingRunRoot(runRoot, async () => {
+          const stranger = idleProcess();
+          return withProcesses([stranger], async () => {
+            await withDaemons([consumer], async (pids) => {
+              pids.add(stranger);
+            });
+            return endsWithin(stranger, SPARE_WAIT_MS);
+          });
+        }),
+      );
+      expect(ended).toBe(false);
+    });
+
+    it("D2496: keeps a failed test's own error when ending its daemons fails too", async () => {
+      const surfaced = await inRunRoot((runRoot, consumer) =>
+        providingRunRoot(runRoot, async () => {
+          const daemon = idleProcess([consumer]);
+          const platform = Object.getOwnPropertyDescriptor(
+            process,
+            "platform",
+          )!;
+          try {
+            return await withDaemons([consumer], async (pids) => {
+              pids.add(daemon);
+              Object.defineProperty(process, "platform", {
+                ...platform,
+                value: "win32",
+              });
+              vi.stubEnv("SystemRoot", undefined);
+              throw new Error("the test body failed");
+            }).then(
+              () => ["passed"],
+              (error: Error) =>
+                error instanceof AggregateError
+                  ? error.errors.map((each: Error) => each.message)
+                  : [error.message],
+            );
+          } finally {
+            Object.defineProperty(process, "platform", platform);
+            vi.unstubAllEnvs();
+            endAll([daemon]);
+          }
+        }),
+      );
+      expect(surfaced[0]).toBe("the test body failed");
+    });
+
+    it("D2474: keeps the consumer's daemon key while a recorded id still runs that it could not prove the test's", async () => {
+      const kept = await inRunRoot((runRoot, consumer) =>
+        providingRunRoot(runRoot, async () => {
+          const identity = consumerIdentity(consumer).worktreeIdentity;
+          const location = clientEndpoint(identity);
+          if (!location.ok) throw new Error(location.reason);
+          const created = createDaemonKey(location, identity);
+          if (!created.ok) throw new Error(created.reason);
+          const stranger = idleProcess();
+          try {
+            await withDaemons([consumer], async (pids) => {
+              pids.add(stranger);
+            });
+            return existsSync(location.keyFile);
+          } finally {
+            endAll([stranger]);
+            created.key.remove();
+          }
+        }),
+      );
+      expect(kept).toBe(true);
     });
   },
 );

@@ -1,8 +1,9 @@
 // Stands in for Vitest's entry under the defect verifier's runner. It reads its script from `stand-in.json` in the
 // `--root` directory: `lines` to write to stdout at once, a `repeat` line to write every REPEAT_MS for `forMs`,
 // `children` to start detached (each an argument list for an idle Node process, so the command line can name what the
-// test needs), `childStdio` for them ("ignore" unless "inherit", which holds the runner's pipes open), and `finish`,
-// which writes an empty report and exits; otherwise it hangs until it is ended.
+// test needs, followed by the root, which ties the child to the test), `childStdio` for them ("ignore" unless
+// "inherit", which holds the runner's pipes open), and `finish`, which writes an empty report and exits; otherwise it
+// hangs until it is ended.
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +19,7 @@ const root = valueOf("--root");
 const script = JSON.parse(readFileSync(join(root, "stand-in.json"), "utf8"));
 
 const children = (script.children ?? []).map((extra) => {
-  const child = spawn(process.execPath, ["-e", IDLE_SCRIPT, ...extra], {
+  const child = spawn(process.execPath, ["-e", IDLE_SCRIPT, ...extra, root], {
     cwd: tmpdir(),
     detached: true,
     stdio: script.childStdio ?? "ignore",

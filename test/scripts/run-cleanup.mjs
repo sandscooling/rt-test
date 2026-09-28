@@ -33,6 +33,7 @@ const RELEASE_POLL_MS = 200;
 /** What Windows answers a removal of a directory that a live process holds open. */
 const HELD_DIRECTORY_CODES = new Set(["EPERM", "EBUSY"]);
 const NOT_FOUND = "ENOENT";
+const NO_SUCH_PROCESS = "ESRCH";
 const POWERSHELL_UNDER_SYSTEM_ROOT = [
   "System32",
   "WindowsPowerShell",
@@ -40,7 +41,9 @@ const POWERSHELL_UNDER_SYSTEM_ROOT = [
   "powershell.exe",
 ];
 const PROC = "/proc";
-const FIELD_SEPARATOR = "\t";
+/** Where `/proc/<pid>/stat` holds the parent's id and the start time, counted from the field after the name. */
+const STAT_PARENT_FIELD = 1;
+const STAT_START_TIME_FIELD = 19;
 const DECIMAL_DIGITS = /^\d+$/;
 
 function isHeldOnWindows(error) {
@@ -124,26 +127,48 @@ function recordedPids(entries) {
     ...(entry.pidFiles ?? []).flatMap(pidsIn),
     ...(entry.lockDirectories ?? []).flatMap(lockFilesIn).flatMap(pidsIn),
   ]);
-  return [...new Set(pids)].filter(isRunning);
+  return [...new Set(pids)];
 }
 
 /**
- * The command line of each Windows process `filter` selects, keyed by process id. Throws when the query cannot be
- * made, since an empty answer would read as "no such process".
+ * Selects the processes `filter` names and their parents, and prints them as one JSON array in UTF-8, since a
+ * command line may hold any character. The creation time is file-time ticks as text, past a JSON number's
+ * precision. A process with no creation time is a system one, never a run's. A failed query exits non-zero rather
+ * than printing an empty list.
  */
-function windowsProcesses(filter) {
+const windowsRecordQuery = (filter) =>
+  [
+    "$ErrorActionPreference = 'Stop'",
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    `$found = @(Get-CimInstance Win32_Process -Filter '${filter}')`,
+    "$ids = @($found | ForEach-Object { $_.ProcessId })",
+    "$parents = @($found | ForEach-Object { $_.ParentProcessId } | Where-Object { $_ -gt 0 -and $ids -notcontains $_ } | Sort-Object -Unique)",
+    `if ($parents.Count -gt 0) { $found += @(Get-CimInstance Win32_Process -Filter (($parents | ForEach-Object { "ProcessId=$_" }) -join ' OR ')) }`,
+    "$records = @($found | Where-Object { $_.CreationDate } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parent = $_.ParentProcessId; startedAt = [string]$_.CreationDate.ToFileTimeUtc(); commandLine = [string]$_.CommandLine } })",
+    "ConvertTo-Json -InputObject $records -Compress",
+  ].join("; ");
+
+/** The record a query printed, or undefined for an entry missing a field. */
+function windowsRecord(entry) {
+  const { pid, parent, startedAt, commandLine } = entry ?? {};
+  const whole = [pid, parent].every(Number.isInteger);
+  if (!whole || !DECIMAL_DIGITS.test(startedAt ?? "")) return undefined;
+  if (typeof commandLine !== "string") return undefined;
+  return { pid, parent, startedAt: BigInt(startedAt), commandLine };
+}
+
+/**
+ * The record of each Windows process `filter` selects and of each one's parent, keyed by process id. Throws when
+ * the query cannot be made, since an empty answer would read as "no such process".
+ */
+function windowsRecords(filter) {
   const systemRoot = process.env.SystemRoot;
   if (systemRoot === undefined) {
     throw new Error("cannot query processes: SystemRoot is not set");
   }
   const result = spawnSync(
     join(systemRoot, ...POWERSHELL_UNDER_SYSTEM_ROOT),
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `Get-CimInstance Win32_Process -Filter '${filter}' | ForEach-Object { [string]$_.ProcessId + [char]9 + $_.CommandLine }`,
-    ],
+    ["-NoProfile", "-NonInteractive", "-Command", windowsRecordQuery(filter)],
     { encoding: "utf8", timeout: COMMAND_LINE_QUERY_MS, windowsHide: true },
   );
   if (result.error !== undefined || result.status !== 0) {
@@ -151,15 +176,17 @@ function windowsProcesses(filter) {
       `cannot query processes (${filter}): ${result.error?.message ?? result.stderr.trim()}`,
     );
   }
-  return new Map(
-    result.stdout
-      .split(/\r?\n/)
-      .filter((line) => line.includes(FIELD_SEPARATOR))
-      .map((line) => {
-        const at = line.indexOf(FIELD_SEPARATOR);
-        return [Number(line.slice(0, at)), line.slice(at + 1)];
-      }),
-  );
+  let entries;
+  try {
+    entries = JSON.parse(result.stdout);
+    if (!Array.isArray(entries)) throw new Error("the query printed no list");
+  } catch (error) {
+    throw new Error(`cannot read the process query (${filter}): ${error}`, {
+      cause: error,
+    });
+  }
+  const records = entries.map(windowsRecord).filter(Boolean);
+  return new Map(records.map((record) => [record.pid, record]));
 }
 
 function readProc(pid, name) {
@@ -182,46 +209,99 @@ function linuxWorkingDirectory(pid) {
   }
 }
 
-/** Each running process's command line, and on Linux its working directory: what ties a process to a run. */
-function processIdentities(pids) {
-  if (process.platform === WINDOWS) {
-    const filter = pids.map((pid) => `ProcessId=${pid}`).join(" OR ");
-    const lines = windowsProcesses(filter);
-    return new Map(pids.map((pid) => [pid, [lines.get(pid) ?? ""]]));
-  }
-  return new Map(
-    pids.map((pid) => [
-      pid,
-      [linuxCommandLine(pid), linuxWorkingDirectory(pid)].filter(
-        (identity) => identity !== undefined,
-      ),
-    ]),
-  );
-}
-
-/** The field after a Linux `/proc/<pid>/stat` line's command name, which may itself hold spaces and parentheses. */
-function linuxParent(pid) {
+/**
+ * The parent and start time from a Linux `/proc/<pid>/stat` line, read after its command name, which may itself
+ * hold spaces and parentheses. Undefined for a line not in that shape.
+ */
+function linuxStat(pid) {
   const stat = readProc(pid, "stat");
-  if (stat === undefined) return undefined;
-  const [, parent] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-  return Number(parent);
+  const nameEnd = stat?.lastIndexOf(")") ?? -1;
+  if (nameEnd < 0) return undefined;
+  const fields = stat.slice(nameEnd + 2).split(" ");
+  const parent = fields[STAT_PARENT_FIELD] ?? "";
+  const startedAt = fields[STAT_START_TIME_FIELD] ?? "";
+  if (![parent, startedAt].every((field) => DECIMAL_DIGITS.test(field))) {
+    return undefined;
+  }
+  return { parent: Number(parent), startedAt: BigInt(startedAt) };
 }
 
-/** The processes `pid` started directly, each with its command line, found while `pid` still runs. */
-export function childProcessesOf(pid) {
-  if (process.platform === WINDOWS) {
-    return [...windowsProcesses(`ParentProcessId=${pid}`)].map(
-      ([child, commandLine]) => ({ pid: child, commandLine }),
-    );
+function linuxRecord(pid) {
+  const stat = linuxStat(pid);
+  if (stat === undefined) return undefined;
+  const workingDirectory = linuxWorkingDirectory(pid);
+  return {
+    pid,
+    ...stat,
+    commandLine: linuxCommandLine(pid) ?? "",
+    ...(workingDirectory === undefined ? {} : { workingDirectory }),
+  };
+}
+
+function linuxRecords(pids) {
+  const records = new Map();
+  const add = (pid) => {
+    const record = linuxRecord(pid);
+    if (record !== undefined) records.set(pid, record);
+    return record;
+  };
+  for (const pid of pids) {
+    const record = add(pid);
+    if (record !== undefined && !records.has(record.parent)) add(record.parent);
   }
-  return readdirSync(PROC)
+  return records;
+}
+
+const linuxChildIds = (pid) =>
+  readdirSync(PROC)
     .filter((name) => DECIMAL_DIGITS.test(name))
     .map(Number)
-    .filter((child) => linuxParent(child) === pid)
-    .map((child) => ({
-      pid: child,
-      commandLine: linuxCommandLine(child) ?? "",
-    }));
+    .filter((child) => linuxStat(child)?.parent === pid);
+
+/**
+ * The record of each of `pids` still running, and of each one's parent, keyed by process id. An id alone names
+ * whichever process holds it now; its start time tells that process from every other that ever held the id.
+ */
+export function processRecords(pids) {
+  const ids = pids.filter(isProcessId);
+  if (ids.length === 0) return new Map();
+  if (process.platform === WINDOWS) {
+    return windowsRecords(ids.map((pid) => `ProcessId=${pid}`).join(" OR "));
+  }
+  return linuxRecords(ids);
+}
+
+/** A non-positive id is never a process, and anything but a whole number would break the query. */
+const isProcessId = (pid) => Number.isInteger(pid) && pid > 0;
+
+function recordsNamingParent(pid) {
+  if (!isProcessId(pid)) return new Map();
+  if (process.platform === WINDOWS) {
+    return windowsRecords(`ProcessId=${pid} OR ParentProcessId=${pid}`);
+  }
+  return linuxRecords([pid, ...linuxChildIds(pid)]);
+}
+
+/** Whether `parent` started the process `record` describes: a later holder of the parent's id cannot have. */
+const isStartedBy = (record, parent) =>
+  record.parent === parent.pid && record.startedAt >= parent.startedAt;
+
+/** The processes `pid` started directly that still run, each as its record; none once `pid` has exited. */
+export function childProcessesOf(pid) {
+  const records = recordsNamingParent(pid);
+  const parent = records.get(pid);
+  if (parent === undefined) return [];
+  return [...records.values()].filter((record) => isStartedBy(record, parent));
+}
+
+/**
+ * Whether any process still names `pid` as its parent. On Windows that outlives the parent, so it proves no
+ * parenthood; it only says whether processes that one started may still run.
+ */
+export function namedAsParent(pid) {
+  return [...recordsNamingParent(pid).values()].some(
+    (record) => record.parent === pid,
+  );
 }
 
 /** Whether a command line is a run watchdog's, which must outlive the process it guards to clean up after it. */
@@ -239,26 +319,86 @@ function runRootForms(runRoot) {
   return forms.map((form) => (fold ? form.toLowerCase() : form));
 }
 
-/** The recorded processes still running whose command line or working directory lies inside the run's directory. */
-function ownedProcesses(runRoot, pids) {
-  if (pids.length === 0) return [];
-  const forms = runRootForms(runRoot);
+/** Whether a process's command line, or on Linux its working directory, lies inside one of `roots`. */
+function liesInside(roots) {
+  const forms = roots.flatMap(runRootForms);
   const fold = process.platform === WINDOWS;
-  const identities = processIdentities(pids);
-  return pids.filter((pid) =>
-    (identities.get(pid) ?? []).some((identity) => {
+  return (record) =>
+    [record.commandLine, record.workingDirectory ?? ""].some((identity) => {
       const text = fold ? identity.toLowerCase() : identity;
       return forms.some((form) => text.includes(form));
-    }),
+    });
+}
+
+/**
+ * The records of `pids` whose process lies inside one of `roots`, or was started by a process that does, as a
+ * daemon starts the executors whose command lines name only the daemon's own files.
+ */
+function ownedRecords(roots, pids, records) {
+  const inside = liesInside(roots);
+  return pids.flatMap((pid) => {
+    const record = records.get(pid);
+    if (record === undefined) return [];
+    const parent = records.get(record.parent);
+    const owned =
+      inside(record) ||
+      (parent !== undefined && isStartedBy(record, parent) && inside(parent));
+    return owned ? [record] : [];
+  });
+}
+
+/**
+ * The records whose process id still names the process each was taken of: the same id and start time. The parent
+ * is left out, since Linux gives an orphan a new one.
+ */
+export function stillRunning(records) {
+  const running = records.filter(({ pid }) => isRunning(pid));
+  if (running.length === 0) return [];
+  const current = processRecords(running.map(({ pid }) => pid));
+  return running.filter(
+    ({ pid, startedAt }) => current.get(pid)?.startedAt === startedAt,
   );
 }
 
-export function endProcess(pid) {
-  try {
-    process.kill(pid, KILL_SIGNAL);
-  } catch {
-    // It exited between the check and the kill.
+/**
+ * Kills the process of each record read from the OS just now, and returns the records it killed. Only a
+ * check-then-kill window of milliseconds remains, since Node can hold no handle to a process it did not start.
+ * Throws, once it has tried every record, when the OS refused a kill.
+ */
+function endFreshlyRead(records) {
+  const ended = [];
+  let refused;
+  for (const record of records) {
+    const { pid } = record;
+    try {
+      process.kill(pid, KILL_SIGNAL);
+      ended.push(record);
+    } catch (error) {
+      // No such process: it exited between the check and the kill.
+      if (error.code !== NO_SUCH_PROCESS) refused ??= error;
+    }
   }
+  if (refused !== undefined) throw refused;
+  return ended;
+}
+
+/**
+ * Ends each process its record was taken of, re-reading its start time just before the kill, so an id a later
+ * process now holds is spared. Returns the records it ended.
+ */
+export function endRecorded(records) {
+  return endFreshlyRead(stillRunning(records));
+}
+
+/**
+ * Ends each of `pids` still running whose process lies inside one of `roots`, or was started by one that does,
+ * reading each one's identity just before the kill, and returns the records it ended. A recorded id some
+ * unrelated process now holds is spared.
+ */
+export function endOwnedProcesses(roots, pids) {
+  const running = [...new Set(pids)].filter(isRunning);
+  if (running.length === 0) return [];
+  return endFreshlyRead(ownedRecords(roots, running, processRecords(running)));
 }
 
 /** Removes a daemon's key file with the `.tmp` and `.removing` copies a killed writer leaves beside it. */
@@ -284,16 +424,17 @@ function removeRecordedFiles(entries) {
 }
 
 /**
- * Ends every process the run recorded that still runs inside its directory, removes the files it recorded outside
- * that directory, and removes the directory. Resolves with the processes it ended and whether the directory is gone,
- * which it is not while Windows still holds it. Throws, removing nothing, when it cannot tell which processes are
- * the run's, so a live daemon never loses its key.
+ * Ends every process the run recorded that still runs inside its directory or was started by one that does,
+ * removes the files it recorded outside that directory, and removes the directory. Resolves with the processes it
+ * ended and whether the directory is gone, which it is not while Windows still holds it. Throws, removing nothing,
+ * when it cannot tell which processes are the run's or cannot end one, so a live daemon never loses its key.
  */
 export async function cleanUpRun(runRoot) {
   if (!existsSync(runRoot)) return { ended: [], removed: true };
   const entries = readStarted(runRoot);
-  const ended = ownedProcesses(runRoot, recordedPids(entries));
-  for (const pid of ended) endProcess(pid);
+  const ended = endOwnedProcesses([runRoot], recordedPids(entries)).map(
+    ({ pid }) => pid,
+  );
   removeRecordedFiles(entries);
   return { ended, removed: await removeDirectory(runRoot) };
 }

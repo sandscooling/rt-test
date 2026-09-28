@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { LONGEST_TEST_TIMEOUT_MS } from "../../../test/scripts/longest-test-timeout.mjs";
 import {
   childProcessesOf,
-  endProcess,
+  endRecorded,
   isRunWatchdog,
 } from "../../../test/scripts/run-cleanup.mjs";
 import { toPosix } from "../paths.mjs";
@@ -27,6 +27,9 @@ export const IDLE_WINDOW_MS = 2 * LONGEST_TEST_TIMEOUT_MS;
 /** How long a stopped Vitest may take to act on the stop before it is killed outright. */
 const KILL_GRACE_MS = 10_000;
 const KILL_SIGNAL = "SIGKILL";
+/** Once the main process has gone, its id no longer proves which processes are its workers. */
+const EXITED_BEFORE_STOP =
+  "its main process had exited before the stop, so its workers could not be told from other processes and any still running were left";
 const PROGRESS_REPORTER = fileURLToPath(
   new URL("./progress-reporter.mjs", import.meta.url),
 );
@@ -215,26 +218,41 @@ function stallText(log, idleWindowMs, stopProblem, output) {
 /**
  * Ends the Vitest main process, then the processes it started directly, its pool workers, which it leaves running
  * when it is killed. The run watchdog is spared, since it ends the daemons a stopped run started once the main
- * process is gone; those daemons are the workers' children, so ending the workers leaves them to it. Returns why
- * the workers could not be listed, if they could not.
+ * process is gone; those daemons are the workers' children, so ending the workers leaves them to it. A worker is
+ * ended only while its id still names the process listed. Returns the stop at once; its `problem`, why the workers
+ * could not be listed or ended, is final before the runner's own exit listener reads it.
  */
 function stopRun(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { problem: EXITED_BEFORE_STOP };
+  }
+  const stop = { problem: undefined };
   let workers = [];
-  let problem;
   try {
     workers = childProcessesOf(child.pid).filter(
       (worker) => !isRunWatchdog(worker.commandLine),
     );
   } catch (error) {
-    problem = `its workers could not be listed, so any still running were left: ${error.message}`;
+    stop.problem = `its workers could not be listed, so any still running were left: ${error.message}`;
   }
   child.kill();
   const escalate = setTimeout(() => child.kill(KILL_SIGNAL), KILL_GRACE_MS);
-  child.once("exit", () => {
+  // Ahead of the runner's own exit listener, which writes the stall report.
+  child.prependOnceListener("exit", () => {
     clearTimeout(escalate);
-    for (const worker of workers) endProcess(worker.pid);
+    stop.problem ??= endWorkers(workers);
   });
-  return problem;
+  return stop;
+}
+
+/** Ends each listed worker still running as the process listed, and says why they could not be, if they could not. */
+function endWorkers(workers) {
+  try {
+    endRecorded(workers);
+    return undefined;
+  } catch (error) {
+    return `its workers could not be checked before they were ended, so any still running were left: ${error.message}`;
+  }
 }
 
 function spawnRun(args, cwd, idleWindowMs, exitRecord) {
@@ -250,10 +268,12 @@ function spawnRun(args, cwd, idleWindowMs, exitRecord) {
     const tail = stdoutTail();
     let exitedAt;
     let stalled = false;
-    let stopProblem;
+    let stop;
     const stopStalled = () => {
       stalled = true;
-      stopProblem = stopRun(child);
+      stop = stopRun(child);
+      // Its exit has passed, and a worker holding the pipes can keep "close" away for good.
+      if (exitedAt !== undefined) failStalled();
     };
     let idle = setTimeout(stopStalled, idleWindowMs);
     let stderr = "";
@@ -280,7 +300,7 @@ function spawnRun(args, cwd, idleWindowMs, exitRecord) {
     const failStalled = () => {
       if (stallReported) return;
       stallReported = true;
-      fail(new Error(stallText(log, idleWindowMs, stopProblem, runOutput())));
+      fail(new Error(stallText(log, idleWindowMs, stop.problem, runOutput())));
     };
     const failWithOutput = (problem) =>
       fail(new Error(withOutputEvidence(problem, runOutput())));

@@ -3,7 +3,7 @@
     "id": "D1747",
     "defect": "A recorded process still running inside the run's directory is found but never ended, so a killed run's daemon keeps running.",
     "file": "test/scripts/run-cleanup.mjs",
-    "old": "for (const pid of ended) endProcess(pid);",
+    "old": "process.kill(pid, KILL_SIGNAL);",
     "new": ""
   },
   {
@@ -145,5 +145,138 @@
     "file": "test/scripts/run-cleanup.mjs",
     "old": "    ...(entry.lockDirectories ?? []).flatMap(lockFilesIn).flatMap(pidsIn),\n",
     "new": ""
+  },
+  {
+    "id": "D2440",
+    "defect": "A recorded process counts as still running whenever its id runs, whatever started now, so a process that took a recorded id is killed.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "current.get(pid)?.startedAt === startedAt",
+    "new": "current.has(pid)"
+  },
+  {
+    "id": "D2441",
+    "defect": "endRecorded checks each record against the OS and then kills nothing, so a recorded process that still runs is left.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "return endFreshlyRead(stillRunning(records));",
+    "new": "return stillRunning(records);"
+  },
+  {
+    "id": "D2442",
+    "defect": "The daemon harness kills every recorded id still running, so a process outside the consumer that took a daemon's id is killed.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  const ended = endOwnedProcesses(roots, recorded);\n",
+    "new": "  const ended = endOwnedProcesses(roots, recorded);\n  for (const pid of recorded) if (isRunning(pid)) process.kill(pid, \"SIGKILL\");\n"
+  },
+  {
+    "id": "D2443",
+    "defect": "A process is the run's only when its own command line or working directory lies inside the run, so an executor naming only the daemon's files is never ended.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "(parent !== undefined && isStartedBy(record, parent) && inside(parent));",
+    "new": "false;"
+  },
+  {
+    "id": "D2445",
+    "defect": "endAll signals each id it is given, so a process that is no idle process it started, such as one that took an ended one's id, is killed.",
+    "file": "test/scripts/processes.ts",
+    "old": "idleProcesses.get(pid)?.kill(\"SIGKILL\")",
+    "new": "process.kill(pid, \"SIGKILL\")"
+  },
+  {
+    "id": "D2474",
+    "defect": "The daemon harness removes a consumer's key while a recorded id it could not prove the test's still runs, which may be a daemon still using that key.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "if (alive.length === 0 && unproven.length === 0) {",
+    "new": "if (alive.length === 0) {"
+  },
+  {
+    "id": "D2444",
+    "defect": "A process is admitted as started by whatever process now holds its recorded parent id, so a later process naming the run adopts a stranger that is then killed.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "record.parent === parent.pid && record.startedAt >= parent.startedAt;",
+    "new": "record.parent === parent.pid && true;"
+  },
+  {
+    "id": "D2475",
+    "defect": "A live parent's children are listed by parent id alone, so processes that named an earlier holder of its id are listed as its workers and ended.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "filter((record) => isStartedBy(record, parent))",
+    "new": "filter((record) => record.parent === pid)"
+  },
+  {
+    "id": "D2446",
+    "defect": "An exited parent's former children are listed as its children, so a later holder of its id is credited with processes it never started.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (parent === undefined) return [];",
+    "new": "if (parent === undefined) return [...records.values()].filter((record) => record.parent === pid);"
+  },
+  {
+    "id": "D2447",
+    "defect": "namedAsParent counts only the children of a live parent, so the defect harness removes a scratch folder while workers of its exited Vitest still hold it.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "  return [...recordsNamingParent(pid).values()].some(\n    (record) => record.parent === pid,\n  );",
+    "new": "  return childProcessesOf(pid).length > 0;"
+  },
+  {
+    "id": "D2448",
+    "defect": "A Windows query entry missing its parent id is kept as a record, so a process whose parent cannot be checked reads as known.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "  if (!whole || !DECIMAL_DIGITS.test(startedAt ?? \"\")) return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2449",
+    "defect": "The Windows query prints in the console's code page, so a command line holding a non-ASCII character reads garbled and a process under such a root is never matched.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "    \"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\",\n",
+    "new": ""
+  },
+  {
+    "id": "D2450",
+    "defect": "A Linux stat line whose start time is not decimal throws, so one unreadable process fails the whole check.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "  if (![parent, startedAt].every((field) => DECIMAL_DIGITS.test(field))) {\n    return undefined;\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2451",
+    "defect": "A Linux stat line without the command name's closing parenthesis is read from its second character, so a line of numbers yields a record with a made-up parent and start time.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "  if (nameEnd < 0) return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2495",
+    "defect": "A Windows process query whose CIM call fails prints an empty list and exits 0, so every recorded process reads as gone and a live daemon's key is removed.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "    \"$ErrorActionPreference = 'Stop'\",\n",
+    "new": ""
+  },
+  {
+    "id": "D2496",
+    "defect": "When ending the daemons fails after the test body failed, the cleanup's error replaces the body's, so the test's own failure is lost.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": ".catch((cleanup: unknown) => {\n      throw new AggregateError(\n        [error, cleanup],\n        \"the test failed, and ending its daemons failed too\",\n      );\n    });",
+    "new": ";"
+  },
+  {
+    "id": "D2497",
+    "defect": "A Windows query entry missing its command line is kept, so the ownership check throws on it and one bad entry fails the whole check.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "  if (typeof commandLine !== \"string\") return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2498",
+    "defect": "A kill the OS refuses is swallowed, so a process the run owns that still runs reads as handled rather than failing the cleanup.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (error.code !== NO_SUCH_PROCESS) refused ??= error;",
+    "new": ""
+  },
+  {
+    "id": "D2499",
+    "defect": "A Linux stat line whose parent is not decimal yields a record with a parent of NaN rather than no record.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "![parent, startedAt].every(",
+    "new": "![startedAt].every("
   }
 ]

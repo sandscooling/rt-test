@@ -1,6 +1,6 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
-import { childProcessesOf } from "../run-cleanup.mjs";
+import { childProcessesOf, endRecorded } from "../run-cleanup.mjs";
 import { PROCESS_SCENARIO } from "../timeouts.js";
 import { runStandIn, withScratch } from "./harness.js";
 
@@ -16,6 +16,7 @@ vi.mock("../run-cleanup.mjs", async (importOriginal) => {
     childProcessesOf: vi.fn<typeof actual.childProcessesOf>(
       actual.childProcessesOf,
     ),
+    endRecorded: vi.fn<typeof actual.endRecorded>(actual.endRecorded),
   };
 });
 
@@ -114,19 +115,17 @@ describe("stopping a stalled Vitest run", PROCESS_SCENARIO, () => {
     expect(sent).toEqual(["SIGTERM"]);
   });
 
-  it("D1784: leaves a run that finished alone once the idle window passes", async () => {
+  it("D1784: leaves no timer armed once a run has finished, so nothing holds the verifier's process open", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const listings = await withScratch(async (dir) => {
+    const armed = await withScratch(async (dir) => {
       try {
         await runStandIn(dir, { finish: true }, STALL_WINDOW_MS).outcome;
-        const before = vi.mocked(childProcessesOf).mock.calls.length;
-        await vi.advanceTimersByTimeAsync(STALL_WINDOW_MS);
-        return vi.mocked(childProcessesOf).mock.calls.length - before;
+        return vi.getTimerCount();
       } finally {
         vi.useRealTimers();
       }
     });
-    expect(listings).toBe(0);
+    expect(armed).toBe(0);
   });
 
   it("D1707: says in the stall report when the stopped run's workers could not be listed", async () => {
@@ -138,6 +137,18 @@ describe("stopping a stalled Vitest run", PROCESS_SCENARIO, () => {
     );
     expect(outcome).toMatch(
       /workers could not be listed.*the process table cannot be read/,
+    );
+  });
+
+  it("D2473: says in the stall report when the stopped run's workers could not be checked before they were ended", async () => {
+    vi.mocked(endRecorded).mockImplementationOnce(() => {
+      throw new Error("the process table cannot be read");
+    });
+    const outcome = await withScratch(
+      (dir) => runStandIn(dir, {}, STALL_WINDOW_MS).outcome,
+    );
+    expect(outcome).toMatch(
+      /workers could not be checked before they were ended.*the process table cannot be read/,
     );
   });
 

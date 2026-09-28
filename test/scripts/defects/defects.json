@@ -724,7 +724,7 @@
     "id": "D1704",
     "defect": "A stopped run's pool workers are listed but never ended, so they outlive the stopped Vitest.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "for (const worker of workers) endProcess(worker.pid);",
+    "old": "endRecorded(workers);",
     "new": ""
   },
   {
@@ -787,12 +787,26 @@
     "id": "D1783",
     "defect": "A stopped run's workers are ended only once its output closes, so a worker holding the main process's output open is never ended.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "  child.once(\"exit\", () => {",
-    "new": "  child.once(\"close\", () => {"
+    "old": "  child.prependOnceListener(\"exit\", () => {",
+    "new": "  child.prependOnceListener(\"close\", () => {"
+  },
+  {
+    "id": "D2472",
+    "defect": "A stalled run whose main process exited before the stop is stopped as if it still ran, so its stall report never says that its workers could not be told from other processes and were left.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "if (child.exitCode !== null || child.signalCode !== null) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2473",
+    "defect": "When a stopped run's workers cannot be checked before they are ended, the stall report does not say that any may have been left running.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "stop.problem ??= endWorkers(workers);",
+    "new": "endWorkers(workers);"
   },
   {
     "id": "D1784",
-    "defect": "A run that finished leaves its idle timer armed, so the window later stops, and lists the children of, a process that has exited.",
+    "defect": "A run that finished leaves its idle timer armed, which holds the verifier's process open for up to the idle window after its last run.",
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "    child.on(\"close\", (status, signal) => {\n      clearTimeout(idle);",
     "new": "    child.on(\"close\", (status, signal) => {"
@@ -1097,5 +1111,12 @@
     "file": "scripts/lib/defects/run-evidence.mjs",
     "old": "if (run.runEnd === null) return \"Vitest reported no run end\";",
     "new": "if (run.runEnd === null) return exitOf(run.exitRecord) === undefined ? \"Vitest reported no run end\" : null;"
+  },
+  {
+    "id": "D2494",
+    "defect": "A stall found after the main process exited waits for a close that a worker holding the pipes keeps away, so the run hangs instead of failing.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "      if (exitedAt !== undefined) failStalled();\n",
+    "new": ""
   }
 ]
