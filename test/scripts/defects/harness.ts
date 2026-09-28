@@ -168,7 +168,7 @@ export function fakeVitest(catalog: Catalog, hooks: FakeHooks = {}): RunTests {
         testResults,
       },
       stderr: "",
-      stdout: "",
+      stdoutTail: "",
     };
   };
 }

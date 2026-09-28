@@ -927,7 +927,7 @@
     "id": "D2059",
     "defect": "A run that wrote a valid report comes back without its stdout tail, so a verdict on that run cannot quote what Vitest printed.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "stdout: run.stdout,",
+    "old": "stdoutTail: run.stdoutTail,",
     "new": ""
   },
   {

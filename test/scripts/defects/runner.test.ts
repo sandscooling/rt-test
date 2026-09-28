@@ -38,7 +38,10 @@ const test = (
 function result(
   status: number | null,
   files: Readonly<Record<string, readonly AssertionResult[]>>,
-  output: Pick<RunResult, "stderr" | "stdout"> = { stderr: "", stdout: "" },
+  output: Pick<RunResult, "stderr" | "stdoutTail"> = {
+    stderr: "",
+    stdoutTail: "",
+  },
 ): RunResult {
   const tests = Object.values(files).flat();
   const count = (state: string) =>
@@ -57,7 +60,10 @@ function result(
   };
 }
 
-const RUN_OUTPUT = { stderr: "vitest broke here\n", stdout: "last words" };
+const RUN_OUTPUT = {
+  stderr: "vitest broke here\n",
+  stdoutTail: "last words",
+};
 
 const defect = (id: string) =>
   catalogOf().defects.find((each) => each.id === id)!;
@@ -158,16 +164,16 @@ const writesStdout = (text: string) =>
   `process.stdout.write(${JSON.stringify(text)});\n`;
 
 /** The output the runner hands back from a run that writes a valid report, stderr, and stdout around a progress line. */
-function validRunOutput(): Promise<Pick<RunResult, "stderr" | "stdout">> {
+function validRunOutput(): Promise<Pick<RunResult, "stderr" | "stdoutTail">> {
   return withScratch(async (dir) => {
-    const { stderr, stdout } = await runEntryIn(
+    const { stderr, stdoutTail } = await runEntryIn(
       dir,
       (report) =>
         writesReport(report, JSON.stringify(result(0, {}).report)) +
         `process.stderr.write(${JSON.stringify("warned here\n")});\n` +
         writesStdout(`said first\n${collected}\nsaid last\n`),
     );
-    return { stderr, stdout };
+    return { stderr, stdoutTail };
   });
 }
 
@@ -388,8 +394,8 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
   });
 
   it("D2059: hands back a run's stdout tail that is not progress with a valid report", async () => {
-    const { stdout } = await validRunOutput();
-    expect(stdout).toBe("said first\nsaid last");
+    const { stdoutTail } = await validRunOutput();
+    expect(stdoutTail).toBe("said first\nsaid last");
   });
 
   it("D946: rejects a run whose only failure is a different test", () => {

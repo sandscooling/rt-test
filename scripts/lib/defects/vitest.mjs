@@ -154,7 +154,7 @@ const orEmpty = (output) => output || "(empty)";
 /** The run's stderr and stdout tail, as a failure quotes them. */
 const outputEvidence = (run) => [
   `stderr: ${orEmpty(run.stderr)}`,
-  `stdout tail: ${orEmpty(run.stdout)}`,
+  `stdout tail: ${orEmpty(run.stdoutTail)}`,
 ];
 
 const withOutputEvidence = (problem, run) =>
@@ -229,7 +229,7 @@ function spawnRun(args, cwd, idleWindowMs) {
       clearTimeout(idle);
       fail(error);
     });
-    const runOutput = () => ({ stderr, stdout: tail.text() });
+    const runOutput = () => ({ stderr, stdoutTail: tail.text() });
     const failStalled = () =>
       fail(new Error(stallText(log, idleWindowMs, stopProblem, runOutput())));
     const failWithOutput = (problem) =>
@@ -250,7 +250,7 @@ function spawnRun(args, cwd, idleWindowMs) {
         done({
           status,
           stderr,
-          stdout: tail.text(),
+          stdoutTail: tail.text(),
           exitMs:
             exitedAt === undefined ? null : elapsedMs(startedAt, exitedAt),
           closeLagMs:
@@ -276,7 +276,7 @@ export function createVitestRunner({
         status: run.status,
         report: read.report,
         stderr: run.stderr,
-        stdout: run.stdout,
+        stdoutTail: run.stdoutTail,
       };
     }
     throw new Error(noReportText(run, read.problem), { cause: read.error });

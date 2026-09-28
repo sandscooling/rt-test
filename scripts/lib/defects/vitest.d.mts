@@ -21,7 +21,7 @@ export interface RunResult {
   /** The run's whole stderr, unbounded. */
   readonly stderr: string;
   /** The last non-blank stdout lines that were not progress, cut to a bounded length. */
-  readonly stdout: string;
+  readonly stdoutTail: string;
 }
 
 export interface RunRequest {
