@@ -120,7 +120,7 @@ Add a dependency only as P9 directs. After any `bun install` or `bun add`, run `
 
 **Gate a dependency bump on a tree with no other code change**, so a red is attributable to the bump.
 
-**Read exit codes with the Bash tool**, redirecting a gate's whole output to a log and printing its status after: `bun run test:run > <log> 2>&1; echo "EXIT:$?"`. PowerShell does not set `$?` the same way, and a piped filter's status replaces the runner's.
+**Read exit codes with the Bash tool**, redirecting a gate's whole output to a log and printing its status after: `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- bun run test:run > <log> 2>&1; echo "EXIT:$?"`. PowerShell does not set `$?` the same way, and a piped filter's status replaces the runner's.
 
 ### Orchestrated Gate Delegation
 
@@ -133,7 +133,7 @@ A lane shares one checkout with its siblings, so a repo-wide gate reads every la
 | § Targeted Typecheck, § Targeted Test Validation, targeted lint and `bun x prettier --check` over the files you touched, `bun run test:defects` to prove your named defects, § Citation Shift Check                                                    | the member       |
 | `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file; a worktree lane's review runs `bun run check` in its own tree (`_agent-docs/crew.md` § Worktree lanes) | the orchestrator |
 
-`bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your lane's claims.
+`bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your lane's claims. Every heavy run goes through the run lease (`_agent-docs/crew.md` § Gates), so only one runs on the machine at a time.
 
 #### Claim a file before you touch it
 
@@ -196,7 +196,7 @@ With no test beside the changed code, skip this gate; § Full-Suite Validation s
 
 Run by `create-tests` once an implementation is complete, and by `review-changes` after its fix pass. It protects against **transitive regressions**: A changed, C depends on A through B, and C's test fails. A hand-picked list of related tests cannot see those.
 
-`bun run test:run` runs every Vitest project. Scope to the blast radius only by a graph walk, `bun x vitest related <paths> --run`, and **state the denominator**: `<selected> of <total>` test files. Read a zero or implausibly small selection as a wrong path form, not a pass; fix it and re-run. Run the whole suite when the change spans workspaces, touches shared test helpers, or its reach is uncertain.
+`bun run test:run` runs every Vitest project. Run it, and `vitest related`, through the run lease (`_agent-docs/crew.md` § Gates). Scope to the blast radius only by a graph walk, `bun x vitest related <paths> --run`, and **state the denominator**: `<selected> of <total>` test files. Read a zero or implausibly small selection as a wrong path form, not a pass; fix it and re-run. Run the whole suite when the change spans workspaces, touches shared test helpers, or its reach is uncertain.
 
 **Categorize every failure by causation**, not by whether its file is in your changed list:
 

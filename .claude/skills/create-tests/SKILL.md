@@ -117,7 +117,7 @@ logged>. Discovering targets.`
 ## 3. Discover targets
 
 **In ticket mode, run the suite first**, by § Full-Suite Validation, scoped to the change's production files:
-`bun x vitest related <production paths> --run`, stating `<selected> of <total>` test files. The dev ran none.
+`bun x vitest related <production paths> --run`, run through the run lease (`_agent-docs/crew.md` § Gates), stating `<selected> of <total>` test files. The dev ran none.
 Sort every red by the operating rules. Every broken test file in the handoff and every stale red becomes a
 target; every `ACs Owed a Test` and `Tests Owed` entry becomes a target whose guarantee is its named defect.
 
@@ -185,7 +185,7 @@ and the exact `old` and `new` text, where `old` matches once. The named defect i
 behavior with one minimal edit (invert a comparison, drop a guard, return a constant, skip a write). Write the
 file with the `Write` or `Edit` tool, since the anchors are source text.
 
-**Prove it**: `bun run test:defects > <log> 2>&1; echo "EXIT:$?"`. It needs a passing baseline, applies each
+**Prove it**: `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- bun run test:defects > <log> 2>&1; echo "EXIT:$?"`. It needs a passing baseline, applies each
 mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored
 baseline. It never touches the live tree, so never hand-edit a production file to watch a test fail (P25).
 Read its exit code and detected count. A setup, compile or timeout failure is not a detection.

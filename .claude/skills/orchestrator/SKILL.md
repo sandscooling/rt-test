@@ -91,18 +91,20 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 
 ## Gates you run
 
+**Heavy runs take turns through the run lease, not through you**: `node scripts/run-lease.mjs status` shows who holds it, and every gate command below runs inside its wrapper.
+
 **Members run targeted gates**: the tests, lint, and typecheck for what they touched, and `bun run test:defects` for their named defects. **`bun run check` is yours**, because it reads every lane's code at once; a worktree lane is the exception (§ Worktree lanes).
 
 **Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run, because the review can still change the tree. Run early only when a member is blocked on a red it cannot place. A run you already made still counts if nothing it read has changed since its start.
 
 **Route each red to the lane holding its file.** `node scripts/file-claims.mjs list` names the holder; send the red to that lane's member alone. A red in an unclaimed file belongs to a sibling or predates the lanes: read it in the log, say so, and hold.
 
-**When a sibling lane is mid-edit, gate in isolation instead of holding.** Add a detached worktree of `HEAD` under `_agent-docs/.scratch/`, copy in exactly the committing lane's paths (its new files from `git ls-files --others` plus its modified files and your own edits), run `bun install --frozen-lockfile` and `bun run check` there, then stage that same set in the real checkout and confirm the staged count matches. Remove the worktree after the commit. This gates exactly what the commit contains.
+**When a sibling lane is mid-edit, gate in isolation instead of holding.** Add a detached worktree of `HEAD` under `_agent-docs/.scratch/`, copy in exactly the committing lane's paths (its new files from `git ls-files --others` plus its modified files and your own edits), run `bun install --frozen-lockfile` and `bun run check` there through the run lease, then stage that same set in the real checkout and confirm the staged count matches. Remove the worktree after the commit. This gates exactly what the commit contains.
 
 **Every long command runs in the background, and so does every wait.** A foreground run makes you unreachable while the owner watches a frozen thread. Redirect the whole command to a log unpiped, and bracket it with `date` inside the redirect:
 
 ```
-{ date; bun run check; echo "CHECK_EXIT:$?"; date; } > _agent-docs/.scratch/check-<lane>.log 2>&1
+{ date; node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- bun run check; echo "CHECK_EXIT:$?"; date; } > _agent-docs/.scratch/check-<lane>.log 2>&1
 ```
 
 **Read the result from the log's `CHECK_EXIT` line**, never from the background task's status, which is the trailing `date`'s. Never pipe a gate through `tail` or `head`: a killed run leaves an empty file, and `$?` becomes the filter's status.
@@ -110,7 +112,7 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 **Gate on Linux before every push, under Node 24 and Node 22**: a path, link, or process behavior can pass on Windows and fail on Linux, and Node 22 is the oldest line the project supports. These local gates are the project's only pre-push validation; it runs no hosted CI. WSL Ubuntu holds a clone at `~/rt-test` whose `origin` is this checkout, so it can check out a commit not yet pushed, and Node 24 at `~/.local/node` and the latest Node 22 at `~/.local/node22`, each an official tarball. Commit the lane locally after the Windows gate passes, then run in the background:
 
 ```
-wsl.exe -e bash -lc 'cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; date; node --version; bun install --frozen-lockfile; bun run check; echo "CHECK_EXIT_$v:$? $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
+node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- wsl.exe -e bash -lc 'cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; export TMPDIR="$HOME/.rt-test-runs/wsl-$v-$$"; mkdir -p "$TMPDIR"; date; node --version; bun install --frozen-lockfile; bun run check; code=$?; [ "$code" -eq 0 ] && rm -rf "$TMPDIR"; echo "CHECK_EXIT_$v:$code $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
 ```
 
 Push only when the Windows log reads `CHECK_EXIT:0` and the Linux log reads both `CHECK_EXIT_node:0 v24.…` and `CHECK_EXIT_node22:0 v22.…`; the version on each marker proves which Node ran it. A Linux-only red goes to the lane like any other red, and its fix lands as a further commit before the push.
@@ -169,7 +171,7 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 - **The cap counts lanes, not trees**, and the intersection still applies: two trees turn a shared file from a silent overwrite into a merge conflict, which is better but not free. Serialize overlapping lanes. Claims already span both trees (§ Claims and grants).
 - **Project-wide files in a worktree lane are written in that tree**, by you or under a grant, and land with the lane on `wt/<n>`. **Before writing one, bring the tree current**: when `wt/<n>` has no commits of its own, `git merge --ff-only main` in the tree; otherwise any doc line both trees edit conflicts at merge, so write the line in one tree only.
 - **The lane gates itself**: its review runs `bun run check` in its own tree and reports the exit code with its window.
-- **Land it**: in the worktree, stage with `stage-lane` and commit on `wt/<n>`. From the main checkout, commit any shared-checkout lane first (a merge refuses while the main tree holds uncommitted changes to a file it touches), then `git merge --no-ff wt/<n>`: a merge commit, never a rebase, so the sha the review gated stays stable. Gate the merged `main` once with `bun run check` in the background, push `main` on `CHECK_EXIT:0`, then fast-forward `wt/<n>` to `main` so the next lane starts current. Never push `wt/<n>`.
+- **Land it**: in the worktree, stage with `stage-lane` and commit on `wt/<n>`. From the main checkout, commit any shared-checkout lane first (a merge refuses while the main tree holds uncommitted changes to a file it touches), then `git merge --no-ff wt/<n>`: a merge commit, never a rebase, so the sha the review gated stays stable. Gate the merged `main` once with `bun run check` through the run lease in the background, push `main` on `CHECK_EXIT:0`, then fast-forward `wt/<n>` to `main` so the next lane starts current. Never push `wt/<n>`.
 - **Sweep** the worktree's own `_agent-docs/.scratch/` as well as the main checkout's. When no lane needs the tree, `git worktree remove` it and `git branch -d wt/<n>`.
 
 ## Messages you send and relay

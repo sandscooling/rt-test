@@ -40,6 +40,7 @@ vi.mock("prettier", async (importOriginal) => {
 const ADR = "docs/adr/0001-first.md";
 const HOOKS = ".claude/hooks";
 const FORMAT_ENTRY = "format-on-save.cjs";
+const LEASE_ENTRY = "run-lease.cjs";
 const PROJECT = "project";
 // A line prettier's defaults rewrite, and the text they rewrite it to.
 const UNFORMATTED = "const a=1\n";
@@ -51,6 +52,7 @@ const ENTRY_DEPENDENCIES = [
   HOOKS,
   "scripts/lib/flow-config.mjs",
   "scripts/lib/paths.mjs",
+  "scripts/lib/processes.mjs",
   "scripts/lib/orchestration",
   "_agent-docs/_flow-config.yaml",
 ];
@@ -101,12 +103,32 @@ function runEntry(
   entry: string,
   input: Record<string, unknown> | string,
   args: string[] = [],
+  env: NodeJS.ProcessEnv = process.env,
 ) {
   return spawnSync("node", [join(root, HOOKS, entry), ...args], {
     cwd: root,
     input: typeof input === "string" ? input : JSON.stringify(input),
     encoding: "utf8",
     timeout: PROCESS_SCENARIO_TIMEOUT_MS,
+    env,
+  });
+}
+
+// The run-lease hook over a tool call, with the lease store in the temp root rather than the real one.
+function runLeaseHook(
+  tool_name: string,
+  command: string,
+  copy: (root: string) => void = copyEntries,
+) {
+  return withTemp((root) => {
+    copy(root);
+    return runEntry(
+      root,
+      LEASE_ENTRY,
+      { tool_name, tool_input: { command }, cwd: root },
+      [],
+      { ...process.env, RUN_LEASE_DIR: join(root, "lease") },
+    );
   });
 }
 
@@ -446,7 +468,60 @@ describe("format on save", PROCESS_SCENARIO, () => {
   });
 });
 
+describe("run-lease hook", PROCESS_SCENARIO, () => {
+  it("D2338: denies a bare heavy command, giving the queue sentence when no lease is held", () => {
+    const run = runLeaseHook("Bash", "bun run check");
+    expect({
+      status: run.status,
+      output: JSON.parse(run.stdout || "{}"),
+    }).toEqual({
+      status: 0,
+      output: {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason:
+            "To queue, run it as: node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- bun run check",
+        },
+      },
+    });
+  });
+
+  it("D2339: reads a PowerShell tool call with PowerShell's backtick escape", () => {
+    const run = runLeaseHook("PowerShell", "echo a`;bun run check");
+    expect({
+      status: run.status,
+      stdout: run.stdout,
+      stderr: run.stderr,
+    }).toEqual({ status: 0, stdout: "", stderr: "" });
+  });
+
+  it("D2340: fails open, exiting 0 with a note on stderr, when its modules cannot load", () => {
+    const run = runLeaseHook("Bash", "bun run check", (root) =>
+      cpSync(join(REPO, HOOKS), join(root, HOOKS), { recursive: true }),
+    );
+    expect({
+      status: run.status,
+      stdout: run.stdout,
+      stderr: run.stderr,
+    }).toEqual({
+      status: 0,
+      stdout: "",
+      stderr: expect.stringMatching(/^run-lease hook skipped: /),
+    });
+  });
+});
+
 describe("hook settings", () => {
+  it("D2341: gates each Bash and PowerShell call through the run-lease hook, within a 10 s timeout", () => {
+    const gates = hookCommands()
+      .filter((hook) => entryOf(hook.command) === `${HOOKS}/${LEASE_ENTRY}`)
+      .map(({ event, matcher, timeout }) => ({ event, matcher, timeout }));
+    expect(gates).toEqual([
+      { event: "PreToolUse", matcher: "Bash|PowerShell", timeout: 10 },
+    ]);
+  });
+
   it("D364: names only hook entries that exist", () => {
     const missing = hookCommands()
       .map((hook) => entryOf(hook.command))
