@@ -2443,9 +2443,9 @@ describe("reporting each workspace's selection facts", () => {
   );
 
   it(
-    "D2116: through a linked consumer root, a project dir not yet on disk reports its path under the consumer root",
+    "D2116: a project dir not yet on disk, named through a directory link, reports the real path of the directory holding it",
     async () => {
-      const discovery = await discoverSelectionFacts("vitest", true);
+      const discovery = await discoverSelectionFacts("vitest");
       expect(
         projectFact(
           discovery,
@@ -2453,7 +2453,7 @@ describe("reporting each workspace's selection facts", () => {
           "pending",
           (facts) => facts.testFilePatterns.directory,
         ),
-      ).toBe("pending");
+      ).toBe("setup/later");
     },
     DISCOVERY_TIMEOUT_MS,
   );

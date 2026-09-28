@@ -3907,7 +3907,7 @@
   },
   {
     "id": "D2116",
-    "defect": "A path not on disk is converted as given, so under a linked consumer root a project dir not yet created climbs out through the link.",
+    "defect": "A path not on disk is converted as given, so a project dir not yet created, named through a directory link, reports the link spelling rather than the real path of the directory holding it.",
     "file": "packages/daemon/src/vitest/module-tests.ts",
     "old": "    const parent = dirname(path);\n    return parent === path ? path : join(realPath(parent), basename(path));",
     "new": "    return path;"

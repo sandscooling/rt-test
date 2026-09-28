@@ -39,10 +39,11 @@ export default {
         },
       },
       {
+        // Absolute, so it is resolved through setup-link on every host rather than against the working directory.
         test: {
           name: "pending",
           globals: true,
-          dir: "./pending",
+          dir: join(setupLink, "later"),
           include: ["**/*.test.mjs"],
         },
       },
