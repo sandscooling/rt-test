@@ -39,12 +39,14 @@ import {
   readNonInputs,
   type NonInputsDeclaration,
 } from "../src/inputs/non-inputs.js";
+import { protection } from "../src/inputs/protection.js";
 import { readCheckedIgnored } from "../src/selection/git-ignored.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
 import { readJson } from "../src/vitest/find-workspaces.js";
+import type { SelectionFacts } from "../src/vitest/selection-facts.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
   eventually,
@@ -53,10 +55,12 @@ import {
 } from "./daemon-harness.js";
 import {
   REPO,
+  discoveredWorkspace,
   fakeVitest,
   fixtureRepository,
   inTempDir,
   onPlatform,
+  projectFacts,
   runTempRoot,
   settle,
   within,
@@ -139,6 +143,32 @@ const DECLARATION_CHANGED_STARTED =
   "input reconciliation started: rt-test.json, which declares the non-inputs, changed";
 const UNUSABLE_JSON_REASON =
   "rt-test.json declares no non-inputs, so every file stays an input: it is not valid JSON: ";
+const NO_DISCOVERY_REASON =
+  "rt-test.json's patterns do not apply, so every file stays an input: no discovery in effect reports which files they may not remove";
+const NOT_REPORTED_AT_ROOT_REASON =
+  "rt-test.json's patterns do not apply, so every file stays an input: the discovery in effect does not report which files they may not remove for the workspace at the consumer root";
+/** A consumer declaring `docs/**`, holding a file it matches and one input. */
+const DOCS_DECLARED = {
+  [DECLARATION_FILE]: JSON.stringify({ nonInputs: ["docs/**"] }),
+  "docs/a.md": "# a\n",
+  "src/a.ts": "",
+};
+/** A consumer declaring `setup/**`, holding a setup file it matches and one input. */
+const SETUP_DECLARED = {
+  [DECLARATION_FILE]: JSON.stringify({ nonInputs: ["setup/**"] }),
+  "setup/a.ts": "export {};\n",
+  "src/a.ts": "",
+};
+const PROTECTION_RESOLVED = "protection resolved";
+/** A path no test writes: an event naming it is read as absent, which changes no input and marks no job. */
+const NEVER_WRITTEN = "c.ts";
+/** The verdict of a job during which the tracker read a change to a.md, and to nothing else. */
+const A_MD_CHANGED = {
+  fingerprinted: false,
+  reason: "its inputs changed while it ran: a.md",
+};
+/** How long before protection a job began, so a file written as the test starts was modified during it. */
+const JOB_BEGAN_BEFORE_MS = 60_000;
 const TRACKER_MODULE = new URL(
   "../src/inputs/input-tracker.ts",
   import.meta.url,
@@ -193,32 +223,17 @@ function repository(
   return fixtureRepository(root);
 }
 
-/** The consumer root as one Vitest workspace whose latest discovery lists `testModules`. */
+/** The consumer root as one Vitest workspace whose latest discovery lists `testModules` and reports `facts`. */
 function workspaceAt(
   root: string,
   testModules: readonly string[] = [],
+  facts: SelectionFacts = { reported: true, projects: [] },
 ): WorkspaceDiscovery {
-  return {
-    status: "discovered",
-    workspace: { path: ROOT_WORKSPACE, directory: root },
-    vitestVersion: "5.0.1",
-    tests: testModules.map((modulePath) => ({
-      identity: {
-        workspacePath: ROOT_WORKSPACE,
-        projectName: "unit",
-        modulePath,
-        namePath: ["t"],
-        occurrence: 0,
-      },
-      isDuplicate: false,
-      mode: "run",
-    })),
-    failedModules: [],
-    typecheckModules: [],
-    unsupportedProjects: [],
-    unhandledErrors: [],
-    selectionFacts: { reported: true, projects: [] },
-  };
+  return discoveredWorkspace(
+    { path: ROOT_WORKSPACE, directory: root },
+    testModules,
+    facts,
+  );
 }
 
 interface Tracked {
@@ -235,6 +250,11 @@ interface TrackingOptions {
   readonly log?: MemoryLog;
   /** Test modules the root workspace's latest discovery lists. */
   readonly testModules?: readonly string[];
+  /**
+   * The discovery protected before the start, as the lifecycle protects the store's latest: the root workspace listing
+   * `testModules` unless given, and none for `null`, as when the store holds no discovery.
+   */
+  readonly discovery?: TestDiscovery | null;
 }
 
 /**
@@ -267,7 +287,12 @@ async function tracking<T>(
     log,
   });
   const entry = workspaceAt(root, options.testModules);
+  const stored =
+    options.discovery === undefined
+      ? discoveryListing(root, options.testModules ?? [])
+      : options.discovery;
   try {
+    if (stored !== null) await tracker.protectInputs(stored);
     tracker.start();
     await tracker.firstReconciled();
     await drained(tracker);
@@ -682,6 +707,72 @@ function discoveryListing(
   return { workspaces: [workspaceAt(root, testModules)], notRead: [] };
 }
 
+/** The root workspace's discovery, listing no test module and reporting `facts`. */
+function discoveryReporting(
+  root: string,
+  facts: SelectionFacts,
+): TestDiscovery {
+  return { workspaces: [workspaceAt(root, [], facts)], notRead: [] };
+}
+
+/** A discovery stored before the store kept selection facts, so no declared pattern may apply. */
+function unreportedDiscovery(root: string): TestDiscovery {
+  return discoveryReporting(root, { reported: false });
+}
+
+/** The root workspace's discovery, whose one project's include patterns are `include`, matched from the root. */
+function discoveryIncluding(root: string, ...include: string[]): TestDiscovery {
+  return discoveryReporting(root, {
+    reported: true,
+    projects: [projectFacts({ include })],
+  });
+}
+
+/** The root workspace's discovery, whose one project reports `setupFiles` and no include pattern. */
+function setupDiscovery(
+  root: string,
+  setupFiles: readonly string[],
+): TestDiscovery {
+  return discoveryReporting(root, {
+    reported: true,
+    projects: [projectFacts({ setupFiles })],
+  });
+}
+
+/**
+ * Holds each event read of a file named `name` until `release` is called, so paths queued meanwhile wait behind it.
+ * `entered` resolves once such a read has begun.
+ */
+function holdingReadsOf(name: string): {
+  entered: Promise<void>;
+  release: () => void;
+} {
+  let enter = (): void => undefined;
+  let release = (): void => undefined;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.mocked(readEntryDigest).mockImplementation(async (path, signal) => {
+    if (basename(path) === name) {
+      enter();
+      await released;
+    }
+    return realReadEntryDigest(path, signal);
+  });
+  return { entered, release };
+}
+
+/** A log line saying which declared patterns are in effect, or that they do not apply. */
+function isDeclarationLine(entry: string): boolean {
+  return (
+    entry.startsWith("non-inputs") ||
+    entry.includes(`the patterns ${DECLARATION_FILE} declares`)
+  );
+}
+
 /** Runs `write`, then says whether a reconciliation ended after it, once the paths it left unread are read. */
 async function reconciledAfter(
   tracker: InputTracker,
@@ -700,14 +791,14 @@ async function reconciledAfter(
   return reconciled;
 }
 
-/** For each path, the pattern that makes it a declared non-input under `patterns`, protecting no test module. */
+/** For each path, the pattern that makes it a declared non-input under `patterns`, with patterns applying and protecting no file. */
 function matchedBy(
   patterns: readonly string[],
   paths: readonly string[],
 ): (string | undefined)[] {
   const match = declaredNonInputs(
     { file: DECLARATION_FILE, state: "declared", patterns },
-    new Set(),
+    protection({ workspaces: [], notRead: [] }, REPO),
   );
   return paths.map((path) => match(path));
 }
@@ -915,11 +1006,11 @@ describe("a job's inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         const since = Date.now();
         const before = tracker
           .current()
-          .testModuleChangedSince(discovery, since);
+          .protectedFileChangedSince(discovery, since);
         appendFileSync(join(root, "gen/a.test.ts"), "// an edit\n");
         const after = tracker
           .current()
-          .testModuleChangedSince(discovery, since);
+          .protectedFileChangedSince(discovery, since);
         return { before, after: after?.includes("gen/a.test.ts") === true };
       });
     });
@@ -2147,12 +2238,10 @@ describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         "src/a.test.ts": "it('t', () => {});\n",
         "b.ts": "",
       });
-      return tracking(root, async ({ tracker }) => {
+      return trackingOwnGitHome(root, async ({ tracker }) => {
         const revision = tracker.facts().revision;
         const mark = tracker.beginJob();
-        await tracker.protectTestModules(
-          discoveryListing(root, ["src/a.test.ts"]),
-        );
+        await tracker.protectInputs(discoveryListing(root, ["src/a.test.ts"]));
         const verdict = await tracker.endJob(mark);
         return {
           fingerprinted: verdict.fingerprinted,
@@ -2170,13 +2259,13 @@ describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         "src/a.test.ts": "it('t', () => {});\n",
         "b.ts": "",
       });
-      return tracking(root, async (tracked) => {
+      return trackingOwnGitHome(root, async (tracked) => {
         const before = tracked.fingerprint();
-        await tracked.tracker.protectTestModules(
+        await tracked.tracker.protectInputs(
           discoveryListing(root, ["src/a.test.ts"]),
         );
         const whileProtected = tracked.fingerprint();
-        await tracked.tracker.protectTestModules(discoveryListing(root, []));
+        await tracked.tracker.protectInputs(discoveryListing(root, []));
         return {
           protectionMoved: whileProtected !== before,
           restored: tracked.fingerprint() === before,
@@ -2431,6 +2520,302 @@ describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       }
     });
     expect(moved).toBe(true);
+  });
+
+  it("D2149: with no discovery in effect, an edit to a file a declared pattern matches moves the fingerprint, and the current inputs say why no pattern applies", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      return trackingOwnGitHome(
+        root,
+        async (tracked) => {
+          const before = tracked.fingerprint();
+          appendFileSync(join(root, "docs/a.md"), "more\n");
+          return {
+            moved: await movesFrom(tracked, before),
+            unusable: tracked.tracker.current().nonInputsUnusable,
+          };
+        },
+        { discovery: null },
+      );
+    });
+    expect(outcome).toStrictEqual({
+      moved: true,
+      unusable: NO_DISCOVERY_REASON,
+    });
+  });
+
+  it("D2150: with no discovery in effect, an rt-test.json declaring no pattern gives the current inputs no reason", async () => {
+    const reason = await inTempDir((root) => {
+      writeTree(root, { [DECLARATION_FILE]: declaring(), "src/a.ts": "" });
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker }) => tracker.current().nonInputsUnusable,
+        { discovery: null },
+      );
+    });
+    expect(reason).toBeUndefined();
+  });
+
+  it("D2151: with no discovery in effect the log warns that the declared patterns do not apply, and once a discovery reporting its facts is protected it says they apply", async () => {
+    const logged = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      const log = memoryLog();
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker }) => {
+          await tracker.protectInputs(discoveryListing(root, []));
+          return log.entries.filter(isDeclarationLine);
+        },
+        { log, discovery: null },
+      );
+    });
+    expect(logged).toStrictEqual([
+      `warning: ${NO_DISCOVERY_REASON}; the patterns rt-test.json declares: "docs/**"`,
+      'non-inputs in effect from rt-test.json: "docs/**"',
+    ]);
+  });
+
+  it("D2152: once a discovery that does not report its facts is protected in place of one that did, the log warns that the declared patterns stopped applying", async () => {
+    const logged = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      const log = memoryLog();
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker }) => {
+          await tracker.protectInputs(unreportedDiscovery(root));
+          return log.entries.filter(isDeclarationLine);
+        },
+        { log },
+      );
+    });
+    expect(logged).toStrictEqual([
+      'non-inputs in effect from rt-test.json: "docs/**"',
+      `warning: ${NOT_REPORTED_AT_ROOT_REASON}; the patterns rt-test.json declares: "docs/**"`,
+    ]);
+  });
+
+  it("D2153: once the declared patterns stop applying, a file one hid is an input by the time protection resolves, and a job open through it stays fingerprinted", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      return trackingOwnGitHome(root, async ({ tracker, fingerprint }) => {
+        const before = fingerprint();
+        const mark = tracker.beginJob();
+        await tracker.protectInputs(unreportedDiscovery(root));
+        const after = fingerprint();
+        return {
+          moved: after !== undefined && after !== before,
+          fingerprinted: (await tracker.endJob(mark)).fingerprinted,
+        };
+      });
+    });
+    expect(outcome).toStrictEqual({ moved: true, fingerprinted: true });
+  });
+
+  it("D2154: once a discovered project's include patterns come to match a file a declared pattern hid, it is an input by the time protection resolves", async () => {
+    const moved = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/a.test.ts": "it('t', () => {});\n",
+        "src/a.ts": "",
+      });
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker, fingerprint }) => {
+          const before = fingerprint();
+          await tracker.protectInputs(discoveryIncluding(root, "**/*.test.ts"));
+          const after = fingerprint();
+          return after !== undefined && after !== before;
+        },
+        { discovery: discoveryIncluding(root, "src/**/*.test.ts") },
+      );
+    });
+    expect(moved).toBe(true);
+  });
+
+  it("D2155: a file only the walk after patterns stop applying finds, modified after the job began, is named as possibly changed during it", async () => {
+    const reason = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      return trackingOwnGitHome(root, async ({ tracker }) =>
+        tracker.protectInputs(
+          unreportedDiscovery(root),
+          Date.now() - JOB_BEGAN_BEFORE_MS,
+        ),
+      );
+    });
+    expect(reason).toBe(
+      "docs/a.md, an input the tracker had not read before protection changed, may have changed while the job ran",
+    );
+  });
+
+  it("D2156: while protection walks for the files a declared pattern no longer hides, no fingerprint can be computed", async () => {
+    const during = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      return trackingOwnGitHome(root, async ({ tracker }) => {
+        const walking = tracker.protectInputs(unreportedDiscovery(root));
+        const unavailable = tracker.current().unavailable;
+        await walking;
+        return unavailable;
+      });
+    });
+    expect(during).toBe(
+      "a change of protection is finding the files a declared pattern no longer hides",
+    );
+  });
+
+  it("D2157: a setup file a declared pattern hid, which the tracker never read, is an input by the time a discovery reporting it is protected, and a job open through it stays fingerprinted", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, SETUP_DECLARED);
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker, fingerprint }) => {
+          const before = fingerprint();
+          const mark = tracker.beginJob();
+          await tracker.protectInputs(setupDiscovery(root, ["setup/a.ts"]));
+          const after = fingerprint();
+          return {
+            moved: after !== undefined && after !== before,
+            fingerprinted: (await tracker.endJob(mark)).fingerprinted,
+          };
+        },
+        { discovery: setupDiscovery(root, []) },
+      );
+    });
+    expect(outcome).toStrictEqual({ moved: true, fingerprinted: true });
+  });
+
+  it("D2160: a setup file the discovery reports, which a declared pattern hid, edited after a job started, is reported as possibly changed during it", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, SETUP_DECLARED);
+      const anHourAgo = new Date(Date.now() - AN_HOUR_MS);
+      utimesSync(join(root, "setup/a.ts"), anHourAgo, anHourAgo);
+      const discovery = setupDiscovery(root, ["setup/a.ts"]);
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker }) => {
+          const since = Date.now();
+          const before = tracker
+            .current()
+            .protectedFileChangedSince(discovery, since);
+          appendFileSync(join(root, "setup/a.ts"), "// an edit\n");
+          const after = tracker
+            .current()
+            .protectedFileChangedSince(discovery, since);
+          return { before, after: after?.includes("setup/a.ts") === true };
+        },
+        { discovery: setupDiscovery(root, []) },
+      );
+    });
+    expect(outcome).toStrictEqual({ before: undefined, after: true });
+  });
+
+  it("D2162: a stop while protection walks lets protection resolve, though a path it flipped is never read", async () => {
+    const settled = await inTempDir((root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("docs/**"),
+        "docs/a.test.ts": "it('t', () => {});\n",
+        "src/a.ts": "",
+      });
+      return trackingOwnGitHome(
+        root,
+        async ({ tracker }) => {
+          // Narrowing the include both flips the held docs/a.test.ts and starts a walk, which the stop then overtakes.
+          const protecting = tracker.protectInputs(
+            discoveryIncluding(root, "src/**"),
+          );
+          await tracker.stop();
+          return within(
+            protecting.then(() => PROTECTION_RESOLVED),
+            SETTLE_MS,
+          );
+        },
+        { discovery: discoveryIncluding(root, "**/*.test.ts") },
+      );
+    });
+    expect(settled).toBe(PROTECTION_RESOLVED);
+  });
+
+  it("D2164: an input event on a path protection flipped, arriving before its quiet read, marks a job open through it", async () => {
+    const verdict = await inTempDir(async (root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("*.md"),
+        "a.md": "# a\n",
+        "b.ts": "",
+      });
+      const { listeners, paths } = capturingWatches();
+      try {
+        return await trackingOwnGitHome(root, async ({ tracker }) => {
+          const rootWatch = listeners[paths.indexOf(realpathSync.native(root))];
+          const held = holdingReadsOf(NEVER_WRITTEN);
+          const mark = tracker.beginJob();
+          rootWatch?.("change", NEVER_WRITTEN);
+          await held.entered;
+          const protecting = tracker.protectInputs(
+            discoveryListing(root, ["a.md"]),
+          );
+          rootWatch?.("change", "a.md");
+          held.release();
+          await protecting;
+          return tracker.endJob(mark);
+        });
+      } finally {
+        vi.mocked(readEntryDigest).mockReset();
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(verdict).toStrictEqual(A_MD_CHANGED);
+  });
+
+  it("D2165: while protection walks, the input facts read the reconciliation incomplete, naming the walk", async () => {
+    const reconciliation = await inTempDir((root) => {
+      writeTree(root, DOCS_DECLARED);
+      return trackingOwnGitHome(root, async ({ tracker }) => {
+        const walking = tracker.protectInputs(unreportedDiscovery(root));
+        const during = tracker.facts().reconciliation;
+        await walking;
+        return during;
+      });
+    });
+    expect(reconciliation).toStrictEqual({
+      state: "incomplete",
+      reason:
+        "a change of protection is finding the files a declared pattern no longer hides",
+    });
+  });
+
+  it("D2170: an input event already queued on a path protection then flips keeps that path's read marking a job open through it", async () => {
+    const verdict = await inTempDir(async (root) => {
+      writeTree(root, {
+        [DECLARATION_FILE]: declaring("*.md"),
+        "a.md": "# a\n",
+        "b.ts": "",
+      });
+      const { listeners, paths } = capturingWatches();
+      try {
+        return await trackingOwnGitHome(
+          root,
+          async ({ tracker }) => {
+            const rootWatch =
+              listeners[paths.indexOf(realpathSync.native(root))];
+            const held = holdingReadsOf(NEVER_WRITTEN);
+            const mark = tracker.beginJob();
+            rootWatch?.("change", NEVER_WRITTEN);
+            await held.entered;
+            rootWatch?.("change", "a.md");
+            const protecting = tracker.protectInputs(
+              discoveryListing(root, []),
+            );
+            held.release();
+            await protecting;
+            return tracker.endJob(mark);
+          },
+          { testModules: ["a.md"] },
+        );
+      } finally {
+        vi.mocked(readEntryDigest).mockReset();
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(verdict).toStrictEqual(A_MD_CHANGED);
   });
 });
 

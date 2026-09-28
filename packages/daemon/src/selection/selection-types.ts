@@ -1,5 +1,6 @@
 import type { TestIdentity } from "@rt-test/core";
 import type { NonInputsDeclaration } from "../inputs/non-inputs.js";
+import type { Protection } from "../inputs/protection.js";
 import type {
   PackageWorkspace,
   UnreadWorkspaceSource,
@@ -7,7 +8,7 @@ import type {
 } from "../vitest/find-workspaces.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 3;
+export const SELECTION_POLICY_VERSION = 4;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -146,11 +147,11 @@ export interface SelectionInput {
   readonly nonInputs: SelectionNonInputs;
 }
 
-/** The consumer's declaration, and the test modules no declared pattern may remove. */
+/** The consumer's declaration, and the files no declared pattern may remove. */
 export interface SelectionNonInputs {
   readonly declaration: NonInputsDeclaration;
-  /** Root-relative and `/`-separated: every test module the discovery lists, as `discoveredTestModules` gives them. */
-  readonly protectedTestModules: ReadonlySet<string>;
+  /** Built by `protection` over the discovery the tracker reads, so selection and the tracker decide alike. */
+  readonly protection: Protection;
 }
 
 /** One step from a workspace to a dependent of it, through an edge's producer or a widening's cause. */

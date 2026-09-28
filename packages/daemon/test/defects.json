@@ -2885,10 +2885,10 @@
   },
   {
     "id": "D1879",
-    "defect": "A discovery is stored under its digest although a listed test module no watch covers may have changed while it ran.",
+    "defect": "A discovery is stored under its digest although a file it protects by path, which no watch covers, may have changed while it ran.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    if (unwatched !== undefined)\n      return { fingerprinted: false, reason: unwatched };\n",
-    "new": ""
+    "old": "    const changed = unwatched ?? released;\n",
+    "new": "    const changed = released;\n"
   },
   {
     "id": "D1880",
@@ -3006,7 +3006,7 @@
     "id": "D1898",
     "defect": "A listed test module no watch covers is never checked for an edit during a job, so a discovery that read it mid-edit is stored under its digest.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
-    "old": "    if (inputs.selected.digests.has(path)) continue;\n    const modified",
+    "old": "    if (project.digests.has(path)) continue;\n    const modified",
     "new": "    continue;\n    const modified"
   },
   {
@@ -3089,8 +3089,8 @@
   {
     "id": "D1910",
     "defect": "A fingerprint is computed while a reconciliation runs, so a result can read current before the reconciliation has checked its inputs.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    if (this.#reconciling) return RECONCILING_REASON;\n",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "  if (condition.reconciling) return RECONCILING_REASON;\n",
     "new": ""
   },
   {
@@ -3103,8 +3103,8 @@
   {
     "id": "D1912",
     "defect": "A fingerprint is computed before the first reconciliation has ended, over no inputs at all.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    if (this.#lastReconciledAt === undefined) {\n      return FIRST_RECONCILIATION_REASON;\n    }\n",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "  if (condition.lastReconciledAt === undefined) {\n    return FIRST_RECONCILIATION_REASON;\n  }\n",
     "new": ""
   },
   {
@@ -3342,8 +3342,8 @@
     "id": "D1988",
     "defect": "The check for test modules no watch covered runs after protection has moved them into the inputs, so a declared module edited during the discovery's job is skipped and the discovery is stored under a digest.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    await inputs.protectTestModules(discovery);\n",
-    "new": "    const guard = inputs.beginJob();\n    await inputs.protectTestModules(discovery);\n    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n"
+    "old": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    const released = await inputs.protectInputs(discovery, startedAt);\n",
+    "new": "    const guard = inputs.beginJob();\n    const released = await inputs.protectInputs(discovery, startedAt);\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n"
   },
   {
     "id": "D1989",
@@ -3354,9 +3354,9 @@
   },
   {
     "id": "D1990",
-    "defect": "The start sequence never protects the test modules of the discovery an earlier life stored, so the first reconciliation leaves a declared test module out of the inputs.",
+    "defect": "The start sequence never protects the files of the discovery an earlier life stored, so the first reconciliation leaves a declared test module out of the inputs.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    this.#protectStoredTestModules();\n    this.#parts.inputs.start();",
+    "old": "    this.#protectStoredDiscovery();\n    this.#parts.inputs.start();",
     "new": "    this.#parts.inputs.start();"
   },
   {
@@ -3405,8 +3405,8 @@
     "id": "D1997",
     "defect": "The declaration is logged after every reconciliation, not only after one that finds it different from the one in effect.",
     "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
-    "old": "      sameDeclaration(this.#logged, declaration)",
-    "new": "      false"
+    "old": "    if (text === this.#logged) return;\n",
+    "new": ""
   },
   {
     "id": "D1998",
@@ -3552,7 +3552,7 @@
     "id": "D2052",
     "defect": "A throwing read of the earlier life's stored discovery escapes begin, so the daemon never runs its start sequence.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    let stored: TestDiscovery | undefined;\n    try {\n      stored = this.#latestResults().discovery?.discovery;\n    } catch (error) {\n      log.error(\"reading the latest stored discovery's test modules\", error);\n      return;\n    }\n",
+    "old": "    let stored: TestDiscovery | undefined;\n    try {\n      stored = this.#latestResults().discovery?.discovery;\n    } catch (error) {\n      log.error(\"reading the latest stored discovery\", error);\n      return;\n    }\n",
     "new": "    const stored = this.#latestResults().discovery?.discovery;\n"
   },
   {
@@ -3725,10 +3725,10 @@
   },
   {
     "id": "D2090",
-    "defect": "The check for test modules no watch covers runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest.",
+    "defect": "The check for files the discovery protects by path runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n",
-    "new": "    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n"
+    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n",
+    "new": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n"
   },
   {
     "id": "D2091",
@@ -3967,5 +3967,278 @@
     "file": "packages/daemon/src/inputs/input-filter.ts",
     "old": "    if (!liesInside(this.#root, path)) return true;\n    const fromRoot = relative(this.#root, path);",
     "new": "    const fromRoot = relative(this.#root, path);\n    if (climbsOut(fromRoot, sep)) return true;"
+  },
+  {
+    "id": "D2132",
+    "defect": "The test file patterns are matched without dot names, so a new test module under a directory such as .storybook, which Vitest's glob finds, stays a declared non-input.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  dot: true,\n  nobrace",
+    "new": "  dot: false,\n  nobrace"
+  },
+  {
+    "id": "D2133",
+    "defect": "The test file patterns are matched without regard to case, so a file Vitest's glob would not find is protected as a test module.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  nocase: false,",
+    "new": "  nocase: true,"
+  },
+  {
+    "id": "D2134",
+    "defect": "A file an exclude pattern matches is protected whenever an include pattern matches it, though Vitest's glob never finds it.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      !ignored(path) &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2135",
+    "defect": "A directory an exclude pattern matches is not pruned, so a file inside it that an include pattern matches is protected though Vitest's glob never crawls there.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      !parentDirectories(path).some(",
+    "new": "      !parentDirectories(\"\").some("
+  },
+  {
+    "id": "D2136",
+    "defect": "An excluded directory name also prunes the directories the glob's crawl starts from, so a test module under e2e/ is hidden by the exclude **/e2e though Vitest's glob finds it.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "          posix.join(cwd, directory).startsWith(below) && ignored(directory),",
+    "new": "          ignored(directory),"
+  },
+  {
+    "id": "D2137",
+    "defect": "An absolute include pattern is matched as written against a path relative to the pattern directory, so it protects nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    ? posix.relative(escapedCwd, result)",
+    "new": "    ? result"
+  },
+  {
+    "id": "D2138",
+    "defect": "A leading climb that re-enters the pattern directory by name is kept, so ../a/*.test.ts from packages/a protects none of the test modules Vitest's glob finds there.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  if (parentDirectory !== undefined) {\n    result = collapseClimb(",
+    "new": "  if (parentDirectory === \"\") {\n    result = collapseClimb("
+  },
+  {
+    "id": "D2139",
+    "defect": "A climbing include pattern leaves the crawl's start at the pattern directory, so an excluded directory outside it is not pruned and a file under it is protected though Vitest's glob never crawls there.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    crawl.root = nonDriveRelative(potentialRoot);\n",
+    "new": ""
+  },
+  {
+    "id": "D2140",
+    "defect": "The includeSource patterns are never compiled, so a new source file they match stays a declared non-input though Vitest globs it for in-source tests.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  for (const patterns of [include, includeSource]) {",
+    "new": "  for (const patterns of [include]) {"
+  },
+  {
+    "id": "D2141",
+    "defect": "An include pattern beginning with ! is dropped instead of excluding what it matches, so a file Vitest's glob ignores is protected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      sorted.push({ written: pattern, pattern: rest, isIgnore: true });\n",
+    "new": ""
+  },
+  {
+    "id": "D2142",
+    "defect": "An exclude pattern beginning with ! is compiled as a negation, so it excludes every file it does not name and protects none of them, though Vitest's glob drops it.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    if (pattern !== \"\" && !isNegated(pattern)) {",
+    "new": "    if (pattern !== \"\") {"
+  },
+  {
+    "id": "D2143",
+    "defect": "An empty include pattern is not skipped but normalized to \".\", which resets the glob's crawl start to the pattern directory, so an excluded name prunes the directory the other patterns start from and hides a test module Vitest's glob finds.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    if (pattern === \"\") continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D2144",
+    "defect": "The pattern directory is escaped as on Windows whatever the platform, so on Linux a climb back into a directory whose name holds * is collapsed, protecting a file Vitest's glob does not find and none it does.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    process.platform === WINDOWS\n",
+    "new": "    true\n"
+  },
+  {
+    "id": "D2145",
+    "defect": "A pattern picomatch refuses throws out of the producer instead of stopping patterns applying with a reason.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    } catch (error) {\n      return {\n        ok: false,",
+    "new": "    } catch (error) {\n      if (error) throw error;\n      return {\n        ok: false,"
+  },
+  {
+    "id": "D2146",
+    "defect": "A refused pattern is quoted whole, so a pattern of tens of thousands of characters lands in the log and every answer.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  return pattern.length <= MAX_QUOTED_PATTERN_LENGTH",
+    "new": "  return true"
+  },
+  {
+    "id": "D2147",
+    "defect": "A root workspace that does not report its selection facts is named by its path, so the reason ends with the workspace \".\" instead of naming the one at the consumer root.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "${entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path}",
+    "new": "${entry.workspace.path}"
+  },
+  {
+    "id": "D2148",
+    "defect": "A workspace that failed, is unsupported or was not confirmed stops the declared patterns applying.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    if (entry.status !== \"discovered\") continue;\n    if (!entry.selectionFacts.reported) {",
+    "new": "    if (entry.status !== \"discovered\") return { applies: false, reason: NO_DISCOVERY_REASON };\n    if (!entry.selectionFacts.reported) {"
+  },
+  {
+    "id": "D2158",
+    "defect": "On Windows a path is matched in its on-disk case, so a new test module under Src/ stays hidden by a declared pattern though Vitest's glob of src/** opens Src and finds it.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      const path = respell(onDisk);",
+    "new": "      const path = onDisk;"
+  },
+  {
+    "id": "D2161",
+    "defect": "The crawl root's directories match in any case on every platform, so on Linux a file under Src/ is protected though Vitest's glob of src/** never opens Src.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  if (process.platform !== WINDOWS || !crawlRoot.startsWith(prefix)) {",
+    "new": "  if (!crawlRoot.startsWith(prefix)) {"
+  },
+  {
+    "id": "D2149",
+    "defect": "The tracker starts with declared patterns applying and nothing protected, so before any discovery is in effect a file a pattern matches is hidden and no answer says why.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    this.#protection = protection(undefined, root);",
+    "new": "    this.#protection = protection({ workspaces: [], notRead: [] }, root);"
+  },
+  {
+    "id": "D2150",
+    "defect": "The reason no pattern applies is carried while rt-test.json declares no pattern, so a declaration with nothing to switch off still reports every file as an input for a reason.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "      (this.#declaresPatterns() && !this.#protection.applies",
+    "new": "      (!this.#protection.applies"
+  },
+  {
+    "id": "D2151",
+    "defect": "The declaration's log line calls the patterns in effect while no pattern applies, so the log never warns why every file stays an input.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "      return current.applies\n",
+    "new": "      return true\n"
+  },
+  {
+    "id": "D2152",
+    "defect": "A change of protection is not logged, so the log says nothing when the declared patterns stop or start applying until a later reconciliation.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    this.#rebuild();\n    this.report();\n",
+    "new": "    this.#rebuild();\n"
+  },
+  {
+    "id": "D2153",
+    "defect": "No walk runs when the declared patterns stop applying, so a file a pattern hid stays out of the inputs until the next reconciliation and a result can read current after its edit.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "      walk: this.#declaresPatterns() && patternsReleaseFiles(previous, next),\n",
+    "new": "      walk: false,\n"
+  },
+  {
+    "id": "D2154",
+    "defect": "No walk runs when a discovered project's test file patterns change, so a file they now protect stays out of the inputs until the next reconciliation.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "  return !next.applies || previous.patternKey !== next.patternKey;",
+    "new": "  return !next.applies;"
+  },
+  {
+    "id": "D2155",
+    "defect": "A file only the protection walk finds is never checked against the job's start, so a discovery whose job read it mid-edit is stored under its digest.",
+    "file": "packages/daemon/src/inputs/protection-walk.ts",
+    "old": "    since === undefined\n      ? undefined\n      : released.find(",
+    "new": "    true\n      ? undefined\n      : released.find("
+  },
+  {
+    "id": "D2156",
+    "defect": "A fingerprint can be computed while protection walks for the files a declared pattern no longer hides, so a result reads current before they count.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "  if (condition.protecting) return PROTECTING_REASON;\n",
+    "new": ""
+  },
+  {
+    "id": "D2157",
+    "defect": "A file the new protection names by path is flipped only if the tracker holds it, so a setup file a pattern hid, never read, stays out of the inputs until the next reconciliation.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "      ...namedFiles(next),\n",
+    "new": ""
+  },
+  {
+    "id": "D2160",
+    "defect": "The time check before protection covers only listed test modules, so a setup file a pattern hid, edited during the discovery's job, leaves the discovery stored under its digest.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "  for (const path of protectedFiles(discovery)) {",
+    "new": "  for (const path of discoveredTestModules(discovery)) {"
+  },
+  {
+    "id": "D2162",
+    "defect": "After a stop during protection's walk, protection waits for its flipped paths to be read, which a stopped tracker never does, so it never resolves and the daemon's stop hangs.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    await this.settled();\n    return changed;",
+    "new": "    await this.#ledger.waitForRead();\n    return changed;"
+  },
+  {
+    "id": "D2163",
+    "defect": "The lifecycle gives protection no job start, so a file only the walk finds, edited during the discovery's job, leaves the discovery stored under its digest.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "inputs.protectInputs(discovery, startedAt)",
+    "new": "inputs.protectInputs(discovery)"
+  },
+  {
+    "id": "D2164",
+    "defect": "An input event on a flipped path that arrives before its quiet read leaves the read quiet, so the guard job stays fingerprinted and the discovery is stored under a digest taken mid-edit.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#quiet.delete(path);\n    if (this.#queue.get(path)",
+    "new": "    if (this.#queue.get(path)"
+  },
+  {
+    "id": "D2165",
+    "defect": "While protection walks, the answers' facts read the reconciliation complete, so an answer whose results all read unknown gives no reason.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "const incomplete = incompleteReason(condition);\n  const { lastReconciledAt",
+    "new": "const incomplete = incompleteReason({ ...condition, protecting: false });\n  const { lastReconciledAt"
+  },
+  {
+    "id": "D2166",
+    "defect": "An include pattern opening with the extglob !( is sorted as a negation and becomes an ignore pattern, so the test modules it finds are unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "pattern.startsWith(NEGATION) && pattern[1] !== EXTGLOB_OPEN;",
+    "new": "pattern.startsWith(NEGATION);"
+  },
+  {
+    "id": "D2167",
+    "defect": "A trailing ** leaves its directory in the crawl's start, so an exclude naming that directory no longer prunes it and its files are protected though Vitest's glob finds none.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      shared.pop();\n",
+    "new": ""
+  },
+  {
+    "id": "D2168",
+    "defect": "A discovered workspace below the root that does not report its facts is named as the one at the consumer root in the reason.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "${entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path}",
+    "new": "${ROOT_WORKSPACE}"
+  },
+  {
+    "id": "D2169",
+    "defect": "A pattern directory at a Windows drive root builds its prefix as C://, so the crawl start's directories never match in another case and a test module under Src/ stays hidden.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  const prefix = directoryPrefix(cwd);",
+    "new": "  const prefix = `${cwd}/`;"
+  },
+  {
+    "id": "D2170",
+    "defect": "A flipped path an event had already queued is made quiet, so its real change marks no job.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      if (!this.#queue.has(absolute)) {\n        this.#quiet.add(absolute);",
+    "new": "      {\n        this.#quiet.add(absolute);"
+  },
+  {
+    "id": "D2159",
+    "defect": "The reason protection's walk resolves with is dropped, so a discovery whose job read a file only the walk found mid-edit is stored under its digest.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const changed = unwatched ?? released;\n",
+    "new": "    const changed = unwatched;\n"
   }
 ]

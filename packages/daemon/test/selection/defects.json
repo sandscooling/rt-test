@@ -1368,15 +1368,15 @@
     "id": "D2010",
     "defect": "A test module the discovery lists is not protected, so a declared pattern covering it lets its edit select nothing.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "      PROTECTED_NAMES.has(posix.basename(path)) ||\n      protectedTestModules.has(path)\n",
-    "new": "      PROTECTED_NAMES.has(posix.basename(path))\n"
+    "old": "    return pattern === undefined || protection.protects(path)\n",
+    "new": "    return pattern === undefined\n"
   },
   {
     "id": "D2011",
     "defect": "Manifests, lockfiles and Vitest or Vite config files are not protected, so a declared pattern covering them turns their project-wide fallbacks into nothing selected.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "      PROTECTED_NAMES.has(posix.basename(path)) ||\n",
-    "new": ""
+    "old": "      TYPESCRIPT_CONFIG_NAME.test(posix.basename(path)) ||\n      PROTECTED_NAMES.has(posix.basename(path))\n",
+    "new": "      TYPESCRIPT_CONFIG_NAME.test(posix.basename(path))\n"
   },
   {
     "id": "D2012",
@@ -1394,10 +1394,10 @@
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 2, so results stored under the earlier selection rules are not staled once.",
+    "defect": "The selection policy version stays at 3, so results stored before setup files and test file patterns were protected are not staled once.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 3;",
-    "new": "export const SELECTION_POLICY_VERSION = 2;"
+    "old": "export const SELECTION_POLICY_VERSION = 4;",
+    "new": "export const SELECTION_POLICY_VERSION = 3;"
   },
   {
     "id": "D2045",
@@ -1412,5 +1412,33 @@
     "file": "packages/daemon/src/inputs/non-inputs.ts",
     "old": "  PNPM_WORKSPACE_FILE,\n  ...LOCKFILES,",
     "new": "  ...LOCKFILES,"
+  },
+  {
+    "id": "D2128",
+    "defect": "A setup file the discovery reports is not protected, so a declared pattern covering it makes its edit select nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      for (const file of project.setupFiles) files.add(file);\n",
+    "new": ""
+  },
+  {
+    "id": "D2129",
+    "defect": "A global setup file the discovery reports is not protected, so a declared pattern covering it makes its edit select nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      for (const file of project.globalSetupFiles) files.add(file);\n",
+    "new": ""
+  },
+  {
+    "id": "D2130",
+    "defect": "Only listed files are protected, so a new test module a workspace's include pattern matches stays a declared non-input and its change selects nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      files.has(path) || matchers.some((matches) => matches(path)),",
+    "new": "      files.has(path),"
+  },
+  {
+    "id": "D2131",
+    "defect": "A discovered workspace that does not report its selection facts is skipped, so declared patterns still apply with that workspace's setup files and test file patterns unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    if (!entry.selectionFacts.reported) {\n      return {\n        applies: false,",
+    "new": "    if (!entry.selectionFacts.reported) {\n      continue;\n      return {\n        applies: false,"
   }
 ]

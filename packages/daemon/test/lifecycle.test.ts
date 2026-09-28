@@ -309,8 +309,10 @@ interface InputsScript {
   readonly verdicts?: readonly JobVerdict[];
   /** A workspace's current fingerprint, asked at its run's start and again at its end. */
   readonly fingerprintOf?: (workspacePath: string) => FingerprintResult;
-  /** Why a listed test module no watch covers may have changed during the discovery. */
+  /** Why a file the discovery protects by path, which no watch covers, may have changed during the discovery. */
   readonly moduleChanged?: string | undefined;
+  /** Why a file only protection's walk found may have changed during the discovery, which protection resolves with. */
+  readonly walkChanged?: string;
   /**
    * Holds one wait for the inputs to settle, counted from 0 in call order (the discovery's, the guard's, then each
    * run's), until the test resolves `settleHeld` or the inputs stop.
@@ -325,6 +327,8 @@ class StandInInputs implements TrackedInputs {
   jobsBegun = 0;
   /** The discovery each protection was given, in call order. */
   readonly protected: (TestDiscovery | undefined)[] = [];
+  /** The job start each protection was given, in call order. */
+  readonly jobStarts: (number | undefined)[] = [];
   readonly reconciled = new Deferred<void>();
   readonly settleHeld = new Deferred<void>();
   readonly #released = new Deferred<void>();
@@ -357,7 +361,7 @@ class StandInInputs implements TrackedInputs {
       facts: SETTLED_INPUTS,
       workspaceFingerprint: (entry) => fingerprintOf(entry.workspace.path),
       discoveryFingerprint: () => ({ ok: true, digest: DISCOVERY_DIGEST }),
-      testModuleChangedSince: () => this.#script.moduleChanged,
+      protectedFileChangedSince: () => this.#script.moduleChanged,
     };
   }
 
@@ -379,9 +383,13 @@ class StandInInputs implements TrackedInputs {
     return this.#verdicts.shift() ?? FINGERPRINTED;
   }
 
-  protectTestModules(discovery: TestDiscovery | undefined): Promise<void> {
+  protectInputs(
+    discovery: TestDiscovery | undefined,
+    jobStart?: number,
+  ): Promise<string | undefined> {
     this.protected.push(discovery);
-    return Promise.resolve();
+    this.jobStarts.push(jobStart);
+    return Promise.resolve(this.#script.walkChanged);
   }
 
   stop(): Promise<void> {
@@ -483,11 +491,14 @@ interface DeclaredModuleStart {
 /**
  * Runs the start sequence to idle with a real input tracker and store, over a consumer whose `rt-test.json` declares
  * `src/**` and whose one workspace, the root, lists the test module `src/a.test.ts`, last modified an hour ago.
- * Every watch the tracker opens is real; each event's name is recorded once the tracker's listener has returned.
+ * Every watch the tracker opens is real; each event's name is recorded once the tracker's listener has returned. With
+ * `earlierLife`, the store already holds a discovery that reports its facts and lists no test module, so the declared
+ * pattern hides the module until the new discovery is protected; without it no pattern applies until then.
  */
 async function declaredModuleStart(
   dir: string,
   during: DuringDiscovery = () => Promise.resolve(true),
+  earlierLife = false,
 ): Promise<DeclaredModuleStart> {
   const root = join(dir, "consumer");
   const module = join(root, "src", "a.test.ts");
@@ -531,6 +542,15 @@ async function declaredModuleStart(
   let held = false;
   const log = memoryLog();
   const store = openStore(join(dir, "state"));
+  if (earlierLife) {
+    store.writeDiscovery(
+      { ...SCOPE, inputFingerprint: { kind: "not-fingerprinted" } },
+      discovery({
+        ...discovered("."),
+        workspace: { path: ".", directory: root },
+      }),
+    );
+  }
   const lifecycle = new DaemonLifecycle({
     identity: { ...IDENTITY, consumerRoot: root },
     scope: SCOPE,
@@ -786,7 +806,7 @@ describe("the start sequence", () => {
 
   it("D1879: a discovery during which a listed test module no watch covers may have changed is stored not fingerprinted, naming the module", async () => {
     const moduleChanged =
-      "the test module packages/a/gen/a.test.ts, which no watch covers, may have changed while the job ran";
+      "packages/a/gen/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran";
     const { store, log } = await begun(scripted({ moduleChanged }));
     expect({
       discovery: store.discoveryFingerprints,
@@ -797,6 +817,33 @@ describe("the start sequence", () => {
       discovery: [{ kind: "not-fingerprinted" }],
       logged: [`the discovery is stored not fingerprinted: ${moduleChanged}`],
     });
+  });
+
+  it("D2159: a discovery during which a file only protection's walk found may have changed is stored not fingerprinted, naming the file", async () => {
+    const walkChanged =
+      "docs/new.test.ts, an input the tracker had not read before protection changed, may have changed while the job ran";
+    const { store, log } = await begun(scripted({ walkChanged }));
+    expect({
+      discovery: store.discoveryFingerprints,
+      logged: log.entries.filter((entry) =>
+        entry.includes("stored not fingerprinted"),
+      ),
+    }).toStrictEqual({
+      discovery: [{ kind: "not-fingerprinted" }],
+      logged: [`the discovery is stored not fingerprinted: ${walkChanged}`],
+    });
+  });
+
+  it("D2163: protection of the new discovery is given the discovery job's start, and protection of the stored one is given none", async () => {
+    const before = Date.now();
+    const { inputs } = await begun(scripted({}));
+    const after = Date.now();
+    const [stored, discovered] = inputs.jobStarts;
+    expect({
+      stored,
+      duringStart:
+        discovered !== undefined && discovered >= before && discovered <= after,
+    }).toStrictEqual({ stored: undefined, duringStart: true });
   });
 
   it("D1880: no discovery starts until the first reconciliation of the inputs has ended", async () => {
@@ -893,8 +940,10 @@ describe(
   "protecting the discovery's test modules",
   { timeout: DAEMON_TEST_TIMEOUT_MS },
   () => {
-    it("D1987: a discovery whose test module a declared pattern covers reads current once the start sequence ends", async () => {
-      const outcome = await inTempDir((dir) => declaredModuleStart(dir));
+    it("D1987: a discovery whose test module a declared pattern hid until its protection reads current once the start sequence ends", async () => {
+      const outcome = await inTempDir((dir) =>
+        declaredModuleStart(dir, undefined, true),
+      );
       expect(outcome).toStrictEqual({
         held: true,
         idle: true,
@@ -903,18 +952,22 @@ describe(
       });
     });
 
-    it("D1988: a declared test module edited during the discovery's job leaves the discovery stored not fingerprinted", async () => {
+    it("D1988: a test module a declared pattern hid through the discovery's job, edited during it, leaves the discovery stored not fingerprinted", async () => {
       const outcome = await inTempDir((dir) =>
-        declaredModuleStart(dir, (module, handled) => {
-          writeFileSync(module, "it('t', () => {});\n// an edit\n");
-          // The access time stays current for the reason the helper gives; only the modification time moves ahead.
-          utimesSync(module, new Date(), new Date(Date.now() + 60_000));
-          // One watch covers both files and reports in order, so the job ends only after the edit's events were dropped.
-          writeFileSync(join(dirname(module), SENTINEL), "a sentinel\n");
-          return eventually(() =>
-            handled.some((name) => basename(name) === SENTINEL),
-          );
-        }),
+        declaredModuleStart(
+          dir,
+          (module, handled) => {
+            writeFileSync(module, "it('t', () => {});\n// an edit\n");
+            // The access time stays current for the reason the helper gives; only the modification time moves ahead.
+            utimesSync(module, new Date(), new Date(Date.now() + 60_000));
+            // One watch covers both files and reports in order, so the job ends only after the edit's events were dropped.
+            writeFileSync(join(dirname(module), SENTINEL), "a sentinel\n");
+            return eventually(() =>
+              handled.some((name) => basename(name) === SENTINEL),
+            );
+          },
+          true,
+        ),
       );
       expect(outcome).toStrictEqual({
         held: true,
@@ -970,9 +1023,7 @@ describe(
       expect({
         returned: begin === undefined,
         logged: started.log.entries.some((entry) =>
-          entry.startsWith(
-            "error: reading the latest stored discovery's test modules",
-          ),
+          entry.startsWith("error: reading the latest stored discovery"),
         ),
         idle: started.log.entries.includes(IDLE_ENTRY),
       }).toStrictEqual({ returned: true, logged: true, idle: true });
@@ -1037,7 +1088,7 @@ describe(
           heldSettle: 1,
           get moduleChanged() {
             return moduleChange.settled
-              ? "the test module src/a.test.ts, which no watch covers, may have changed while the job ran"
+              ? "src/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran"
               : undefined;
           },
         }),

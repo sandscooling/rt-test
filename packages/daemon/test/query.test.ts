@@ -67,7 +67,7 @@ const UNSETTLED: CurrentInputs = {
   unavailable: FIRST_RECONCILIATION,
   workspaceFingerprint: () => ({ ok: false, reason: FIRST_RECONCILIATION }),
   discoveryFingerprint: () => ({ ok: false, reason: FIRST_RECONCILIATION }),
-  testModuleChangedSince: () => FIRST_RECONCILIATION,
+  protectedFileChangedSince: () => FIRST_RECONCILIATION,
 };
 
 const SETTLED_FACTS: InputFacts = {
@@ -92,7 +92,7 @@ function settled(
         reason: `no fingerprint was scripted for ${entry.workspace.path}`,
       },
     discoveryFingerprint: () => discovery,
-    testModuleChangedSince: () => undefined,
+    protectedFileChangedSince: () => undefined,
   };
 }
 

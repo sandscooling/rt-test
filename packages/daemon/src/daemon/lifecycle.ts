@@ -73,7 +73,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   begin(): void {
-    this.#protectStoredTestModules();
+    this.#protectStoredDiscovery();
     this.#parts.inputs.start();
     this.#sequence = this.#startSequence()
       .catch((error: unknown) => {
@@ -117,18 +117,21 @@ export class DaemonLifecycle implements DaemonHandlers {
     return this.#stopping !== undefined;
   }
 
-  /** The first reconciliation leaves out no test module the store's latest discovery, from an earlier life, lists. */
-  #protectStoredTestModules(): void {
+  /**
+   * The first reconciliation leaves out no file the store's latest discovery, from an earlier life, protects. A
+   * discovery that cannot be read gives none, so no declared pattern applies.
+   */
+  #protectStoredDiscovery(): void {
     const { inputs, log } = this.#parts;
     let stored: TestDiscovery | undefined;
     try {
       stored = this.#latestResults().discovery?.discovery;
     } catch (error) {
-      log.error("reading the latest stored discovery's test modules", error);
+      log.error("reading the latest stored discovery", error);
       return;
     }
-    inputs.protectTestModules(stored).catch((error: unknown) => {
-      log.error("protecting the stored discovery's test modules", error);
+    inputs.protectInputs(stored).catch((error: unknown) => {
+      log.error("protecting the stored discovery's files", error);
     });
   }
 
@@ -188,10 +191,10 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   /**
-   * Protects the discovery's test modules before its fingerprint is taken, so the stored digest counts them as every
-   * later answer does. A module a pattern covered had no watch through the job, so its time is read before
-   * protection moves it into the inputs; an input event during protection fails the fingerprint, and protection's own
-   * reads do not.
+   * Protects the discovery's files before its fingerprint is taken, so the stored digest counts them as every later
+   * answer does. The tracker dropped the events of a file a pattern covered through the job, so the time of each one
+   * the discovery names is read before protection moves it into the inputs, and protection reads the time of each one
+   * only its walk finds; an input event during protection fails the fingerprint, and protection's own reads do not.
    */
   async #protectDiscovered(
     discovery: TestDiscovery,
@@ -204,13 +207,13 @@ export class DaemonLifecycle implements DaemonHandlers {
       return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };
     const unwatched = inputs
       .current()
-      .testModuleChangedSince(discovery, startedAt);
+      .protectedFileChangedSince(discovery, startedAt);
     const guard = inputs.beginJob();
-    await inputs.protectTestModules(discovery);
+    const released = await inputs.protectInputs(discovery, startedAt);
     const guarded = await inputs.endJob(guard);
     if (!verdict.fingerprinted) return verdict;
-    if (unwatched !== undefined)
-      return { fingerprinted: false, reason: unwatched };
+    const changed = unwatched ?? released;
+    if (changed !== undefined) return { fingerprinted: false, reason: changed };
     return guarded;
   }
 

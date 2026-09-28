@@ -3,32 +3,42 @@ import type { DaemonLog } from "../daemon/daemon-log.js";
 import {
   declaredNonInputs,
   NON_INPUTS_ABSENT,
+  NON_INPUTS_DECLARED,
   NON_INPUTS_UNUSABLE,
   readNonInputs,
-  sameDeclaration,
   unusableReason,
   type NonInputMatch,
   type NonInputsDeclaration,
 } from "./non-inputs.js";
+import { liesUnderRoot, protection, type Protection } from "./protection.js";
 
 const LIST_SEPARATOR = ", ";
 
+/** What a change of protection moved: the paths whose declared state flipped, and whether only a walk finds the rest. */
+export interface ProtectionChange {
+  /** Root-relative, each under the consumer root. */
+  readonly flipped: readonly string[];
+  /** Whether a file no path names may have become an input, which only a walk under the new decision finds. */
+  readonly walk: boolean;
+}
+
 /**
- * The declaration in effect in the daemon and the test modules it may not remove: read again at each full
- * reconciliation, and protected from each stored discovery.
+ * The declaration in effect in the daemon and the files it may not remove: read again at each full reconciliation,
+ * and protected from each discovery the lifecycle gives. No pattern applies until the first one does.
  */
 export class DeclaredNonInputs {
   readonly #root: string;
   readonly #log: DaemonLog;
   #declaration: NonInputsDeclaration | undefined;
-  #logged: NonInputsDeclaration | undefined;
-  #protected: ReadonlySet<string> = new Set();
+  #logged: string | undefined;
+  #protection: Protection;
   #match: NonInputMatch = () => undefined;
 
   /** `root` is the consumer root's real path. */
   constructor(root: string, log: DaemonLog) {
     this.#root = root;
     this.#log = log;
+    this.#protection = protection(undefined, root);
   }
 
   /** The pattern that makes a root-relative path a declared non-input, or undefined when it is an input. */
@@ -54,11 +64,18 @@ export class DeclaredNonInputs {
     }
   }
 
-  /** Why every file stays an input, while the declaration in effect cannot be used. */
+  /**
+   * Why every file stays an input: the declaration in effect cannot be used, or it declares patterns and no pattern
+   * applies. Undefined otherwise, and before the declaration is first read.
+   */
   get unusable(): string | undefined {
-    return this.#declaration === undefined
-      ? undefined
-      : unusableReason(this.#declaration);
+    if (this.#declaration === undefined) return undefined;
+    return (
+      unusableReason(this.#declaration) ??
+      (this.#declaresPatterns() && !this.#protection.applies
+        ? this.#protection.reason
+        : undefined)
+    );
   }
 
   /** Reads `rt-test.json` again, which takes effect at once. */
@@ -67,37 +84,46 @@ export class DeclaredNonInputs {
     this.#rebuild();
   }
 
-  /** Logs the declaration in effect when it differs from the one last logged. */
+  /** Logs the declaration in effect, and whether its patterns apply, when either differs from the one last logged. */
   report(): void {
     const declaration = this.#declaration;
     if (declaration === undefined) return;
-    if (
-      this.#logged !== undefined &&
-      sameDeclaration(this.#logged, declaration)
-    ) {
-      return;
-    }
-    this.#logged = declaration;
-    this.#log.entry(declarationText(declaration));
+    const text = declarationText(declaration, this.#protection);
+    if (text === this.#logged) return;
+    this.#logged = text;
+    this.#log.entry(text);
   }
 
   /**
-   * Replaces the protected test modules, root-relative, and returns each path that was a declared non-input and is
-   * now an input, or the reverse.
+   * Replaces the protection, logs the declaration when its line changed, and returns each path whose declared state
+   * flipped among those either protection names and those in `held`, the root-relative inputs the tracker holds, and
+   * whether a walk must find the rest.
    */
-  protect(testModules: readonly string[]): string[] {
-    const next = new Set(testModules);
-    const changed = [
-      ...[...next].filter((path) => !this.#protected.has(path)),
-      ...[...this.#protected].filter((path) => !next.has(path)),
-    ];
-    if (changed.length === 0) return [];
+  protect(next: Protection, held: Iterable<string>): ProtectionChange {
     const before = this.#match;
-    this.#protected = next;
+    const previous = this.#protection;
+    this.#protection = next;
     this.#rebuild();
-    return changed.filter(
-      (path) =>
-        (before(path) === undefined) !== (this.#match(path) === undefined),
+    this.report();
+    const candidates = new Set([
+      ...namedFiles(previous),
+      ...namedFiles(next),
+      ...held,
+    ]);
+    return {
+      flipped: [...candidates].filter(
+        (path) =>
+          liesUnderRoot(path) &&
+          (before(path) === undefined) !== (this.#match(path) === undefined),
+      ),
+      walk: this.#declaresPatterns() && patternsReleaseFiles(previous, next),
+    };
+  }
+
+  #declaresPatterns(): boolean {
+    return (
+      this.#declaration?.state === NON_INPUTS_DECLARED &&
+      this.#declaration.patterns.length > 0
     );
   }
 
@@ -105,19 +131,42 @@ export class DeclaredNonInputs {
     this.#match =
       this.#declaration === undefined
         ? () => undefined
-        : declaredNonInputs(this.#declaration, this.#protected);
+        : declaredNonInputs(this.#declaration, this.#protection);
   }
 }
 
-function declarationText(declaration: NonInputsDeclaration): string {
+function namedFiles(value: Protection): ReadonlySet<string> {
+  return value.applies ? value.files : new Set();
+}
+
+/**
+ * Whether a file a declared pattern hid may count now: the patterns stopped applying, or a discovered project's
+ * test file patterns or pattern directory changed, or a project joined or left.
+ */
+function patternsReleaseFiles(previous: Protection, next: Protection): boolean {
+  if (!previous.applies) return false;
+  return !next.applies || previous.patternKey !== next.patternKey;
+}
+
+function declarationText(
+  declaration: NonInputsDeclaration,
+  current: Protection,
+): string {
   switch (declaration.state) {
     case NON_INPUTS_UNUSABLE:
       return `warning: ${declaration.reason}`;
     case NON_INPUTS_ABSENT:
       return `non-inputs: none, since there is no ${declaration.file}`;
-    default:
-      return declaration.patterns.length === 0
-        ? `non-inputs: none, since ${declaration.file} declares no pattern`
-        : `non-inputs in effect from ${declaration.file}: ${declaration.patterns.map((pattern) => JSON.stringify(pattern)).join(LIST_SEPARATOR)}`;
+    default: {
+      if (declaration.patterns.length === 0) {
+        return `non-inputs: none, since ${declaration.file} declares no pattern`;
+      }
+      const patterns = declaration.patterns
+        .map((pattern) => JSON.stringify(pattern))
+        .join(LIST_SEPARATOR);
+      return current.applies
+        ? `non-inputs in effect from ${declaration.file}: ${patterns}`
+        : `warning: ${current.reason}; the patterns ${declaration.file} declares: ${patterns}`;
+    }
   }
 }

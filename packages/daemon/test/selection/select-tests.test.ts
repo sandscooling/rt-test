@@ -647,14 +647,18 @@ describe("declared non-inputs", () => {
   }
 
   /** The path reports for `change` with `pattern` declared, and with no `rt-test.json`. */
-  async function pathReports(pattern: string, change: readonly string[]) {
+  async function pathReports(
+    pattern: string,
+    change: readonly string[],
+    shape: Consumer = THREE_APPS,
+  ) {
     const reports = (outcome: Settled<SelectionOutcome>) =>
       from(outcome, ({ paths }) => paths);
     return {
       declared: reports(
-        await select({ ...THREE_APPS, files: declaring(pattern) }, change),
+        await select({ ...shape, files: declaring(pattern) }, change),
       ),
-      undeclared: reports(await select(THREE_APPS, change)),
+      undeclared: reports(await select(shape, change)),
     };
   }
 
@@ -749,13 +753,47 @@ describe("declared non-inputs", () => {
     ).toEqual(DECLARATION_FALLBACK);
   });
 
-  it("D2014: a selection carries policy version 3", async () => {
+  it("D2014: a selection carries policy version 4", async () => {
     const outcome = await select({ vitest: { app: {} } }, [
       "packages/app/src/x.ts",
     ]);
     expect("policyVersion" in outcome ? outcome.policyVersion : outcome).toBe(
-      3,
+      4,
     );
+  });
+
+  it("D2128: a setup file selects as it does with no rt-test.json, though a declared pattern matches it", async () => {
+    const { declared, undeclared } = await pathReports(
+      "docs/**",
+      ["docs/setup.ts"],
+      { vitest: { app1: { setupFiles: ["docs/setup.ts"] }, app2: {} } },
+    );
+    expect(declared).toEqual(undeclared);
+  });
+
+  it("D2129: a global setup file selects as it does with no rt-test.json, though a declared pattern matches it", async () => {
+    const { declared, undeclared } = await pathReports(
+      "docs/**",
+      ["docs/global.ts"],
+      { vitest: { app1: { globalSetupFiles: ["docs/global.ts"] }, app2: {} } },
+    );
+    expect(declared).toEqual(undeclared);
+  });
+
+  it("D2130: a test module no discovery lists, which a workspace's include pattern matches, selects as it does with no rt-test.json, though a declared pattern matches it", async () => {
+    const { declared, undeclared } = await pathReports(
+      "packages/app/e2e/**",
+      ["packages/app/e2e/new.test.ts"],
+      { vitest: { app: { patterns: { include: ["**/*.test.ts"] } } } },
+    );
+    expect(declared).toEqual(undeclared);
+  });
+
+  it("D2131: while a discovered workspace does not report its selection facts, a path a declared pattern matches selects as it does with no rt-test.json", async () => {
+    const { declared, undeclared } = await pathReports("*.md", ["README.md"], {
+      vitest: { app1: { factsUnreported: true }, app2: {} },
+    });
+    expect(declared).toEqual(undeclared);
   });
 });
 

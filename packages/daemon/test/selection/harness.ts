@@ -2,7 +2,8 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { expect } from "vitest";
-import { readNonInputs, testModuleFile } from "../../src/inputs/non-inputs.js";
+import { readNonInputs } from "../../src/inputs/non-inputs.js";
+import { protection } from "../../src/inputs/protection.js";
 import { selectTests } from "../../src/selection/select-tests.js";
 import type {
   DependencyInformation,
@@ -11,11 +12,21 @@ import type {
   SelectionOutcome,
 } from "../../src/selection/selection-types.js";
 import { buildDependencyInformation } from "../../src/selection/workspace-graph.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../../src/vitest/discover-tests.js";
 import {
   findPackageWorkspaces,
   type UnreadWorkspaceSource,
 } from "../../src/vitest/find-workspaces.js";
-import { inTempDir, settle } from "../harness.js";
+import {
+  discoveredWorkspace,
+  inTempDir,
+  projectFacts,
+  settle,
+  type FactsCase,
+} from "../harness.js";
 
 const DEFAULT_MODULES = ["unit.test.ts"];
 
@@ -30,6 +41,13 @@ export interface TreeWorkspace {
   readonly aliases?: (root: string) => readonly ResolvedAlias[];
   /** The reason the caller will not run it. */
   readonly notRunnable?: string;
+  /** Its one project's test file patterns, matched from the workspace's directory unless they name another. */
+  readonly patterns?: Pick<
+    FactsCase,
+    "directory" | "include" | "exclude" | "includeSource"
+  >;
+  /** Its discovery reports no selection facts, as one stored before the store kept them does. */
+  readonly factsUnreported?: boolean;
 }
 
 export interface TreeCase {
@@ -173,23 +191,46 @@ export function selectInTree(
       vitestListingNotRead: tree.vitestListingNotRead ?? [],
       nonInputs: {
         declaration: readNonInputs(root),
-        protectedTestModules: new Set(listedTestModules(workspaces)),
+        protection: protection(treeDiscovery(root, tree), root),
       },
     });
   });
 }
 
-/** Each runnable workspace's listed test modules, root-relative, as its discovery would list them. */
-function listedTestModules(
-  workspaces: readonly SelectableWorkspace[],
-): string[] {
-  return workspaces.flatMap(({ workspace, tests }) =>
-    tests.known
-      ? tests.tests.map((test) =>
-          testModuleFile(workspace.path, test.modulePath),
-        )
-      : [],
-  );
+/** The discovery the tree's workspaces stand for: a workspace the caller will not run failed to load. */
+function treeDiscovery(root: string, tree: TreeCase): TestDiscovery {
+  return {
+    workspaces: tree.workspaces.map((entry): WorkspaceDiscovery => {
+      const workspace = { path: entry.path, directory: join(root, entry.path) };
+      if (entry.notRunnable !== undefined) {
+        return {
+          status: "failed",
+          workspace,
+          vitestVersion: "5.0.1",
+          error: entry.notRunnable,
+        };
+      }
+      const tests = entry.tests ?? DEFAULT_MODULES;
+      return discoveredWorkspace(
+        workspace,
+        typeof tests === "string" ? [] : tests,
+        entry.factsUnreported === true
+          ? { reported: false }
+          : {
+              reported: true,
+              projects: [
+                projectFacts({
+                  directory: entry.path,
+                  ...entry.patterns,
+                  setupFiles: entry.setupFiles ?? [],
+                  globalSetupFiles: entry.globalSetupFiles ?? [],
+                }),
+              ],
+            },
+      );
+    }),
+    notRead: [],
+  };
 }
 
 /** The selected Vitest workspace paths, or the outcome itself when nothing was selected that way. */
