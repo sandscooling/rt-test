@@ -15,7 +15,8 @@ import {
   type AssertionResult,
   type RunResult,
 } from "../../../scripts/lib/defects/vitest.mjs";
-import { endAll, endsWithin } from "../processes.js";
+import { endsWithin } from "../processes.js";
+import { endOwnedProcesses } from "../run-cleanup.mjs";
 import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   CALC_TEST,
@@ -88,6 +89,8 @@ const LIVE_WINDOW_MS = 2000;
 const STOP_WAIT_MS = 15_000;
 /** How long a process that must be spared is watched for an end that should never come. */
 const SPARE_WAIT_MS = 2000;
+/** How long a stopped run may take to fail on a loaded machine, kept under the test's budget. */
+const SETTLE_WAIT_MS = 10_000;
 
 const progress = (event: object) =>
   `${PROGRESS_MARKER}${JSON.stringify(event)}`;
@@ -124,7 +127,7 @@ function afterStall<T>(
       }
       return await observe(children);
     } finally {
-      endAll(children);
+      endOwnedProcesses([dir], children);
     }
   });
 }
@@ -289,7 +292,10 @@ function killedFromOutside(): Promise<string> {
       () => "read",
       (error: Error) => error.message,
     );
-    process.kill(await pidWithin(pidFile, PID_WAIT_MS), "SIGKILL");
+    const entryPid = await pidWithin(pidFile, PID_WAIT_MS);
+    if (endOwnedProcesses([dir], [entryPid]).length === 0) {
+      throw new Error(`the entry process ${entryPid} was not killed`);
+    }
     return outcome;
   });
 }
@@ -672,6 +678,53 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
       ([worker]) => endsWithin(worker!, STOP_WAIT_MS),
     );
     expect(ended).toBe(true);
+  });
+
+  it("D2472: fails a stalled run whose main process exited before the stop, saying its workers could not be told apart", async () => {
+    const outcome = await withScratch(async (dir) => {
+      const run = runStandIn(
+        dir,
+        {
+          lines: [startedCalc],
+          children: [[]],
+          childStdio: "inherit",
+          finish: true,
+        },
+        STALL_WINDOW_MS,
+      );
+      try {
+        return await run.outcome;
+      } finally {
+        endOwnedProcesses([dir], run.children());
+      }
+    });
+    expect(outcome).toMatch(
+      /its main process had exited before the stop, so its workers could not be told from other processes/,
+    );
+  });
+
+  it("D2494: fails, rather than waiting on its output, a stalled run whose main process exited before the stop", async () => {
+    const settled = await withScratch(async (dir) => {
+      const run = runStandIn(
+        dir,
+        {
+          lines: [startedCalc],
+          children: [[]],
+          childStdio: "inherit",
+          finish: true,
+        },
+        STALL_WINDOW_MS,
+      );
+      try {
+        return await Promise.race([
+          run.outcome.then(() => true),
+          delay(STALL_WINDOW_MS + SETTLE_WAIT_MS).then(() => false),
+        ]);
+      } finally {
+        endOwnedProcesses([dir], run.children());
+      }
+    });
+    expect(settled).toBe(true);
   });
 
   it("D1704: ends a stopped run's pool workers, which outlive its main process", async () => {

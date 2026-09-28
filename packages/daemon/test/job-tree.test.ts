@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
 import { daemonStatus, stopDaemon } from "../src/client.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import {
@@ -413,7 +414,7 @@ describe("what a job starts ends with the job", () => {
           logged(identity.logFile, IDLE_ENTRY),
         );
         const alive = await stillRunning(root, children);
-        for (const pid of alive) process.kill(pid, "SIGKILL");
+        endOwnedProcesses([root], alive);
         const status = await settled(daemonStatus(root));
         return {
           idle,
@@ -444,7 +445,7 @@ describe("what a job starts ends with the job", () => {
           const stuckWith = await stillRunning(root, children);
           const stop = await settled(stopDaemon(root));
           const alive = await stillRunning(root, children);
-          for (const pid of alive) process.kill(pid, "SIGKILL");
+          endOwnedProcesses([root], alive);
           return {
             pid: identity.pid,
             stuckWith: stuckWith.length,

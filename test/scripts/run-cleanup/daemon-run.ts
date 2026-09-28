@@ -1,17 +1,19 @@
 import { rmSync } from "node:fs";
 import type { TestProject } from "vitest/node";
 import setup from "../../../packages/daemon/test/temp-root.js";
-import { childProcessesOf, isRunWatchdog } from "../run-cleanup.mjs";
-import { endAll } from "../processes.js";
+import {
+  childProcessesOf,
+  endRecorded,
+  isRunWatchdog,
+  type ProcessRecord,
+} from "../run-cleanup.mjs";
 
 /** The run watchdogs this process started for `runRoot`. */
-export const watchdogsOf = (runRoot: string): number[] =>
-  childProcessesOf(process.pid)
-    .filter(
-      (child) =>
-        isRunWatchdog(child.commandLine) && child.commandLine.includes(runRoot),
-    )
-    .map((child) => child.pid);
+export const watchdogsOf = (runRoot: string): ProcessRecord[] =>
+  childProcessesOf(process.pid).filter(
+    (child) =>
+      isRunWatchdog(child.commandLine) && child.commandLine.includes(runRoot),
+  );
 
 /**
  * Runs the daemon project's global setup as Vitest does, hands `body` the run's temp parent and teardown, then ends
@@ -30,7 +32,7 @@ export async function withDaemonRunSetup<T>(
   try {
     return await body(runRoot, teardown);
   } finally {
-    endAll(watchdogsOf(runRoot));
+    endRecorded(watchdogsOf(runRoot));
     rmSync(runRoot, { recursive: true, force: true });
   }
 }

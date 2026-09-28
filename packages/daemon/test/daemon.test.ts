@@ -16,6 +16,7 @@ import {
   WatchedChild,
   type ChildEnd,
 } from "../../../test/scripts/child-end.js";
+import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
 import {
   daemonStatus,
   queryPathStatus,
@@ -44,8 +45,8 @@ import {
   WORKSPACE_A,
   WORKSPACE_B,
   confirmNothing,
+  endExecutors,
   eventually,
-  executorPids,
   fixtureFile,
   frozenProof,
   holdAt,
@@ -916,9 +917,7 @@ describe("the executor process", () => {
         const identity = await started(root, pids, confirmEvery(root));
         if ("thrown" in identity) return identity;
         await atHoldPoint(root, "holding");
-        for (const pid of new Set(executorPids(root))) {
-          if (isRunning(pid)) process.kill(pid, "SIGKILL");
-        }
+        endExecutors([root]);
         await eventually(() => logged(identity.logFile, IDLE_ENTRY));
         const status = await settled(daemonStatus(root));
         return {
@@ -1241,7 +1240,7 @@ describe("the key and the store lock a daemon holds", () => {
       const outcome = await withDaemonConsumer(async (root, pids) => {
         const first = await started(root, pids);
         if ("thrown" in first) return first;
-        process.kill(first.pid, "SIGKILL");
+        endOwnedProcesses([root], [first.pid]);
         await eventually(() => gone(first));
         const keyLeft = existsSync(keyFileOf(first));
         const second = await started(root, pids);

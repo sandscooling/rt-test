@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { LONGEST_TEST_TIMEOUT_MS } from "../../../test/scripts/longest-test-timeout.mjs";
 import {
-  endProcess,
+  endOwnedProcesses,
   recordStarted,
   removeKeyFile,
+  stillRunning,
+  type ProcessRecord,
 } from "../../../test/scripts/run-cleanup.mjs";
 import {
   startDaemon,
@@ -400,7 +402,7 @@ export function holdAt(root: string, hold: string): void {
 }
 
 /** Every executor process id the fixture recorded. */
-export function executorPids(root: string): number[] {
+function executorPids(root: string): number[] {
   return EXECUTOR_PID_FILES.flatMap((name) => {
     const file = join(root, name);
     if (!existsSync(file)) return [];
@@ -523,8 +525,13 @@ export function storedRuns(
   }
 }
 
-function end(pid: number): void {
-  if (isRunning(pid)) endProcess(pid);
+/**
+ * Ends each executor the fixture recorded for `roots` that is still running as one of theirs, and returns the records
+ * it ended. On Windows only a live daemon proves an executor theirs; on Linux its working directory does too. An id
+ * another process has since taken is spared.
+ */
+export function endExecutors(roots: readonly string[]): ProcessRecord[] {
+  return endOwnedProcesses(roots, roots.flatMap(executorPids));
 }
 
 /**
@@ -541,7 +548,12 @@ export async function withDaemons<T>(
   try {
     result = await body(pids);
   } catch (error) {
-    await endDaemons(roots, pids);
+    await endDaemons(roots, pids).catch((cleanup: unknown) => {
+      throw new AggregateError(
+        [error, cleanup],
+        "the test failed, and ending its daemons failed too",
+      );
+    });
     throw error;
   }
   const alive = await endDaemons(roots, pids);
@@ -553,18 +565,34 @@ export async function withDaemons<T>(
   return result;
 }
 
-/** Ends every daemon and executor of `roots`, and returns the ids of any process still running after the wait. */
+/**
+ * Ends every daemon and executor of `roots` still running as theirs, and returns the ids of any it ended that still
+ * run after the wait. Each daemon is asked to stop even when its executors could not be ended. A recorded id still
+ * running that could not be proven theirs keeps the leftovers, since it may be a daemon still using its key; the
+ * run's teardown removes them, as it removes whatever a run recorded.
+ */
 async function endDaemons(
   roots: readonly string[],
   pids: ReadonlySet<number>,
 ): Promise<number[]> {
-  for (const pid of roots.flatMap(executorPids)) end(pid);
-  for (const root of roots) await stopDaemon(root).catch(() => undefined);
+  let endedFirst: ProcessRecord[];
+  try {
+    endedFirst = endExecutors(roots);
+  } finally {
+    for (const root of roots) await stopDaemon(root).catch(() => undefined);
+  }
   const recorded = [...pids, ...roots.flatMap(executorPids)];
-  for (const pid of recorded) end(pid);
-  await eventually(() => recorded.every((pid) => !isRunning(pid)));
-  const alive = recorded.filter((pid) => isRunning(pid));
-  if (alive.length === 0) for (const root of roots) removeLeftovers(root);
+  const ended = endOwnedProcesses(roots, recorded);
+  const everyEnded = [...endedFirst, ...ended];
+  const endedIds = new Set(everyEnded.map(({ pid }) => pid));
+  const unproven = recorded.filter(
+    (pid) => !endedIds.has(pid) && isRunning(pid),
+  );
+  await eventually(() => stillRunning(everyEnded).length === 0);
+  const alive = [...new Set(stillRunning(everyEnded).map(({ pid }) => pid))];
+  if (alive.length === 0 && unproven.length === 0) {
+    for (const root of roots) removeLeftovers(root);
+  }
   return alive;
 }
 

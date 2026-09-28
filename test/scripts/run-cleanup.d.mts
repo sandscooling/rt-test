@@ -13,22 +13,41 @@ export interface StartedEntry {
 }
 
 export interface RunCleanup {
-  /** The recorded processes that were still running inside the run's directory, now ended. */
+  /** The recorded processes that were still running inside the run's directory, or started by one that was, now ended. */
   readonly ended: readonly number[];
   /** False while Windows still holds the run's directory. */
   readonly removed: boolean;
 }
 
-export interface ChildProcess {
+/** A running process as the OS knew it when the record was taken. */
+export interface ProcessRecord {
   readonly pid: number;
+  readonly parent: number;
+  /** In the OS's own units; with the id, it tells this process from every other that held the id. */
+  readonly startedAt: bigint;
   readonly commandLine: string;
+  /** Linux only. */
+  readonly workingDirectory?: string;
 }
 
 export declare const STARTED_FILE: string;
 export declare function removeDirectory(directory: string): Promise<boolean>;
 export declare function isRunning(pid: number): boolean;
-export declare function endProcess(pid: number): void;
-export declare function childProcessesOf(pid: number): ChildProcess[];
+export declare function processRecords(
+  pids: readonly number[],
+): Map<number, ProcessRecord>;
+export declare function childProcessesOf(pid: number): ProcessRecord[];
+export declare function namedAsParent(pid: number): boolean;
+export declare function stillRunning(
+  records: readonly ProcessRecord[],
+): ProcessRecord[];
+export declare function endRecorded(
+  records: readonly ProcessRecord[],
+): ProcessRecord[];
+export declare function endOwnedProcesses(
+  roots: readonly string[],
+  pids: readonly number[],
+): ProcessRecord[];
 export declare function isRunWatchdog(commandLine: string): boolean;
 export declare function recordStarted(
   runRoot: string,

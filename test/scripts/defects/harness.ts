@@ -31,7 +31,7 @@ import {
   type RunResult,
   type RunTests,
 } from "../../../scripts/lib/defects/vitest.mjs";
-import { childProcessesOf } from "../run-cleanup.mjs";
+import { namedAsParent } from "../run-cleanup.mjs";
 
 export type Tree = Readonly<Record<string, string>>;
 
@@ -236,7 +236,7 @@ async function removeScratch(dir: string): Promise<void> {
     const code = (error as NodeJS.ErrnoException).code ?? "";
     if (!FOLDER_IN_USE.has(code) || pids.length === 0) throw error;
   }
-  while (pids.some((pid) => childProcessesOf(pid).length > 0)) {
+  while (pids.some(namedAsParent)) {
     await delay(RUN_TREE_POLL_MS);
   }
   rmSync(dir, { recursive: true, force: true });
