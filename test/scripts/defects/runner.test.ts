@@ -1,6 +1,9 @@
-import { writeFileSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import type { Defect } from "../../../scripts/lib/defects/catalog.mjs";
 import ProgressReporter, {
   PROGRESS_MARKER,
 } from "../../../scripts/lib/defects/progress-reporter.mjs";
@@ -17,6 +20,7 @@ import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   CALC_TEST,
   catalogOf,
+  cleanEnd,
   OTHER_TEST,
   runStandIn,
   withScratch,
@@ -57,6 +61,7 @@ function result(
       })),
     },
     ...output,
+    ...cleanEnd(status),
   };
 }
 
@@ -182,6 +187,125 @@ const TAIL_LABEL = "; stdout tail: ";
 /** The stdout tail a no-report failure ends with. */
 const tailOf = (message: string) =>
   message.slice(message.lastIndexOf(TAIL_LABEL) + TAIL_LABEL.length);
+
+const REAL_FIXTURES = fileURLToPath(
+  new URL("../../fixtures/defects-runner/vitest/", import.meta.url),
+);
+/** Under the test's budget, so a real run that hangs fails through the runner's verdict, not the test's timeout. */
+const REAL_WINDOW_MS = 20_000;
+
+interface RealRun {
+  /** Fixture files to copy into the sandbox; the run covers the first. */
+  readonly files: readonly string[];
+  /** The fixture config the sandbox runs under. */
+  readonly config?: string;
+  readonly pattern?: string;
+}
+
+type Judge = (run: RunResult, sandbox: string) => string | null;
+
+/**
+ * Runs real Vitest under the runner over fixtures copied into a scratch sandbox, and returns `judge`'s verdict on
+ * the run, or the runner's error when it rejected the run.
+ */
+function realRun(spec: RealRun, judge: Judge): Promise<string | null> {
+  return withScratch(async (dir) => {
+    for (const file of spec.files) {
+      copyFileSync(join(REAL_FIXTURES, file), join(dir, file));
+    }
+    copyFileSync(
+      join(REAL_FIXTURES, spec.config ?? "vitest.config.ts"),
+      join(dir, "vitest.config.ts"),
+    );
+    const run = createVitestRunner({ root: dir, idleWindowMs: REAL_WINDOW_MS });
+    return run({
+      sandbox: dir,
+      report: join(dir, "report.json"),
+      files: spec.files.slice(0, 1),
+      ...(spec.pattern === undefined ? {} : { pattern: spec.pattern }),
+    }).then(
+      (done) => judge(done, dir),
+      (error: Error) => error.message,
+    );
+  });
+}
+
+const fixtureDefect = (test: string): Defect => ({
+  id: "D1",
+  defect: "D1 defect",
+  file: test,
+  old: "",
+  new: "",
+  source: "",
+  test,
+});
+
+const asBaseline =
+  (test: string): Judge =>
+  (run, sandbox) =>
+    baselineProblem(run, sandbox, [fixtureDefect(test)], [test]);
+
+const asDetection =
+  (test: string): Judge =>
+  (run, sandbox) =>
+    detectionProblem(run, sandbox, fixtureDefect(test));
+
+/** The exit witness's record path the runner derives from the report path. */
+const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
+
+const bareRejection = 'Promise.reject(new Error("bare boom"));\n';
+
+/** Node's own crash on an unhandled rejection: exit status 1, and the error on stderr. */
+const NODE_REJECTION_CRASH = /; exit status 1, .*; stderr: .*Error: bare boom/s;
+
+const PID_WAIT_MS = 15_000;
+const PID_POLL_MS = 50;
+
+async function pidWithin(path: string, boundMs: number): Promise<number> {
+  const until = Date.now() + boundMs;
+  while (Date.now() < until) {
+    let pid = 0;
+    try {
+      pid = Number(readFileSync(path, "utf8"));
+    } catch {
+      pid = 0;
+    }
+    if (Number.isInteger(pid) && pid > 0) return pid;
+    await delay(PID_POLL_MS);
+  }
+  throw new Error(`no process id appeared in ${path}`);
+}
+
+/** Runs an entry that hangs until another process kills it, as something outside the run can; the runner's error. */
+function killedFromOutside(): Promise<string> {
+  return withScratch(async (dir) => {
+    const pidFile = join(dir, "pid");
+    const outcome = runEntryIn(
+      dir,
+      () =>
+        `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`,
+      REAL_WINDOW_MS,
+    ).then(
+      () => "read",
+      (error: Error) => error.message,
+    );
+    process.kill(await pidWithin(pidFile, PID_WAIT_MS), "SIGKILL");
+    return outcome;
+  });
+}
+
+/** A report whose one run file holds the named assertion failure a detection needs. */
+const namedFailureReport = () =>
+  result(1, {
+    [CALC_TEST]: [test("D1", "failed"), test("D2", "skipped")],
+  }).report;
+
+const cleanRunEnded = progress({
+  event: "run-ended",
+  reason: "failed",
+  errorCount: 0,
+  errors: [],
+});
 
 function parseErrorOf(text: string): string {
   try {
@@ -389,7 +513,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
         writesStdout(`said first\n${startedAndFinished(120_001).join("\n")}\n`),
     );
     expect(outcome).toBe(
-      "slow > D9 (120001 ms) declares a timeout above LONGEST_TEST_TIMEOUT_MS (120000 ms) in test/scripts/longest-test-timeout.mjs, which the verifier's idle window is sized from; raise that constant; stderr: warned here\n; stdout tail: said first",
+      "slow > D9 (120001 ms) declares a timeout above LONGEST_TEST_TIMEOUT_MS (120000 ms) in test/scripts/longest-test-timeout.mjs, which the verifier's idle window is sized from; raise that constant; Vitest reported no run end; the Vitest process exited with code 0; stderr: warned here\n; stdout tail: said first",
     );
   });
 
@@ -651,7 +775,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
       RUN_OUTPUT,
     );
     expect(detectionProblem(run, SANDBOX, defect("D1"))).toBe(
-      "expected one named assertion failure; inspect the mutation (exit 1; passed 0; failed: none); stderr: vitest broke here\n; stdout tail: last words",
+      'expected one named assertion failure; inspect the mutation (exit 1; passed 0; failed: none); Vitest ended the run with reason "failed" and no unhandled error; the Vitest process exited with code 1; stderr: vitest broke here\n; stdout tail: last words',
     );
   });
 
@@ -659,7 +783,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     const { defects } = catalogOf();
     const run = result(1, { [CALC_TEST]: [], [OTHER_TEST]: [] }, RUN_OUTPUT);
     expect(baselineProblem(run, SANDBOX, defects)).toBe(
-      `the unmodified baseline must pass every named test and no other (passed 0 for ${defects.length} named; failed: none); stderr: vitest broke here\n; stdout tail: last words`,
+      `the unmodified baseline must pass every named test and no other (passed 0 for ${defects.length} named; failed: none); Vitest ended the run with reason "failed" and no unhandled error; the Vitest process exited with code 1; stderr: vitest broke here\n; stdout tail: last words`,
     );
   });
 
@@ -668,7 +792,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
       [CALC_TEST]: [test("D1", "skipped"), test("D2", "skipped")],
     });
     expect(detectionProblem(run, SANDBOX, defect("D1"))).toBe(
-      "expected one named assertion failure; inspect the mutation (exit 1; passed 0; failed: none); stderr: (empty); stdout tail: (empty)",
+      'expected one named assertion failure; inspect the mutation (exit 1; passed 0; failed: none); Vitest ended the run with reason "failed" and no unhandled error; the Vitest process exited with code 1; stderr: (empty); stdout tail: (empty)',
     );
   });
 
@@ -682,7 +806,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
       RUN_OUTPUT,
     );
     expect(detectionProblem(run, SANDBOX, defect("D1"))).toBe(
-      "expected a run of test/calc/calc.test.ts alone; stderr: vitest broke here\n; stdout tail: last words",
+      'expected a run of test/calc/calc.test.ts alone; Vitest ended the run with reason "failed" and no unhandled error; the Vitest process exited with code 1; stderr: vitest broke here\n; stdout tail: last words',
     );
   });
 
@@ -699,7 +823,233 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     );
     const scope = [CALC_TEST, OTHER_TEST].sort();
     expect(baselineProblem(run, SANDBOX, defects, scope)).toBe(
-      "the baseline ran a different set of test files; stderr: vitest broke here\n; stdout tail: last words",
+      'the baseline ran a different set of test files; Vitest ended the run with reason "passed" and no unhandled error; the Vitest process exited with code 0; stderr: vitest broke here\n; stdout tail: last words',
+    );
+  });
+
+  it("D2172: names a test worker's death by its exit code or signal, runner state and test file", async () => {
+    const verdict = await realRun(
+      { files: ["dies.fixture.ts"] },
+      asBaseline("dies.fixture.ts"),
+    );
+    expect(verdict).toMatch(
+      /caused by: Error: Worker exited unexpectedly with (exit code \d+ |signal \w+ )+during \w+ state while running test file \S*dies\.fixture\.ts/,
+    );
+  });
+
+  it("D2173: names an unhandled error beside a passing test by its type, message and first stack frame", async () => {
+    const verdict = await realRun(
+      { files: ["beside-pass.fixture.ts"] },
+      asBaseline("beside-pass.fixture.ts"),
+    );
+    expect(verdict).toMatch(
+      /\(1\) Uncaught Exception: Error: boom beside a passing test\n\s+at .*beside-pass\.fixture\.ts:\d+:\d+/,
+    );
+  });
+
+  it("D2174: names a test file whose import threw by the file and its error", async () => {
+    const verdict = await realRun(
+      { files: ["import.fixture.ts", "throws-on-import.ts"] },
+      asBaseline("import.fixture.ts"),
+    );
+    expect(verdict).toContain(
+      "; file errors: import.fixture.ts: the import threw; ",
+    );
+  });
+
+  it("D2175: names the first 10 tests a dead worker left pending and counts the rest", async () => {
+    const verdict = await realRun(
+      { files: ["dies.fixture.ts"] },
+      asBaseline("dies.fixture.ts"),
+    );
+    expect(verdict).toContain(
+      "; tests left pending: (1) D1: dies mid-test (2) D2: never runs (3) D3: never runs (4) D4: never runs (5) D5: never runs (6) D6: never runs (7) D7: never runs (8) D8: never runs (9) D9: never runs (10) D10: never runs and 2 more; ",
+    );
+  });
+
+  it("D2185: names exactly 10 pending tests with no count of the rest", async () => {
+    const verdict = await realRun(
+      { files: ["dies-ten.fixture.ts"] },
+      asBaseline("dies-ten.fixture.ts"),
+    );
+    expect(verdict).toContain(
+      "(9) D9: never runs (10) D10: never runs; Vitest ended the run",
+    );
+  });
+
+  it("D2176: names a host-side unhandled rejection, the process.exit call it led to with its callers, and the exit code", async () => {
+    const outcome = await realRun(
+      {
+        files: ["passes.fixture.ts", "host-rejection.setup.ts"],
+        config: "host-rejection.config.ts",
+      },
+      () => "read",
+    );
+    expect(outcome).toMatch(
+      /; the Vitest process recorded \(1\) an unhandled rejection: Error: host boom\n.*\(2\) a process\.exit\(1\) call from .+ < .+, then exited with code 1; /s,
+    );
+  });
+
+  it("D2177: never counts a named assertion failure beside an unhandled error as a detection", async () => {
+    const verdict = await realRun(
+      { files: ["fails-beside-error.fixture.ts"], pattern: "D1" },
+      asDetection("fails-beside-error.fixture.ts"),
+    );
+    expect(verdict).toEqual(
+      expect.stringContaining(
+        "the named assertion failed, but a run that did not end cleanly is not a detection: Vitest reported 1 unhandled error(s); ",
+      ),
+    );
+  });
+
+  it("D2178: never counts a named assertion failure as a detection when the process wrote its report and recorded no exit", async () => {
+    const run = await withScratch((dir) =>
+      runEntryIn(
+        dir,
+        (report) =>
+          writesReport(report, JSON.stringify(namedFailureReport())) +
+          `process.stdout.write(${JSON.stringify(`${cleanRunEnded}\n`)}, () => process.reallyExit(1));\n`,
+      ),
+    );
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toEqual(
+      expect.stringContaining(
+        "the named assertion failed, but a run that did not end cleanly is not a detection: the Vitest process recorded no exit; ",
+      ),
+    );
+  });
+
+  it("D2179: says a run killed from outside before its report recorded no exit", async () => {
+    const outcome = await killedFromOutside();
+    expect(outcome).toContain(
+      "; the Vitest process recorded no exit, so it was killed, crashed below JavaScript, or could not write its record; ",
+    );
+  });
+
+  it("D2180: leaves a bare unhandled rejection to crash with Node's own stderr and exit 1", async () => {
+    const outcome = await runEntry(() => bareRejection);
+    expect(outcome).toMatch(NODE_REJECTION_CRASH);
+  });
+
+  it("D2181: passes a clean real detection and a clean real baseline", async () => {
+    const verdicts = await Promise.all([
+      realRun(
+        { files: ["fails.fixture.ts"], pattern: "D1" },
+        asDetection("fails.fixture.ts"),
+      ),
+      realRun(
+        { files: ["passes.fixture.ts"] },
+        asBaseline("passes.fixture.ts"),
+      ),
+    ]);
+    expect(verdicts).toEqual([null, null]);
+  });
+
+  it("D2182: records a process.exit call with its caller, then exits with its code", async () => {
+    const outcome = await runEntry(
+      () => "process.exit(3);\nsetInterval(() => {}, 1000);\n",
+      STALL_WINDOW_MS,
+    );
+    expect(outcome).toMatch(
+      /; exit status 3, .*; the Vitest process recorded \(1\) a process\.exit\(3\) call from .+, then exited with code 3; /s,
+    );
+  });
+
+  it("D2183: leaves a rejection after the last other listener left to crash as Node does", async () => {
+    const outcome = await runEntry(
+      () =>
+        `const listener = () => {};\nprocess.on("unhandledRejection", listener);\nprocess.off("unhandledRejection", listener);\n${bareRejection}`,
+    );
+    expect(outcome).toMatch(NODE_REJECTION_CRASH);
+  });
+
+  it("D2184: keeps a process.exit code when the exit record cannot be written", async () => {
+    const outcome = await runEntry(
+      (report) =>
+        `import { mkdirSync, rmSync } from "node:fs";\nconst record = ${JSON.stringify(`${report}${EXIT_RECORD_SUFFIX}`)};\nrmSync(record);\nmkdirSync(record);\nprocess.exit(3);\n`,
+    );
+    expect(outcome).toMatch(/; exit status 3, /);
+  });
+
+  it("D2186: counts an exit record line cut short as unreadable", async () => {
+    const outcome = await runEntry(
+      (report) =>
+        `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(`${report}${EXIT_RECORD_SUFFIX}`)}, ${JSON.stringify('{"kind":"exi\n')});\n`,
+    );
+    expect(outcome).toContain(
+      "; the Vitest process exited with code 0, then left 1 unreadable record line(s); ",
+    );
+  });
+
+  it("D2187: never counts a named assertion failure as a detection when the process then crashed on an uncaught exception", async () => {
+    const run = await withScratch((dir) =>
+      runEntryIn(
+        dir,
+        (report) =>
+          writesReport(report, JSON.stringify(namedFailureReport())) +
+          `process.stdout.write(${JSON.stringify(`${cleanRunEnded}\n`)}, () => setTimeout(() => { throw new Error("host boom after close"); }, 0));\n`,
+      ),
+    );
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toEqual(
+      expect.stringContaining(
+        "the named assertion failed, but a run that did not end cleanly is not a detection: the Vitest process recorded 1 unhandled error(s); ",
+      ),
+    );
+  });
+
+  it("D2188: never counts a named assertion failure as a detection when a process.exit call ended the process", async () => {
+    const run = await withScratch((dir) =>
+      runEntryIn(
+        dir,
+        (report) =>
+          writesReport(report, JSON.stringify(namedFailureReport())) +
+          `process.stdout.write(${JSON.stringify(`${cleanRunEnded}\n`)}, () => process.exit(1));\n`,
+      ),
+    );
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toEqual(
+      expect.stringContaining(
+        "the named assertion failed, but a run that did not end cleanly is not a detection: the Vitest process was ended by a process.exit call, ",
+      ),
+    );
+  });
+
+  it("D2189: fails an all-pass baseline that exited 0 when its process recorded no exit", async () => {
+    const { defects } = catalogOf();
+    const allPass = result(0, {
+      [CALC_TEST]: [test("D1", "passed"), test("D2", "passed")],
+      [OTHER_TEST]: [test("D3", "passed")],
+    }).report;
+    const passedRunEnded = progress({
+      event: "run-ended",
+      reason: "passed",
+      errorCount: 0,
+      errors: [],
+    });
+    const run = await withScratch((dir) =>
+      runEntryIn(
+        dir,
+        (report) =>
+          writesReport(report, JSON.stringify(allPass)) +
+          `process.stdout.write(${JSON.stringify(`${passedRunEnded}\n`)}, () => process.reallyExit(0));\n`,
+      ),
+    );
+    expect(baselineProblem(run, SANDBOX, defects)).toEqual(
+      expect.stringContaining(
+        "the unmodified baseline did not end cleanly: the Vitest process recorded no exit; ",
+      ),
+    );
+  });
+
+  it("D2190: never counts a named assertion failure as a detection when Vitest reported no run end, though its process exited", () => {
+    const run = {
+      ...result(1, {
+        [CALC_TEST]: [test("D1", "failed"), test("D2", "skipped")],
+      }),
+      runEnd: null,
+    };
+    expect(detectionProblem(run, SANDBOX, defect("D1"))).toEqual(
+      expect.stringContaining(
+        "the named assertion failed, but a run that did not end cleanly is not a detection: Vitest reported no run end; ",
+      ),
     );
   });
 });

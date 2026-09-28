@@ -370,7 +370,7 @@ Fixed:
 - `inputs/protection.ts` `rootRespelling`: for a pattern directory at a Windows drive root, the prefix was `C://`, so the crawl root's segments never folded. `directoryPrefix` now builds that prefix and `globCall`'s `below`.
 - Doc comments: `DeclaredNonInputs.protect` now says it logs; `#protectDiscovered` says the tracker dropped a covered file's events rather than that no watch covered it.
 
-Undisposed tech debt, for triage once committed:
+Tech debt, triaged against a3ca5bc on 2026-09-28 at 04:21 (triage only, by the orchestrator's 04:20 instruction; `node scripts/list-open-issues.mjs` printed `0 open issues, complete`). The dispositions follow the list:
 
 - `inputs/protection-walk.ts` `keepReleasedFiles` calls `takeInventory(scope, scope.root)`, which reads and hashes every input under the root (`input-inventory.ts` `hashFiles`), then keeps only those `state.hasInput` lacks. A walk costs a full reconciliation's reads to find a few files. It runs at most once per daemon life today; 2.3f's rediscovery makes it recur.
 - `daemon/lifecycle.ts` `#protectDiscovered`: nothing catches deleting or reordering `if (!verdict.fingerprinted) return verdict;` (every lifecycle test scripts the discovery's own verdict as fingerprinted; no record mutates the line). Without it, a discovery whose watched inputs changed while Vitest collected is stored under a digest.
@@ -379,6 +379,15 @@ Undisposed tech debt, for triage once committed:
 - `daemon/lifecycle.ts` `#protectStoredDiscovery` reads every workspace's latest run through `#latestResults()` to use only `.discovery`; `store.readLatestDiscovery` answers it.
 - `inputs/input-tracker.ts` `protectInputs` takes `held` from the committed `project()` snapshot. An input set but not committed when `protect` runs, then declared by the new protection, never flips. It cannot be reached today, because lifecycle awaits `settled()` first; 2.3f's repeated protection can reach it.
 - `selection/select-tests.ts` `normalizeRelativePath`: a change path holding `\` is neither refused nor converted, so under `**` it reaches `protects` as one segment, and the answer differs by platform. A change naming the root (`""`, `.`) normalizes to `.`, which `**` declares, so it selects nothing where it would select widely.
+
+Dispositions:
+
+1. The walk hashes every input. Fix later. Change request: "perf: let protection's walk read only the files the tracker does not hold". Evidence: `input-inventory.ts` `takeInventory` passes every listed file to `hashFiles` before `keepReleasedFiles` filters by `state.hasInput`. Scope: a skip predicate on the inventory, applied before `hashFiles`; two files, mechanical. Sprint 2.3f's scope already names the recurrence.
+2. and 3. The lifecycle verdict order and the job start. Fix later, as one change request: "test: pin #protectDiscovered's own-verdict return and the time its job start is taken". Evidence: no record in `test/defects.json` mutates `if (!verdict.fingerprinted) return verdict;`, and every lifecycle test scripts the discovery's verdict as fingerprinted; D1988 edits its module 60 s ahead of now, so a `startedAt` taken after `executor.discover` still flags it. Scope: `lifecycle.test.ts` and `defects.json` only (the stand-in records `jobStart` since D2163, but not the `since` that `protectedFileChangedSince` receives).
+3. A rejection in the protection step. No change. Every rejection source inside it is already turned into a reason: `protection` catches a refused pattern, `#walkReleased` catches the walk, `#drainQueue` catches a failed read, `settled()` never rejects, and `InputJobs.close` is pure. Only a programming error reaches the start sequence's catch, which logs it at error level.
+4. The start reads every latest run. Fix later. Change request: "perf: read only the latest discovery when protecting the stored one at start". Evidence: `#protectStoredDiscovery` uses only `this.#latestResults().discovery`, while `RtTestStore.readLatestDiscovery(scope)` (`store/open-store.ts`) answers that alone. Scope: one line in `lifecycle.ts`, mechanical, once per start.
+5. `held` from the committed snapshot. Closed by decision: it cannot be reached until protection runs within one daemon life, and sprint 2.3f's scope now carries it (amended at a3ca5bc), so 2.3f's author meets it with the repeated protection that makes it reachable.
+6. A backslash or root change path. Fix later. Change request: "fix: refuse a change path holding a backslash or naming the root". Evidence: `select-tests.ts` `normalizeRelativePath` runs `posix.normalize` only, and `refusalReason` refuses only absolute and climbing paths. `SelectionInput.change` is documented as `/`-separated root-relative files, and selection has no production caller until 2.3e. Scope: `refusalReason` in `select-tests.ts`, which holds 489 of its 500 code lines and which 2.3d edits next, so the change request should land after 2.3d or extract first.
 
 #### Test Coverage Gaps
 
