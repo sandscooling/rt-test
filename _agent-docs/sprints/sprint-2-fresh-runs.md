@@ -6,6 +6,11 @@ Make the daemon run tests on edits and answer with current results, so agents on
 
 The sprint's correctness targets are requirements measured over a controlled edit corpus: no duplicate execution (NFR1) and no failure a full run finds that the selected run misses (NFR2). The Fleet Cooling trial follows the sprint, started by the owner with RT Test's state directory outside that checkout.
 
+Trial preflight, done before the owner starts the trial (owner, 2026-09-28 09:50):
+
+- `rt-test start` can name a state directory outside the consumer's tree, and every other command finds the daemon and its store there. `startDaemon` accepts one; check that the CLI passes it through, and add the option if it does not.
+- The summary names what RT Test does not cover in that project, such as a workspace with a test script but no Vitest (the Fleet Cooling survey, 2026-09-27 23:22).
+
 ## Ticket 2.1: Track inputs and invalidate
 
 Scope: watch saved inputs, fingerprint them, and mark every result an edit could affect as stale, reconciling after start, missed events, and branch changes before any result is reported current. Requirements: FR6, NFR3. Ticket file: [2-1-track-inputs](../tickets/2-1-track-inputs.md)
