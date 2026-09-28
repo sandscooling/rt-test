@@ -45,6 +45,9 @@ const PROC = "/proc";
 const STAT_PARENT_FIELD = 1;
 const STAT_START_TIME_FIELD = 19;
 const DECIMAL_DIGITS = /^\d+$/;
+/** What may follow a path a command line names whole: its end, a separator, a closing quote or the next argument. */
+const PATH_END = /^(?:$|[/\\"'\s])/;
+const TRAILING_SEPARATORS = /[/\\]+$/;
 
 function isHeldOnWindows(error) {
   return process.platform === WINDOWS && HELD_DIRECTORY_CODES.has(error?.code);
@@ -308,6 +311,12 @@ export function namedAsParent(pid) {
 export const isRunWatchdog = (commandLine) =>
   commandLine.includes(basename(WATCHDOG));
 
+/** A path as Windows compares it, in any case and with either separator; elsewhere the path itself. */
+const comparable = (path) =>
+  process.platform === WINDOWS
+    ? path.toLowerCase().replaceAll("\\", "/")
+    : path;
+
 function runRootForms(runRoot) {
   const forms = [runRoot];
   try {
@@ -315,18 +324,26 @@ function runRootForms(runRoot) {
   } catch {
     // Only the recorded form is left to match once the directory is gone.
   }
-  const fold = process.platform === WINDOWS;
-  return forms.map((form) => (fold ? form.toLowerCase() : form));
+  return forms
+    .map((form) => comparable(form).replace(TRAILING_SEPARATORS, ""))
+    .filter((form) => form !== "");
+}
+
+/** Whether `text` names `root` or a path inside it, rather than a longer sibling such as `<root>-2`. */
+function namesPath(text, root) {
+  for (let at = text.indexOf(root); at >= 0; at = text.indexOf(root, at + 1)) {
+    if (PATH_END.test(text.slice(at + root.length))) return true;
+  }
+  return false;
 }
 
 /** Whether a process's command line, or on Linux its working directory, lies inside one of `roots`. */
 function liesInside(roots) {
   const forms = roots.flatMap(runRootForms);
-  const fold = process.platform === WINDOWS;
   return (record) =>
     [record.commandLine, record.workingDirectory ?? ""].some((identity) => {
-      const text = fold ? identity.toLowerCase() : identity;
-      return forms.some((form) => text.includes(form));
+      const text = comparable(identity);
+      return forms.some((form) => namesPath(text, form));
     });
 }
 

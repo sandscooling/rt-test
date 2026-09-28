@@ -11,6 +11,7 @@ import {
   baselineProblem,
   createVitestRunner,
   detectionProblem,
+  EXIT_RECORD_SUFFIX,
   vitestArgs,
   type AssertionResult,
   type RunResult,
@@ -252,9 +253,6 @@ const asDetection =
   (test: string): Judge =>
   (run, sandbox) =>
     detectionProblem(run, sandbox, fixtureDefect(test));
-
-/** The exit witness's record path the runner derives from the report path. */
-const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
 
 const bareRejection = 'Promise.reject(new Error("bare boom"));\n';
 

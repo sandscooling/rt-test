@@ -30,13 +30,12 @@ import {
   type RunRequest,
   type RunResult,
   type RunTests,
+  EXIT_RECORD_SUFFIX,
 } from "../../../scripts/lib/defects/vitest.mjs";
 import { namedAsParent } from "../run-cleanup.mjs";
 
 export type Tree = Readonly<Record<string, string>>;
 
-/** The exit witness's record beside a report is named for the report with this suffix. */
-const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
 // How Windows refuses to remove a folder that is still some process's working directory.
 const FOLDER_IN_USE = new Set(["EBUSY", "EPERM"]);
 const RUN_TREE_POLL_MS = 50;
