@@ -342,8 +342,8 @@ now catches and say it was refuted.
    both pairs.
 3. **The suite, last, once the tree is final**, by § Full-Suite Validation, scoped from the fix manifest and
    stating `<selected> of <total>`. Mandatory whenever a code fix landed.
-4. **Named defects**: `bun run test:defects` when a fix touched a named-defect test or a line a defect record
-   mutates.
+4. **Named defects**: a by-id proof (`_agent-docs/crew.md` § Gates) when a fix touched a named-defect test or a
+   line a defect record mutates.
 5. **Citations**: `node scripts/check-line-citations.mjs` whenever a fix inserted lines; re-point each hit by
    name.
 

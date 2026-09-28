@@ -128,10 +128,10 @@ Add a dependency only as P9 directs. After any `bun install` or `bun add`, run `
 
 A lane shares one checkout with its siblings, so a repo-wide gate reads every lane's code at once. The gates split by scope:
 
-| Gate                                                                                                                                                                                                                                                   | Owner            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
-| § Targeted Typecheck, § Targeted Test Validation, targeted lint and `bun x prettier --check` over the files you touched, `bun run test:defects` to prove your named defects, § Citation Shift Check                                                    | the member       |
-| `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file; a worktree lane's review runs `bun run check` in its own tree (`_agent-docs/crew.md` § Worktree lanes) | the orchestrator |
+| Gate                                                                                                                                                                                                                 | Owner            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| § Targeted Typecheck, § Targeted Test Validation, targeted lint and `bun x prettier --check` over the files you touched, a by-id proof of your named defects (`_agent-docs/crew.md` § Gates), § Citation Shift Check | the member       |
+| `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file, over the merged tree for a worktree lane                             | the orchestrator |
 
 `bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your lane's claims. Every heavy run goes through the run lease (`_agent-docs/crew.md` § Gates), so only one runs on the machine at a time.
 
@@ -285,7 +285,7 @@ If that finds the root cause, fix it and retry with the attempt count reset. Oth
 1. **Name the defect before writing** the test, in one sentence, and derive the expected values from the requirement. No nameable defect, no test.
 2. **Write it as a named-defect test**: titled `it("D<id>: <behavior>", ...)` (P22), hook-free (P23), with one assertion (P24), an id from your allocated range (P26), and inputs the defect sandbox copies (P27). `it.each` arms are invisible to the checker, so write one `it` per arm.
 3. **Record its mutation** in the `defects.json` beside the test: `id`, a `defect` sentence, the `file` it mutates, and the exact `old` and `new` text. The mutation is the named defect; do not improvise another. `old` must match exactly once in the file, and a stale anchor stops the run rather than being skipped.
-4. **Prove it with `bun run test:defects`** (P25). The checker requires a passing baseline, applies each mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored baseline. Read its exit code and the detected count; a setup or compile failure is not a detection.
+4. **Prove it** (P25): by id in an orchestrated lane (`_agent-docs/crew.md` § Gates), else with `bun run test:defects`. The checker requires a passing baseline, applies each mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored baseline. Read its exit code and the detected count; a setup or compile failure is not a detection.
 5. **Diagnose a survivor** before touching anything (C65): a vacuous test is rewritten; a mutation no test could observe is replaced by one that is observable.
 6. **A spec-derived test that fails against existing code is a bug finding.** Report it; never bend the test until it agrees.
 

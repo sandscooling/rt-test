@@ -106,9 +106,9 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 
 **Heavy runs take turns through the run lease, not through you**: `node scripts/run-lease.mjs status` shows who holds it, and every gate command below runs inside its wrapper.
 
-**Members run targeted gates**: the tests, lint, and typecheck for what they touched, and `bun run test:defects` for their named defects. **`bun run check` is yours**, because it reads every lane's code at once; a worktree lane is the exception (§ Worktree lanes).
+**Members run targeted gates**: the tests, lint, and typecheck for what they touched, and a by-id proof of their named defects (`_agent-docs/crew.md` § Gates). **`bun run check` is yours**, because it reads every lane's code at once, and it is the only run of the whole defect catalog.
 
-**Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run, because the review can still change the tree. Run early only when a member is blocked on a red it cannot place. A run you already made still counts if nothing it read has changed since its start.
+**Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run, because the review can still change the tree. Run early only when a member is blocked on a red it cannot place. A run you already made still counts if nothing it read has changed since its start. **A review's Step 9 debt commit rides with the next lane's gate and push**, since a debt round is proven by its own targeted gates; gate it alone only when it fixes false freshness or a setup failure counted as a detection.
 
 **Route each red to the lane holding its file.** `node scripts/file-claims.mjs list` names the holder; send the red to that lane's member alone. A red in an unclaimed file belongs to a sibling or predates the lanes: read it in the log, say so, and hold.
 
@@ -185,8 +185,7 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 - **Attach**: spawn the lane's first member with `worktree: { path, branch }`, and every later member with `worktree: { sameAs: <first member's threadId> }`.
 - **The cap counts lanes, not trees**, and the intersection still applies: two trees turn a shared file from a silent overwrite into a merge conflict, which is better but not free. Serialize overlapping lanes. Claims already span both trees (§ Claims and grants).
 - **Project-wide files in a worktree lane are written in that tree**, by you or under a grant, and land with the lane on `wt/<n>`. **Before writing one, bring the tree current**: when `wt/<n>` has no commits of its own, `git merge --ff-only main` in the tree; otherwise any doc line both trees edit conflicts at merge, so write the line in one tree only.
-- **The lane gates itself**: its review runs `bun run check` in its own tree and reports the exit code with its window.
-- **Land it**: in the worktree, stage with `stage-lane` and commit on `wt/<n>`. From the main checkout, commit any shared-checkout lane first (a merge refuses while the main tree holds uncommitted changes to a file it touches), then `git merge --no-ff wt/<n>`: a merge commit, never a rebase, so the sha the review gated stays stable. Gate the merged `main` once with `bun run check` through the run lease in the background, push `main` on `CHECK_EXIT:0`, then fast-forward `wt/<n>` to `main` so the next lane starts current. Never push `wt/<n>`.
+- **Land it**: in the worktree, stage with `stage-lane` and commit on `wt/<n>`. From the main checkout, commit any shared-checkout lane first (a merge refuses while the main tree holds uncommitted changes to a file it touches), then `git merge --no-ff wt/<n>`: a merge commit, never a rebase, so each lane's commits stay stable. Gate the merged `main` once, the lane's only full check, with `bun run check` through the run lease in the background, push `main` on `CHECK_EXIT:0`, then fast-forward `wt/<n>` to `main` so the next lane starts current. Never push `wt/<n>`.
 - **Sweep** the worktree's own `_agent-docs/.scratch/` as well as the main checkout's. When no lane needs the tree, `git worktree remove` it and `git branch -d wt/<n>`.
 
 ## Messages you send and relay

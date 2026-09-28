@@ -52,7 +52,7 @@ re-author the same function or signature. Say where the fix went.
 ## 4. Apply and validate
 
 Apply the fixes with the same loop and gates as Step 7, in the same order: size, lint, typecheck, the suite scoped
-from this round, `test:defects` when a fix touched a named-defect test or an anchored line, and the citation check
+from this round, a by-id defect proof when a fix touched a named-defect test or an anchored line, and the citation check
 when lines moved. Verify any third-party claim an item turns on against installed source, and say which you read.
 
 Then report the debt change to the orchestrator as its own path list, with the gates and their windows, and wait

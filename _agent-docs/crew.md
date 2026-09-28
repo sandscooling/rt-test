@@ -48,7 +48,7 @@ When you drive T3 Code's preview browser:
 
 ## Worktree lanes
 
-If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. Claim from that tree as usual. If you are the lane's review, run `bun run check` in your tree at the end and report its exit code, test counts, and window. Never commit, merge, or push; the orchestrator lands the branch.
+If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. Claim from that tree as usual. The orchestrator gates the merged tree with `bun run check`, so a worktree lane's review runs the same targeted gates as any review. Never commit, merge, or push; the orchestrator lands the branch.
 
 ## Gates
 
@@ -58,10 +58,10 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 - lint: `bun x oxlint <paths>`
 - format: `bun x prettier --check <paths>` over every file you changed other than through Edit or Write (a script, a generator, a shell command, a git operation), since the save hook formats only those two tools' saves and the gate's first step fails on any one
 - typecheck: `bun run --filter <workspace> typecheck`, or `bun x tsc --noEmit` for root tooling
-- named defects: `bun run test:defects`, which requires one record per `D###` test in the `defects.json` beside your tests
+- named defects: a by-id proof (below) of every record you added, moved or re-anchored, each `D###` test with its record in the `defects.json` beside it; the whole catalog (`bun run test:defects`) is the orchestrator's gate
 - a heavy run (`bun run check`, `test:run`, `test:defects`, `vitest related`, or an unscoped `vitest run`) goes through `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- <command>`, which waits its turn; a bare one is denied by the lease hook. A named test file needs no lease. `node scripts/run-lease.mjs status` names the holder and the queue.
 
-**A fix round re-proves the defects it can have moved before it reports.** Any round that edits code a defect record anchors in or mutates (a review's fixes, a debt round, a test repair) re-proves, by id through the lease, every record whose mutated file or test file the round edited, plus the records it added or re-anchored, and reports the result. Filter the verifier's own `loadCatalog`, `verifyInSandboxes` and `createVitestRunner` to those ids and baseline only their test files. Never repeat a broad `test:defects:changed` run to re-prove one fix: count its selection first, and send the orchestrator any count over a few hundred, since the orchestrator's full check runs the whole catalog before every push and catches a fix that hides another file's mutation.
+**Prove named defects by id.** A first proof, and every later round that edits code a defect record anchors in or mutates (a review's fixes, a debt round, a test repair), proves by id through the lease every record it added, moved or re-anchored, plus every record whose mutated file or test file it edited, and reports the result. Filter the verifier's own `loadCatalog`, `verifyInSandboxes` and `createVitestRunner` to those ids and baseline only their test files. Never run `test:defects`, or a broad `test:defects:changed`, to prove a lane's records: count a `--changed` selection first, and send the orchestrator any count over a few hundred, since the orchestrator's full check runs the whole catalog before every push and catches a change that hides another file's mutation.
 
 **Keep every log of a run until the orchestrator has closed it**, a failed one above all: the log is the only evidence of a failure that does not reproduce.
 

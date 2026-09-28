@@ -50,7 +50,7 @@ Run `session_list` at the start of a session and read your own row. If your `gro
 - Do not count compilation failures, setup failures, unrelated failures, or timeouts as a successful defect detection.
 - Invalidate defect evidence when its test, mutation, relevant inputs, or execution configuration changes.
 - Run targeted checks while iterating. Broaden to affected dependents when a change is ready; use a full run when impact is uncertain.
-- Run `bun run check` before handing off code changes while the starter suite remains small. Read actual process exit codes and test counts.
+- Outside an orchestrated lane, run `bun run check` before handing off code changes; in a lane the orchestrator runs it (`_agent-docs/crew.md`). Read actual process exit codes and test counts.
 - Preserve failures and fix their causes. Update expectations only when intended behavior changed.
 - Do not rerun an unchanged passing suite merely for reassurance. Investigate failures before repeating broad runs.
 - Keep performance targets labeled as targets until measured. Record hardware, runtime, project size, and warm/cold state with benchmarks.

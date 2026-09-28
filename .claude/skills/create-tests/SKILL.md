@@ -185,7 +185,7 @@ and the exact `old` and `new` text, where `old` matches once. The named defect i
 behavior with one minimal edit (invert a comparison, drop a guard, return a constant, skip a write). Write the
 file with the `Write` or `Edit` tool, since the anchors are source text.
 
-**Prove it**: `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- bun run test:defects > <log> 2>&1; echo "EXIT:$?"`. It needs a passing baseline, applies each
+**Prove it by id**, as `_agent-docs/crew.md` § Gates sets out: the records you added, moved or re-anchored, through the run lease, never the whole catalog, which the orchestrator's gate runs. It needs a passing baseline, applies each
 mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored
 baseline. It never touches the live tree, so never hand-edit a production file to watch a test fail (P25).
 Read its exit code and detected count. A setup, compile or timeout failure is not a detection.
@@ -215,7 +215,7 @@ Mark each file's task complete as it lands.
 - **The suite**, by § Targeted Test Validation over the files you touched. In ticket mode the suite already ran
   at Step 3: re-run only what changed since (a dev fix, shared test infrastructure you touched, and the suites
   importing it).
-- **Named defects**: `bun run test:defects` exits 0 over the final tree.
+- **Named defects**: the by-id proof of every record you added, moved or re-anchored detects each over the final tree; re-prove only the ids a later edit can move.
 - **Reconcile files touched against files run**: `<run> of <touched>`, accounting for every difference. A scoped
   run reports what it selected, never what it skipped.
 
