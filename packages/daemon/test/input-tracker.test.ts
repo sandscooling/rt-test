@@ -125,6 +125,8 @@ const FIRST_RECONCILIATION = "the first reconciliation has not ended";
 const PERIODIC_STARTED =
   "input reconciliation started: the periodic reconciliation";
 const RECONCILIATION_ENDED = "input reconciliation ended";
+const IGNORE_RULES_CHANGED_STARTED =
+  "input reconciliation started: the ignore rules in .gitignore changed";
 /** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
 const LOST_INPUT_SET_RETRY = 10_000;
 const LOST_INPUT_SET_RETRY_STARTED =
@@ -263,6 +265,35 @@ async function tracking<T>(
     });
   } finally {
     await tracker.stop();
+  }
+}
+
+/**
+ * `tracking` with HOME and XDG_CONFIG_HOME pointed at an empty directory beside `root`, so the tracker watches no git
+ * config file another process on the machine reads: on Windows, the first read of one idle for an hour raises a change
+ * event, which starts a reconciliation no edit under test caused.
+ */
+async function trackingOwnGitHome<T>(
+  root: string,
+  body: (tracked: Tracked) => Promise<T>,
+  options: TrackingOptions = {},
+): Promise<T> {
+  const home = `${root}-git-home`;
+  mkdirSync(home);
+  const saved = {
+    HOME: process.env["HOME"],
+    XDG_CONFIG_HOME: process.env["XDG_CONFIG_HOME"],
+  };
+  process.env["HOME"] = home;
+  process.env["XDG_CONFIG_HOME"] = home;
+  try {
+    return await tracking(root, body, options);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(home, { recursive: true, force: true });
   }
 }
 
@@ -1382,7 +1413,7 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       git("add", "-A");
       git("commit", "-q", "-m", "first");
       const root = join(dir, "sub");
-      return tracking(root, async ({ tracker }) => {
+      return trackingOwnGitHome(root, async ({ tracker }) => {
         const last = tracker.facts().lastReconciledAt;
         git("commit", "-q", "--allow-empty", "-m", "second");
         return eventually(
@@ -1399,7 +1430,7 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       const git = repository(dir, "", { "sub/a.ts": "" });
       git("add", "-A");
       git("commit", "-q", "-m", "first");
-      return tracking(join(dir, "sub"), async ({ tracker }) => {
+      return trackingOwnGitHome(join(dir, "sub"), async ({ tracker }) => {
         const last = tracker.facts().lastReconciledAt;
         appendFileSync(join(dir, ".git/info/exclude"), "*.tmp\n");
         return eventually(
@@ -1416,7 +1447,7 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       const git = repository(dir, "*.log\n", { "sub/a.ts": "" });
       git("add", "-A");
       git("commit", "-q", "-m", "first");
-      return tracking(join(dir, "sub"), async ({ tracker }) => {
+      return trackingOwnGitHome(join(dir, "sub"), async ({ tracker }) => {
         const last = tracker.facts().lastReconciledAt;
         appendFileSync(join(dir, ".gitignore"), "*.tmp\n");
         return eventually(
@@ -1436,7 +1467,7 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       // With the branch already packed, the only watched file the next pack rewrites is packed-refs.
       git("pack-refs", "--all");
       git("tag", "loose");
-      return tracking(join(dir, "sub"), async ({ tracker }) => {
+      return trackingOwnGitHome(join(dir, "sub"), async ({ tracker }) => {
         const last = tracker.facts().lastReconciledAt;
         git("pack-refs", "--all");
         return eventually(
@@ -1451,11 +1482,10 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
   it("D1906: an edit to a .gitignore under the root runs a reconciliation", async () => {
     const reconciled = await inTempDir((root) => {
       repository(root, "*.log\n", { "src/a.ts": "" });
-      return tracking(root, async ({ tracker }) => {
-        const last = tracker.facts().lastReconciledAt;
+      return trackingOwnGitHome(root, async ({ log }) => {
         appendFileSync(join(root, ".gitignore"), "*.tmp\n");
         return eventually(
-          () => tracker.facts().lastReconciledAt !== last,
+          () => log.entries.includes(IGNORE_RULES_CHANGED_STARTED),
           SETTLE_MS,
         );
       });
@@ -1939,7 +1969,7 @@ describe(
       const reconciled = await inTempDir(async (root) => {
         writeTree(root, { "src/a.ts": "" });
         repository(join(root, "nested"), "", { "b.ts": "" });
-        return tracking(root, async ({ tracker }) => {
+        return trackingOwnGitHome(root, async ({ tracker }) => {
           const last = tracker.facts().lastReconciledAt;
           appendFileSync(join(root, "nested/.git/info/exclude"), "*.tmp\n");
           return eventually(
@@ -1970,7 +2000,7 @@ describe(
         git("add", "-A");
         git("commit", "-q", "-m", "first");
         git("symbolic-ref", "HEAD", "refs/heads/feature/x");
-        return tracking(join(dir, "sub"), async ({ tracker }) => {
+        return trackingOwnGitHome(join(dir, "sub"), async ({ tracker }) => {
           const last = tracker.facts().lastReconciledAt;
           git("commit", "-q", "--allow-empty", "-m", "on feature/x");
           return eventually(
