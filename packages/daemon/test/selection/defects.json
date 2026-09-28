@@ -1394,10 +1394,10 @@
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 5, so a selection reports the version from before aliases were read under their project's Vite root and unanchored RegExp finds widened.",
+    "defect": "The selection policy version stays at 6, so a selection reports the version from before each alias rewrote the imports the source scan reads.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 6;",
-    "new": "export const SELECTION_POLICY_VERSION = 5;"
+    "old": "export const SELECTION_POLICY_VERSION = 7;",
+    "new": "export const SELECTION_POLICY_VERSION = 6;"
   },
   {
     "id": "D2045",
@@ -1888,5 +1888,194 @@
     "file": "packages/daemon/src/selection/tsconfig-edges.ts",
     "old": "    ? { ok: true, value: read.value, file: located }",
     "new": "    ? { ok: true, value: read.value, file: key }"
+  },
+  {
+    "id": "D2382",
+    "defect": "The source scan never applies an alias to the imports it reads, so a change to the file an aliased import climbs to with .. selects nothing.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "    addAliasedSpecifierEdges(scan, aliases, { base, label }, specifier);",
+    "new": ""
+  },
+  {
+    "id": "D2383",
+    "defect": "An edge an aliased import gives through a path is recorded as a relative import rather than as an alias.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  path: EDGE_PRODUCER.alias,",
+    "new": "  path: EDGE_PRODUCER.relativeImport,"
+  },
+  {
+    "id": "D2384",
+    "defect": "An alias rewrites only the imports of files inside its own Vitest workspace, so an aliased import in a plain package workspace's file gives no edge.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  for (const scanAlias of aliases) {",
+    "new": "  for (const scanAlias of aliases.filter((each) => importer.label.startsWith(each.dependent))) {"
+  },
+  {
+    "id": "D2385",
+    "defect": "A string find matches any import that begins with its text, so find @ rewrites the package import @x/b.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "text === find || text.startsWith(`${find}${POSIX_SEPARATOR}`);",
+    "new": "text.startsWith(find);"
+  },
+  {
+    "id": "D2386",
+    "defect": "A RegExp alias's replacement is inserted literally, so a $1 in it names a directory called $1 rather than the capture.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  return text.replace(find, alias.replacement);",
+    "new": "  return text.replace(find, () => alias.replacement);"
+  },
+  {
+    "id": "D2387",
+    "defect": "A y-flag RegExp find is tested from where the last import's match ended, so the import after a matched one is not rewritten.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  find.lastIndex = 0;\n  if (!find.test(text)) return undefined;",
+    "new": "  if (!find.test(text)) return undefined;"
+  },
+  {
+    "id": "D2388",
+    "defect": "A y-flag RegExp find replaces from where its own test ended, so a matched import is left unrewritten.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  if (!find.test(text)) return undefined;\n  find.lastIndex = 0;",
+    "new": "  if (!find.test(text)) return undefined;"
+  },
+  {
+    "id": "D2389",
+    "defect": "A rewrite beginning with / is read only as a file-system path, never under the alias's Vite root.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    addSpecifierEdges(scan, fromRoot, underRoot, ALIAS_PRODUCERS);\n",
+    "new": ""
+  },
+  {
+    "id": "D2390",
+    "defect": "A rewrite beginning with / is read only under the alias's Vite root, never as a file-system path.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    addSpecifierEdges(scan, fromRoot, underRoot, ALIAS_PRODUCERS);\n    addSpecifierEdges(scan, reference, rewritten, ALIAS_PRODUCERS);",
+    "new": "    addSpecifierEdges(scan, fromRoot, underRoot, ALIAS_PRODUCERS);"
+  },
+  {
+    "id": "D2391",
+    "defect": "A rewrite beginning with /@fs/ is resolved with its /@fs/ prefix kept, so it reaches no workspace.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  const path = { text: viteFsPath(rest), form };",
+    "new": "  const path = { text, form };"
+  },
+  {
+    "id": "D2392",
+    "defect": "A relative rewrite resolves from the alias's Vite root rather than from the importing file's directory.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "      base: importer.base,",
+    "new": "      base: scanAlias.alias.viteRoot,"
+  },
+  {
+    "id": "D2393",
+    "defect": "An edge a bare rewrite gives is recorded as a bare import rather than as an alias.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  bare: EDGE_PRODUCER.alias,",
+    "new": "  bare: EDGE_PRODUCER.bareImport,"
+  },
+  {
+    "id": "D2394",
+    "defect": "A rewritten glob loses its glob form and is resolved as one path, so it reaches only the workspace holding the literal pattern.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "      { text: hostSeparated(rewritten, found.form), form: found.form },",
+    "new": "      { text: hostSeparated(rewritten, found.form), form: \"module\" as const },"
+  },
+  {
+    "id": "D2395",
+    "defect": "A rewrite beginning with // is read as a root-relative path rather than widening.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  } else if (text.startsWith(SCHEME_RELATIVE_PREFIX)) {",
+    "new": "  } else if (text.startsWith(SCHEME_RELATIVE_PREFIX + SCHEME_RELATIVE_PREFIX)) {"
+  },
+  {
+    "id": "D2396",
+    "defect": "A rewrite beginning with /@ other than /@fs/ is read as a root-relative path rather than widening.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  } else if (text.startsWith(VITE_SPECIAL_PREFIX)) {",
+    "new": "  } else if (text.startsWith(VITE_SPECIAL_PREFIX + VITE_SPECIAL_PREFIX)) {"
+  },
+  {
+    "id": "D2397",
+    "defect": "A rewrite of /@fs/ followed by only a drive is resolved as a path rather than widening.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  if (rest === \"\" || PARTIAL_VOLUME.test(rest)) {",
+    "new": "  if (rest === \"\") {"
+  },
+  {
+    "id": "D2398",
+    "defect": "A rewrite of /@fs/ with nothing after it is resolved as the file-system root rather than widening.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  if (rest === \"\" || PARTIAL_VOLUME.test(rest)) {",
+    "new": "  if (PARTIAL_VOLUME.test(rest)) {"
+  },
+  {
+    "id": "D2399",
+    "defect": "The widening for a RegExp find that does not compile omits the compile error.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "does not compile, so the imports it rewrites are not known: ${compiled.reason}`,",
+    "new": "does not compile, so the imports it rewrites are not known`,"
+  },
+  {
+    "id": "D2400",
+    "defect": "Only the first alias whose find matches an import rewrites it, so a later matching alias's workspace gets no edge.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    if (rewritten === undefined) continue;",
+    "new": "    if (rewritten === undefined || scanAlias !== aliases.find((each) => rewrite(each, found.text) !== undefined)) continue;"
+  },
+  {
+    "id": "D2401",
+    "defect": "An alias with a customResolver still rewrites imports as if its replacement named the module.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    if (alias.hasCustomResolver) continue;",
+    "new": ""
+  },
+  {
+    "id": "D2404",
+    "defect": "A root-relative rewrite is joined to the Vite root's path, so a ( in the root's name ends the glob's literal directory early and the glob widens to every workspace under the root's parent.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    const underRoot = { text: `${CURRENT_DIRECTORY}${text}`, form };",
+    "new": "    const underRoot = { text: `${viteRoot}${text}`, form };"
+  },
+  {
+    "id": "D2405",
+    "defect": "On Windows an aliased glob's rewrite keeps its \\, so a /-rooted glob holding ( after a \\, which the plain glob reading leaves alone, widens to the wrong directory.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    ? text.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR)",
+    "new": "    ? text"
+  },
+  {
+    "id": "D2406",
+    "defect": "The scan keeps one edge per dependency pair whatever its producer, so an aliased import of a file a plain import already reached loses its alias edge.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const key = [reference.dependent, dependency, producer].join(KEY_SEPARATOR);",
+    "new": "  const key = [reference.dependent, dependency].join(KEY_SEPARATOR);"
+  },
+  {
+    "id": "D2417",
+    "defect": "A plain glob's \\ is read as a separator, so on Windows import.meta.glob(\"../../libs\\\\(w)/*.ts\") cuts at libs/ and misses the workspace libs(w).",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const beforeWildcard = hostSeparated(pattern).slice(0, wildcard);",
+    "new": "  const beforeWildcard = pattern.slice(0, wildcard).split(\"\\\\\").join(\"/\");"
+  },
+  {
+    "id": "D2418",
+    "defect": "An aliased glob's \\ is turned into / on every platform, so off Windows a replacement whose name holds \\ is cut inside that name.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  return form === SPECIFIER_FORM.glob && process.platform === WINDOWS_PLATFORM",
+    "new": "  return form === SPECIFIER_FORM.glob"
+  },
+  {
+    "id": "D2419",
+    "defect": "Without the once guard, a file importing one widened specifier twice records two identical widenings.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "  if (!once(scan, key)) return;",
+    "new": ""
+  },
+  {
+    "id": "D2422",
+    "defect": "On Windows a plain glob beginning with none of /, ./ and ../ keeps its \\ as a name character, so its literal directory falls back to the importing file's directory.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    ? pattern.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR)",
+    "new": "    ? pattern"
   }
 ]

@@ -2,6 +2,7 @@ import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join, posix, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { DependencyInformation } from "../../src/selection/selection-types.js";
+import { errorText } from "../../src/vitest/error-text.js";
 import { POSIX_SEPARATOR } from "../../src/vitest/find-workspaces.js";
 import {
   REGEXP_FIND,
@@ -983,6 +984,408 @@ describe("a RegExp alias is analyzed by its replacement only when every match be
       edges: [],
       widenings: [ALIAS_WIDENING, ALIAS_WIDENING],
     });
+  });
+});
+
+/** Quoted by every edge and widening a rewritten import gives, and by none the replacement alone gives. */
+const REWRITES = " rewrites to ";
+const CLIMB_TO_B = 'import { x } from "@/../../b/src/x";\n';
+
+/** An alias `@` to the app's own `src`, which the replacement alone gives no edge, since the app holds it. */
+function intoAppSource(
+  fields: Partial<TreeAlias> = {},
+): (root: string) => readonly TreeAlias[] {
+  return (root) => [
+    {
+      ...STRING_ALIAS,
+      find: "@",
+      replacement: join(root, APP, "src"),
+      ...fields,
+    },
+  ];
+}
+
+/** A RegExp alias `~` whose replacement is the rest of the import, so the import spells the rewrite. */
+const PASS_THROUGH: (root: string) => readonly ReportedAlias[] = () => [
+  {
+    ...STRING_ALIAS,
+    find: "^~(.*)$",
+    findKind: REGEXP_FIND,
+    replacement: "$1",
+  },
+];
+
+/** A RegExp alias `~/<name>` to `packages/<name>/src`, carrying `flags`. */
+function namedPackage(flags = ""): (root: string) => readonly ReportedAlias[] {
+  return (root) => [
+    {
+      ...STRING_ALIAS,
+      find: "^~\\/(.*)$",
+      findKind: REGEXP_FIND,
+      flags,
+      replacement: `${join(root, "packages")}/$1/src`,
+    },
+  ];
+}
+
+/** The app's edges and widenings that a rewritten import gave, apart from what the alias's replacement alone gives. */
+function rewrites(information: Settled<DependencyInformation>) {
+  return "edges" in information
+    ? {
+        edges: information.edges
+          .filter(
+            ({ dependent, detail }) =>
+              dependent === APP && detail.includes(REWRITES),
+          )
+          .map(({ producer, dependency }) => `${producer} ${dependency}`)
+          .sort(),
+        widenings: information.uncertainties
+          .filter(
+            ({ dependent, cause }) =>
+              dependent === APP && cause.includes(REWRITES),
+          )
+          .map(({ kind, cause }) => ({ kind, cause })),
+      }
+    : information;
+}
+
+/** What rewriting `source`, the app's source file, under `aliasList` gives the app. */
+function rewritesOf(
+  aliasList: (root: string) => readonly TreeAlias[],
+  source: string,
+  files: Readonly<Record<string, string>> = {},
+) {
+  return graphInTree(
+    appTree({
+      vitest: { aliases: aliasList },
+      files: { [APP_SOURCE]: source, ...files },
+      change: "",
+    }),
+  ).then(rewrites);
+}
+
+/** The one widening the pass-through alias gives for `specifier`, quoting the file, the import, the alias and the rewrite. */
+function passThroughWidening(specifier: string) {
+  return {
+    edges: [],
+    widenings: [
+      {
+        kind: ALIAS_WIDENING,
+        cause: expect.stringContaining(
+          `${APP_SOURCE} imports ${JSON.stringify(specifier)}, which config alias /^~(.*)$/ to "$1" rewrites to ${JSON.stringify(specifier.slice(1))}`,
+        ),
+      },
+    ],
+  };
+}
+
+/** What the engine says when `find` does not compile, as an error is quoted. */
+function compileError(find: string): string {
+  try {
+    return `${String(new RegExp(find))} compiled`;
+  } catch (error) {
+    return errorText(error);
+  }
+}
+
+const LIBS_W = "packages/libs (w)";
+const GLOB_UNDER_ALIAS = 'export const all = import.meta.glob("@/*.ts");\n';
+
+describe("an alias rewrites each import the source scan reads", () => {
+  it("D2382: a change to a file an aliased import climbs to with .. selects the importing Vitest workspace", async () => {
+    expect(
+      await selectedFor({
+        vitest: { aliases: intoAppSource() },
+        files: { [APP_SOURCE]: CLIMB_TO_B },
+        change: "packages/b/src/x.ts",
+      }),
+    ).toEqual([APP]);
+  });
+
+  it("D2383: the edge an aliased import gives is produced by alias", async () => {
+    expect(
+      await aliasScan(intoAppSource(), { [APP_SOURCE]: CLIMB_TO_B }),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2384: an aliased import in a plain package workspace's file gives the alias's Vitest workspace the edge", async () => {
+    expect(
+      await aliasScan(intoAppSource(), {
+        "packages/c/src/index.ts": CLIMB_TO_B,
+      }),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2385: a string find does not match an import that only begins with its text", async () => {
+    expect(
+      await rewritesOf(
+        (root) => [
+          { ...STRING_ALIAS, find: "@", replacement: join(root, "packages/c") },
+        ],
+        'import { b } from "@x/b";\n',
+      ),
+    ).toEqual({ edges: [], widenings: [] });
+  });
+
+  it("D2386: a $1 in a RegExp alias's replacement inserts the capture", async () => {
+    expect(
+      await rewritesOf(namedPackage(), 'import { b } from "~/b";\n'),
+    ).toEqual({ edges: ["alias packages/b"], widenings: [] });
+  });
+
+  it("D2387: a y-flag RegExp find matches each import from its start, whatever the last import's match left", async () => {
+    expect(
+      await rewritesOf(
+        namedPackage("y"),
+        'import { b } from "~/b";\nimport { c } from "~/c";\n',
+      ),
+    ).toEqual({
+      edges: ["alias packages/b", "alias packages/c"],
+      widenings: [],
+    });
+  });
+
+  it("D2388: a y-flag RegExp find replaces from the import's start after testing it", async () => {
+    expect(
+      await rewritesOf(namedPackage("y"), 'import { b } from "~/b";\n'),
+    ).toEqual({ edges: ["alias packages/b"], widenings: [] });
+  });
+
+  it("D2389: a rewrite beginning with / reaches the workspace it names under the alias's Vite root", async () => {
+    expect(
+      await aliasScan(intoAppSource({ replacement: "/src" }), {
+        [APP_SOURCE]: CLIMB_TO_B,
+      }),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2390: a rewrite beginning with / also reaches the workspace it names as a file-system path", async () => {
+    expect(
+      await aliasScan(
+        (root) =>
+          intoAppSource({ replacement: driveless(join(root, APP, "src")) })(
+            root,
+          ),
+        { [APP_SOURCE]: CLIMB_TO_B },
+      ),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2391: a rewrite beginning with /@fs/ reaches the workspace holding the path that follows", async () => {
+    expect(
+      await aliasScan(
+        (root) =>
+          intoAppSource({
+            replacement: posix.join("/@fs/", slashed(join(root, APP, "src"))),
+          })(root),
+        { [APP_SOURCE]: CLIMB_TO_B },
+      ),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2392: a relative rewrite resolves from the importing file's directory", async () => {
+    expect(
+      await rewritesOf(
+        intoAppSource({ replacement: "../.." }),
+        'import { x } from "@/b/src/x";\n',
+      ),
+    ).toEqual({ edges: ["alias packages/b"], widenings: [] });
+  });
+
+  it("D2393: a bare rewrite reaches the workspace its package name names, produced by alias", async () => {
+    expect(
+      await rewritesOf(
+        () => [{ ...STRING_ALIAS, find: "~", replacement: "@x/b" }],
+        'import { b } from "~";\n',
+      ),
+    ).toEqual({ edges: ["alias packages/b"], widenings: [] });
+  });
+
+  it("D2394: an aliased glob reaches every workspace under the directory before its first wildcard", async () => {
+    expect(
+      await rewritesOf(
+        intoAppSource(),
+        'export const all = import.meta.glob("@/../../*/src/*.ts");\n',
+      ),
+    ).toEqual({
+      edges: ["alias .", "alias packages/b", "alias packages/c"],
+      widenings: [],
+    });
+  });
+
+  it("D2395: a rewrite beginning with // widens, quoting the file, the import, the alias and the rewrite", async () => {
+    expect(
+      await rewritesOf(PASS_THROUGH, 'import "~//cdn.example/lib";\n'),
+    ).toEqual(passThroughWidening("~//cdn.example/lib"));
+  });
+
+  it("D2396: a rewrite beginning with /@ other than /@fs/ widens, quoting the file, the import, the alias and the rewrite", async () => {
+    expect(await rewritesOf(PASS_THROUGH, 'import "~/@id/lib";\n')).toEqual(
+      passThroughWidening("~/@id/lib"),
+    );
+  });
+
+  it("D2397: a rewrite of /@fs/ followed by only a drive widens", async () => {
+    expect(await rewritesOf(PASS_THROUGH, 'import "~/@fs/C:";\n')).toEqual(
+      passThroughWidening("~/@fs/C:"),
+    );
+  });
+
+  it("D2398: a rewrite of /@fs/ with nothing after it widens", async () => {
+    expect(await rewritesOf(PASS_THROUGH, 'import "~/@fs/";\n')).toEqual(
+      passThroughWidening("~/@fs/"),
+    );
+  });
+
+  it("D2399: a RegExp find that does not compile widens its Vitest workspace, naming the compile error", async () => {
+    expect(
+      await graphInTree(
+        appTree({
+          vitest: {
+            aliases: intoAppSource({ find: "^(", findKind: REGEXP_FIND }),
+          },
+          change: "",
+        }),
+      ).then(appWidenings),
+    ).toContainEqual({
+      kind: ALIAS_WIDENING,
+      cause: expect.stringContaining(compileError("^(")),
+    });
+  });
+
+  it("D2400: every alias that matches an import rewrites it, not only the first", async () => {
+    expect(
+      await rewritesOf(
+        (root) => [
+          ...intoAppSource()(root),
+          {
+            ...STRING_ALIAS,
+            find: "@",
+            replacement: join(root, "packages/c/src/x"),
+          },
+        ],
+        'import "@/../../b";\n',
+      ),
+    ).toEqual({
+      edges: ["alias packages/b", "alias packages/c"],
+      widenings: [],
+    });
+  });
+
+  it("D2401: an alias with a customResolver rewrites no import", async () => {
+    expect(
+      await rewritesOf(intoAppSource({ hasCustomResolver: true }), CLIMB_TO_B),
+    ).toEqual({ edges: [], widenings: [] });
+  });
+
+  it("D2404: an aliased glob under a Vite root whose name holds ( reaches the directory the rewrite names under it", async () => {
+    expect(
+      await rewritesOf(
+        (root) =>
+          intoAppSource({
+            replacement: "/src",
+            viteRoot: slashed(join(root, LIBS_W)),
+          })(root),
+        GLOB_UNDER_ALIAS,
+        { [`${LIBS_W}/package.json`]: pkg("@x/libs-w") },
+      ),
+    ).toEqual({ edges: [`alias ${LIBS_W}`], widenings: [] });
+  });
+
+  it("D2405: on Windows an aliased glob whose /-rooted replacement holds ( after a \\ widens to the directory before that \\", async () => {
+    const information = await onPlatform("win32", () =>
+      graphInTree(
+        appTree({
+          root: { workspaces: ["packages/*", "tools/*"] },
+          vitest: {
+            aliases: (root) =>
+              intoAppSource({
+                replacement: `${driveless(join(root, "packages"))}\\libs (w)/src`,
+              })(root),
+          },
+          files: {
+            [APP_SOURCE]: GLOB_UNDER_ALIAS,
+            [`${LIBS_W}/package.json`]: pkg("@x/libs-w"),
+            "tools/t/package.json": pkg("@x/t"),
+          },
+          change: "",
+        }),
+      ),
+    );
+    expect(rewrites(information)).toEqual({
+      edges: [
+        "alias .",
+        "alias packages/b",
+        "alias packages/c",
+        `alias ${LIBS_W}`,
+      ],
+      widenings: [],
+    });
+  });
+
+  it("D2406: a plain import and an aliased import of the same file each keep their own edge", async () => {
+    expect(
+      await aliasScan(intoAppSource(), {
+        [APP_SOURCE]: `import { y } from "../../b/src/x";\n${CLIMB_TO_B}`,
+      }),
+    ).toEqual({
+      edges: ["alias packages/b", "relative-import packages/b"],
+      widenings: [],
+    });
+  });
+
+  it("D2417: on Windows a plain glob's \\ escapes the character after it, so the glob still reaches the workspace whose name holds that character", async () => {
+    const information = await onPlatform("win32", () =>
+      scanApp({
+        [APP_SOURCE]: `${String.raw`export const all = import.meta.glob("../../libs\\(w)/*.ts");`}\n`,
+        "packages/libs(w)/package.json": pkg("@x/libs-paren"),
+      }),
+    );
+    expect(appEdges(information)).toEqual([
+      "relative-import .",
+      "relative-import packages/b",
+      "relative-import packages/c",
+      "relative-import packages/libs(w)",
+    ]);
+  });
+
+  it("D2422: on Windows a plain glob beginning with none of /, ./ and ../ reads its \\ as a separator, so it reaches the workspace before the name holding (", async () => {
+    const information = await onPlatform("win32", () =>
+      scanApp({
+        [APP_SOURCE]: `${String.raw`export const all = import.meta.glob("..\\..\\b\\(x)\\*.ts");`}\n`,
+      }),
+    );
+    expect(appEdges(information)).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D2418: off Windows an aliased glob's \\ stays a character of a name, so the glob widens to the directory before that name", async () => {
+    const information = await onPlatform("linux", () =>
+      graphInTree(
+        appTree({
+          vitest: {
+            aliases: (root) =>
+              intoAppSource({
+                replacement: `${slashed(join(root, "packages"))}/q\\z (w)/src`,
+              })(root),
+          },
+          files: { [APP_SOURCE]: GLOB_UNDER_ALIAS },
+          change: "",
+        }),
+      ),
+    );
+    expect(rewrites(information)).toEqual({
+      edges: ["alias .", "alias packages/b", "alias packages/c"],
+      widenings: [],
+    });
+  });
+
+  it("D2419: a file importing one widened specifier twice widens its Vitest workspace once", async () => {
+    expect(
+      await rewritesOf(
+        PASS_THROUGH,
+        'import "~//cdn.example/lib";\nexport const lazy = () => import("~//cdn.example/lib");\n',
+      ),
+    ).toEqual(passThroughWidening("~//cdn.example/lib"));
   });
 });
 

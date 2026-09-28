@@ -28,22 +28,22 @@ import {
   type SelectableWorkspace,
   type SelectionAlias,
 } from "./selection-types.js";
+import { WINDOWS_PLATFORM } from "./specifier-edges.js";
 
 const REPLACEMENT_REFERENCE = /\$(?:\d|&|<|`|'|\$)/;
 /** A trailing separator ends a directory name, so the prefix must not also begin a longer sibling name. */
 const ENDS_IN_SEPARATOR = /[/\\]$/;
-const WINDOWS_PLATFORM = "win32";
 const ROOT_FIND = "/";
 /** A consumer's own empty find, or what Vite makes of a `/` find whose replacement ends in `/`. */
 const EMPTY_FIND = "";
 /** Vite reads the rest of an import beginning with it as a file-system path, as its own client aliases use. */
-const VITE_FS_PREFIX = "/@fs/";
+export const VITE_FS_PREFIX = "/@fs/";
 const VOLUME_PATH = /^[A-Z]:/i;
 /** A drive letter, or a drive with no path yet, which a replacement reference can complete to any path on it. */
-const PARTIAL_VOLUME = /^[A-Z]:?$/i;
+export const PARTIAL_VOLUME = /^[A-Z]:?$/i;
 /** Begins every other id Vite serves specially, such as `/@id/`. */
-const VITE_SPECIAL_PREFIX = "/@";
-const SCHEME_RELATIVE_PREFIX = "//";
+export const VITE_SPECIAL_PREFIX = "/@";
+export const SCHEME_RELATIVE_PREFIX = "//";
 const START_ANCHOR = "^";
 /** `m` lets `^` match after a line break, and `y` starts a match where the last one ended. */
 const MOVED_START_FLAGS = /[my]/;
@@ -132,7 +132,7 @@ function addAliasEdges(
   dependent: string,
   alias: SelectionAlias,
 ): void {
-  const detail = `config alias ${quotedFind(alias)} to ${JSON.stringify(alias.replacement)}`;
+  const detail = aliasDetail(alias);
   const unbounded = unboundedAliasCause(alias);
   if (unbounded !== undefined) {
     uncertain(
@@ -161,6 +161,10 @@ function addAliasEdges(
   for (const dependency of resolution.paths) {
     edge(graph, dependent, dependency, EDGE_PRODUCER.alias, detail);
   }
+}
+
+export function aliasDetail(alias: ReportedAlias): string {
+  return `config alias ${quotedFind(alias)} to ${JSON.stringify(alias.replacement)}`;
 }
 
 /** A RegExp find as a regular expression literal, so it never reads like a string find of the same text. */
@@ -304,7 +308,7 @@ function unboundedPath(prefix: string): Unresolved {
 }
 
 /** What follows `/@fs/` is absolute already when it names a volume, and otherwise lost its leading `/`. */
-function viteFsPath(rest: string): string {
+export function viteFsPath(rest: string): string {
   return rest.startsWith(POSIX_SEPARATOR) || VOLUME_PATH.test(rest)
     ? rest
     : `${POSIX_SEPARATOR}${rest}`;

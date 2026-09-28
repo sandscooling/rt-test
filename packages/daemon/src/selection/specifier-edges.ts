@@ -28,8 +28,13 @@ const SCOPED_NAME_SEGMENTS = 2;
 const RELATIVE_PREFIXES = ["./", "../", ".\\", "..\\"];
 const RELATIVE_NAMES = [".", ".."];
 const GLOB_SYNTAX = /[*?[\]{}()]/;
-const CURRENT_DIRECTORY = ".";
-const KEY_SEPARATOR = "\0";
+/** Vite globs a pattern beginning with one of these as written, and resolves any other as an id. */
+const GLOB_PATH_PREFIXES = ["/", "./", "../"];
+const WINDOWS_SEPARATOR = "\\";
+export const WINDOWS_PLATFORM = "win32";
+export const CURRENT_DIRECTORY = ".";
+/** Joins the parts of a key `once` is given. */
+export const KEY_SEPARATOR = "\0";
 
 /** Told which file the parser is reading, so a process the parser ends can still name it. */
 export interface ParseObserver {
@@ -100,6 +105,17 @@ export function rootLabel(scan: Scan, path: string): string {
   return label === "" ? ROOT_PATH : label;
 }
 
+/** The producer recorded for an edge a path gives and for one a package name gives. */
+export interface SpecifierProducers {
+  readonly path: EdgeProducerKind;
+  readonly bare: EdgeProducerKind;
+}
+
+const IMPORT_PRODUCERS: SpecifierProducers = {
+  path: EDGE_PRODUCER.relativeImport,
+  bare: EDGE_PRODUCER.bareImport,
+};
+
 /**
  * A relative or absolute specifier depends on the workspace it resolves into, a bare one on the workspace its
  * package name names; a URL scheme or a subpath import names no workspace.
@@ -108,14 +124,15 @@ export function addSpecifierEdges(
   scan: Scan,
   reference: Reference,
   { text, form }: FoundSpecifier,
+  producers: SpecifierProducers = IMPORT_PRODUCERS,
 ): void {
   if (text === "" || URL_SCHEME.test(text)) return;
-  const producer = EDGE_PRODUCER.relativeImport;
+  const producer = producers.path;
   if (form === SPECIFIER_FORM.fileRelative) {
     addPathEdges(scan, reference, withoutSuffix(text), producer);
   } else if (isBare(text)) {
     const specifier = form === SPECIFIER_FORM.glob ? text : withoutSuffix(text);
-    addPackageEdges(scan, reference, specifier, EDGE_PRODUCER.bareImport);
+    addPackageEdges(scan, reference, specifier, producers.bare);
   } else if (text.startsWith(SUBPATH_IMPORT_PREFIX)) {
     return;
   } else if (form === SPECIFIER_FORM.glob) {
@@ -186,7 +203,7 @@ export function addPatternEdges(
     addPathEdges(scan, reference, pattern, producer);
     return;
   }
-  const beforeWildcard = pattern.slice(0, wildcard);
+  const beforeWildcard = hostSeparated(pattern).slice(0, wildcard);
   const separator = beforeWildcard.lastIndexOf(POSIX_SEPARATOR);
   const directory = resolve(
     reference.base,
@@ -201,6 +218,19 @@ export function addPatternEdges(
   for (const dependency of reached) {
     addEdge(scan, reference, dependency, producer);
   }
+}
+
+/**
+ * On Windows Vite normalizes a pattern it resolves as an id, so its `\` separates. In a pattern it globs as
+ * written, the globber reads `\` as an escape on every platform.
+ */
+function hostSeparated(pattern: string): string {
+  const resolvedAsId = !GLOB_PATH_PREFIXES.some((prefix) =>
+    pattern.startsWith(prefix),
+  );
+  return resolvedAsId && process.platform === WINDOWS_PLATFORM
+    ? pattern.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR)
+    : pattern;
 }
 
 function workspacesUnder(graph: Graph, directory: string): string[] {
@@ -259,7 +289,8 @@ function addEdge(
   edge(scan.graph, reference.dependent, dependency, producer, reference.detail);
 }
 
-function once(scan: Scan, key: string): boolean {
+/** True the first time the scan meets `key`. */
+export function once(scan: Scan, key: string): boolean {
   if (scan.added.has(key)) return false;
   scan.added.add(key);
   return true;

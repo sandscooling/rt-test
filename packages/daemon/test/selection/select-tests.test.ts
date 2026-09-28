@@ -776,12 +776,12 @@ describe("declared non-inputs", () => {
     ).toEqual(DECLARATION_FALLBACK);
   });
 
-  it("D2014: a selection carries policy version 6", async () => {
+  it("D2014: a selection carries policy version 7", async () => {
     const outcome = await select({ vitest: { app: {} } }, [
       "packages/app/src/x.ts",
     ]);
     expect("policyVersion" in outcome ? outcome.policyVersion : outcome).toBe(
-      6,
+      7,
     );
   });
 

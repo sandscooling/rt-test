@@ -35,6 +35,11 @@ import {
   type SelectableWorkspace,
   type UncertaintyKind,
 } from "./selection-types.js";
+import {
+  addAliasedSpecifierEdges,
+  scanAliases,
+  type ScanAlias,
+} from "./alias-specifiers.js";
 import { ignoredPathsReader, type IgnoredPaths } from "./git-ignored.js";
 import { readSourceImports } from "./source-imports.js";
 import { walkWorkspace } from "./source-walk.js";
@@ -106,7 +111,8 @@ export function buildDependencyInformation(
   if (root?.read.ok === true) {
     addOverrideEdges(graph, root.workspace, root.read.manifest);
   }
-  addUndeclaredEdges(graph, manifests, observer);
+  const aliases = scanAliases(graph, vitestWorkspaces);
+  addUndeclaredEdges(graph, manifests, aliases, observer);
   for (const workspace of vitestWorkspaces) addVitestEdges(graph, workspace);
   return {
     packageWorkspaces: listing.workspaces,
@@ -370,10 +376,14 @@ function rootDependencySpecs(
   ).filter((spec): spec is string => typeof spec === "string");
 }
 
-/** The dependencies no `package.json` dependency field declares: imports, tsconfig fields, `imports` targets and links. */
+/**
+ * The dependencies no `package.json` dependency field declares: imports, tsconfig fields, `imports` targets
+ * and links, and the imports each Vitest workspace's aliases rewrite.
+ */
 function addUndeclaredEdges(
   graph: Graph,
   manifests: readonly ReadManifest[],
+  aliases: readonly ScanAlias[],
   observer: ParseObserver | undefined,
 ): void {
   const [root] = graph.workspaces;
@@ -381,7 +391,7 @@ function addUndeclaredEdges(
   const scan = newScan(graph, root.directory, observer);
   const ignored = ignoredPathsReader(root.directory);
   for (const { workspace, read } of manifests) {
-    addWorkspaceSourceEdges(scan, workspace, ignored);
+    addWorkspaceSourceEdges(scan, workspace, ignored, aliases);
     if (read.ok) addManifestImportsEdges(scan, workspace, read.manifest);
   }
 }
@@ -390,6 +400,7 @@ function addWorkspaceSourceEdges(
   scan: Scan,
   workspace: PackageWorkspace,
   ignored: IgnoredPaths,
+  aliases: readonly ScanAlias[],
 ): void {
   const { graph } = scan;
   const directory = resolve(workspace.directory);
@@ -408,7 +419,7 @@ function addWorkspaceSourceEdges(
   }
   for (const link of walked.links) addLinkEdges(scan, workspace.path, link);
   for (const file of walked.sources) {
-    addSourceFileEdges(scan, workspace.path, file);
+    addSourceFileEdges(scan, workspace.path, file, aliases);
   }
   for (const file of walked.configs) {
     addTsconfigEdges(scan, workspace.path, file);
@@ -449,7 +460,12 @@ function linkTarget(
 }
 
 /** Relative specifiers resolve against the file's real directory, as Node and Vite resolve a linked file's imports. */
-function addSourceFileEdges(scan: Scan, dependent: string, file: string): void {
+function addSourceFileEdges(
+  scan: Scan,
+  dependent: string,
+  file: string,
+  aliases: readonly ScanAlias[],
+): void {
   const label = rootLabel(scan, file);
   const found = observedParse(scan, label, () => readSourceImports(file));
   if (!found.ok) {
@@ -466,5 +482,6 @@ function addSourceFileEdges(scan: Scan, dependent: string, file: string): void {
   for (const specifier of found.specifiers) {
     const detail = `${label} imports ${JSON.stringify(specifier.text)}`;
     addSpecifierEdges(scan, { dependent, base, detail }, specifier);
+    addAliasedSpecifierEdges(scan, aliases, { base, label }, specifier);
   }
 }
