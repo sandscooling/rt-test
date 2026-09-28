@@ -52,7 +52,7 @@ import {
   memoryLog,
   type MemoryLog,
 } from "./daemon-harness.js";
-import { inTempDir, settle, within } from "./harness.js";
+import { inTempDir, settle } from "./harness.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -78,8 +78,6 @@ const IDENTITY: DaemonIdentity = {
 const FLUSH_TURNS = 20;
 const CONFIG_NOT_CONFIRMED =
   "its config file is no longer the one confirmed at start";
-/** Longer than a stop of the scripted daemon takes, and short enough that a stop that never ends fails the test. */
-const STOP_BOUND_MS = 2000;
 const DISCOVERY_DIGEST = "discovery-digest";
 /** A declared file written after an edit; once the tracker has handled its event, it has handled the edit's. */
 const SENTINEL = "z.md";
@@ -1229,12 +1227,12 @@ describe("stopping", () => {
   it("D1881: a stop while a job's end waits on the inputs stops the tracker, so the stop ends", async () => {
     const { lifecycle } = await begun(scripted({ heldJobEnds: true }));
     lifecycle.stop();
-    expect(
-      await within(
-        lifecycle.stopped().then(() => "stopped"),
-        STOP_BOUND_MS,
-      ),
-    ).toBe("stopped");
+    let stopped = false;
+    void lifecycle.stopped().then(() => {
+      stopped = true;
+    });
+    await flush();
+    expect(stopped).toBe(true);
   });
 
   it("D1953: a stop during the first reconciliation of the inputs starts no discovery", async () => {

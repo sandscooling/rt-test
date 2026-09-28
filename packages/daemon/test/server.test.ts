@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { createConnection, type Socket } from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   daemonVerifier,
   type DaemonVerifier,
@@ -8,6 +8,7 @@ import {
 import type { DaemonIdentity } from "../src/daemon/protocol.js";
 import type { SummaryAnswer } from "../src/query/answer.js";
 import {
+  CLOSE_GRACE_MS,
   connectionServer,
   type DaemonHandlers,
   type Prover,
@@ -403,8 +404,6 @@ describe("a client of another protocol version", () => {
 describe("closing the connections at the stop", () => {
   /** Answers to this many hellos overflow what a paused client's pipe and buffer take in. */
   const UNREAD_HELLOS = 25_000;
-  /** Past the 1 s close grace, with room for a loaded machine. */
-  const CLOSE_BOUND_MS = 5_000;
 
   it(
     "D1540: a client that stops reading is dropped once the close grace passes, so it cannot hold the stop",
@@ -429,13 +428,12 @@ describe("closing the connections at the stop", () => {
                 served.bytesRead === Buffer.byteLength(requests) &&
                 served.writableLength > 0,
             );
+            vi.useFakeTimers({ toFake: ["setTimeout"] });
             server.closeConnections();
-            const dropped = await eventually(
-              () => served?.destroyed === true,
-              CLOSE_BOUND_MS,
-            );
-            return { backlogged, dropped };
+            await vi.advanceTimersByTimeAsync(CLOSE_GRACE_MS);
+            return { backlogged, dropped: served?.destroyed === true };
           } finally {
+            vi.useRealTimers();
             client.destroy();
           }
         },

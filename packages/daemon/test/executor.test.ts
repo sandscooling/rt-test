@@ -16,15 +16,26 @@ const next = vi.hoisted(() => ({
   sends: undefined as string[] | undefined,
   /** Makes each fork fail to spawn, as a fork does when Node cannot start the process. */
   unstartable: false,
+  /** Resolves once the latest forked process has exited, or failed to start, before the executor hears of it. */
+  forkEnded: Promise.resolve(),
 }));
+
+/** Records when `child` ends, listening before the executor does. */
+function recordEnd(child: ChildProcess): ChildProcess {
+  next.forkEnded = new Promise((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  return child;
+}
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     fork: (...args: Parameters<typeof actual.fork>) => {
-      if (next.unstartable) return unstartedChild();
-      const child = actual.fork(...args);
+      if (next.unstartable) return recordEnd(unstartedChild());
+      const child = recordEnd(actual.fork(...args));
       const send = child.send.bind(child) as (...a: unknown[]) => boolean;
       child.send = ((...a: unknown[]) => {
         next.sends?.push(`send ${(a[0] as { type?: string }).type}`);
@@ -135,15 +146,21 @@ async function recordingSends<T>(
   }
 }
 
-/** Far past any job these tests run, so a job that never settles is reported rather than left to time the test out. */
-const SETTLE_BOUND_MS = 20_000;
-
-/** The outcome of `job`, or "never settled" once the bound passes. */
+/**
+ * The outcome of `job`, or "never settled" when the job's executor process has ended and the job has still not settled
+ * a turn of the event loop later. One turn is enough only because the recorded containment's `contain` and `end`
+ * settle without timers or I/O: once that process has ended, the job settles through callbacks its end runs at once,
+ * so a job that has not settled by then never will. A real containment would need more than a turn.
+ */
 function withinBound<T>(job: Promise<T>): Promise<T | "never settled"> {
+  const ended = next.forkEnded;
   return Promise.race([
     job,
-    new Promise<"never settled">((resolve) =>
-      setTimeout(() => resolve("never settled"), SETTLE_BOUND_MS).unref(),
+    ended.then(
+      () =>
+        new Promise<"never settled">((resolve) =>
+          setImmediate(() => resolve("never settled")),
+        ),
     ),
   ]);
 }

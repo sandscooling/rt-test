@@ -193,11 +193,16 @@ export interface StandIn {
 
 /**
  * Listens on the worktree's real endpoint, answering each request line with what `answer` returns (nothing when it
- * returns undefined), and closes however `body` ends.
+ * returns undefined), and closes however `body` ends. `answer` also gets a promise that resolves once the connection
+ * the request came on has closed.
  */
 export async function withStandIn<T>(
   worktreeIdentity: string,
-  answer: (request: Line, standIn: StandIn) => object | undefined,
+  answer: (
+    request: Line,
+    standIn: StandIn,
+    connectionClosed: Promise<void>,
+  ) => object | undefined,
   body: (standIn: StandIn) => Promise<T>,
 ): Promise<T> {
   const sockets = new Set<Socket>();
@@ -209,9 +214,12 @@ export async function withStandIn<T>(
     connections += 1;
     sockets.add(socket);
     socket.on("error", () => undefined);
+    const connectionClosed = new Promise<void>((resolve) =>
+      socket.once("close", () => resolve()),
+    );
     createInterface({ input: socket }).on("line", (line) => {
       if (standIn === undefined) return;
-      const reply = answer(JSON.parse(line) as Line, standIn);
+      const reply = answer(JSON.parse(line) as Line, standIn, connectionClosed);
       if (reply !== undefined) socket.write(`${JSON.stringify(reply)}\n`);
     });
   });
@@ -300,14 +308,18 @@ export function fixtureFile(root: string, name: string): string {
 }
 
 /**
- * Resolves once the fixture has written the marker `name`, however long a loaded machine takes to reach it, so the
- * test acts at the point the fixture holds rather than whenever a wait of its own gives up. The test's timeout still
- * ends a run that never gets there.
+ * Resolves once `ready` holds, however long a loaded machine takes to get there, so the test acts on what it waits for
+ * rather than whenever a wait of its own gives up. The test's timeout still ends a run that never gets there.
  */
-export async function atHoldPoint(root: string, name: string): Promise<void> {
-  while (!existsSync(fixtureFile(root, name))) {
+export async function until(ready: () => boolean): Promise<void> {
+  while (!ready()) {
     await new Promise((wake) => setTimeout(wake, POLL_MS));
   }
+}
+
+/** Resolves once the fixture has written the marker `name`, the point the fixture holds at. */
+export function atHoldPoint(root: string, name: string): Promise<void> {
+  return until(() => existsSync(fixtureFile(root, name)));
 }
 
 export function holdAt(root: string, hold: string): void {

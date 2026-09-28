@@ -142,11 +142,25 @@ const TRACKER_MODULE = new URL(
   "../src/inputs/input-tracker.ts",
   import.meta.url,
 ).href;
+/** Far past the idle tracker child's start, first reconciliation and timer on a loaded machine. */
+const TRACKER_LIFETIME_MS = 30_000;
+const LIFETIME_LINE = "lifetime";
+/**
+ * Ends the idle tracker child from a thread of its own, whose timers run however the main thread's event loop is held,
+ * writing a line first, so a child whose tracker holds that loop still exits and says why. The worker runs with no
+ * Node flags, so it loads nothing through the source hooks before its timer is set.
+ */
+const LIFETIME_WORKER = [
+  'const { writeSync } = require("node:fs");',
+  `setTimeout(() => { writeSync(1, "${LIFETIME_LINE}\\n"); process.kill(process.pid, "SIGKILL"); }, ${TRACKER_LIFETIME_MS});`,
+].join("\n");
 /**
  * Starts a tracker over the root it is given and writes a line once the first reconciliation has ended and another
  * once a timer set after that fires. A tracker that holds the event loop after reconciling never lets the timer fire.
  */
 const IDLE_TRACKER_SCRIPT = [
+  'const { Worker } = await import("node:worker_threads");',
+  `new Worker(${JSON.stringify(LIFETIME_WORKER)}, { eval: true, execArgv: [] }).unref();`,
   "const [trackerModule, root] = process.argv.slice(1);",
   "const { InputTracker } = await import(trackerModule);",
   'const log = { file: "idle-tracker.log", entry() {}, error() {} };',
@@ -1660,14 +1674,10 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       child.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
       });
-      const exited = new Promise((resolve) => child.once("exit", resolve));
-      if ((await within(exited, SETTLE_MS)) === "waiting") {
-        child.kill();
-        await exited;
-      }
+      await new Promise((resolve) => child.once("close", resolve));
       return stdout.split("\n").filter((line) => line !== "");
     });
-    expect(lines).toStrictEqual(["reconciled", "timer fired"]);
+    expect(lines.slice(0, 2)).toStrictEqual(["reconciled", "timer fired"]);
   });
 });
 

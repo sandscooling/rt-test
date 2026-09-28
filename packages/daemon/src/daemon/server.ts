@@ -63,7 +63,7 @@ export interface ConnectionServer {
 type ConnectionState = "awaiting-hello" | "ready" | "mismatched";
 
 /** How long a closing connection may take to flush before it is dropped, so a client that stops reading cannot hold the stop. */
-const CLOSE_GRACE_MS = 1_000;
+export const CLOSE_GRACE_MS = 1_000;
 
 /** Writes to a connection only in answer to a line it sent, so a client that cannot write receives nothing. */
 export function connectionServer(

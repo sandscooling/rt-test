@@ -83,8 +83,6 @@ const CTRL_C = "\u0003";
 const CTRL_D = "\u0004";
 /** Ends the simulated terminal's input in place of typing a reply. */
 const END_OF_INPUT = Symbol("end of input");
-/** An answer settles the prompt within milliseconds, so one still pending by then never settles. */
-const HANG_BOUND_MS = 5_000;
 const HUNG = "hung";
 /** Any process id: a stand-in on the endpoint never proves it. */
 const STAND_IN_PID = 4242;
@@ -112,6 +110,8 @@ interface Session {
   readonly stdout: () => string;
   readonly stderr: () => string;
   readonly asked: () => boolean;
+  /** Resolves once the reply has reached the readers of stdin: its text as data, or the end of input. */
+  readonly replied: Promise<void>;
   readonly close: () => void;
 }
 
@@ -128,6 +128,10 @@ function simulatedSession(invocation: Invocation): Session {
   let out = "";
   let err = "";
   let asked = false;
+  let delivered = (): void => undefined;
+  const replied = new Promise<void>((resolve) => {
+    delivered = resolve;
+  });
   stdout.on("data", (chunk: Buffer) => {
     out += chunk.toString("utf8");
   });
@@ -137,8 +141,13 @@ function simulatedSession(invocation: Invocation): Session {
     asked = true;
     setImmediate(() => {
       invocation.atQuestion?.();
-      if (invocation.reply === END_OF_INPUT) stdin.end();
-      else if (invocation.reply !== undefined) stdin.write(invocation.reply);
+      if (invocation.reply === END_OF_INPUT) {
+        stdin.once("end", () => delivered());
+        stdin.end();
+      } else if (invocation.reply !== undefined) {
+        stdin.once("data", () => delivered());
+        stdin.write(invocation.reply);
+      }
     });
   });
   return {
@@ -153,6 +162,7 @@ function simulatedSession(invocation: Invocation): Session {
     stdout: () => out,
     stderr: () => err,
     asked: () => asked,
+    replied,
     close: () => {
       stdin.destroy();
       stdout.end();
@@ -161,16 +171,27 @@ function simulatedSession(invocation: Invocation): Session {
   };
 }
 
-function bounded<T>(work: Promise<T>): Promise<T | typeof HUNG> {
-  let timer: NodeJS.Timeout | undefined;
-  const hung = new Promise<typeof HUNG>((resolve) => {
-    timer = setTimeout(() => resolve(HUNG), HANG_BOUND_MS);
-  });
-  return Promise.race([work, hung]).finally(() => clearTimeout(timer));
+/**
+ * The outcome of a prompt, or `HUNG` when it is still pending a turn of the event loop after the reply reached stdin's
+ * readers: the prompt settles on its input's events and the promises they settle, so one pending by then never settles.
+ */
+function unlessHung<T>(
+  prompt: Promise<T>,
+  session: Session,
+): Promise<T | typeof HUNG> {
+  return Promise.race([
+    prompt,
+    session.replied.then(
+      () =>
+        new Promise<typeof HUNG>((resolve) =>
+          setImmediate(() => resolve(HUNG)),
+        ),
+    ),
+  ]);
 }
 
 interface CliRun {
-  readonly exit: Settled<ExitCode> | typeof HUNG;
+  readonly exit: Settled<ExitCode>;
   readonly stdout: string;
   readonly stderr: string;
   readonly asked: boolean;
@@ -183,7 +204,7 @@ async function runCli(
 ): Promise<CliRun> {
   const session = simulatedSession(invocation);
   try {
-    const exit = await bounded(settled(main(argv, session.io)));
+    const exit = await settled(main(argv, session.io));
     return {
       exit,
       stdout: session.stdout(),
@@ -243,7 +264,7 @@ async function trustAfter(
     nonInputs: { file: NON_INPUTS_FILE, state: "absent" },
   };
   try {
-    return await bounded(
+    return await unlessHung(
       settled(
         decideTrust(
           session.io,
@@ -252,6 +273,7 @@ async function trustAfter(
           false,
         ),
       ),
+      session,
     );
   } finally {
     session.close();

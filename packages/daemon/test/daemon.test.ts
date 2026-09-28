@@ -39,6 +39,7 @@ import {
   started,
   storedRuns,
   trustedStart,
+  until,
   withDaemonConsumer,
   withDaemonKey,
   withDaemons,
@@ -60,12 +61,16 @@ const FIXTURES = join(REPO, "test/fixtures/daemon");
 /** The Node flags a process needs to load this package from source, as the daemon's own entry points do. */
 const SOURCE_FLAGS = daemonEntryPoint("daemon-main").execArgv;
 const STOP_LINE = '{"type":"stop"}\n';
+/** How far past the executor's bound a loaded machine may end it. */
+const LOADED_MARGIN_MS = 25_000;
+/** A hold that outlives the executor's bound, so an executor nobody ends still finishes its run. */
+const HOLD_LIFETIME_MS = EXECUTOR_BOUND_MS + LOADED_MARGIN_MS;
+/** The marker the fixture writes once a hold's lifetime has run out. */
+const HELD_OUT = "held-out";
 const NEXT_PROTOCOL_VERSION = 2;
 /** A module of the Vitest package, as opposed to this package's own `src/vitest/`. */
 const VITEST_PACKAGE_URL =
   /\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?vitest\//;
-/** A stop that polls every 100 ms has probed the endpoint again well within this. */
-const PROBE_BOUND_MS = 5_000;
 
 function clientLocation(worktreeIdentity: string) {
   const location = clientEndpoint(worktreeIdentity);
@@ -112,6 +117,7 @@ interface KeyContext {
 type StandInAnswer = (
   request: Readonly<Record<string, unknown>>,
   standIn: StandIn,
+  connectionClosed: Promise<void>,
 ) => object | undefined;
 
 /**
@@ -150,16 +156,14 @@ function proofField(
   };
 }
 
-/** Lets a stand-in's stop acknowledgement reach its client before it stops listening. */
-const STAND_IN_CLOSE_MS = 100;
-
 /**
  * Answers the hello, the status and the stop as a daemon of this version with process `pid` would, proving the hello
- * and the stop acknowledgement as `proving` says, and stops listening just after acknowledging a stop.
+ * and the stop acknowledgement as `proving` says, and stops listening once the client that asked for the stop has
+ * closed that connection, so its acknowledgement has been read.
  */
 function answerAs(pid: number, proving: Proving) {
   return (context: KeyContext): StandInAnswer =>
-    (request, standIn) => {
+    (request, standIn, connectionClosed) => {
       switch (request["type"]) {
         case "hello":
           return {
@@ -171,7 +175,7 @@ function answerAs(pid: number, proving: Proving) {
         case "status":
           return { type: "status", protocolVersion: 1, pid };
         case "stop":
-          setTimeout(() => void standIn.close(), STAND_IN_CLOSE_MS);
+          void connectionClosed.then(() => standIn.close());
           return {
             type: "stopping",
             pid,
@@ -261,10 +265,8 @@ describe("a client with no daemon to talk to", () => {
             const stop = settled(stopDaemon(root)).finally(() => {
               stopSettled = true;
             });
-            const probed = await eventually(
-              () => standIn.connections >= 2,
-              PROBE_BOUND_MS,
-            );
+            await until(() => stopSettled || standIn.connections >= 2);
+            const probed = standIn.connections >= 2;
             const waiting = !stopSettled;
             await standIn.close();
             return { probed, waiting, stop: await stop };
@@ -858,7 +860,7 @@ describe("the executor process", () => {
     async () => {
       // Windows ends a killed daemon's children itself, so the channel is closed from this side instead.
       const ended = await withDaemonConsumer(async (root) => {
-        holdAt(root, "hold");
+        writeFileSync(fixtureFile(root, "hold"), String(HOLD_LIFETIME_MS));
         const entry = daemonEntryPoint("executor-main");
         const executor = fork(entry.file, [], {
           cwd: root,
@@ -877,15 +879,16 @@ describe("the executor process", () => {
           });
           await atHoldPoint(root, "holding");
           executor.disconnect();
-          return await eventually(
-            () => executor.exitCode !== null || executor.signalCode !== null,
-            EXECUTOR_BOUND_MS,
-          );
+          const exited = () =>
+            executor.exitCode !== null || executor.signalCode !== null;
+          const heldOut = () => existsSync(fixtureFile(root, HELD_OUT));
+          await until(() => exited() || heldOut());
+          return { exited: exited(), heldOut: heldOut() };
         } finally {
           executor.kill("SIGKILL");
         }
       });
-      expect(ended).toBe(true);
+      expect(ended).toStrictEqual({ exited: true, heldOut: false });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1083,10 +1086,10 @@ describe("a process on the endpoint that is not this user's daemon", () => {
     const stop = await inTempDir((root) =>
       withKeyedStandIn(
         root,
-        (context) => (request, standIn) => {
+        (context) => (request, standIn, connectionClosed) => {
           if (request["type"] !== "stop") return undefined;
           context.key.remove();
-          setTimeout(() => void standIn.close(), STAND_IN_CLOSE_MS);
+          void connectionClosed.then(() => standIn.close());
           return {
             type: "stopping",
             pid,
@@ -1285,10 +1288,10 @@ describe("a query to the worktree's daemon", () => {
     const daemon = answerAs(exitedPid(), "key");
     return withKeyedStandIn(
       root,
-      (context) => (request, standIn) =>
+      (context) => (request, standIn, connectionClosed) =>
         request["type"] === "summary"
           ? { type: "error", ...error }
-          : daemon(context)(request, standIn),
+          : daemon(context)(request, standIn, connectionClosed),
       () => settled(querySummary(root)),
     );
   }
@@ -1324,9 +1327,9 @@ describe("a query to the worktree's daemon", () => {
       const daemon = answerAs(exitedPid(), "key");
       const summary = await withKeyedStandIn(
         root,
-        (context) => (request, standIn) => {
+        (context) => (request, standIn, connectionClosed) => {
           if (request["type"] !== "summary") {
-            return daemon(context)(request, standIn);
+            return daemon(context)(request, standIn, connectionClosed);
           }
           void standIn.close();
           return undefined;

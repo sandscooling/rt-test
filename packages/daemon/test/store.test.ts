@@ -11,7 +11,7 @@ import {
 import { join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   consumerIdentity,
   defaultStateDirectory,
@@ -42,23 +42,25 @@ type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 /** The value every RT Test store carries in `PRAGMA application_id`, whatever its schema version. */
 const RT_TEST_APPLICATION_ID = 1381258324;
 const OPENED = "opened";
-/** Long enough that the store under test reads the empty file's header before the schema commits. */
-const SCHEMA_HOLD_MS = 1000;
-const WORKER_START_TIMEOUT_MS = 10_000;
+/** The message the held-write worker posts once it holds its transaction open. */
+const HOLDING = "holding";
+/** The value of the worker's shared flag that lets it commit. */
+const RELEASED = 1;
+/** The statement the store's opener takes its write lock with, once it has read the header. */
+const WRITE_LOCK = "BEGIN IMMEDIATE";
 
-/** Opens the file as the store's opener does, runs `sql` in one held write transaction, flags that it holds it, then commits after a pause. */
+/** Opens the file as the store's opener does, runs `sql` in one write transaction, says that it holds it, and commits once released. */
 const HELD_WRITE_WORKER = `
 const { DatabaseSync } = require("node:sqlite");
-const { workerData } = require("node:worker_threads");
-const { file, sql, held, holdMs } = workerData;
+const { parentPort, workerData } = require("node:worker_threads");
+const { file, sql, released } = workerData;
 const database = new DatabaseSync(file);
 database.exec("PRAGMA busy_timeout = 10000");
 database.exec("PRAGMA journal_mode = WAL");
 database.exec("BEGIN IMMEDIATE");
 database.exec(sql);
-Atomics.store(held, 0, 1);
-Atomics.notify(held, 0);
-Atomics.wait(held, 0, 1, holdMs);
+parentPort.postMessage("${HOLDING}");
+Atomics.wait(released, 0, 0);
 database.exec("COMMIT");
 database.close();
 `;
@@ -456,23 +458,51 @@ function refusalFacts(
   };
 }
 
-/** Runs `body` while a worker holds a write transaction of `sql` open on the file, and waits for the worker to commit. */
+/**
+ * Runs `body` while a worker holds a write transaction of `sql` open on the file, and waits for the worker to commit.
+ * The worker commits only once the store under test asks for its write lock, so that store has read the header the
+ * held transaction has not yet committed however slowly either thread runs, or once `body` has returned. `held` says
+ * the store under test asked for its write lock while the worker held its transaction.
+ */
 async function whileWriteHeld<T>(
   file: string,
   sql: string,
   body: () => T,
 ): Promise<{ held: boolean; result: T; exitCode: number }> {
-  const held = new Int32Array(new SharedArrayBuffer(4));
+  const released = new Int32Array(new SharedArrayBuffer(4));
   const worker = new Worker(HELD_WRITE_WORKER, {
     eval: true,
-    workerData: { file, sql, held, holdMs: SCHEMA_HOLD_MS },
+    workerData: { file, sql, released },
   });
   const exited = once(worker, "exit");
-  const holding =
-    Atomics.wait(held, 0, 0, WORKER_START_TIMEOUT_MS) !== "timed-out";
-  const result = body();
+  const holding = await Promise.race([
+    once(worker, "message").then(([message]) => message === HOLDING),
+    exited.then(() => false),
+  ]);
+  const release = () => {
+    Atomics.store(released, 0, RELEASED);
+    Atomics.notify(released, 0);
+  };
+  let lockAskedWhileHeld = false;
+  const exec = DatabaseSync.prototype.exec;
+  const releaseAtLock = vi
+    .spyOn(DatabaseSync.prototype, "exec")
+    .mockImplementation(function (this: DatabaseSync, statement: string) {
+      if (statement === WRITE_LOCK) {
+        lockAskedWhileHeld ||= Atomics.load(released, 0) !== RELEASED;
+        release();
+      }
+      exec.call(this, statement);
+    });
+  let result: T;
+  try {
+    result = body();
+  } finally {
+    releaseAtLock.mockRestore();
+    release();
+  }
   const [exitCode] = (await exited) as [number];
-  return { held: holding, result, exitCode };
+  return { held: holding && lockAskedWhileHeld, result, exitCode };
 }
 
 /** Writes the runs through a store, then takes the file back to the schema version before the force-stop column, as the migration's inverse. */

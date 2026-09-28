@@ -21,10 +21,12 @@ export function spawnsChildren() {
 
 /**
  * Starts a heartbeat child that does not detach, outside the consumer tree, and resolves once it has written its
- * first beat to `heartbeat-<name>`, so a job that ends at once still ends a running child.
+ * first beat to `heartbeat-<name>`, so a job that ends at once still ends a running child. Throws the child's reason
+ * once it writes `failed-heartbeat-<name>` instead.
  */
 export async function startHeartbeat(name) {
   const beat = here(`heartbeat-${name}`);
+  const failed = here(`failed-heartbeat-${name}`);
   const args = [fileURLToPath(here("heartbeat.mjs")), fileURLToPath(beat)];
   const options = { cwd: tmpdir(), stdio: "ignore", windowsHide: true };
   if (readFileSync(here("spawn-children"), "utf8") === THROUGH_A_SHELL) {
@@ -34,6 +36,11 @@ export async function startHeartbeat(name) {
     spawn(process.execPath, args, options);
   }
   while (!existsSync(beat)) {
+    if (existsSync(failed)) {
+      throw new Error(
+        `heartbeat ${name} failed: ${readFileSync(failed, "utf8")}`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
 }
