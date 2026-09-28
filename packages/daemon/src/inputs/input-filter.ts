@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import {
   basename,
   dirname,
+  isAbsolute,
   join,
   posix,
   relative,
@@ -96,8 +97,8 @@ export class InputFilter {
   }
 
   excludes(path: string): boolean {
+    if (!liesInside(this.#root, path)) return true;
     const fromRoot = relative(this.#root, path);
-    if (climbsOut(fromRoot, sep)) return true;
     if (
       fromRoot
         .split(sep)
@@ -116,8 +117,9 @@ export class InputFilter {
    * and watched, since a file the declaration may not remove can lie under it.
    */
   declares(path: string): string | undefined {
+    if (!liesInside(this.#root, path)) return undefined;
     const fromRoot = relative(this.#root, path);
-    if (fromRoot === "" || climbsOut(fromRoot, sep)) return undefined;
+    if (fromRoot === "") return undefined;
     return this.#declared(fromRoot.split(sep).join(POSIX_SEPARATOR));
   }
 
@@ -251,7 +253,8 @@ export function liesInsideOnHost(directory: string, path: string): boolean {
   );
 }
 
-/** The absolute path of a root-relative input path. */
+/** The absolute path of an input path, which is root-relative or, on another Windows drive, already absolute. */
 export function absoluteInputPath(root: string, path: string): string {
+  if (isAbsolute(path)) return path;
   return join(root, ...path.split(POSIX_SEPARATOR));
 }

@@ -4,6 +4,7 @@ import type {
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
+import type { SelectionFacts } from "../vitest/selection-facts.js";
 import {
   arrayOf,
   closeError,
@@ -14,6 +15,7 @@ import {
   json,
   member,
   moduleReport,
+  projectSelectionFacts,
   rowsBy,
   stringArray,
   text,
@@ -39,12 +41,15 @@ const SELECT_LATEST_DISCOVERY = `${DISCOVERY_COLUMNS} ORDER BY sequence DESC LIM
 const SELECT_DISCOVERY = `${DISCOVERY_COLUMNS} AND discovery_id = ?`;
 
 const SELECT_WORKSPACES = `SELECT workspace_index, status, workspace_path, workspace_directory, vitest_version,
-  unsupported_vitest, error, close_error, failed_modules, typecheck_modules, unsupported_projects, unhandled_errors
+  unsupported_vitest, error, close_error, failed_modules, typecheck_modules, unsupported_projects, unhandled_errors,
+  selection_facts
   FROM discovery_workspaces WHERE discovery_sequence = ? ORDER BY workspace_index`;
 
 const SELECT_TESTS = `SELECT workspace_index, workspace_path, project_name, module_path, name_path, occurrence,
   is_duplicate, mode
   FROM discovered_tests WHERE discovery_sequence = ? ORDER BY workspace_index, test_index`;
+
+const SELECTION_FACTS = "selection_facts";
 
 const TEST_MODES: Members<DiscoveredTest["mode"]> = {
   run: true,
@@ -136,10 +141,8 @@ function workspaceDiscovery(
     path: text(row, "workspace_path"),
     directory: text(row, "workspace_directory"),
   };
-  if (status !== "discovered" && tests.length > 0) {
-    throw new Error(
-      `The store holds tests under the ${status} workspace ${workspace.path}`,
-    );
+  if (status !== "discovered") {
+    refuseDiscoveredDetails(row, status, workspace, tests);
   }
   switch (status) {
     case "discovered":
@@ -182,7 +185,36 @@ function discoveredWorkspace(
       unsupportedProject,
     ),
     unhandledErrors: stringArray(json(row, "unhandled_errors")),
+    selectionFacts: selectionFacts(row),
     ...closeError(row),
+  };
+}
+
+/** Only a discovered workspace holds tests or selection facts, so either under another status is a record the writer never made. */
+function refuseDiscoveredDetails(
+  row: Row,
+  status: string,
+  workspace: VitestWorkspace,
+  tests: readonly DiscoveredTest[],
+): void {
+  if (tests.length > 0) {
+    throw new Error(
+      `The store holds tests under the ${status} workspace ${workspace.path}`,
+    );
+  }
+  if (column(row, SELECTION_FACTS) !== null) {
+    throw new Error(
+      `The store holds selection facts under the ${status} workspace ${workspace.path}`,
+    );
+  }
+}
+
+/** NULL is a report never made, as on a workspace stored before the store kept one. */
+function selectionFacts(row: Row): SelectionFacts {
+  if (column(row, SELECTION_FACTS) === null) return { reported: false };
+  return {
+    reported: true,
+    projects: arrayOf(json(row, SELECTION_FACTS), projectSelectionFacts),
   };
 }
 

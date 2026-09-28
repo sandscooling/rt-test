@@ -2,6 +2,15 @@ import type { IdentifiedTest } from "@rt-test/core";
 import type { SQLInputValue, SQLOutputValue } from "node:sqlite";
 import type { UnreadWorkspaceSource } from "../vitest/find-workspaces.js";
 import type { FailedModule, ModuleReport } from "../vitest/module-tests.js";
+import {
+  REGEXP_FIND,
+  STRING_FIND,
+  STRING_FIND_FLAGS,
+  type AliasFindKind,
+  type ProjectSelectionFacts,
+  type ReportedAlias,
+  type TestFilePatterns,
+} from "../vitest/selection-facts.js";
 import type {
   UnsupportedProject,
   UnsupportedVitest,
@@ -12,6 +21,11 @@ export type Members<T extends string> = Readonly<Record<T, true>>;
 
 const DUPLICATE_MARK = 1;
 const NOT_DUPLICATE_MARK = 0;
+
+const ALIAS_FIND_KINDS: Members<AliasFindKind> = {
+  [STRING_FIND]: true,
+  [REGEXP_FIND]: true,
+};
 
 /** Both test tables declare these columns in this order, before their own. */
 export function identifiedTestColumns(test: IdentifiedTest): SQLInputValue[] {
@@ -89,7 +103,12 @@ function duplicateMark(row: Row): boolean {
 }
 
 export function json(row: Row, name: string): unknown {
-  return JSON.parse(text(row, name)) as unknown;
+  const value = text(row, name);
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    throw unreadable(name, value, error);
+  }
 }
 
 export function member<T extends string>(
@@ -142,7 +161,7 @@ export function moduleReport(value: unknown): ModuleReport {
 export function failedModule(value: unknown): FailedModule {
   return {
     ...moduleReport(value),
-    errors: stringArray(isRecord(value) ? value["errors"] : undefined),
+    errors: stringArray(jsonField(value, "errors")),
   };
 }
 
@@ -160,16 +179,76 @@ export function unreadWorkspaceSource(value: unknown): UnreadWorkspaceSource {
   };
 }
 
-export function unreadable(name: string, value: unknown): Error {
+export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
+  return {
+    projectName: jsonText(value, "projectName"),
+    setupFiles: stringArray(jsonField(value, "setupFiles")),
+    globalSetupFiles: stringArray(jsonField(value, "globalSetupFiles")),
+    aliases: arrayOf(jsonField(value, "aliases"), reportedAlias),
+    testFilePatterns: testFilePatterns(jsonField(value, "testFilePatterns")),
+  };
+}
+
+function reportedAlias(value: unknown): ReportedAlias {
+  const findKind = member(
+    ALIAS_FIND_KINDS,
+    jsonText(value, "findKind"),
+    "JSON field findKind",
+  );
+  return {
+    find: jsonText(value, "find"),
+    findKind,
+    flags: aliasFlags(value, findKind),
+    replacement: jsonText(value, "replacement"),
+    hasCustomResolver: jsonBoolean(value, "hasCustomResolver"),
+  };
+}
+
+/** Only a RegExp find carries flags. */
+function aliasFlags(value: unknown, findKind: AliasFindKind): string {
+  const flags = jsonText(value, "flags");
+  if (findKind === STRING_FIND && flags !== STRING_FIND_FLAGS) {
+    throw unreadable("JSON field flags", value);
+  }
+  return flags;
+}
+
+function testFilePatterns(value: unknown): TestFilePatterns {
+  return {
+    directory: jsonText(value, "directory"),
+    include: stringArray(jsonField(value, "include")),
+    exclude: stringArray(jsonField(value, "exclude")),
+    includeSource: stringArray(jsonField(value, "includeSource")),
+  };
+}
+
+export function unreadable(
+  name: string,
+  value: unknown,
+  cause?: unknown,
+): Error {
   const shown =
     typeof value === "bigint" ? String(value) : JSON.stringify(value);
-  return new Error(`The store holds an unreadable ${name}: ${shown}`);
+  return new Error(
+    `The store holds an unreadable ${name}: ${shown}`,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 function jsonText(value: unknown, key: string): string {
-  const field = isRecord(value) ? value[key] : undefined;
+  const field = jsonField(value, key);
   if (typeof field === "string") return field;
   throw unreadable(`JSON field ${key}`, value);
+}
+
+function jsonBoolean(value: unknown, key: string): boolean {
+  const field = jsonField(value, key);
+  if (typeof field === "boolean") return field;
+  throw unreadable(`JSON field ${key}`, value);
+}
+
+function jsonField(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

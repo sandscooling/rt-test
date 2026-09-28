@@ -125,6 +125,7 @@ const FIRST_RECONCILIATION = "the first reconciliation has not ended";
 const PERIODIC_STARTED =
   "input reconciliation started: the periodic reconciliation";
 const RECONCILIATION_ENDED = "input reconciliation ended";
+const RECONCILIATION_STARTED = "input reconciliation started: ";
 const IGNORE_RULES_CHANGED_STARTED =
   "input reconciliation started: the ignore rules in .gitignore changed";
 /** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
@@ -216,6 +217,7 @@ function workspaceAt(
     typecheckModules: [],
     unsupportedProjects: [],
     unhandledErrors: [],
+    selectionFacts: { reported: true, projects: [] },
   };
 }
 
@@ -762,13 +764,19 @@ describe("what the inputs are", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         "newdir/only.log": "",
         "src/a.ts": "",
       });
-      return tracking(root, async (tracked) => {
+      return trackingOwnGitHome(root, async (tracked) => {
         const before = tracked.fingerprint();
         writeFileSync(join(root, "newdir/new.ts"), "export {};\n");
-        return movesFrom(tracked, before);
+        return {
+          moved: await movesFrom(tracked, before),
+          reconciliations: tracked.log.entries.filter((entry) =>
+            entry.startsWith(RECONCILIATION_STARTED),
+          ).length,
+        };
       });
     });
-    expect(changed).toBe(true);
+    // A later reconciliation reads git's listing afresh, so it would find the file whatever the first listing said.
+    expect(changed).toStrictEqual({ moved: true, reconciliations: 1 });
   });
 
   it("D1893: a new file an ignore pattern covers, in a directory no listed ignored directory covers, changes no fingerprint", async () => {

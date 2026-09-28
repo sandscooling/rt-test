@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { identifyModuleTests } from "@rt-test/core";
 import type { IdentifiedTest, TestModuleLocation } from "@rt-test/core";
 import type { TestCase, TestModule, TestSpecification } from "vitest/node";
@@ -99,11 +100,15 @@ function identifiedAt(
   return test;
 }
 
-/** Vitest resolves module ids through links and, on 4.1, not through Windows short names; compare resolved paths. */
+/**
+ * Vitest resolves module ids through links and, on 4.1, not through Windows short names; compare resolved paths. A
+ * path not on disk resolves through its nearest ancestor that is, so it still names its directory's on-disk case.
+ */
 function realPath(path: string): string {
   try {
     return realpathSync.native(path);
   } catch {
-    return path;
+    const parent = dirname(path);
+    return parent === path ? path : join(realPath(parent), basename(path));
   }
 }

@@ -10,10 +10,9 @@ import {
 import { readRun, readRuns, selectLatestRuns } from "./read-runs.js";
 import {
   BUSY_TIMEOUT_MS,
-  MIGRATED_SCHEMA_VERSION,
   STORE_APPLICATION_ID,
   STORE_FILE_NAME,
-  STORE_MIGRATION,
+  STORE_MIGRATIONS,
   STORE_SCHEMA,
   STORE_SCHEMA_VERSION,
 } from "./schema.js";
@@ -66,7 +65,7 @@ const SELECT_HEADER = `SELECT
   (SELECT user_version FROM pragma_user_version) AS user_version,
   (SELECT count(*) FROM sqlite_schema) AS schema_objects`;
 
-/** Creates the state directory and a new store in it when none exists, and migrates a store of the previous schema version; refuses, unchanged, a file it cannot read as one. */
+/** Creates the state directory and a new store in it when none exists, and migrates a store of an older schema version in `STORE_MIGRATIONS`; refuses, unchanged, a file it cannot read as one. */
 export function openStore(stateDirectory: string): RtTestStore {
   mkdirSync(stateDirectory, { recursive: true });
   const file = join(stateDirectory, STORE_FILE_NAME);
@@ -94,11 +93,14 @@ function createSchema(database: DatabaseSync, file: string): void {
   });
 }
 
-/** Re-reads the header under the write lock, so of two openers of one old store only the first migrates it. */
+/** Re-reads the header under the write lock, so of two openers of one old store only the first migrates it, every step in one transaction. */
 function migrateSchema(database: DatabaseSync, file: string): void {
   inWriteTransaction(database, () => {
-    if (!isMigratable(checkedHeader(database, file))) return;
-    database.exec(STORE_MIGRATION);
+    const migration = STORE_MIGRATIONS.get(
+      checkedHeader(database, file).userVersion,
+    );
+    if (migration === undefined) return;
+    database.exec(migration);
   });
 }
 
@@ -148,7 +150,7 @@ function refusalReason(header: StoreHeader): string | undefined {
 
 /** Called only once the application id is known to be RT Test's. */
 function isMigratable(header: StoreHeader): boolean {
-  return header.userVersion === MIGRATED_SCHEMA_VERSION;
+  return STORE_MIGRATIONS.has(header.userVersion);
 }
 
 function isNew(header: StoreHeader): boolean {

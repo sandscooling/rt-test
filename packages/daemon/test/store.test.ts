@@ -20,7 +20,7 @@ import { openStore, type RtTestStore } from "../src/store/open-store.js";
 import {
   STORE_APPLICATION_ID,
   STORE_FILE_NAME,
-  STORE_MIGRATION,
+  STORE_MIGRATIONS,
   STORE_SCHEMA,
   STORE_SCHEMA_VERSION,
 } from "../src/store/schema.js";
@@ -34,6 +34,11 @@ import type { TestDiscovery } from "../src/vitest/discover-tests.js";
 import type { VitestWorkspace } from "../src/vitest/find-workspaces.js";
 import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
+import type {
+  ProjectSelectionFacts,
+  ReportedAlias,
+  SelectionFacts,
+} from "../src/vitest/selection-facts.js";
 import { inTempDir, linkedWorktree, mainCheckout, settle } from "./harness.js";
 
 type Settled<T> = T | { thrown: string };
@@ -66,6 +71,8 @@ database.close();
 `;
 /** The schema version before runs recorded whether Vitest was force-stopped. */
 const FORCE_STOP_UNAWARE_VERSION = 1;
+/** The schema version before discovered workspaces kept their selection facts. */
+const SELECTION_FACTS_UNAWARE_VERSION = 2;
 
 const WORKTREE_A: StoreScope = {
   projectIdentity: "/work/shop/.git",
@@ -247,6 +254,53 @@ const BEFORE_LOAD_RUN: WorkspaceRun = {
   workspace: WORKSPACE,
 };
 
+const REGEXP_ALIAS: ReportedAlias = {
+  find: "^~icons\\/(.*)$",
+  findKind: "regexp",
+  flags: "i",
+  replacement: "icon-pack/$1",
+  hasCustomResolver: true,
+};
+const CART_PROJECT_FACTS: ProjectSelectionFacts = {
+  projectName: PROJECT_NAME,
+  setupFiles: ["packages/cart/test/setup.ts", "../shared/setup.ts"],
+  globalSetupFiles: ["test/global-setup.ts"],
+  aliases: [
+    {
+      find: "@cart",
+      findKind: "string",
+      flags: "",
+      replacement: "/work/shop/packages/cart/src",
+      hasCustomResolver: false,
+    },
+    REGEXP_ALIAS,
+  ],
+  testFilePatterns: {
+    directory: "packages/cart",
+    include: ["src/**/*.test.ts"],
+    exclude: ["**/node_modules/**"],
+    includeSource: ["src/**/*.ts"],
+  },
+};
+/** A project with no setup files, global setup files or aliases, matching from the consumer root. */
+const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
+  projectName: "empty",
+  setupFiles: [],
+  globalSetupFiles: [],
+  aliases: [],
+  testFilePatterns: {
+    directory: ".",
+    include: [],
+    exclude: [],
+    includeSource: [],
+  },
+};
+const SELECTION_FACTS: SelectionFacts = {
+  reported: true,
+  projects: [CART_PROJECT_FACTS, EMPTY_PROJECT_FACTS],
+};
+const NOT_REPORTED: SelectionFacts = { reported: false };
+
 const DISCOVERY: TestDiscovery = {
   workspaces: [
     {
@@ -275,6 +329,7 @@ const DISCOVERY: TestDiscovery = {
         { projectName: "browser", reason: "browser mode is not supported" },
       ],
       unhandledErrors: ["Error: leaked timer"],
+      selectionFacts: SELECTION_FACTS,
       closeError: "Error: close timed out",
     },
     {
@@ -517,9 +572,78 @@ function writeForceStopUnawareStore(
   const file = join(stateDirectory, STORE_FILE_NAME);
   withRawDatabase(file, (database) => {
     database.exec("ALTER TABLE runs DROP COLUMN force_stopped");
+    database.exec(
+      "ALTER TABLE discovery_workspaces DROP COLUMN selection_facts",
+    );
     database.exec(`PRAGMA user_version = ${userVersion}`);
   });
   return file;
+}
+
+/** Writes the discoveries and runs through a store, then takes the file back to the schema version before selection facts, as that migration's inverse. */
+function writeSelectionFactsUnawareStore(
+  stateDirectory: string,
+  discoveries: readonly TestDiscovery[],
+  runs: readonly WorkspaceRun[] = [],
+): string {
+  withOpenStore(stateDirectory, (store) => {
+    for (const discovery of discoveries) {
+      store.writeDiscovery(bound(WORKTREE_A), discovery);
+    }
+    for (const run of runs) store.writeRun(bound(WORKTREE_A), run);
+  });
+  const file = join(stateDirectory, STORE_FILE_NAME);
+  withRawDatabase(file, (database) => {
+    database.exec(
+      "ALTER TABLE discovery_workspaces DROP COLUMN selection_facts",
+    );
+    database.exec(`PRAGMA user_version = ${SELECTION_FACTS_UNAWARE_VERSION}`);
+  });
+  return file;
+}
+
+/** The discovery with each discovered workspace's selection facts replaced by `facts`. */
+function withFacts(
+  discovery: TestDiscovery,
+  facts: SelectionFacts,
+): TestDiscovery {
+  return {
+    ...discovery,
+    workspaces: discovery.workspaces.map((entry) =>
+      entry.status === "discovered"
+        ? { ...entry, selectionFacts: facts }
+        : entry,
+    ),
+  };
+}
+
+/** The discovery as a store from before selection facts reads it back: each discovered workspace not reporting them. */
+function withoutReportedFacts(discovery: TestDiscovery): TestDiscovery {
+  return withFacts(discovery, NOT_REPORTED);
+}
+
+/** The selection facts of each discovered workspace of the latest discovery. */
+function discoveredFacts(store: RtTestStore): SelectionFacts[] | undefined {
+  return store
+    .readLatestDiscovery(WORKTREE_A)
+    ?.discovery.workspaces.flatMap((entry) =>
+      entry.status === "discovered" ? [entry.selectionFacts] : [],
+    );
+}
+
+/** Stores `DISCOVERY`, overwrites its discovered workspace's stored selection facts with `stored`, and reads it back. */
+function readingStoredFacts(stored: unknown): Promise<Settled<string>> {
+  return inStore((store) => {
+    store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+    withRawDatabase(store.file, (database) => {
+      database
+        .prepare(
+          "UPDATE discovery_workspaces SET selection_facts = ? WHERE status = 'discovered'",
+        )
+        .run(typeof stored === "string" ? stored : JSON.stringify(stored));
+    });
+    return rejection(settle(() => store.readLatestDiscovery(WORKTREE_A)));
+  });
 }
 
 /** A store in the default state directory of a fresh consumer root, written at the schema version before the force-stop column. */
@@ -1290,7 +1414,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 2 once opened", async () => {
+  it("D1280: the store is at schema version 3 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1298,7 +1422,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(2);
+    expect(version).toBe(3);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -1325,7 +1449,8 @@ describe("opening a store written before the force-stop field", () => {
     const outcome = await inTempDir(async (dir) => {
       const stateDirectory = defaultStateDirectory(dir);
       const file = writeForceStopUnawareStore(stateDirectory, [RAN_RUN]);
-      return whileWriteHeld(file, STORE_MIGRATION, () =>
+      const migration = STORE_MIGRATIONS.get(FORCE_STOP_UNAWARE_VERSION) ?? "";
+      return whileWriteHeld(file, migration, () =>
         settle(() =>
           withOpenStore(stateDirectory, (store) => runsOf(store, WORKTREE_A)),
         ),
@@ -1375,6 +1500,186 @@ describe("opening a store written before the force-stop field", () => {
       }),
     );
     expect(versions).toStrictEqual({ run: 1, discovery: 1 });
+  });
+});
+
+describe("storing each discovered workspace's selection facts", () => {
+  it("D2093: a workspace's reported selection facts read back exactly as written after the store is reopened", async () => {
+    const facts = await acrossReopen(
+      (store) => {
+        store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      },
+      (store) =>
+        store
+          .readLatestDiscovery(WORKTREE_A)
+          ?.discovery.workspaces.map((entry) =>
+            entry.status === "discovered" ? entry.selectionFacts : entry.status,
+          ),
+    );
+    expect(facts).toStrictEqual([SELECTION_FACTS, "unsupported"]);
+  });
+
+  it("D2094: a workspace that reported no projects reads back as reporting none, never as not reporting", async () => {
+    const reportsNone: SelectionFacts = { reported: true, projects: [] };
+    const facts = await inStore((store) => {
+      store.writeDiscovery(
+        bound(WORKTREE_A),
+        withFacts(DISCOVERY, reportsNone),
+      );
+      return discoveredFacts(store);
+    });
+    expect(facts).toStrictEqual([{ reported: true, projects: [] }]);
+  });
+
+  it("D2095: a workspace that never reported its selection facts reads back as not reporting them, never as reporting empty lists", async () => {
+    const facts = await inStore((store) => {
+      store.writeDiscovery(
+        bound(WORKTREE_A),
+        withFacts(DISCOVERY, NOT_REPORTED),
+      );
+      return discoveredFacts(store);
+    });
+    expect(facts).toStrictEqual([{ reported: false }]);
+  });
+
+  it("D2099: stored selection facts that are not JSON are refused as unreadable, naming the column", async () => {
+    const reason = await readingStoredFacts("[{");
+    expect(reason).toContain(
+      'The store holds an unreadable selection_facts: "[{"',
+    );
+  });
+
+  it("D2100: an alias whose find kind is neither string nor regexp is refused as unreadable", async () => {
+    const reason = await readingStoredFacts([
+      {
+        ...CART_PROJECT_FACTS,
+        aliases: [{ ...REGEXP_ALIAS, findKind: "glob" }],
+      },
+    ]);
+    expect(reason).toContain(
+      'The store holds an unreadable JSON field findKind: "glob"',
+    );
+  });
+
+  it("D2101: an alias whose customResolver mark is not a boolean is refused as unreadable", async () => {
+    const reason = await readingStoredFacts([
+      {
+        ...CART_PROJECT_FACTS,
+        aliases: [{ ...REGEXP_ALIAS, hasCustomResolver: "yes" }],
+      },
+    ]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field hasCustomResolver",
+    );
+  });
+
+  it("D2102: an alias with no flags is refused as unreadable, never read as a find without flags", async () => {
+    const { flags: _dropped, ...withoutFlags } = REGEXP_ALIAS;
+    const reason = await readingStoredFacts([
+      { ...CART_PROJECT_FACTS, aliases: [withoutFlags] },
+    ]);
+    expect(reason).toContain("The store holds an unreadable JSON field flags");
+  });
+
+  it("D2103: a project with no global setup list is refused as unreadable, never read as having none", async () => {
+    const { globalSetupFiles: _dropped, ...withoutGlobalSetup } =
+      CART_PROJECT_FACTS;
+    const reason = await readingStoredFacts([withoutGlobalSetup]);
+    expect(reason).toContain("The store holds an unreadable JSON string array");
+  });
+
+  it("D2121: a string find carrying flags is refused as unreadable, a record the writer never makes", async () => {
+    const [stringAlias] = CART_PROJECT_FACTS.aliases;
+    const reason = await readingStoredFacts([
+      { ...CART_PROJECT_FACTS, aliases: [{ ...stringAlias, flags: "i" }] },
+    ]);
+    expect(reason).toContain("The store holds an unreadable JSON field flags");
+  });
+
+  it("D2104: selection facts under a workspace that is not discovered are refused, naming its status and path", async () => {
+    const reason = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      withRawDatabase(store.file, (database) => {
+        database.exec("UPDATE discovery_workspaces SET selection_facts = '[]'");
+      });
+      return rejection(settle(() => store.readLatestDiscovery(WORKTREE_A)));
+    });
+    expect(reason).toContain(
+      `The store holds selection facts under the failed workspace ${WORKSPACE.path}`,
+    );
+  });
+});
+
+describe("opening a store written before selection facts", () => {
+  it("D2096: each discovered workspace reads back as not reporting selection facts, and the rest of the discovery unchanged", async () => {
+    const discovery = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        writeSelectionFactsUnawareStore(stateDirectory, [DISCOVERY]);
+        return withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+      }),
+    );
+    expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
+  });
+
+  it("D2097: the store is at schema version 3 once opened", async () => {
+    const version = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeSelectionFactsUnawareStore(stateDirectory, [
+          DISCOVERY,
+        ]);
+        openStore(stateDirectory).close();
+        return schemaVersionOf(file);
+      }),
+    );
+    expect(version).toBe(3);
+  });
+
+  it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
+    const stored = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeSelectionFactsUnawareStore(
+          stateDirectory,
+          [DISCOVERY, DISCOVERY_WITHOUT_TESTS],
+          [RAN_RUN, FAILED_RUN],
+        );
+        return withOpenStore(stateDirectory, (store) => ({
+          runs: runsOf(store, WORKTREE_A),
+          latest: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+          discoveries: countRows(file, "discoveries"),
+        }));
+      }),
+    );
+    expect(stored).toStrictEqual({
+      runs: [RAN_RUN, FAILED_RUN],
+      latest: DISCOVERY_WITHOUT_TESTS,
+      discoveries: 2,
+    });
+  });
+
+  it("D2098: a version 1 store's discovery reads back not reporting selection facts, beside its runs read not force-stopped", async () => {
+    const stored = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        withOpenStore(stateDirectory, (store) => {
+          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+        });
+        writeForceStopUnawareStore(stateDirectory, [RAN_RUN]);
+        return withOpenStore(stateDirectory, (store) => ({
+          discovery: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+          runs: runsOf(store, WORKTREE_A),
+        }));
+      }),
+    );
+    expect(stored).toStrictEqual({
+      discovery: withoutReportedFacts(DISCOVERY),
+      runs: [{ ...RAN_RUN, forceStopped: false }],
+    });
   });
 });
 

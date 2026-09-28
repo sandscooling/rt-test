@@ -1,9 +1,11 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
-/** Written to `PRAGMA user_version`. A change to the tables below raises it and ships the opener a migration from the previous version, since the opener refuses every other version. */
-export const STORE_SCHEMA_VERSION = 2;
-/** The one older schema version the opener migrates to `STORE_SCHEMA_VERSION` through `STORE_MIGRATION`. */
-export const MIGRATED_SCHEMA_VERSION = 1;
+/** Written to `PRAGMA user_version`. A change to the tables below raises it and gives each older version in `STORE_MIGRATIONS` a path to it, since the opener refuses every version it cannot migrate. */
+export const STORE_SCHEMA_VERSION = 3;
+/** Its code never force-stopped a run and never kept a workspace's selection facts. */
+const FORCE_STOP_UNAWARE_SCHEMA_VERSION = 1;
+/** Its code never kept a workspace's selection facts. */
+const SELECTION_FACTS_UNAWARE_SCHEMA_VERSION = 2;
 export const STORE_FILE_NAME = "store.sqlite";
 /** How long a write waits for another process's write on the same file before it fails whole. */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -15,6 +17,8 @@ export const FORCE_STOPPED = 1;
 export const NOT_FORCE_STOPPED = 0;
 /** Last in `runs`, so a new store and a migrated one hold the same columns in the same order. */
 const FORCE_STOPPED_COLUMN = `force_stopped INTEGER CHECK (force_stopped IN (${NOT_FORCE_STOPPED}, ${FORCE_STOPPED}))`;
+/** Last in `discovery_workspaces`, so a new store and a migrated one hold the same columns in the same order. NULL on a discovered workspace is a report never made. */
+const SELECTION_FACTS_COLUMN = "selection_facts TEXT";
 
 /** A NULL column is a value the record never held. JSON columns hold arrays and objects the record carries whole. */
 export const STORE_SCHEMA = `
@@ -98,6 +102,7 @@ CREATE TABLE discovery_workspaces (
   typecheck_modules TEXT,
   unsupported_projects TEXT,
   unhandled_errors TEXT,
+  ${SELECTION_FACTS_COLUMN},
   PRIMARY KEY (discovery_sequence, workspace_index)
 ) STRICT;
 
@@ -117,9 +122,24 @@ CREATE TABLE discovered_tests (
 ) STRICT;
 `;
 
-/** Brings a store at `MIGRATED_SCHEMA_VERSION` to `STORE_SCHEMA_VERSION`. That version's code never force-stopped a run, so each of its `ran` runs was not force-stopped. */
-export const STORE_MIGRATION = `
+/** Version 1's code never force-stopped a run, so each of its `ran` runs was not force-stopped. */
+const ADD_FORCE_STOPPED = `
 ALTER TABLE runs ADD COLUMN ${FORCE_STOPPED_COLUMN};
-UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';
-PRAGMA user_version = ${STORE_SCHEMA_VERSION};
-`;
+UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';`;
+/** Each workspace stored before keeps a NULL report, so it reads as not reporting its selection facts. */
+const ADD_SELECTION_FACTS = `
+ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN};`;
+const SET_SCHEMA_VERSION = `
+PRAGMA user_version = ${STORE_SCHEMA_VERSION};`;
+
+/** Keyed by each older schema version the opener reads: the statements that bring a store at it to `STORE_SCHEMA_VERSION`. */
+export const STORE_MIGRATIONS: ReadonlyMap<number, string> = new Map([
+  [
+    FORCE_STOP_UNAWARE_SCHEMA_VERSION,
+    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,
+  ],
+  [
+    SELECTION_FACTS_UNAWARE_SCHEMA_VERSION,
+    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,
+  ],
+]);
