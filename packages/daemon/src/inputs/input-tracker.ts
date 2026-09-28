@@ -2,20 +2,19 @@ import type { WatchEventType } from "node:fs";
 import { realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { DaemonLog } from "../daemon/daemon-log.js";
-import {
-  RECONCILIATION_COMPLETE,
-  RECONCILIATION_INCOMPLETE,
-  WATCHER_HEALTHY,
-  WATCHER_UNHEALTHY,
-  type InputFacts,
-} from "../query/answer.js";
+import type { InputFacts } from "../query/answer.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import { relativePosixPath } from "../vitest/find-workspaces.js";
-import { currentInputs } from "./current-inputs.js";
+import {
+  currentInputs,
+  inputFacts,
+  unavailableReason,
+  type TrackerCondition,
+} from "./current-inputs.js";
 import type { FingerprintResult } from "./fingerprint.js";
 import { DeclaredNonInputs } from "./declared-non-inputs.js";
 import { GitFiles } from "./git-files.js";
@@ -39,16 +38,15 @@ import {
 } from "./input-jobs.js";
 import { InputState } from "./input-state.js";
 import { InputWatcher } from "./input-watcher.js";
-import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
+import { NON_INPUTS_FILE } from "./non-inputs.js";
+import { protection } from "./protection.js";
+import { keepReleasedFiles } from "./protection-walk.js";
 import { ReconcileSchedule } from "./reconcile-schedule.js";
 
 const IGNORE_FILE = ".gitignore";
 const RENAME_EVENT = "rename";
 const CHANGE_EVENT = "change";
 const NON_INPUTS_CHANGED_REASON = `${NON_INPUTS_FILE}, which declares the non-inputs, changed`;
-const FIRST_RECONCILIATION_REASON = "the first reconciliation has not ended";
-const RECONCILING_REASON = "a reconciliation of the inputs is running";
-const STOPPED_REASON = "the daemon is stopping";
 
 export interface InputTrackerOptions {
   readonly consumerRoot: string;
@@ -62,12 +60,15 @@ export interface CurrentInputs {
   readonly facts: InputFacts;
   /** Why no fingerprint can be computed for any workspace; absent when each is computed on its own. */
   readonly unavailable?: string;
-  /** Why every file stays an input, while `rt-test.json` cannot be used; absent otherwise. */
+  /** Why every file stays an input, while `rt-test.json` cannot be used or its patterns do not apply; absent otherwise. */
   readonly nonInputsUnusable?: string;
   workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
   discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
-  /** Why a listed test module no watch covers may have changed at or after `since`, a time in ms; undefined when none did. */
-  testModuleChangedSince(
+  /**
+   * Why a file the discovery protects by path that no watch covers may have changed at or after `since`, a time in
+   * ms; undefined when none did.
+   */
+  protectedFileChangedSince(
     discovery: TestDiscovery,
     since: number,
   ): string | undefined;
@@ -87,10 +88,14 @@ export interface TrackedInputs {
   beginJob(): JobMark;
   endJob(mark: JobMark): Promise<JobVerdict>;
   /**
-   * Protects the test modules `discovery` lists from the declared patterns, in place of the last discovery's, and
-   * resolves once every path whose declared state that change flips has been read.
+   * Protects from the declared patterns what `discovery` lists and its projects' test file patterns find, in place of
+   * the last discovery's, and resolves once every path whose declared state that change flips has been read. Resolves
+   * with why a file only a walk found may have changed at or after `jobStart`, a time in ms; undefined when none may.
    */
-  protectTestModules(discovery: TestDiscovery | undefined): Promise<void>;
+  protectInputs(
+    discovery: TestDiscovery | undefined,
+    jobStart?: number,
+  ): Promise<string | undefined>;
   /** Ends the timer, every watch and any git process, and releases every job waiting on the inputs. */
   stop(): Promise<void>;
 }
@@ -98,7 +103,8 @@ export interface TrackedInputs {
 /**
  * Tracks the consumer's inputs for one daemon life: reads them all in a reconciliation at start, on a watcher
  * failure, a git move, an ignore-rule change or a change to `rt-test.json`, and `RECONCILE_INTERVAL_MS` after the
- * last one ended; between reconciliations, re-reads only the paths events name. A declared non-input is never an input.
+ * last one ended; between reconciliations, re-reads only the paths events name. A declared non-input is never an input,
+ * and no declared pattern applies until the lifecycle gives a discovery that reports what the patterns may not remove.
  */
 export class InputTracker implements TrackedInputs {
   readonly #root: string;
@@ -126,6 +132,7 @@ export class InputTracker implements TrackedInputs {
   #reconciliation: Promise<void> = Promise.resolve();
   #processing: Promise<void> | undefined;
   #inFlight = 0;
+  #protecting = 0;
   #establishFailure: string | undefined;
   #watchFailure: string | undefined;
   #lastReconciledAt: string | undefined;
@@ -166,23 +173,11 @@ export class InputTracker implements TrackedInputs {
   }
 
   facts(): InputFacts {
-    const incomplete = this.#incompleteReason();
-    return {
-      revision: this.#state.revision,
-      reconciliation:
-        incomplete === undefined
-          ? { state: RECONCILIATION_COMPLETE }
-          : { state: RECONCILIATION_INCOMPLETE, reason: incomplete },
-      ...(this.#lastReconciledAt === undefined
-        ? {}
-        : { lastReconciledAt: this.#lastReconciledAt }),
-      watcher:
-        this.#watchFailure === undefined
-          ? { state: WATCHER_HEALTHY }
-          : { state: WATCHER_UNHEALTHY, reason: this.#watchFailure },
-      pendingChanges: this.#pending(),
-      gitUnread: this.#git.unread,
-    };
+    return inputFacts(
+      this.#condition(),
+      this.#state.revision,
+      this.#git.unread,
+    );
   }
 
   current(): CurrentInputs {
@@ -208,15 +203,59 @@ export class InputTracker implements TrackedInputs {
     return this.#jobs.close(mark, this.#unavailableReason());
   }
 
-  /** Reads only the paths whose declared state the change flips, after any reconciliation running has ended. */
-  async protectTestModules(
+  /**
+   * Reads the paths whose declared state the change flips, once any reconciliation running has ended, and walks for
+   * the files a pattern no longer hides when the patterns changed or stopped applying. The walk starts at once.
+   */
+  async protectInputs(
     discovery: TestDiscovery | undefined,
-  ): Promise<void> {
-    const flipped = this.#declared.protect(
-      discovery === undefined ? [] : discoveredTestModules(discovery),
+    jobStart?: number,
+  ): Promise<string | undefined> {
+    const change = this.#declared.protect(
+      protection(discovery, this.#root),
+      this.#state.project().digests.keys(),
     );
-    if (flipped.length === 0 || !this.#started || this.#stopped) return;
-    for (const path of flipped) {
+    if (!this.#started || this.#stopped) return undefined;
+    if (change.flipped.length === 0 && !change.walk) return undefined;
+    this.#queueQuietly(change.flipped);
+    const changed = change.walk
+      ? await this.#walkReleased(jobStart)
+      : undefined;
+    this.#processQueue();
+    await this.settled();
+    return changed;
+  }
+
+  /** A path a reconciliation will read anyway needs no walk: one runs until the input set is established. */
+  async #walkReleased(
+    jobStart: number | undefined,
+  ): Promise<string | undefined> {
+    const filter = this.#filter;
+    if (filter === undefined || !this.#state.established) return undefined;
+    this.#protecting += 1;
+    const released = await keepReleasedFiles(
+      this.#scope(filter),
+      this.#state,
+      (path) => this.#queue.has(path),
+      jobStart,
+    )
+      .catch((error: unknown) => ({
+        ok: false as const,
+        reason: errorText(error),
+      }))
+      .finally(() => {
+        this.#protecting -= 1;
+      });
+    if (released.ok) return released.changed;
+    if (this.#stopped) return unavailableReason(this.#condition());
+    const reason = `the inputs protection released could not be read: ${released.reason}`;
+    this.#inputSetLost(reason);
+    return reason;
+  }
+
+  /** Root-relative paths queued because protection changed whether they count; an event before their read clears it. */
+  #queueQuietly(paths: readonly string[]): void {
+    for (const path of paths) {
       const absolute = absoluteInputPath(this.#root, path);
       if (!this.#queue.has(absolute)) {
         this.#quiet.add(absolute);
@@ -224,8 +263,6 @@ export class InputTracker implements TrackedInputs {
       }
       this.#ledger.accept();
     }
-    this.#processQueue();
-    await this.#ledger.waitForRead();
   }
 
   async stop(): Promise<void> {
@@ -412,7 +449,10 @@ export class InputTracker implements TrackedInputs {
       this.#git.report(filter);
     }
     for (const [path, kind] of batch) {
-      if (filter.excludes(path)) continue;
+      if (filter.excludes(path)) {
+        this.#quiet.delete(path);
+        continue;
+      }
       await this.#readPath(filter, path, kind);
     }
   }
@@ -520,32 +560,20 @@ export class InputTracker implements TrackedInputs {
     for (const description of descriptions) this.#jobs.record(description);
   }
 
-  #pending(): number {
-    return this.#queue.size + this.#inFlight;
-  }
-
-  /** Why no current fingerprint can be computed now; undefined when one can. */
   #unavailableReason(): string | undefined {
-    const incomplete = this.#incompleteReason();
-    if (incomplete !== undefined) return incomplete;
-    if (this.#watchFailure !== undefined) {
-      return `the input watcher is unhealthy: ${this.#watchFailure}`;
-    }
-    const pending = this.#pending();
-    if (pending > 0) return `${pending} changed paths have not been read yet`;
-    return undefined;
+    return unavailableReason(this.#condition());
   }
 
-  #incompleteReason(): string | undefined {
-    if (this.#stopped) return STOPPED_REASON;
-    if (this.#lastReconciledAt === undefined) {
-      return FIRST_RECONCILIATION_REASON;
-    }
-    if (this.#reconciling) return RECONCILING_REASON;
-    if (this.#establishFailure !== undefined) {
-      return `the input set could not be established: ${this.#establishFailure}`;
-    }
-    return undefined;
+  #condition(): TrackerCondition {
+    return {
+      stopped: this.#stopped,
+      lastReconciledAt: this.#lastReconciledAt,
+      reconciling: this.#reconciling,
+      establishFailure: this.#establishFailure,
+      watchFailure: this.#watchFailure,
+      protecting: this.#protecting > 0,
+      pending: this.#queue.size + this.#inFlight,
+    };
   }
 
   #label(path: string): string {

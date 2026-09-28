@@ -16,6 +16,7 @@ import {
   VITE_CONFIG_FILES,
   VITEST_CONFIG_FILES,
 } from "../vitest/find-workspaces.js";
+import type { Protection } from "./protection.js";
 
 /** The consumer's RT Test settings file, at the consumer root and committed with the project. */
 export const NON_INPUTS_FILE = "rt-test.json";
@@ -30,7 +31,7 @@ const INVALID_SEGMENTS = ["", ".", ".."];
 const WILDCARD_CHARACTERS = [ANY_RUN, ANY_CHARACTER];
 
 export const NON_INPUTS_ABSENT = "absent";
-const NON_INPUTS_DECLARED = "declared";
+export const NON_INPUTS_DECLARED = "declared";
 export const NON_INPUTS_UNUSABLE = "unusable";
 
 /** What `rt-test.json` at the consumer root declares: nothing when it is absent, its patterns, or why it declares nothing. */
@@ -82,14 +83,6 @@ export function readNonInputs(consumerRoot: string): NonInputsDeclaration {
   };
 }
 
-/** Whether two declarations would leave the same patterns in effect, or give the same reason. */
-export function sameDeclaration(
-  first: NonInputsDeclaration,
-  second: NonInputsDeclaration,
-): boolean {
-  return JSON.stringify(first) === JSON.stringify(second);
-}
-
 /** The reason every file stays an input, while the declaration cannot be used; undefined otherwise. */
 export function unusableReason(
   declaration: NonInputsDeclaration,
@@ -100,17 +93,18 @@ export function unusableReason(
 }
 
 /**
- * Decides declared non-inputs for one declaration and one set of protected test modules. `rt-test.json` itself,
- * every manifest, workspace list, lockfile, Vitest or Vite config, tsconfig or jsconfig file, and each protected
- * test module is never one.
+ * Decides declared non-inputs for one declaration and one protection. No pattern applies while the protection says
+ * none does. `rt-test.json` itself, every manifest, workspace list, lockfile, Vitest or Vite config, tsconfig or
+ * jsconfig file, and each file the protection protects is never one.
  */
 export function declaredNonInputs(
   declaration: NonInputsDeclaration,
-  protectedTestModules: ReadonlySet<string>,
+  protection: Protection,
 ): NonInputMatch {
   if (
     declaration.state !== NON_INPUTS_DECLARED ||
-    declaration.patterns.length === 0
+    declaration.patterns.length === 0 ||
+    !protection.applies
   ) {
     return () => undefined;
   }
@@ -122,14 +116,17 @@ export function declaredNonInputs(
     if (
       path === NON_INPUTS_FILE ||
       TYPESCRIPT_CONFIG_NAME.test(posix.basename(path)) ||
-      PROTECTED_NAMES.has(posix.basename(path)) ||
-      protectedTestModules.has(path)
+      PROTECTED_NAMES.has(posix.basename(path))
     ) {
       return undefined;
     }
     const segments = path.split(POSIX_SEPARATOR);
-    return compiled.find((entry) => matchesPath(entry.segments, segments))
-      ?.pattern;
+    const pattern = compiled.find((entry) =>
+      matchesPath(entry.segments, segments),
+    )?.pattern;
+    return pattern === undefined || protection.protects(path)
+      ? undefined
+      : pattern;
   };
 }
 

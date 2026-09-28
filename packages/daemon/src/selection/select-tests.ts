@@ -151,7 +151,7 @@ function selectionContext(input: SelectionInput): SelectionContext {
     walks: new Map(),
     declared: declaredNonInputs(
       input.nonInputs.declaration,
-      input.nonInputs.protectedTestModules,
+      input.nonInputs.protection,
     ),
   };
 }

@@ -16,6 +16,7 @@ import {
   type InputDigests,
 } from "./input-inventory.js";
 import { discoveredTestModules, workspaceTestModules } from "./non-inputs.js";
+import { protectedFiles } from "./protection.js";
 
 const ENTRY_SEPARATOR = "\n";
 const MISSING_CODE = "ENOENT";
@@ -187,23 +188,23 @@ function moduleDigest(path: string): FingerprintResult {
 }
 
 /**
- * Why a listed test module the selected inputs leave out may have changed at or after `since`, a time in ms, or
- * undefined when none did. No watch covers such a module, so a job reading it cannot learn of an edit any other way.
+ * Why a file the discovery protects by path that the inputs leave out may have changed at or after `since`, a time in
+ * ms, or undefined when none did: a listed test module, setup file or global setup file. No watch covers such a file,
+ * so a job reading it cannot learn of an edit any other way.
  */
-export function testModuleChangedSince(
+export function protectedFileChangedSince(
   project: ProjectInputs,
   discovery: TestDiscovery,
   since: number,
 ): string | undefined {
-  const inputs = workspaceInputs(project, discoveredTestModules(discovery));
-  for (const path of inputs.testModules) {
-    if (inputs.selected.digests.has(path)) continue;
+  for (const path of protectedFiles(discovery)) {
+    if (project.digests.has(path)) continue;
     const modified = modifiedAt(absoluteInputPath(project.root, path));
     if (
       modified === undefined ||
       modified >= since - MODIFIED_TIME_RESOLUTION_MS
     ) {
-      return `the test module ${path}, which no watch covers, may have changed while the job ran`;
+      return `${path}, which the discovery protects and no watch covers, may have changed while the job ran`;
     }
   }
   return undefined;

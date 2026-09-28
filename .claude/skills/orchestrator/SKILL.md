@@ -234,6 +234,8 @@ Keep discussing with the owner. When a change is agreed, route it: new work with
 3. `rt-<lane>-tests`: `Run /create-tests for <ticket or record>. The dev session is threadId <dev threadId>; your defect ids are <range>. Report when every test is green, then stay available: the review sends you test gaps.`
 4. `rt-<lane>-review`: `Run /review-changes for <ticket or record>. The tests session is threadId <tests threadId>. Also review the doc changes of its authoring commit <sha>. Leave these sibling paths out of your scope: <paths, or none>.`
 
+**A dispatch asks for no work ahead of the skill's own blocking gates.** Dev's sanity check must find nothing built yet, so ask for a dependency edit, an install or any other change only once the member reports it is past that check.
+
 **Land a ticket's authoring in its own commit** once `create-ticket` reports ready (the ticket, and the planning docs it changed), before dev starts: a worktree lane's branch must hold its ticket, and shared planning files must not sit dirty through a build. Since that commit leaves the lane's diff, name its sha in the review dispatch, so the glossary, requirement and sprint text it wrote still gets a reviewer.
 
 Keep every member's threadId as you spawn it, since a later stage needs it as an address. **Stage 3 always runs**, because dev writes no test and runs no suite; an inline `change-request` gets its own tests and review members the same way.

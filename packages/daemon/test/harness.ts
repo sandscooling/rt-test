@@ -29,12 +29,20 @@ import {
   chosenConfigFile,
   type ConfirmedStart,
 } from "../src/vitest/confirmed-start.js";
-import { findVitestWorkspaces } from "../src/vitest/find-workspaces.js";
+import type { WorkspaceDiscovery } from "../src/vitest/discover-tests.js";
+import {
+  findVitestWorkspaces,
+  type VitestWorkspace,
+} from "../src/vitest/find-workspaces.js";
 import {
   runWorkspace,
   type NotConfirmedRun,
   type WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
+import type {
+  ProjectSelectionFacts,
+  SelectionFacts,
+} from "../src/vitest/selection-facts.js";
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const FIXTURES = join(REPO, "test/fixtures/daemon");
@@ -353,4 +361,59 @@ export function settle<T>(run: () => T): T | { thrown: string } {
   } catch (error) {
     return { thrown: String(error) };
   }
+}
+
+/** One project's selection facts; a pattern list left out is empty, and the pattern directory is the consumer root. */
+export interface FactsCase {
+  readonly projectName?: string;
+  readonly setupFiles?: readonly string[];
+  readonly globalSetupFiles?: readonly string[];
+  readonly directory?: string;
+  readonly include?: readonly string[];
+  readonly exclude?: readonly string[];
+  readonly includeSource?: readonly string[];
+}
+
+export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
+  return {
+    projectName: facts.projectName ?? "unit",
+    setupFiles: facts.setupFiles ?? [],
+    globalSetupFiles: facts.globalSetupFiles ?? [],
+    aliases: [],
+    testFilePatterns: {
+      directory: facts.directory ?? ".",
+      include: facts.include ?? [],
+      exclude: facts.exclude ?? [],
+      includeSource: facts.includeSource ?? [],
+    },
+  };
+}
+
+/** A discovered workspace listing one test in each of `modules`, relative to it, and reporting `facts`. */
+export function discoveredWorkspace(
+  workspace: VitestWorkspace,
+  modules: readonly string[],
+  facts: SelectionFacts,
+): WorkspaceDiscovery {
+  return {
+    status: "discovered",
+    workspace,
+    vitestVersion: "5.0.1",
+    tests: modules.map((modulePath) => ({
+      identity: {
+        workspacePath: workspace.path,
+        projectName: "unit",
+        modulePath,
+        namePath: ["t"],
+        occurrence: 0,
+      },
+      isDuplicate: false,
+      mode: "run",
+    })),
+    failedModules: [],
+    typecheckModules: [],
+    unsupportedProjects: [],
+    unhandledErrors: [],
+    selectionFacts: facts,
+  };
 }
