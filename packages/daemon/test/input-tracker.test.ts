@@ -1024,9 +1024,14 @@ describe(
           name: INPUT,
           held: takenAfterLastWrite(AN_HOUR_MS),
           between: () => {
+            const heldChange = statSync(file, { bigint: true }).ctimeNs;
             writeFileSync(file, CONTENT.replace("1", "2"));
             writeFileSync(file, CONTENT);
-            utimesSync(file, new Date(), modified);
+            // A kernel stamping times from a coarse clock can give this edit the held read's change time, which no read
+            // taken 2 s after that time could see; the restore repeats until the change time has moved.
+            do {
+              utimesSync(file, new Date(), modified);
+            } while (statSync(file, { bigint: true }).ctimeNs === heldChange);
           },
         });
       });
@@ -1100,10 +1105,14 @@ describe(
           name: "src/link.ts",
           held: takenAfterLastWrite(AN_HOUR_MS),
           between: () => {
-            rmSync(link);
-            symlinkSync(other, link, "file");
-            rmSync(link);
-            symlinkSync(target, link, "file");
+            const heldChange = lstatSync(link, { bigint: true }).ctimeNs;
+            // Repeated until the link's change time has moved, for the coarse clock the edit test above names.
+            do {
+              rmSync(link);
+              symlinkSync(other, link, "file");
+              rmSync(link);
+              symlinkSync(target, link, "file");
+            } while (lstatSync(link, { bigint: true }).ctimeNs === heldChange);
           },
         });
       });
