@@ -1,5 +1,5 @@
 import { lstatSync } from "node:fs";
-import { join, posix } from "node:path";
+import { isAbsolute, join, posix } from "node:path";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
@@ -133,12 +133,12 @@ export function declaredNonInputs(
   };
 }
 
-/** Every test module the discovery lists, root-relative: each workspace's test, failed and typecheck modules. */
+/** Every test module the discovery lists, named by `testModuleFile`: each workspace's test, failed and typecheck modules. */
 export function discoveredTestModules(discovery: TestDiscovery): string[] {
   return [...new Set(discovery.workspaces.flatMap(workspaceTestModules))];
 }
 
-/** The test modules the discovery lists for one workspace, root-relative. */
+/** The test modules the discovery lists for one workspace, named by `testModuleFile`. */
 export function workspaceTestModules(entry: WorkspaceDiscovery): string[] {
   if (entry.status !== "discovered") return [];
   const modulePaths = [
@@ -153,11 +153,15 @@ export function workspaceTestModules(entry: WorkspaceDiscovery): string[] {
   ];
 }
 
-/** A test module's path relative to the consumer root; its module path is relative to its workspace's directory. */
+/**
+ * A test module's path relative to the consumer root; its module path is relative to its workspace's directory, or
+ * absolute when it lies on another Windows drive, where no relative path reaches it.
+ */
 export function testModuleFile(
   workspacePath: string,
   modulePath: string,
 ): string {
+  if (isAbsolute(modulePath)) return modulePath;
   return posix.normalize(posix.join(workspacePath, modulePath));
 }
 

@@ -16,6 +16,7 @@ import {
   type ModuleReport,
 } from "./module-tests.js";
 import { RunInterruption } from "./run-interruption.js";
+import { selectionFacts, type SelectionFacts } from "./selection-facts.js";
 import {
   inWorkspaceSession,
   queueSessionJob,
@@ -38,6 +39,7 @@ export type WorkspaceDiscovery =
       readonly typecheckModules: readonly ModuleReport[];
       readonly unsupportedProjects: readonly UnsupportedProject[];
       readonly unhandledErrors: readonly string[];
+      readonly selectionFacts: SelectionFacts;
       readonly closeError?: string;
     }
   | {
@@ -70,6 +72,7 @@ interface CollectedWorkspace {
   readonly typecheckModules: readonly ModuleReport[];
   readonly unsupportedProjects: readonly UnsupportedProject[];
   readonly unhandledErrors: readonly string[];
+  readonly selectionFacts: SelectionFacts;
 }
 
 const UNCOLLECTED_MODULE_ERROR =
@@ -147,6 +150,7 @@ async function collectWorkspace(
     typecheckModules: session.typecheckModules,
     unsupportedProjects: session.unsupportedProjects,
     unhandledErrors: unhandledErrors.map(errorText),
+    selectionFacts: selectionFacts(session),
   };
   for (const testModule of testModules) {
     sortModule(testModule, session, report);

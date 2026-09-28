@@ -25,6 +25,7 @@ interface WorkspaceColumns {
   readonly typecheckModules: string | null;
   readonly unsupportedProjects: string | null;
   readonly unhandledErrors: string | null;
+  readonly selectionFacts: string | null;
 }
 
 interface DiscoveryStatements {
@@ -38,8 +39,8 @@ const INSERT_DISCOVERY = `INSERT INTO discoveries
 
 const INSERT_WORKSPACE = `INSERT INTO discovery_workspaces
   (discovery_sequence, workspace_index, status, workspace_path, workspace_directory, vitest_version, unsupported_vitest,
-   error, close_error, failed_modules, typecheck_modules, unsupported_projects, unhandled_errors)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+   error, close_error, failed_modules, typecheck_modules, unsupported_projects, unhandled_errors, selection_facts)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const INSERT_TEST = `INSERT INTO discovered_tests
   (discovery_sequence, workspace_index, test_index, workspace_path, project_name, module_path, name_path, occurrence,
@@ -55,6 +56,7 @@ const NO_WORKSPACE_COLUMNS: WorkspaceColumns = {
   typecheckModules: null,
   unsupportedProjects: null,
   unhandledErrors: null,
+  selectionFacts: null,
 };
 
 /** Stores one discovery whole, or nothing of it; the store assigns its identity and stamps the adapter version. */
@@ -134,6 +136,7 @@ function writeWorkspace(
     columns.typecheckModules,
     columns.unsupportedProjects,
     columns.unhandledErrors,
+    columns.selectionFacts,
   );
   if (entry.status !== "discovered") return;
   entry.tests.forEach((test, testIndex) => {
@@ -152,6 +155,9 @@ function workspaceColumns(entry: WorkspaceDiscovery): WorkspaceColumns {
         typecheckModules: JSON.stringify(entry.typecheckModules),
         unsupportedProjects: JSON.stringify(entry.unsupportedProjects),
         unhandledErrors: JSON.stringify(entry.unhandledErrors),
+        selectionFacts: entry.selectionFacts.reported
+          ? JSON.stringify(entry.selectionFacts.projects)
+          : null,
       };
     case "unsupported":
       return {

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -17,6 +18,11 @@ import {
 } from "../src/vitest/discover-tests.js";
 import type { RecordedTest } from "../src/vitest/run-states.js";
 import { runWorkspace } from "../src/vitest/run-workspace.js";
+import type {
+  ProjectSelectionFacts,
+  ReportedAlias,
+  SelectionFacts,
+} from "../src/vitest/selection-facts.js";
 import { queueSessionJob } from "../src/vitest/workspace-session.js";
 import {
   confirmEvery,
@@ -2146,6 +2152,324 @@ describe("the working directory of a workspace's discovery and run", () => {
     async () => {
       const { before, after } = await runInWorkspaceB();
       expect(after).toBe(before);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+/** The selection-facts fixture's `packages/solo` names this file one directory above the consumer root. */
+const OUTSIDE_SETUP_FILE = "outside-setup.mjs";
+/** The node project's own aliases, in its config's order, as Vite's resolved config holds them. */
+const NODE_ALIASES: readonly ReportedAlias[] = [
+  {
+    find: "@shared",
+    findKind: "string",
+    flags: "",
+    replacement: "shared-lib",
+    hasCustomResolver: false,
+  },
+  {
+    find: "^~icons\\/(.*)$",
+    findKind: "regexp",
+    flags: "i",
+    replacement: "icon-pack/$1",
+    hasCustomResolver: false,
+  },
+  {
+    find: "virtual:facts",
+    findKind: "string",
+    flags: "",
+    replacement: "facts-module",
+    hasCustomResolver: true,
+  },
+];
+
+const selectionFactsRuns = new Map<
+  string,
+  Promise<TestDiscovery | { thrown: string }>
+>();
+
+/**
+ * Discovers the selection-facts fixture once per install and root spelling, first writing the setup file it names
+ * outside the consumer root and the `setup-link` directory link its bare project names.
+ */
+function discoverSelectionFacts(
+  install: VitestInstall,
+  throughLink = false,
+): Promise<TestDiscovery | { thrown: string }> {
+  const key = `${install}:${String(throughLink)}`;
+  const cached = selectionFactsRuns.get(key);
+  if (cached !== undefined) return cached;
+  const run = inConsumerCopy(
+    "selection-facts",
+    install,
+    (root) => {
+      writeFileSync(join(dirname(root), OUTSIDE_SETUP_FILE), "export {};\n");
+      symlinkSync(join(root, "setup"), join(root, "setup-link"), "junction");
+      return settledDiscovery(root);
+    },
+    throughLink,
+  );
+  selectionFactsRuns.set(key, run);
+  return run;
+}
+
+function selectionFactsOf(
+  discovery: ConsumerRun["discovery"],
+  path: string,
+): unknown {
+  const entry = workspace(discovery, path);
+  if (entry === undefined || !("status" in entry)) return entry;
+  return entry.status === "discovered" ? entry.selectionFacts : entry;
+}
+
+/** One fact of one project's report, or what stood in its way. */
+function projectFact(
+  discovery: ConsumerRun["discovery"],
+  path: string,
+  projectName: string,
+  fact: (facts: ProjectSelectionFacts) => unknown,
+): unknown {
+  const facts = selectionFactsOf(discovery, path);
+  if (!isReported(facts)) return facts;
+  const project = facts.projects.find(
+    (entry) => entry.projectName === projectName,
+  );
+  return project === undefined ? `no project ${projectName}` : fact(project);
+}
+
+function isReported(
+  facts: unknown,
+): facts is Extract<SelectionFacts, { reported: true }> {
+  return (
+    typeof facts === "object" &&
+    facts !== null &&
+    "reported" in facts &&
+    facts.reported === true
+  );
+}
+
+function sorted(files: readonly string[]): string[] {
+  return [...files].sort();
+}
+
+describe("reporting each workspace's selection facts", () => {
+  it(
+    "D2105: a project's setup files leave out RT Test's snapshot guard, so a project with none reports an empty list",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, ".", "bare", (facts) => facts.setupFiles),
+      ).toStrictEqual([]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2106: on Vitest 4.1, setup files are root-relative, climbing with .. for a file outside the consumer root",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(
+          discovery,
+          "packages/solo",
+          "",
+          (facts) => facts.setupFiles,
+        ),
+      ).toStrictEqual([
+        "packages/solo/setup.mjs",
+        "setup/shared-setup.mjs",
+        `../${OUTSIDE_SETUP_FILE}`,
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2107: through a linked consumer root, setup files read as they do from the real root",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest", true);
+      expect(
+        projectFact(
+          discovery,
+          "packages/solo",
+          "",
+          (facts) => facts.setupFiles,
+        ),
+      ).toStrictEqual([
+        "packages/solo/setup.mjs",
+        "setup/shared-setup.mjs",
+        `../${OUTSIDE_SETUP_FILE}`,
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2108: on Vitest 5, a project extending the root config reports the root's global setup beside its own",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, ".", "node", (facts) =>
+          sorted(facts.globalSetupFiles),
+        ),
+      ).toStrictEqual(["setup/global-own.mjs", "setup/global-root.mjs"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2109: on Vitest 4.1, a workspace with no projects lists its global setup once, though it is both the project's and the root's",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(
+          discovery,
+          "packages/solo",
+          "",
+          (facts) => facts.globalSetupFiles,
+        ),
+      ).toStrictEqual(["packages/solo/global.mjs"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2110: a project whose own global setup names the root's file, through a directory link, lists that file once",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, ".", "bare", (facts) => facts.globalSetupFiles),
+      ).toStrictEqual(["setup/global-root.mjs"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2119: a project naming the root's global setup file by an absolute path through a directory link lists that file once",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "absolute",
+          (facts) => facts.globalSetupFiles,
+        ),
+      ).toStrictEqual(["setup/global-root.mjs"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2120: a setup file named by an absolute path through a directory link reports the file's own path, not the link's",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(discovery, ".", "absolute", (facts) => facts.setupFiles),
+      ).toStrictEqual(["setup/node-setup.mjs"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2111: on Vitest 4.1, a browser-mode project is left out of the report while its sibling project is reported",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      const facts = selectionFactsOf(discovery, "packages/browser");
+      expect(
+        isReported(facts)
+          ? facts.projects.map((project) => project.projectName)
+          : facts,
+      ).toStrictEqual(["node"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2112: on Vitest 5, a project's own aliases lead its report in config order, a RegExp find as its source text and flags",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, ".", "node", (facts) =>
+          facts.aliases.slice(0, NODE_ALIASES.length),
+        ),
+      ).toStrictEqual(NODE_ALIASES);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2113: on Vitest 4.1, a project's own aliases lead its report in config order, marking the one with a customResolver",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(discovery, ".", "node", (facts) =>
+          facts.aliases.slice(0, NODE_ALIASES.length),
+        ),
+      ).toStrictEqual(NODE_ALIASES);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2114: a workspace's report survives a JSON round trip unchanged",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      const facts = selectionFactsOf(discovery, ".");
+      const carried: unknown =
+        facts === undefined
+          ? "no facts"
+          : JSON.parse(JSON.stringify(facts) as string);
+      expect(carried).toStrictEqual(facts);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2115: on Vitest 5, a project's test file patterns match from its dir, root-relative",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, ".", "node", (facts) => facts.testFilePatterns),
+      ).toStrictEqual({
+        directory: "unit",
+        include: ["**/*.test.mjs"],
+        exclude: ["**/skipped/**"],
+        includeSource: ["src/**/*.mjs"],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2116: through a linked consumer root, a project dir not yet on disk reports its path under the consumer root",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest", true);
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "pending",
+          (facts) => facts.testFilePatterns.directory,
+        ),
+      ).toBe("pending");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2117: on Vitest 4.1, a project that sets no includeSource reports none, matching from the consumer root as .",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(discovery, ".", "bare", (facts) => facts.testFilePatterns),
+      ).toStrictEqual({
+        directory: ".",
+        include: ["bare/*.test.mjs"],
+        exclude: ["**/node_modules/**", "**/.git/**"],
+        includeSource: [],
+      });
     },
     DISCOVERY_TIMEOUT_MS,
   );

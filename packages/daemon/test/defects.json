@@ -1102,8 +1102,8 @@
     "id": "D1278",
     "defect": "The migration adds the force-stop column but never marks the version-1 ran runs, so each reads back unreadable.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';\n",
-    "new": ""
+    "old": "\nUPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';`;",
+    "new": "`;"
   },
   {
     "id": "D1279",
@@ -1128,17 +1128,17 @@
   },
   {
     "id": "D1282",
-    "defect": "An opener that read the version-1 header before another opener migrated the file migrates it again and fails on the column that already exists.",
+    "defect": "An opener picks its migration from the version-1 header it read before the write lock, so it migrates a store another opener already migrated and fails on the column that already exists.",
     "file": "packages/daemon/src/store/open-store.ts",
-    "old": "    if (!isMigratable(checkedHeader(database, file))) return;\n",
-    "new": ""
+    "old": "      checkedHeader(database, file).userVersion,\n    );\n    if (migration === undefined) return;",
+    "new": "      1,\n    );\n    if (migration === undefined) return;"
   },
   {
     "id": "D1283",
-    "defect": "The opener migrates an RT Test store of any schema version up to 1, so a version-0 store is changed rather than refused.",
+    "defect": "The opener accepts an RT Test store of any schema version up to 2, so a version-0 store is opened rather than refused.",
     "file": "packages/daemon/src/store/open-store.ts",
-    "old": "  return header.userVersion === MIGRATED_SCHEMA_VERSION;",
-    "new": "  return header.userVersion <= MIGRATED_SCHEMA_VERSION;"
+    "old": "  return STORE_MIGRATIONS.has(header.userVersion);",
+    "new": "  return header.userVersion <= 2;"
   },
   {
     "id": "D1285",
@@ -3743,5 +3743,229 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(\"discovery started\");",
     "new": "    if (this.isStopping()) return;\n    await inputs.settled();\n    log.entry(\"discovery started\");"
+  },
+  {
+    "id": "D2093",
+    "defect": "The discovery writer never stores a workspace's selection facts, so every discovered workspace reads back as not reporting them.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "        selectionFacts: entry.selectionFacts.reported\n          ? JSON.stringify(entry.selectionFacts.projects)\n          : null,",
+    "new": "        selectionFacts: null,"
+  },
+  {
+    "id": "D2094",
+    "defect": "The discovery writer stores a report of no projects as NULL, so a workspace whose every project is in browser mode reads back as not reporting.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "        selectionFacts: entry.selectionFacts.reported\n",
+    "new": "        selectionFacts: entry.selectionFacts.reported && entry.selectionFacts.projects.length > 0\n"
+  },
+  {
+    "id": "D2095",
+    "defect": "The discovery writer stores a workspace that never reported as an empty list, so it reads back as reporting no projects.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "          ? JSON.stringify(entry.selectionFacts.projects)\n          : null,",
+    "new": "          ? JSON.stringify(entry.selectionFacts.projects)\n          : \"[]\","
+  },
+  {
+    "id": "D2096",
+    "defect": "The migration gives the new column a default of an empty list, so each workspace stored before it reads back as reporting no projects rather than as not reporting.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN};`;",
+    "new": "ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN} DEFAULT '[]';`;"
+  },
+  {
+    "id": "D2097",
+    "defect": "The version 2 migration never raises the header, so the migrated store still claims version 2.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}`,"
+  },
+  {
+    "id": "D2098",
+    "defect": "The version 1 migration never adds the selection facts column, so a version 1 store's discoveries cannot be read once migrated.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_FORCE_STOPPED}${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D2099",
+    "defect": "A JSON column holding text that does not parse escapes as a bare SyntaxError that names neither the store nor the column.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  const value = text(row, name);\n  try {\n    return JSON.parse(value) as unknown;\n  } catch (error) {\n    throw unreadable(name, value, error);\n  }",
+    "new": "  return JSON.parse(text(row, name)) as unknown;"
+  },
+  {
+    "id": "D2100",
+    "defect": "The alias reader takes any find kind as written, so a record the writer never made reads as an alias of an unknown kind.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  const findKind = member(\n    ALIAS_FIND_KINDS,\n    jsonText(value, \"findKind\"),\n    \"JSON field findKind\",\n  );",
+    "new": "  const findKind = jsonText(value, \"findKind\") as AliasFindKind;"
+  },
+  {
+    "id": "D2101",
+    "defect": "The alias reader coerces the customResolver mark to a boolean, so a malformed mark reads as an alias with a customResolver.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    hasCustomResolver: jsonBoolean(value, \"hasCustomResolver\"),",
+    "new": "    hasCustomResolver: Boolean(jsonField(value, \"hasCustomResolver\")),"
+  },
+  {
+    "id": "D2102",
+    "defect": "The alias reader reads missing flags as none, so a RegExp alias stored without its flags silently matches case-sensitively.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  const flags = jsonText(value, \"flags\");",
+    "new": "  const flags = String(jsonField(value, \"flags\") ?? \"\");"
+  },
+  {
+    "id": "D2103",
+    "defect": "The project reader reads a missing global setup list as empty, so a malformed record reads as a project with no global setup files.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    globalSetupFiles: stringArray(jsonField(value, \"globalSetupFiles\")),",
+    "new": "    globalSetupFiles: stringArray(jsonField(value, \"globalSetupFiles\") ?? []),"
+  },
+  {
+    "id": "D2104",
+    "defect": "The discovery reader ignores selection facts under a workspace that is not discovered, so a record the writer never made reads as valid.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "  if (column(row, SELECTION_FACTS) !== null) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D2105",
+    "defect": "The report keeps RT Test's snapshot guard among a project's setup files, so a project with none reports RT Test's own file.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    setupFiles: config.setupFiles\n      .filter((file) => file !== SNAPSHOT_GUARD_FILE)\n      .map(rootRelative),",
+    "new": "    setupFiles: config.setupFiles.map(rootRelative),"
+  },
+  {
+    "id": "D2106",
+    "defect": "A setup file is reported relative to its workspace's directory rather than the consumer root, so a nested workspace's files name the wrong paths.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    return testModuleFile(location.workspacePath, location.modulePath);",
+    "new": "    return location.modulePath;"
+  },
+  {
+    "id": "D2107",
+    "defect": "Setup files are made relative to the workspace's directory as spelled rather than its real path, so under a linked consumer root every setup file, which Vitest resolves to its real path, climbs out through the link.",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
+    "old": "  const realDirectory = realPath(workspace.directory);",
+    "new": "  const realDirectory = workspace.directory;"
+  },
+  {
+    "id": "D2108",
+    "defect": "The report lists only a project's own global setup, so a Vitest 5 project extending the root config loses the root's global setup, which Vitest still runs.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      ...new Set([...ownGlobalSetup, ...rootGlobalSetup].map(rootRelative)),",
+    "new": "      ...new Set([...ownGlobalSetup].map(rootRelative)),"
+  },
+  {
+    "id": "D2109",
+    "defect": "The report never removes a repeated global setup file, so a workspace whose one project is the root project lists its global setup twice.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      ...new Set([...ownGlobalSetup, ...rootGlobalSetup].map(rootRelative)),",
+    "new": "      ...[...ownGlobalSetup, ...rootGlobalSetup].map(rootRelative),"
+  },
+  {
+    "id": "D2110",
+    "defect": "The report never removes a repeated global setup file, so a project whose own global setup names the root's file lists that file twice.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      ...new Set([...ownGlobalSetup, ...rootGlobalSetup].map(rootRelative)),",
+    "new": "      ...[...ownGlobalSetup, ...rootGlobalSetup].map(rootRelative),"
+  },
+  {
+    "id": "D2111",
+    "defect": "The report includes browser-mode projects, which RT Test never discovers or runs.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      .filter((project) => !usesBrowserMode(project))\n",
+    "new": ""
+  },
+  {
+    "id": "D2112",
+    "defect": "A RegExp alias loses its flags, so a case-insensitive find is reported as case-sensitive and narrows what selection matches.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    flags: isString ? STRING_FIND_FLAGS : find.flags,",
+    "new": "    flags: STRING_FIND_FLAGS,"
+  },
+  {
+    "id": "D2113",
+    "defect": "An alias's customResolver is never marked, so an alias Vite resolves through a function reads as a plain replacement.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    hasCustomResolver: customResolver !== undefined && customResolver !== null,",
+    "new": "    hasCustomResolver: false,"
+  },
+  {
+    "id": "D2114",
+    "defect": "A RegExp find is carried as the RegExp itself, which a JSON round trip, the executor channel's format, turns into an empty object.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    find: isString ? find : find.source,",
+    "new": "    find: isString ? find : (find as unknown as string),"
+  },
+  {
+    "id": "D2115",
+    "defect": "The pattern directory ignores a project's dir and reports its root, so patterns read as matching from the wrong directory.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      directory: rootRelative(config.dir || config.root),",
+    "new": "      directory: rootRelative(config.root),"
+  },
+  {
+    "id": "D2116",
+    "defect": "A path not on disk is converted as given, so under a linked consumer root a project dir not yet created climbs out through the link.",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
+    "old": "    const parent = dirname(path);\n    return parent === path ? path : join(realPath(parent), basename(path));",
+    "new": "    return path;"
+  },
+  {
+    "id": "D2117",
+    "defect": "The report spreads includeSource as though Vitest always set it, so a workspace that sets none fails discovery.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  return patterns ?? [];",
+    "new": "  return patterns as readonly string[];"
+  },
+  {
+    "id": "D2118",
+    "defect": "A module path already absolute, as one on another Windows drive is, is joined under its workspace path.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "  if (isAbsolute(modulePath)) return modulePath;\n",
+    "new": ""
+  },
+  {
+    "id": "D2119",
+    "defect": "Global setup files are deduplicated before conversion, so a project naming the root's global setup file by an absolute path through a directory link lists that file twice.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      ...new Set([...ownGlobalSetup, ...rootGlobalSetup].map(rootRelative)),",
+    "new": "      ...[...new Set([...ownGlobalSetup, ...rootGlobalSetup])].map(rootRelative),"
+  },
+  {
+    "id": "D2120",
+    "defect": "A module id is made relative as given rather than through its real path, so a setup file named by an absolute path through a directory link reports the link's path instead of the file's.",
+    "file": "packages/daemon/src/vitest/module-tests.ts",
+    "old": "    modulePath: relativePosixPath(realDirectory, realPath(moduleId)),",
+    "new": "    modulePath: relativePosixPath(realDirectory, moduleId),"
+  },
+  {
+    "id": "D2121",
+    "defect": "The alias reader accepts flags on a string find, a record the writer never makes.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  if (findKind === STRING_FIND && flags !== STRING_FIND_FLAGS) {\n    throw unreadable(\"JSON field flags\", value);\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2122",
+    "defect": "The version 2 migration marks each ran run not force-stopped, so a force-stopped run stored at version 2 reads back not force-stopped.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}\nUPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D2123",
+    "defect": "A test module path that is already absolute, as one on another Windows drive is, is joined under the consumer root, so its digest reads absent and an edit to it never changes the fingerprint.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "  if (isAbsolute(path)) return path;\n",
+    "new": ""
+  },
+  {
+    "id": "D2124",
+    "defect": "The input filter counts a path on another Windows drive as under the consumer root, so a protected test module there enters the inventory, which no watch refreshes.",
+    "file": "packages/daemon/src/inputs/input-filter.ts",
+    "old": "    if (!liesInside(this.#root, path)) return true;\n    const fromRoot = relative(this.#root, path);",
+    "new": "    const fromRoot = relative(this.#root, path);\n    if (climbsOut(fromRoot, sep)) return true;"
   }
 ]

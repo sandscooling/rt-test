@@ -69,7 +69,7 @@ const MODULE_CACHE_OFF = false;
 /** From this major Vitest reads the module cache flag at the top level and deprecates the `experimental` spelling 4.1 reads. */
 const TOP_LEVEL_MODULE_CACHE_MAJOR = 5;
 /** Built beside this module, so it shares its extension: `.ts` run from source, `.js` from `dist`. */
-const SNAPSHOT_GUARD_FILE = fileURLToPath(
+export const SNAPSHOT_GUARD_FILE = fileURLToPath(
   new URL(
     `./snapshot-guard${extname(fileURLToPath(import.meta.url))}`,
     import.meta.url,
@@ -218,6 +218,6 @@ function isTypecheck(specification: TestSpecification): boolean {
   return specification.pool === TYPECHECK_POOL;
 }
 
-function usesBrowserMode(project: TestProject): boolean {
+export function usesBrowserMode(project: TestProject): boolean {
   return project.config.browser.enabled;
 }

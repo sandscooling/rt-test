@@ -141,6 +141,7 @@ function discoveredWorkspace(
     typecheckModules: [],
     unsupportedProjects: [],
     unhandledErrors: [],
+    selectionFacts: { reported: true, projects: [] },
     ...more,
   };
 }

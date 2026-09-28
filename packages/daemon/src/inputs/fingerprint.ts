@@ -70,7 +70,7 @@ function workspaceInputs(
  */
 export class SnapshotReads {
   readonly #root: string;
-  /** By root-relative path. */
+  /** By test module path, as `testModuleFile` names it. */
   readonly #modules = new Map<string, FingerprintResult>();
   /** By workspace directory. */
   readonly #versions = new Map<string, string | null>();
@@ -79,7 +79,7 @@ export class SnapshotReads {
     this.#root = root;
   }
 
-  /** The digest of the test module at `path`, root-relative. */
+  /** The digest of the test module at `path`, as `testModuleFile` names it. */
   moduleDigest(path: string): FingerprintResult {
     let read = this.#modules.get(path);
     if (read === undefined) {

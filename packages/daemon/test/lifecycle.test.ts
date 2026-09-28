@@ -118,6 +118,7 @@ function discovered(
     typecheckModules: [],
     unsupportedProjects: [],
     unhandledErrors: [],
+    selectionFacts: { reported: true, projects: [] },
   };
 }
 
