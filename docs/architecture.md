@@ -89,7 +89,7 @@ The bootstrap `scripts/verify-defects.mjs` only validates the known hook-free fi
 
 ## Query surface
 
-The CLI offers summary, `status <path>` with counts per state for files and folders, failures, affected selection, explanation, defect evidence, gaps, and `wait <files>`. Read operations never trigger execution. A wait binds to the input revision at call time and returns when every test covering the files has a current result or an explicit non-current state, or as superseded, naming the newer revision, as soon as a covering input changes.
+The CLI offers summary, `status <path>` with counts per state for files and folders, failures, affected selection, explanation, defect evidence, gaps, and `wait <files>`. Read operations never trigger execution. A wait binds to the input revision at call time and returns when every test covering the files has a current result or an explicit non-current state, or as superseded, naming the newer revision, as soon as a covering input changes, or as unsettled, naming each covering workspace's execution state, once its time limit passes. The default limit stays under the two minutes a coding agent's shell tool commonly allows a command, so an agent always gets an answer and can wait again.
 
 Every `--json` payload carries a schema version, which also serves the later gap report that coding agents read to propose defects ([ADR-0005](adr/0005-no-model-calls.md)). There is no MCP server. Keep local endpoints scoped to an explicitly started project, authenticate access if using HTTP, and avoid binding to external interfaces by default. Do not leak source or environment values in summaries.
 
