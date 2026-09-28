@@ -15,13 +15,8 @@ import type {
 } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import { relativePosixPath } from "../vitest/find-workspaces.js";
-import {
-  discoveryFingerprint,
-  SnapshotReads,
-  testModuleChangedSince,
-  workspaceFingerprint,
-  type FingerprintResult,
-} from "./fingerprint.js";
+import { currentInputs } from "./current-inputs.js";
+import type { FingerprintResult } from "./fingerprint.js";
 import { DeclaredNonInputs } from "./declared-non-inputs.js";
 import { GitFiles } from "./git-files.js";
 import {
@@ -32,6 +27,7 @@ import {
 import {
   readEntryDigest,
   takeInventory,
+  type InputRead,
   type InventoryResult,
   type InventoryScope,
 } from "./input-inventory.js";
@@ -83,6 +79,11 @@ export interface TrackedInputs {
   /** Resolves once the first reconciliation has ended, or the tracker has stopped. */
   firstReconciled(): Promise<void>;
   current(): CurrentInputs;
+  /**
+   * Resolves once every event seen before the call has been read and no reconciliation runs, or at once when the
+   * tracker has stopped. Events arriving after the call do not hold it.
+   */
+  settled(): Promise<void>;
   beginJob(): JobMark;
   endJob(mark: JobMark): Promise<JobVerdict>;
   /**
@@ -185,34 +186,16 @@ export class InputTracker implements TrackedInputs {
   }
 
   current(): CurrentInputs {
-    const unavailable = this.#unavailableReason();
-    const facts = this.facts();
-    const unusable = this.#declared.unusable;
-    const declaration =
-      unusable === undefined ? {} : { nonInputsUnusable: unusable };
-    if (unavailable !== undefined) {
-      const none: FingerprintResult = { ok: false, reason: unavailable };
-      return {
-        facts,
-        ...declaration,
-        unavailable,
-        workspaceFingerprint: () => none,
-        discoveryFingerprint: () => none,
-        testModuleChangedSince: () => unavailable,
-      };
-    }
-    const project = this.#state.project();
-    const reads = new SnapshotReads(project.root);
-    return {
-      facts,
-      ...declaration,
-      workspaceFingerprint: (entry) =>
-        workspaceFingerprint(project, entry, reads),
-      discoveryFingerprint: (discovery) =>
-        discoveryFingerprint(project, discovery, reads),
-      testModuleChangedSince: (discovery, since) =>
-        testModuleChangedSince(project, discovery, since),
-    };
+    return currentInputs({
+      unavailable: this.#unavailableReason(),
+      facts: this.facts(),
+      nonInputsUnusable: this.#declared.unusable,
+      project: () => this.#state.project(),
+    });
+  }
+
+  settled(): Promise<void> {
+    return this.#stopped ? Promise.resolve() : this.#ledger.waitForRead();
   }
 
   beginJob(): JobMark {
@@ -221,7 +204,7 @@ export class InputTracker implements TrackedInputs {
 
   /** Judges the job once every event seen before its end has been read and any reconciliation running has ended. */
   async endJob(mark: JobMark): Promise<JobVerdict> {
-    if (!this.#stopped) await this.#ledger.waitForRead();
+    await this.settled();
     return this.#jobs.close(mark, this.#unavailableReason());
   }
 
@@ -355,6 +338,7 @@ export class InputTracker implements TrackedInputs {
       const changed = this.#state.establish(
         inventory.inputs,
         inventory.directories,
+        new Set([...this.#queue.keys()].map((path) => this.#label(path))),
       );
       this.#state.commit();
       for (const path of changed) this.#jobs.record(path);
@@ -451,7 +435,7 @@ export class InputTracker implements TrackedInputs {
         return;
       }
       case "input":
-        this.#readFile(filter, path, entry.digest, record);
+        this.#readFile(filter, path, entry.read, record);
         return;
       case "directory":
         if (this.#state.hasDirectory(path) && kind !== RENAME_EVENT) return;
@@ -463,11 +447,14 @@ export class InputTracker implements TrackedInputs {
     }
   }
 
-  /** A file that replaced a directory drops what the directory held; a declared file is not an input. */
+  /**
+   * A file that replaced a directory drops what the directory held; a declared file is not an input. A read that
+   * rules out any write since the last one, such as one following a last-access event, marks no job.
+   */
   #readFile(
     filter: InputFilter,
     path: string,
-    digest: string,
+    read: InputRead,
     record: (changed: readonly string[]) => void,
   ): void {
     const relative = relativePosixPath(this.#root, path);
@@ -479,8 +466,7 @@ export class InputTracker implements TrackedInputs {
       record(this.#state.remove(relative, path));
       return;
     }
-    this.#state.set(relative, digest);
-    record([relative]);
+    if (this.#state.set(relative, read)) record([relative]);
   }
 
   /**

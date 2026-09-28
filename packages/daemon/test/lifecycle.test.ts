@@ -1,5 +1,6 @@
 import {
   mkdirSync,
+  realpathSync,
   utimesSync,
   watch,
   writeFileSync,
@@ -82,6 +83,7 @@ const STOP_BOUND_MS = 2000;
 const DISCOVERY_DIGEST = "discovery-digest";
 /** A declared file written after an edit; once the tracker has handled its event, it has handled the edit's. */
 const SENTINEL = "z.md";
+const RECONCILIATION_ENDED = "input reconciliation ended";
 const FINGERPRINTED: JobVerdict = { fingerprinted: true };
 const SETTLED_INPUTS: InputFacts = {
   revision: 1,
@@ -309,19 +311,27 @@ interface InputsScript {
   /** A workspace's current fingerprint, asked at its run's start and again at its end. */
   readonly fingerprintOf?: (workspacePath: string) => FingerprintResult;
   /** Why a listed test module no watch covers may have changed during the discovery. */
-  readonly moduleChanged?: string;
+  readonly moduleChanged?: string | undefined;
+  /**
+   * Holds one wait for the inputs to settle, counted from 0 in call order (the discovery's, the guard's, then each
+   * run's), until the test resolves `settleHeld` or the inputs stop.
+   */
+  readonly heldSettle?: number;
 }
 
 /** Inputs whose reconciliation, fingerprints and job verdicts the test scripts, recording each start and stop. */
 class StandInInputs implements TrackedInputs {
   starts = 0;
   stops = 0;
+  jobsBegun = 0;
   /** The discovery each protection was given, in call order. */
   readonly protected: (TestDiscovery | undefined)[] = [];
   readonly reconciled = new Deferred<void>();
+  readonly settleHeld = new Deferred<void>();
   readonly #released = new Deferred<void>();
   readonly #script: InputsScript;
   readonly #verdicts: JobVerdict[];
+  #settles = 0;
 
   constructor(script: InputsScript = {}) {
     this.#script = script;
@@ -352,7 +362,16 @@ class StandInInputs implements TrackedInputs {
     };
   }
 
+  settled(): Promise<void> {
+    const call = this.#settles;
+    this.#settles += 1;
+    return call === this.#script.heldSettle
+      ? this.settleHeld.promise
+      : Promise.resolve();
+  }
+
   beginJob(): JobMark {
+    this.jobsBegun += 1;
     return new JobWindows().open(undefined);
   }
 
@@ -370,6 +389,7 @@ class StandInInputs implements TrackedInputs {
     this.stops += 1;
     this.#released.resolve();
     this.reconciled.resolve();
+    this.settleHeld.resolve();
     return Promise.resolve();
   }
 }
@@ -442,20 +462,6 @@ class EditingExecutor extends ScriptedExecutor {
   override async discover(): Promise<JobOutcome<TestDiscovery>> {
     await this.#during();
     return super.discover();
-  }
-}
-
-/**
- * A tracker whose first reconciliation counts as ended only once the paths it left unread are read. On Windows its own
- * listing of a directory raises an event, which would leave the discovery's job unsettled when it starts.
- */
-class SettledTracker extends InputTracker {
-  override async firstReconciled(): Promise<void> {
-    await super.firstReconciled();
-    const deadline = Date.now() + STOP_BOUND_MS;
-    while (this.facts().pendingChanges > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
   }
 }
 
@@ -535,7 +541,7 @@ async function declaredModuleStart(
     executor: new EditingExecutor(found, async () => {
       held = await during(module, handled);
     }) as unknown as Executor,
-    inputs: new SettledTracker({
+    inputs: new InputTracker({
       consumerRoot: root,
       exclusions: [],
       log: memoryLog(),
@@ -559,6 +565,84 @@ async function declaredModuleStart(
     await lifecycle.stopped();
     vi.mocked(watch).mockReset();
   }
+}
+
+/**
+ * Runs the start sequence to idle with a real input tracker and store, over a consumer root holding one input and
+ * discovered as one workspace, and returns the kind of fingerprint the discovery was stored under. As the first
+ * reconciliation ends, the root's watch reports a change to the input, as Windows does for the reconciliation's own
+ * read of a file whose access time is over an hour old, so the event is still unread when that reconciliation ends.
+ */
+async function idleStart(dir: string): Promise<IdleStart> {
+  const root = join(dir, "consumer");
+  mkdirSync(root);
+  writeFileSync(join(root, "a.ts"), "export {};\n");
+  const listeners: WatchListener<string>[] = [];
+  const paths: string[] = [];
+  vi.mocked(watch).mockImplementation(((
+    path: PathLike,
+    options: { recursive?: boolean },
+    listener: WatchListener<string>,
+  ) => {
+    listeners.push(listener);
+    paths.push(String(path));
+    return realWatch(path, options, listener);
+  }) as typeof watch);
+  let injected = false;
+  const recording = memoryLog();
+  const trackerLog: MemoryLog = {
+    ...recording,
+    error: (context, error) => recording.error(context, error),
+    entry(message) {
+      recording.entry(message);
+      const rootWatch = listeners[paths.indexOf(realpathSync.native(root))];
+      if (message.startsWith(RECONCILIATION_ENDED) && rootWatch !== undefined) {
+        rootWatch("change", "a.ts");
+        injected = true;
+      }
+    },
+  };
+  const log = memoryLog();
+  const store = openStore(join(dir, "state"));
+  const lifecycle = new DaemonLifecycle({
+    identity: { ...IDENTITY, consumerRoot: root },
+    scope: SCOPE,
+    start: confirmed("."),
+    store,
+    log,
+    executor: new ScriptedExecutor({
+      ended: true,
+      value: discovery({
+        ...discovered("."),
+        workspace: { path: ".", directory: root },
+      }),
+    }) as unknown as Executor,
+    inputs: new InputTracker({
+      consumerRoot: root,
+      exclusions: [],
+      log: trackerLog,
+    }),
+    closeEndpoint: () => Promise.resolve(),
+  });
+  try {
+    lifecycle.begin();
+    await eventually(() => log.entries.includes(IDLE_ENTRY));
+    return {
+      injected,
+      storedFingerprint:
+        store.readLatestDiscovery(SCOPE)?.inputFingerprint.kind,
+    };
+  } finally {
+    lifecycle.stop();
+    await lifecycle.stopped();
+    vi.mocked(watch).mockReset();
+  }
+}
+
+interface IdleStart {
+  /** Whether the change was delivered through the root's watch as the first reconciliation ended. */
+  readonly injected: boolean;
+  readonly storedFingerprint: string | undefined;
 }
 
 async function flush(): Promise<void> {
@@ -893,6 +977,100 @@ describe(
         ),
         idle: started.log.entries.includes(IDLE_ENTRY),
       }).toStrictEqual({ returned: true, logged: true, idle: true });
+    });
+  },
+);
+
+describe(
+  "beginning each job once the inputs settle",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    /** How many jobs have begun while the given wait is held, and how many once it is released. */
+    async function jobsAroundHeldSettle(
+      heldSettle: number,
+    ): Promise<{ held: number; released: number }> {
+      const { inputs } = await begun(scripted({ heldSettle }));
+      const held = inputs.jobsBegun;
+      inputs.settleHeld.resolve();
+      await flush();
+      return { held, released: inputs.jobsBegun };
+    }
+
+    it("D2080: the discovery's job begins only once the inputs have settled", async () => {
+      expect(await jobsAroundHeldSettle(0)).toStrictEqual({
+        held: 0,
+        released: 3,
+      });
+    });
+
+    it("D2081: the guard around protecting the discovery's test modules begins only once the inputs have settled", async () => {
+      expect(await jobsAroundHeldSettle(1)).toStrictEqual({
+        held: 1,
+        released: 3,
+      });
+    });
+
+    it("D2082: a run's job begins only once the inputs have settled", async () => {
+      expect(await jobsAroundHeldSettle(2)).toStrictEqual({
+        held: 2,
+        released: 3,
+      });
+    });
+
+    it("D2083: a stop while the guard waits for the inputs to settle begins no guard job", async () => {
+      const { lifecycle, inputs } = await begun(scripted({ heldSettle: 1 }));
+      lifecycle.stop();
+      await lifecycle.stopped();
+      expect(inputs.jobsBegun).toBe(1);
+    });
+
+    it("D2084: a stop while a run waits for the inputs to settle starts no run", async () => {
+      const { lifecycle, executor } = await begun(scripted({ heldSettle: 2 }));
+      lifecycle.stop();
+      await lifecycle.stopped();
+      expect(executor.runs).toStrictEqual([]);
+    });
+
+    it("D2090: a declared test module that changes while the guard waits for the inputs to settle leaves the discovery stored not fingerprinted", async () => {
+      const moduleChange = { settled: false };
+      const { inputs, store } = await begun(
+        scripted({
+          heldSettle: 1,
+          get moduleChanged() {
+            return moduleChange.settled
+              ? "the test module src/a.test.ts, which no watch covers, may have changed while the job ran"
+              : undefined;
+          },
+        }),
+      );
+      moduleChange.settled = true;
+      inputs.settleHeld.resolve();
+      await flush();
+      expect(store.discoveryFingerprints).toStrictEqual([
+        { kind: "not-fingerprinted" },
+      ]);
+    });
+
+    it("D2092: a stop while the discovery waits for the inputs to settle starts no discovery", async () => {
+      const { lifecycle, executor } = await begun(scripted({ heldSettle: 0 }));
+      lifecycle.stop();
+      await lifecycle.stopped();
+      expect(executor.discoveries).toBe(0);
+    });
+
+    it("D2088: while a run waits for the inputs to settle, the activity names its workspace", async () => {
+      const { lifecycle } = await begun(scripted({ heldSettle: 2 }));
+      expect(lifecycle.status().activity).toStrictEqual({
+        state: "running",
+        workspacePath: "a",
+      });
+    });
+
+    it("D2086: the first discovery after a start whose reconciliation left an event unread, on an input nothing changed, is stored fingerprinted", async () => {
+      expect(await inTempDir(idleStart)).toStrictEqual({
+        injected: true,
+        storedFingerprint: "digest",
+      });
     });
   },
 );

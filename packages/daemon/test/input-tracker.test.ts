@@ -16,6 +16,7 @@ import {
   type BigIntStats,
   type FSWatcher,
   type PathLike,
+  type WatchEventType,
   type WatchListener,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -28,7 +29,10 @@ import {
   workspaceFingerprint,
 } from "../src/inputs/fingerprint.js";
 import { gitSources } from "../src/inputs/git-sources.js";
-import { readEntryDigest } from "../src/inputs/input-inventory.js";
+import {
+  readEntryDigest,
+  type InputRead,
+} from "../src/inputs/input-inventory.js";
 import { InputTracker } from "../src/inputs/input-tracker.js";
 import {
   declaredNonInputs,
@@ -104,6 +108,9 @@ const { watch: realWatch } =
 const { readJson: realReadJson } = await vi.importActual<
   typeof import("../src/vitest/find-workspaces.js")
 >("../src/vitest/find-workspaces.js");
+const { readEntryDigest: realReadEntryDigest } = await vi.importActual<
+  typeof import("../src/inputs/input-inventory.js")
+>("../src/inputs/input-inventory.js");
 
 const ROOT_WORKSPACE = ".";
 const STATE_DIRECTORY = ".rt-test";
@@ -117,11 +124,14 @@ const RECONCILING = "a reconciliation of the inputs is running";
 const FIRST_RECONCILIATION = "the first reconciliation has not ended";
 const PERIODIC_STARTED =
   "input reconciliation started: the periodic reconciliation";
+const RECONCILIATION_ENDED = "input reconciliation ended";
 /** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
 const LOST_INPUT_SET_RETRY = 10_000;
 const LOST_INPUT_SET_RETRY_STARTED =
   "input reconciliation started: an input event arrived while the input set could not be established";
 const DECLARATION_FILE = "rt-test.json";
+const AN_HOUR_MS = 3_600_000;
+const MS_PER_SECOND = 1000;
 const DECLARATION_CHANGED_STARTED =
   "input reconciliation started: rt-test.json, which declares the non-inputs, changed";
 const UNUSABLE_JSON_REASON =
@@ -437,17 +447,7 @@ async function retryAfterLostInputSet(
 ): Promise<LostInputSetRetry> {
   const deep = `${Array(65).fill("d").join("/")}/x.ts`;
   writeTree(root, { "src/a.ts": "", [deep]: "" });
-  const listeners: WatchListener<string>[] = [];
-  const paths: string[] = [];
-  vi.mocked(watch).mockImplementation(((
-    path: PathLike,
-    _options: unknown,
-    listener: WatchListener<string>,
-  ) => {
-    listeners.push(listener);
-    paths.push(String(path));
-    return silentWatch();
-  }) as typeof watch);
+  const { listeners, paths } = silentCapturedWatches();
   try {
     return await withFakeTimeouts(() =>
       tracking(root, async ({ tracker, log }) => {
@@ -485,6 +485,140 @@ async function withFakeTimeouts<T>(body: () => Promise<T>): Promise<T> {
     return await body();
   } finally {
     vi.useRealTimers();
+  }
+}
+
+/**
+ * Runs `body` with fake `setTimeout` and a fake `Date` that moves only as the test advances it, so a read the tracker
+ * takes later is stamped later without a real wait.
+ */
+async function withFakeClock<T>(body: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    return await body();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+/** Opens silent watches, keeping each one's listener, so only the events a test delivers reach the tracker. */
+function silentCapturedWatches(): CapturedWatches {
+  const captured: CapturedWatches = { listeners: [], paths: [] };
+  vi.mocked(watch).mockImplementation(((
+    path: PathLike,
+    _options: unknown,
+    listener: WatchListener<string>,
+  ) => {
+    captured.listeners.push(listener);
+    captured.paths.push(String(path));
+    return silentWatch();
+  }) as typeof watch);
+  return captured;
+}
+
+/** Delivers an event naming the root-relative `name` through the watch opened on `root`. */
+function deliver(
+  watches: CapturedWatches,
+  root: string,
+  name: string,
+  kind: WatchEventType = "change",
+): void {
+  const listener =
+    watches.listeners[watches.paths.indexOf(realpathSync.native(root))];
+  if (listener === undefined) throw new Error(`no watch opened on ${root}`);
+  listener(kind, name);
+}
+
+type ReadChange = (read: InputRead) => InputRead;
+
+/** Makes the tracker's next read of a path an event named report what `change` makes of the real read. */
+function changeNextRead(change: ReadChange): void {
+  vi.mocked(readEntryDigest).mockImplementationOnce(async (path, signal) => {
+    const entry = await realReadEntryDigest(path, signal);
+    return entry.kind === "input"
+      ? { kind: "input", read: change(entry.read) }
+      : entry;
+  });
+}
+
+/** A read taken `ms` after the later of the input's modification and change times. */
+function takenAfterLastWrite(ms: number): ReadChange {
+  return (read) => ({
+    ...read,
+    stamp: {
+      ...read.stamp,
+      readAtMs: Math.max(read.stamp.modifiedMs, read.stamp.changedMs) + ms,
+    },
+  });
+}
+
+/** A read taken `ms` after the input's change time. */
+function takenAfterChange(ms: number): ReadChange {
+  return (read) => ({
+    ...read,
+    stamp: { ...read.stamp, readAtMs: read.stamp.changedMs + ms },
+  });
+}
+
+/**
+ * Sets `file`'s modification time to the whole second `offsetMs` from now, which every supported file system stores
+ * exactly, and its access time to now; either moves its change time to now. Returns the modification time set.
+ */
+function modifiedAt(file: string, offsetMs: number): Date {
+  const modified = new Date(
+    Math.floor((Date.now() + offsetMs) / MS_PER_SECOND) * MS_PER_SECOND,
+  );
+  utimesSync(file, new Date(), modified);
+  return modified;
+}
+
+interface EventAcrossJob {
+  /** The root-relative input the events name. */
+  readonly name: string;
+  /** What the tracker's last read of `name` before the job holds, made from a real read; the reconciliation's when absent. */
+  readonly held?: ReadChange;
+  /** Runs once the job is open, before its one event. */
+  readonly between?: () => void;
+  /** What the read after the job's one event reports, made from a real read; that read itself when absent. */
+  readonly next?: ReadChange;
+}
+
+interface JobAcrossEvent {
+  readonly fingerprinted: boolean;
+  readonly revisionRose: boolean;
+}
+
+/**
+ * Tracks `root` over silent watches. Has the tracker read `name` after an event as `held` makes it, opens a job, runs
+ * `between`, delivers one event naming `name` whose read `next` makes, and says how the job was judged and whether the
+ * input revision rose while it ran.
+ */
+async function jobAcrossEvent(
+  root: string,
+  event: EventAcrossJob,
+): Promise<JobAcrossEvent> {
+  const watches = silentCapturedWatches();
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      const readAfterEvent = async (change?: ReadChange): Promise<void> => {
+        if (change !== undefined) changeNextRead(change);
+        deliver(watches, root, event.name);
+        await drained(tracker);
+      };
+      if (event.held !== undefined) await readAfterEvent(event.held);
+      const revision = tracker.facts().revision;
+      const mark = tracker.beginJob();
+      event.between?.();
+      await readAfterEvent(event.next);
+      const verdict = await tracker.endJob(mark);
+      return {
+        fingerprinted: verdict.fingerprinted,
+        revisionRose: tracker.facts().revision > revision,
+      };
+    });
+  } finally {
+    vi.mocked(readEntryDigest).mockReset();
+    vi.mocked(watch).mockReset();
   }
 }
 
@@ -678,6 +812,8 @@ describe("a job's inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
   it("D1897: a job's end returns while events naming a file never stop arriving, not fingerprinted and naming the file", async () => {
     const outcome = await inTempDir(async (root) => {
       writeTree(root, { "src/a.ts": "" });
+      // Modified an hour ahead of every read, so no read rules out a write and each event counts against the job.
+      modifiedAt(join(root, "src/a.ts"), AN_HOUR_MS);
       const { listeners } = capturingWatches();
       try {
         return await tracking(root, async ({ tracker }) => {
@@ -774,7 +910,335 @@ describe("a job's inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
     });
     expect(fingerprinted).toBe(true);
   });
+
+  it("D2085: a wait for the inputs to settle, begun after a stop that left an event unread, resolves", async () => {
+    const outcome = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      let tracker: InputTracker | undefined;
+      let stopping: Promise<void> | undefined;
+      const recording = memoryLog();
+      const log: MemoryLog = {
+        ...recording,
+        error: (context, error) => recording.error(context, error),
+        entry(message) {
+          recording.entry(message);
+          if (message.startsWith(RECONCILIATION_ENDED)) {
+            deliver(watches, root, "src/a.ts");
+            stopping = tracker?.stop();
+          }
+        },
+      };
+      tracker = new InputTracker({ consumerRoot: root, exclusions: [], log });
+      try {
+        tracker.start();
+        await tracker.firstReconciled();
+        await stopping;
+        return await within(
+          tracker.settled().then(() => "settled"),
+          SETTLE_MS,
+        );
+      } finally {
+        await tracker.stop();
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(outcome).toBe("settled");
+  });
 });
+
+describe(
+  "an event that may have changed nothing",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    const INPUT = "src/a.ts";
+    const CONTENT = "export const a = 1;\n";
+
+    /** A consumer root holding the one input `INPUT`. */
+    function oneInput(root: string): string {
+      writeTree(root, { [INPUT]: CONTENT });
+      return join(root, INPUT);
+    }
+
+    it("D2065: an event after which an input reads as the tracker last read it, an hour after its last write, leaves the job fingerprinted and the revision where it was", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(AN_HOUR_MS),
+        });
+      });
+      expect(outcome).toStrictEqual({
+        fingerprinted: true,
+        revisionRose: false,
+      });
+    });
+
+    it("D2066: an event after which only an input's content digest differs from the tracker's last read marks the job", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(AN_HOUR_MS),
+          next: (read) => ({ ...read, digest: `${read.digest}-other` }),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2067: an event after which only an input's modification time differs from the tracker's last read marks the job", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(AN_HOUR_MS),
+          next: (read) => ({
+            ...read,
+            stamp: { ...read.stamp, modifiedMs: read.stamp.modifiedMs + 1 },
+          }),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2068: an event after which only an input's change time differs from the tracker's last read marks the job", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(AN_HOUR_MS),
+          next: (read) => ({
+            ...read,
+            stamp: { ...read.stamp, changedMs: read.stamp.changedMs + 1 },
+          }),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2069: an edit reverted with its modification time restored, before the tracker reads the input, marks the job", async () => {
+      const outcome = await inTempDir((root) => {
+        const file = oneInput(root);
+        const modified = modifiedAt(file, -AN_HOUR_MS);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(AN_HOUR_MS),
+          between: () => {
+            writeFileSync(file, CONTENT.replace("1", "2"));
+            writeFileSync(file, CONTENT);
+            utimesSync(file, new Date(), modified);
+          },
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2070: an event naming a new file, which the tracker held no read of, marks the job", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: "src/b.ts",
+          between: () =>
+            writeFileSync(join(root, "src/b.ts"), "export const b = 1;\n"),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2071: an event on an input the tracker last read 1999 ms after its last write marks the job, though nothing moved", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(1999),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2072: an event on an input the tracker last read exactly 2000 ms after its last write, with nothing moved, leaves the job fingerprinted", async () => {
+      const outcome = await inTempDir((root) => {
+        oneInput(root);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterLastWrite(2000),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(true);
+    });
+
+    it("D2073: an event on an input modified an hour ago but changed 1 s before the tracker's last read marks the job, though nothing moved", async () => {
+      const outcome = await inTempDir((root) => {
+        modifiedAt(oneInput(root), -AN_HOUR_MS);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterChange(1000),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2074: an event on an input whose modification time lies after the tracker's last read marks the job, though its change time is an hour before that read", async () => {
+      const outcome = await inTempDir((root) => {
+        modifiedAt(oneInput(root), 2 * AN_HOUR_MS);
+        return jobAcrossEvent(root, {
+          name: INPUT,
+          held: takenAfterChange(AN_HOUR_MS),
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2079: a link to a file retargeted to another file and back before the tracker reads it marks the job", async () => {
+      const outcome = await inTempDir((root) => {
+        const target = oneInput(root);
+        const other = join(root, "src/other.ts");
+        const link = join(root, "src/link.ts");
+        writeFileSync(other, "export const other = 1;\n");
+        symlinkSync(target, link, "file");
+        return jobAcrossEvent(root, {
+          name: "src/link.ts",
+          held: takenAfterLastWrite(AN_HOUR_MS),
+          between: () => {
+            rmSync(link);
+            symlinkSync(other, link, "file");
+            rmSync(link);
+            symlinkSync(target, link, "file");
+          },
+        });
+      });
+      expect(outcome.fingerprinted).toBe(false);
+    });
+
+    it("D2075: an event still unread when a reconciliation reads its input is judged against the read before that reconciliation, so it marks the job", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        // A minute ahead: before it for the first reconciliation's read, long after it for the periodic one's.
+        modifiedAt(oneInput(root), 60_000);
+        const watches = silentCapturedWatches();
+        const recording = memoryLog();
+        const log: MemoryLog = {
+          ...recording,
+          error: (context, error) => recording.error(context, error),
+          entry(message) {
+            recording.entry(message);
+            if (message === PERIODIC_STARTED) deliver(watches, root, INPUT);
+          },
+        };
+        try {
+          return await withFakeClock(() =>
+            tracking(
+              root,
+              async ({ tracker }) => {
+                const mark = tracker.beginJob();
+                await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+                await tracker.endJob(tracker.beginJob());
+                await drained(tracker);
+                return (await tracker.endJob(mark)).fingerprinted;
+              },
+              { log },
+            ),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(false);
+    });
+
+    it("D2076: once a reconciliation finds an input's times moved and its content unchanged, an event on it is judged against the read before, so it marks the job", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        const file = oneInput(root);
+        modifiedAt(file, 60_000);
+        const watches = silentCapturedWatches();
+        try {
+          return await withFakeClock(() =>
+            tracking(root, async ({ tracker }) => {
+              modifiedAt(file, 120_000);
+              await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+              await tracker.endJob(tracker.beginJob());
+              const mark = tracker.beginJob();
+              deliver(watches, root, INPUT);
+              await drained(tracker);
+              return (await tracker.endJob(mark)).fingerprinted;
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(false);
+    });
+
+    it("D2077: a walk of a renamed directory an hour later leaves an event on an input in it judged against the read before the walk, so it marks the job", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        writeTree(root, { "dir/x.ts": CONTENT });
+        modifiedAt(join(root, "dir/x.ts"), 60_000);
+        const watches = silentCapturedWatches();
+        try {
+          return await withFakeClock(() =>
+            tracking(root, async ({ tracker }) => {
+              vi.setSystemTime(Date.now() + AN_HOUR_MS);
+              deliver(watches, root, "dir", "rename");
+              await drained(tracker);
+              const mark = tracker.beginJob();
+              deliver(watches, root, "dir/x.ts");
+              await drained(tracker);
+              return (await tracker.endJob(mark)).fingerprinted;
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(false);
+    });
+
+    it("D2091: a directory replaced by a copy with the same content and other times, walked after both moves, marks the job", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        writeTree(root, { "dir/x.ts": CONTENT });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            writeTree(root, { "copy/x.ts": CONTENT });
+            modifiedAt(join(root, "copy/x.ts"), -AN_HOUR_MS);
+            rmSync(join(root, "dir"), { recursive: true });
+            renameSync(join(root, "copy"), join(root, "dir"));
+            deliver(watches, root, "dir", "rename");
+            await drained(tracker);
+            return (await tracker.endJob(mark)).fingerprinted;
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(false);
+    });
+
+    it("D2078: a reconciliation that finds an input's content changed, with no event reporting it, moves the fingerprint", async () => {
+      const moved = await inTempDir(async (root) => {
+        const file = oneInput(root);
+        vi.mocked(watch).mockImplementation((() =>
+          silentWatch()) as typeof watch);
+        try {
+          return await withFakeTimeouts(() =>
+            tracking(root, async ({ tracker, fingerprint }) => {
+              const before = fingerprint();
+              appendFileSync(file, "// unreported\n");
+              await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+              await tracker.endJob(tracker.beginJob());
+              const after = fingerprint();
+              return after !== undefined && after !== before;
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(moved).toBe(true);
+    });
+  },
+);
 
 describe(
   "an input set that cannot be established",

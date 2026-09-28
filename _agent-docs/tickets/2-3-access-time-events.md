@@ -13,8 +13,8 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: An input event after which the input's content digest, size, modification time and change time all equal what the tracker last read for it, where that read came at least the coarsest timestamp step a supported file system records (`MODIFIED_TIME_RESOLUTION_MS`, 2 s) after both of those times, raises no input revision and marks no running job not fingerprinted. So on Windows, where reading a file whose last-access time is more than an hour old raises a change event that moves only that time, the reads of a reconciliation, of test-module protection and of a job leave every job fingerprinted when nothing else changed. An event after which any of the four differs from the tracker's last read of that input, or that names a path the tracker held no read of (a path test-module protection is reading excepted, per ticket 2.1b), or whose last read came within that step of its modification or change time, marks every running job as ticket 2.1's AC3 states, an edit reverted before the tracker reads the path included.
-- [ ] AC2: A job (a discovery, test-module protection's guard, or a run) begins only once every input event the tracker saw before the daemon asked to begin it has been read and no reconciliation is running, so events that turn out to change nothing, such as AC1's, cannot leave it unsettled. The daemon's first discovery after a start on a consumer whose inputs were last read more than an hour earlier is stored fingerprinted when no input changes during it. A job that begins while new events keep arriving is still judged as ticket 2.1's AC3 states, and a stop during the wait still ends the daemon within ticket 1.3's stop bound.
+- [x] AC1: An input event after which the input's content digest, size, modification time and change time all equal the tracker's last read of it taken before the event arrived (a read taken while an event naming the path is unread, such as a reconciliation's or a directory walk's, never becomes the one events are compared with, and a whole walk that finds any of the four moved keeps the earlier read), where that read came at least the coarsest timestamp step a supported file system records (`MODIFIED_TIME_RESOLUTION_MS`, 2 s) after both of those times, raises no input revision and marks no running job not fingerprinted. So on Windows, where reading a file whose last-access time is more than an hour old raises a change event that moves only that time, the reads of a reconciliation, of test-module protection and of a job leave every job fingerprinted when nothing else changed. An event after which any of the four differs from that read, or that names a path the tracker held no read of (a path test-module protection is reading excepted, per ticket 2.1b), or whose last read came within that step of its modification or change time, marks every running job as ticket 2.1's AC3 states, an edit reverted before the tracker reads the path included.
+- [x] AC2: A job (a discovery, test-module protection's guard, or a run) begins only once every input event the tracker saw before the daemon asked to begin it has been read and no reconciliation is running, so events that turn out to change nothing, such as AC1's, cannot leave it unsettled. The daemon's first discovery after a start on a consumer whose inputs were last read more than an hour earlier is stored fingerprinted when no input changes during it. A job that begins while new events keep arriving is still judged as ticket 2.1's AC3 states, and a stop during the wait still ends the daemon within ticket 1.3's stop bound.
 
 ## Unverified Assumptions
 
@@ -31,6 +31,10 @@ when that is literally true.
 | --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
 | U1  | On Node 22 on Windows, does a last-access update also leave `ctimeMs`, `mtimeMs` and `size` unchanged, as observed under Node 24.19.0? | AC1 compares those four; if Node 22 reported a moved change time, the event would still mark the job there, which is the behavior today and errs safe. | Run the probe in Dev Notes § Settled facts under Node 22.13 on Windows. |
 
+**Resolutions (dev, 2026-09-27 19:10):**
+
+- **U1 CONFIRMED.** The official `node-v22.13.0-win-x64.zip` (SHA-256 `b0feb09e...8429`, matching nodejs.org's `SHASUMS256.txt`) ran a rewrite of the Dev Notes probe (`atime-probe.mjs`: `utimesSync` both times back, recursive `fs.watch` on the real temp directory, one `readFileSync`, 1.5 s wait, `statSync` compared on `size`, `atimeMs`, `mtimeMs` and `ctimeMs`) on this Windows 11 machine. Output under `v22.13.0 libuv 1.49.2`, 2 runs of 2: `{"label":"read, atime 2 h old","events":["change a.ts"],"moved":["atimeMs"]}`, `{"label":"read, atime 10 min old","events":[],"moved":["atimeMs"]}`, `{"label":"edit, revert, mtime restored",...,"moved":["ctimeMs"]}`. The Node 24.19.0 (libuv 1.52.1) control printed the same three lines. The binary and probe were deleted after.
+
 ## Tasks / Subtasks
 
 <!--
@@ -39,13 +43,13 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Resolve every Unverified Assumption above before implementing, and write each answer with the source location or observed output beneath the table.
-- [ ] (AC1) In `packages/daemon/src/inputs/input-inventory.ts` `readEntryDigest`, return beside an input's digest the size, modification time and change time of what it hashed (the `lstat` it already takes, or the `stat` through the link for a link to a file), and carry them through `takeInventory`'s result, so a reconciliation and an event read record the same facts.
-- [ ] (AC1) In `packages/daemon/src/inputs/input-state.ts`, keep those three beside each input's digest, set by `establish`, `set` and `replaceUnder` alike and dropped with the input by `remove`, without changing when the revision rises (a digest change only), and without adding them to `project()` or to anything the input fingerprint is computed from. Record, per input, when the tracker last read it.
-- [ ] (AC1) In `packages/daemon/src/inputs/input-tracker.ts` `#readFile`, record the path against the running jobs only when the input was not held, its digest or one of the three differs from what the state held, or its last read came less than `MODIFIED_TIME_RESOLUTION_MS` after its held modification or change time. That constant has two readers now, so move it from `fingerprint.ts` to `input-inventory.ts`, which both already import (C4). A path protection queued (`#quiet`) keeps recording nothing, as today.
-- [ ] (AC2) Give `TrackedInputs` (`input-tracker.ts`) a method that resolves once every event accepted before the call has been read and no reconciliation runs, and at once after a stop (`EventLedger.waitForRead`, which `endJob` already uses), and have `packages/daemon/src/daemon/lifecycle.ts` await it before each `beginJob` (confirm with `rg -n "beginJob\(" packages/*/src` that these three are its only callers): the discovery's in `#startSequence`, the guard's in `#protectDiscovered`, and each run's in `#run`. Keep `#startSequence`'s stop check after the wait, and have `#protectDiscovered` and `#run` likewise return without calling `beginJob` when the wait resolved because of a stop.
-- [ ] (Support) Report the exact `docs/architecture.md` text to the orchestrator (orchestrator-owned; C48, C55): in the input tracker paragraph, the sentence "A job is stored under the fingerprint it started from only when no input changed and no event named one while it ran" gains AC1's exception and AC2's wait, and the known limits gain "a write that restores an input's content, modification time and change time while a job runs".
-- [ ] (Support) Lint and typecheck.
+- [x] (Support) Resolve every Unverified Assumption above before implementing, and write each answer with the source location or observed output beneath the table.
+- [x] (AC1) In `packages/daemon/src/inputs/input-inventory.ts` `readEntryDigest`, return beside an input's digest the size, modification time and change time of what it hashed (the `lstat` it already takes, or the `stat` through the link for a link to a file), and carry them through `takeInventory`'s result, so a reconciliation and an event read record the same facts.
+- [x] (AC1) In `packages/daemon/src/inputs/input-state.ts`, keep those three beside each input's digest, set by `establish`, `set` and `replaceUnder` alike and dropped with the input by `remove`, without changing when the revision rises (a digest change only), and without adding them to `project()` or to anything the input fingerprint is computed from. Record, per input, when the tracker last read it.
+- [x] (AC1) In `packages/daemon/src/inputs/input-tracker.ts` `#readFile`, record the path against the running jobs only when the input was not held, its digest or one of the three differs from what the state held, or its last read came less than `MODIFIED_TIME_RESOLUTION_MS` after its held modification or change time. That constant has two readers now, so move it from `fingerprint.ts` to `input-inventory.ts`, which both already import (C4). A path protection queued (`#quiet`) keeps recording nothing, as today.
+- [x] (AC2) Give `TrackedInputs` (`input-tracker.ts`) a method that resolves once every event accepted before the call has been read and no reconciliation runs, and at once after a stop (`EventLedger.waitForRead`, which `endJob` already uses), and have `packages/daemon/src/daemon/lifecycle.ts` await it before each `beginJob` (confirm with `rg -n "beginJob\(" packages/*/src` that these three are its only callers): the discovery's in `#startSequence`, the guard's in `#protectDiscovered`, and each run's in `#run`. Keep `#startSequence`'s stop check after the wait, and have `#protectDiscovered` and `#run` likewise return without calling `beginJob` when the wait resolved because of a stop.
+- [x] (Support) Report the exact `docs/architecture.md` text to the orchestrator (orchestrator-owned; C48, C55): in the input tracker paragraph, the sentence "A job is stored under the fingerprint it started from only when no input changed and no event named one while it ran" gains AC1's exception and AC2's wait, and the known limits gain "a write that restores an input's content, modification time and change time while a job runs".
+- [x] (Support) Lint and typecheck.
 
 ## Reusable Code
 
@@ -94,7 +98,7 @@ Clauses the criteria rest on:
 Every question went to the orchestrator by `session_wake` (crew.md § Questions).
 
 - The access-time decision, dispatched to this ticket by the orchestrator (dispatch, 18:35): decide whether an event that changes only the access time taints a job. Asked 18:45 with the evidence below; orchestrator ruling 18:46: accepted as recommended. "An event after which the input's content digest, size, mtime and ctime all equal the tracker's last read marks no job and raises no revision. A job, the start sequence's discovery included, begins only after the events queued before it are read. Record the residual (a write restoring content, mtime and ctime) as a named known limit. Reason: an edit then revert still moves ctime, so 2.1's reverted-edit guard holds. Restoring ctime needs a Windows-only API call and is impossible on Linux. Meanwhile today's behavior stores every first discovery after an idle start not fingerprinted, which defeats the freshness the product promises." (AC1, AC2)
-- The two-second bar, create-ticket at 19:04 on the ticket review's F8: the review found that an edit and its revert within one timestamp tick of the tracker's last read would leave all four facts equal, a hole in 2.1's reverted-edit guard that the 18:46 ruling's own reason says must hold, on Linux too, where no access-time event exists to justify it. AC1 therefore exempts an event only when the tracker's last read came at least `MODIFIED_TIME_RESOLUTION_MS` (2 s) after the input's modification and change times. That narrows the ruling's exception toward more marking and leaves its case, a file untouched for an hour, exempt. Reported to the orchestrator with this ticket.
+- The two-second bar, create-ticket at 19:04 on the ticket review's F8: the review found that an edit and its revert within one timestamp tick of the tracker's last read would leave all four facts equal, a hole in 2.1's reverted-edit guard that the 18:46 ruling's own reason says must hold, on Linux too, where no access-time event exists to justify it. AC1 therefore exempts an event only when the tracker's last read came at least `MODIFIED_TIME_RESOLUTION_MS` (2 s) after the input's modification and change times. That narrows the ruling's exception toward more marking and leaves its case, a file untouched for an hour, exempt. Reported to the orchestrator with this ticket; orchestrator ruling 19:07: accepted.
 - Split, owner 18:47 then orchestrator 19:01: this ticket holds only the access-time criteria; the selection facts, their protection and the alias widening went to 2.3b, 2.3c and 2.3d with their rulings (G1, G2 and G3 at 18:59, the `picomatch` and schema rulings at 18:46), which the sprint file carries under those headings.
 
 #### Settled facts
@@ -111,7 +115,7 @@ Every question went to the orchestrator by `session_wake` (crew.md § Questions)
 
 #### Design notes
 
-- **AC1 compares with the tracker's last read, not with the job's start.** A job that read an edited file is still marked when an edit and a revert both land before the tracker reads the path, since both move the modification and change times. The reads that feed the comparison are the reconciliation's inventory and each event read, so both must record the same three facts.
+- **AC1 compares with the tracker's last read, not with the job's start.** A job that read an edited file is still marked when an edit and a revert both land before the tracker reads the path, since both move the modification and change times. The reads that feed the comparison are the reconciliation's inventory and each event read, so both must record the same three facts. A read taken while an event on the path is still unread (a reconciliation runs with the queue held, and a directory walk) may postdate a write the queued event reports, so it never replaces the read the event is judged against; a whole walk that finds the content unchanged but the size or a time moved keeps the earlier read too (sanity check, rt-t2-3-dev, 19:21). Keeping a read refreshed by a walk that finds all four unchanged and no event unread is what lets a file edited in this daemon life reach AC1's case an hour later.
 - **A path the tracker held no read of** (a new file, or an input a reconciliation could not read) always marks the jobs running, as today.
 - **AC2's wait** is 2.1's `EventLedger.waitForRead`, which waits only for events accepted before it was called and for a running reconciliation, so a continuous writer cannot hold a job's start forever; a job that starts while events keep coming is then judged as today. A stop releases the wait through `EventLedger.releaseAll`, which `InputTracker.stop` already calls.
 - **Known limit this ticket adds**, for `docs/architecture.md`: a write that restores an input's content, modification time and change time while a job runs is not seen as a change, once the tracker's last read of it came at least 2 s after those times. An edit and its revert within one timestamp tick are covered by that bar. The change time cannot be set on Linux; on Windows only through `SetFileInformationByHandle`.
@@ -202,41 +206,145 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 02e49f18-8776-4df3-8493-f25e6a081ca7
 
 #### Test Files This Change Broke
 
-None.
+- `packages/daemon/test/lifecycle.test.ts`: `StandInInputs` no longer implements `TrackedInputs`, which gained `settled(): Promise<void>` (`bun run --filter @rt-test/daemon typecheck`: TS2420 at 316 and TS2741 at 402, the workspace's only 2 errors). A stand-in that resolves at once keeps today's ordering; a test holding a reconciliation may want it to hold too.
+- `packages/daemon/test/defects.json`: 4 records whose `old` no longer matches once (checked by string count over all 510 records): D1888 and D1998 in `input-tracker.ts` (`#readFile`'s `this.#state.set(relative, digest)` became `if (this.#state.set(relative, read)) record([relative]);`, and `current()` moved to `inputs/current-inputs.ts`), D1953 and D1988 in `lifecycle.ts` (the `settled()` wait now sits between `testModuleChangedSince` and the guard's `beginJob`, and before each `beginJob`).
+- `packages/daemon/test/input-tracker.test.ts`: none by type (it reads only `readEntryDigest(...).kind`), but `EntryDigest`'s input arm is now `{ kind: "input", read: { digest, stamp } }` and `InputState.establish` takes a third argument, so any runtime reading `.digest` off an entry moves.
 
 #### ACs Owed a Test
 
-None.
+- AC1: an input event whose read finds digest, size, mtime and ctime equal to the held read, taken at least 2 s after both times, marks no running job and raises no revision; any difference, a path not held, or a held read within 2 s of those times marks every running job. Only a test with a real watcher shows it (a Windows last-access event, or a planted `readEntryDigest` result on either OS).
+- AC1, the reverted edit through a whole walk: an edit and revert while a reconciliation runs, read by the inventory at least 2 s after the revert, still marks the running job when its queued event is read (`keptReads` in `input-state.ts`).
+- AC1, a link to a file: retargeting a link to another file and back marks the running job (the stamp takes the later of the link's and the file's times).
+- AC2: each of the three `beginJob` calls in `lifecycle.ts` runs only after `inputs.settled()` resolves; a stop during that wait ends the sequence without beginning the job; the first discovery after a start on a tree idle over an hour is stored fingerprinted on Windows.
 
 #### Tests Owed
 
-None.
+None beyond the criteria above.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 9e49a9fd-0678-4dd3-86af-bb87e07f9f1c
 
 #### Named Defects
 
-None.
+- D2065: Every event read of an input marks the running jobs, so a last-access event on a file untouched for an hour leaves a job not fingerprinted. (AC1)
+- D2066: A read whose content digest alone differs from the held read counts as unmoved, so an edit on a file system whose times do not move marks no job. (AC1)
+- D2067: A read whose modification time alone differs from the held read counts as unmoved, so the job is not marked. (AC1)
+- D2068: A read whose change time alone differs from the held read counts as unmoved, so an edit reverted with its modification time restored marks no job. (AC1)
+- D2069: A read records the input's modification time as its change time, so an edit reverted with its modification time restored reads as unmoved and marks no job. (AC1)
+- D2070: An event naming a path the tracker held no read of marks no job, so a file created during a job leaves it fingerprinted. (AC1)
+- D2071: A held read taken 1999 ms after the input's last write counts as clear of the 2 s timestamp step, so an event with nothing moved marks no job. (AC1)
+- D2072: A held read taken exactly 2000 ms after the input's last write does not count as clear of the timestamp step, so an event with nothing moved still marks the job. (AC1)
+- D2073: The 2 s bar is measured from the modification time alone, so an input whose modification time was restored but whose change time is recent is exempted. (AC1)
+- D2074: The 2 s bar is measured from the change time alone, so an input whose modification time lies after the held read is exempted. (AC1)
+- D2075: A reconciliation's read replaces the held read while an event naming the input is unread, so that event is judged against a read that may postdate its write. (AC1)
+- D2076: A reconciliation that finds an input's times moved and its content unchanged replaces the held read, so a later event is judged against a read taken after the write. (AC1)
+- D2077: A directory walk replaces the held reads of the inputs it finds unmoved, though an event on them may be unread, so that event is judged against the walk's read. (AC1)
+- D2078: A reconciliation that finds an input's content changed keeps the held read, so the fingerprint is computed from the old digest. (AC1)
+- D2079: A link to a file is stamped with its target's times alone, so a retarget to another file and back reads as unmoved and marks no job. (AC1)
+- D2080: The discovery's job begins as soon as the first reconciliation ends, before the events it left unread are read. (AC2)
+- D2081: The guard around protecting the discovery's test modules begins without waiting for the inputs to settle. (AC2)
+- D2082: A run's job begins without waiting for the inputs to settle. (AC2)
+- D2083: A stop that arrives while the guard waits for the inputs to settle is followed by the guard's job. (AC2)
+- D2084: A stop that arrives while a run waits for the inputs to settle is followed by the run. (AC2)
+- D2085: A wait for the inputs to settle begun after the tracker stopped waits on events no one will read, so it never resolves. (AC2)
+- D2086: The tracker's wait for the inputs to settle resolves at once, so the discovery begins while the first reconciliation's events are unread and is stored not fingerprinted. (AC2; the Windows hour-idle start, proven on either host by an event the test's `fs.watch` wrapper delivers as the first reconciliation ends)
+- D2088: A run sets its activity only after the inputs settle, so a status during that wait does not name the workspace about to run. (AC2)
+
+- D2090: The check for test modules no watch covers runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest. (AC2, review gap G1)
+- D2091: A directory walk counts only a changed digest, so a directory replaced by a copy with the same content and other times marks no running job. (AC1, review gap G2)
+- D2092: The start sequence checks for a stop before waiting for the inputs to settle, so a stop arriving during that wait is followed by the discovery. (AC2, review gap G3)
+- Review gap G4: D2086 now records whether its change event was delivered through the root's watch and asserts that together with the stored fingerprint kind, so a missing watch fails it rather than passing as a start with no events.
+- After the review's fixes R1 and R2: D1988 and D2083 re-anchored to `#protectDiscovered`'s new order, with the wait and stop check ahead of the unwatched-module check.
+
+Existing records this change moved or retired, re-proven:
+
+- Re-anchored to the moved code: D1888 (`#readFile`'s conditional record), D1953 (the stop check after `settled()`), D1988 (the settle wait before the guard) and D1998 (now in `current-inputs.ts`).
+- D1460: its mutation dropped the start sequence's loop `break`, which `#run`'s new post-wait stop check (D2084) now also guards, so it was re-targeted to `isStopping()` returning false. The test is unchanged. (orchestrator, 19:49)
+- D1766 retired, its test and record removed (orchestrator, 19:49). With `isStopping()` false, the start sequence's extra `await inputs.settled()` lets `daemon-main.ts`'s `await lifecycle.stopped(); process.exit()` win the microtask race, so no single mutation makes discovery start after a stop. D1953 proves the start sequence's post-wait stop check. `daemon-main.ts`'s begin guard (`if (!lifecycle.isStopping()) lifecycle.begin();`) now has no named test of its own. The start sequence's check makes it redundant for discovery, and a `begin` after a stop leaves nothing a test can observe deterministically.
+- D1897 repaired, not re-targeted: its file is now modified an hour ahead of every read. Under AC1 an event on a file whose last read came 2 s after its write marks nothing, so a loaded run could otherwise pass the job as fingerprinted.
+- D1987 and D1988 now run over the real `InputTracker`; `SettledTracker`, which waited out unread events itself, was removed because AC2's wait does that in the lifecycle.
+- State at the 19:54 harness pause: D1766's retirement and D1460's re-target are both done. `bun run test:defects:changed` ended before the pause (19:49 to 19:54, exit 0, 233/233 detected, baseline green before and after), so no re-run is owed.
+- AC2's clause that a job begun while events keep arriving is still judged as 2.1's AC3 states: D1897 covers it, since `endJob` now waits through `settled()`, whose bound it proves.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/inputs/input-inventory.ts` `readEntryDigest`'s `readAtMs`, taken before the `lstat`: a later instant is observable only through a write landing inside one read, which no seam can place.
+- `packages/daemon/src/inputs/input-state.ts` `unmoved`'s size comparison, and `stampOf`'s `size` and `modifiedMs`: inert, since a size cannot differ while the digest matches for a file, a link to a file or a special type, and no file system moves a modification time without the change time.
+- `packages/daemon/src/inputs/current-inputs.ts` beyond D1998: a move of `current()`'s body, whose branches the existing tracker and query tests reach unchanged.
+- `packages/daemon/src/inputs/fingerprint.ts`: only `MODIFIED_TIME_RESOLUTION_MS` moved out; no behavior changed.
 
 ### Review Record
 
+Review session: threadId 009f44c2-1973-4d70-9ce7-f79820445d9c (rt-t2-3-review, 2026-09-27 20:07 to 20:19)
+
+Findings fixed in this review:
+
+- R1 (HIGH, `consumer`, reach unknown) `lifecycle.ts` `#protectDiscovered`: the unwatched test-module check ran before the guard's new `settled()` wait. A declared module no watch covers, edited during that wait, raises no event; protection's quiet read then puts the edited content in the inputs, and the discovery is stored under a digest of content it was not collected from. Fixed: the check now runs after the wait and its stop check, directly before `beginJob`, so nothing but synchronous code lies between it and `protectTestModules`, which D1988 requires.
+- R2 (CRITICAL, `consumer`, reach unknown; digest-only counting predates this ticket, AC1 claims the case) `input-state.ts` `replaceUnder`: a directory walk counted only a changed digest. A directory replaced by a rename with identical bytes but moved times, both moves landing before the tracker reads it, marked no running job, though the job may have read the path while it was missing, and no per-file event follows to judge against the kept read. Fixed: the walk also returns each input whose content is unchanged but which the held read cannot rule a write out of (`unrestedPaths`, the same `restedSince` test an event read takes), so the running jobs are marked; the revision still rises on a digest change only.
+
+Orchestrator rulings on this review: R1 and R2 accepted as fixes within the ticket, R2 because AC1 claims the case (20:20); D2090 to D2092 allocated to the tests session (20:20); the seven doc findings applied, 2.3e's scope restored to the 01:27 ruling's wording, the FR3, FR6, FR7 and NFR3 markers relinked to the split's tickets, and the guard rule added as C160 (20:42).
+
+Tech debt, for triage after the commit:
+
+- T1 (pre-existing, 2.1's design) `input-tracker.ts` `endJob`: after its wait it closes with `#unavailableReason()`, which counts events accepted after the call, and `#drainQueue` starts the next batch before `endJob`'s continuation runs. A job whose own reads raise last-access events still arriving at its end is stored not fingerprinted. Errs safe; reach unknown.
+- T2 (pre-existing coverage) `fingerprint.ts` `testModuleChangedSince`: no named defect mutates its `since - MODIFIED_TIME_RESOLUTION_MS` margin (D1898 edits after `since`, so it passes without the margin) or its `modified === undefined` branch (a module deleted during the job).
+- T3 (pre-existing, left untested by D1766's retirement) `daemon-main.ts`'s begin guard: moving it into `DaemonLifecycle.begin` as its first line would make it testable in `lifecycle.test.ts` (a `begin` after `stop` starts no inputs and reads no store); without the guard, a late `begin` reads a store the stop sequence closed.
+- T4 (pre-existing coverage) `lifecycle.ts` `#startSequence`'s loop `break` on a stop: no defect mutates it alone since D1460's re-target; without it, a later workspace missing from the confirmed start is listed unstored as unconfirmed after a stop.
+- T5 (pre-existing) `input-inventory.ts` `linkDigest`: a chain of links stamps only the first link and the final file, so retargeting a middle link and restoring it moves no compared time.
+- T6 (dev's F3) `fingerprint.ts` `testModuleChangedSince` reads only `mtimeMs`; the fix, `Math.max(mtimeMs, ctimeMs)`, costs a real 2 s wait in the fixtures that backdate a module with `utimesSync`.
+- T7 (dev's F5) a writer that keeps requesting reconciliations keeps `#reconcileWhileRequested` looping, so `firstReconciled`, `settled()` and `endJob` wait until a stop.
+
+Discarded: the run's activity reading `running` through its settle wait (deliberate, the dev's F6 and D2088); `#protectDiscovered`'s stop verdict, which its caller re-derives (clarity only); renaming `set`, `keptReads`' predicate or `MODIFIED_TIME_RESOLUTION_MS` (the name is quoted by AC1 and the docs, and its comment carries the wider meaning); a queued event on a directory not protecting its files' reads in a reconciliation (needs a lost per-file event, which the watcher's own failure path reconciles); NTFS's change time on a last-access update (U1, settled by probe).
+
 #### Test Coverage Gaps
 
-None.
+| #   | Source                                           | Named defect                                                                                                                                                                                                                                                                 | Expected test                                                                                                                                                                                                                                                                                         | Severity |
+| --- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| G1  | `packages/daemon/src/daemon/lifecycle.ts`        | The check for test modules no watch covers runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest of content it was not collected from. | `lifecycle.test.ts`, stand-in holding the guard's settle (call 1): a module change the stand-in's `testModuleChangedSince` reports only once the hold is released leaves the discovery not fingerprinted. Mutation: the pre-fix order, the `unwatched` statement above `await inputs.settled();`.     | HIGH     |
+| G2  | `packages/daemon/src/inputs/input-state.ts`      | A directory walk counts only a changed digest, so a directory replaced by a rename with the same content but moved times, read after both moves, marks no running job.                                                                                                       | `input-tracker.test.ts`, real tracker: a job open while a held directory is replaced by a same-content copy whose times differ, with only the directory's event delivered, is not fingerprinted. Mutation: `return [...changed, ...unrestedPaths(before, inputs)];` to `return changed;`.             | CRITICAL |
+| G3  | `packages/daemon/src/daemon/lifecycle.ts`        | The start sequence checks for a stop before waiting for the inputs to settle, so a stop arriving during that wait is followed by the discovery.                                                                                                                              | `lifecycle.test.ts`, `scripted({ heldSettle: 0 })`: a stop during the discovery's settle wait runs no discovery. Mutation: move `if (this.isStopping()) return;` in `#startSequence` above `await inputs.settled();`. D1953 holds the reconciliation, not the wait, so it passes under this mutation. | MEDIUM   |
+| G4  | `packages/daemon/test/lifecycle.test.ts` (D2086) | D2086's injection `listeners[paths.indexOf(realpathSync.native(root))]?.("change", "a.ts")` does nothing when no watch opened on that exact path, so the test would pass as "a discovery with no events is stored fingerprinted" under its own mutation.                     | Record that the event was injected and assert it with the fingerprint kind, keeping one assertion.                                                                                                                                                                                                    | LOW      |
+
+Re-anchor after R1: D1988 and D2083, whose `old` text no longer matches `lifecycle.ts` (both counted 0 matches at 20:18). R2 may move existing verdicts in `input-tracker.test.ts`: a held directory re-read on a rename event whose inputs were written less than 2 s before their last read now marks the running jobs.
 
 ### Completion Notes
 
+Dev (rt-t2-3-dev, 2026-09-27 19:07 to 19:22).
+
+- **Sanity check**: no findings. The one detail the ticket hands forward is which instant "when the tracker last read it" means. AC1's reverted-edit guard admits only one: the time taken before the read's `lstat` (`readAtMs` in `InputStamp`), since a later instant could exempt a revert landing during the hash.
+- **U1**: CONFIRMED on Node 22.13.0 (resolution under the table).
+- **Built**: `readEntryDigest` returns `{ digest, stamp }` with `stamp = { size, modifiedMs, changedMs, readAtMs }`; `takeInventory` returns `InputReads`; `MODIFIED_TIME_RESOLUTION_MS` moved to `input-inventory.ts`, read by `fingerprint.ts` and `input-state.ts`. `InputState` holds one `InputRead` per input, raises the revision on a digest change only, and `project()` still digests paths and content digests alone. `InputState.set` returns whether a write may have landed since the held read (`restedSince`), and `#readFile` records the path only then. `TrackedInputs.settled()` is `EventLedger.waitForRead`, or at once after a stop; `endJob` now calls it too, and `lifecycle.ts` awaits it before each of the three `beginJob` calls, returning without the job on a stop. `current()`'s body moved to `inputs/current-inputs.ts` (new) because `input-tracker.ts` passed the 500-code-line cap at 503.
+- **Adversarial review** (19:13 to 19:17, 7 findings), triage:
+  - F1 fixed. A whole walk no longer replaces a held read unless content, size and both times are unchanged and no unread event names the path (`keptReads`; `replaceUnder` always keeps it), so a queued event is judged against a read before the write. Asked the author (fc226c90) at 19:21 whether AC1's first sentence should say so; author reply 19:22, CONFIRMED and TICKET UPDATED (AC1 and Dev Notes § Design notes). Where a walk finds an input's content changed, its read replaces the held one whatever is unread, since the fingerprint digests it; that walk reports the path changed and so marks every running job itself, and AC2's wait keeps a new job from beginning before the queued event is read.
+  - F2 fixed: a link to a file stamps the later of the link's and the file's times.
+  - F6 fixed: `#run` sets its activity before the wait.
+  - F7a fixed: `currentInputs`' docblock names `SnapshotReads` rather than claiming every outside read.
+  - F7b discarded: the type-only cycle between `current-inputs.ts` and `input-tracker.ts` erases at compile, and moving `CurrentInputs` would ripple into `query/` and two test files.
+  - F3, F4 and F5 are listed below.
+- **Post-fix re-validation** (19:21): `bun run --filter @rt-test/daemon typecheck` exit 1 with only the 2 `lifecycle.test.ts` errors above; `bun run --filter rt-test typecheck` exit 0; root `bun x tsc --noEmit` exit 0 (19:13); `bun x oxlint` over the 6 source files exit 0, no warnings; `bun x prettier --check` exit 0. `node scripts/check-line-citations.mjs` clean. Literal check: the only new literal is `MODIFIED_TIME_RESOLUTION_MS`, moved and named.
+- **README**: no user-visible CLI, configuration or support change; `README.md` untouched.
+
+Change-request candidates, for `review-changes`:
+
+1. **F3, pre-existing, carries a decision.** `testModuleChangedSince` (`fingerprint.ts`) reads only `mtimeMs` of a test module no watch covers, which `cp -p`, `touch -r` or tar extraction can hold still across an edit. The fix is `Math.max(mtimeMs, ctimeMs)` in `modifiedAt`. But a fixture can no longer backdate a module with `utimesSync`, which moves ctime to now (D1898 in `input-tracker.test.ts` and `declaredModuleStart` in `lifecycle.test.ts` do), so those tests would need a real 2 s wait. Recommend the fix, with the test cost stated.
+2. **F4, a known limit to name.** The 2 s bar compares the daemon's clock (`readAtMs`) with file times. On a network share whose server clock lags 2 s or more and whose timestamps are coarse, an edit and revert within one step could pass. Recommend naming it in `docs/architecture.md`'s known limits (text in the lane report) rather than anchoring on file-system time.
+3. **F5, pre-existing liveness.** A writer that keeps requesting reconciliations (`.gitignore`, `rt-test.json`, a watched git file) keeps `#reconcileWhileRequested` looping. `firstReconciled` then never resolves and every `endJob` waits, so the start sequence stalls until a stop (a stop still ends it). `settled()` adds the same wait before the guard and each run. Fixing it means bounding the wait to the reconciliation running at the call, in `input-jobs.ts` and the tracker, which is outside this ticket's files.
+
 ### File List
 
-- `_agent-docs/tickets/2-3-access-time-events.md` (create-ticket)
+- `_agent-docs/tickets/2-3-access-time-events.md` (create-ticket; dev wrote the task and assumption records, Dev Handoff and Completion Notes)
+- `packages/daemon/src/inputs/input-inventory.ts` (dev)
+- `packages/daemon/src/inputs/fingerprint.ts` (dev)
+- `packages/daemon/src/inputs/input-state.ts` (dev)
+- `packages/daemon/src/inputs/input-tracker.ts` (dev)
+- `packages/daemon/src/inputs/current-inputs.ts` (dev, created)
+- `packages/daemon/src/daemon/lifecycle.ts` (dev)
+- `packages/daemon/test/lifecycle.test.ts`, `packages/daemon/test/input-tracker.test.ts`, `packages/daemon/test/daemon.test.ts` and `packages/daemon/test/defects.json` (tests)
 - `_agent-docs/sprints/sprint-2-fresh-runs.md` and `_agent-docs/sprint-status.yaml` (create-ticket, the split into 2.3 to 2.3f under the 18:47 and 19:01 grants)
+- `docs/architecture.md` and `docs/testing.md` (orchestrator, from the dev's and the tests session's reported text)
+- `packages/daemon/src/daemon/lifecycle.ts` and `packages/daemon/src/inputs/input-state.ts` (review fixes, 20:18)

@@ -12,6 +12,7 @@ import { absoluteInputPath } from "./input-filter.js";
 import {
   DIGEST_ALGORITHM,
   DIGEST_ENCODING,
+  MODIFIED_TIME_RESOLUTION_MS,
   type InputDigests,
 } from "./input-inventory.js";
 import { discoveredTestModules, workspaceTestModules } from "./non-inputs.js";
@@ -20,8 +21,6 @@ const ENTRY_SEPARATOR = "\n";
 const MISSING_CODE = "ENOENT";
 /** Stands for a listed test module that no longer exists, so its deletion changes the digest. */
 const ABSENT_MODULE = "absent";
-/** The coarsest modification-time step a supported file system records, FAT's two seconds. */
-const MODIFIED_TIME_RESOLUTION_MS = 2000;
 
 export type FingerprintResult =
   | { readonly ok: true; readonly digest: string }

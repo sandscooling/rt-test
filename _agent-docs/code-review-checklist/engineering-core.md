@@ -55,6 +55,7 @@ C19. **No widening casts**: No `as` cast widens a union or literal type (such as
 C20. **Never sort a shared array in place**: Sorting an array the function did not create uses `toSorted()` or a copy, never `sort()` on the original.
 
 C21. **Guard on presence, not truthiness**: A guard deciding whether to transform a value that can be `0` or `""` tests `!== undefined` or `in`, never truthiness.
+C160. **Keep a guard's read beside what it guards**: A check whose answer vouches for state until an action relies on it (a file time read before protection moves the file, a stop check before a job begins) runs with no await between it and that action. A change that inserts an await between them moves the check below the await.
 
 ## Bounds and truncation
 
