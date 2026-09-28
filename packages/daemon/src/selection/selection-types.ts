@@ -9,7 +9,7 @@ import type {
 import type { ReportedAlias } from "../vitest/selection-facts.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 8;
+export const SELECTION_POLICY_VERSION = 9;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -34,6 +34,7 @@ export const UNCERTAINTY = {
   unlistedPackage: "unlisted-package",
   unresolvedOverride: "unresolved-override",
   unresolvableAlias: "unresolvable-alias",
+  unresolvableSpecifier: "unresolvable-specifier",
   testsNotKnown: "tests-not-known",
   unreadableSource: "unreadable-source",
   unparsedSource: "unparsed-source",

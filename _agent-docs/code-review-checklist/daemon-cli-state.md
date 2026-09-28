@@ -53,6 +53,8 @@ C130. **A zero-test selection is not a pass**: A selection or run that executed 
 
 C154. **Never run a current test again**: A path that queues a test skips it while it holds a current result for the same input fingerprint; only a changed input, an invalidated run or a falsification experiment executes it again.
 
+C163. **Derive an edge from where a specifier resolves**: When a resolver can place a file away from what its specifier names (a redirect field, a link, an exports map), the dependency edge goes to the workspace holding the resolved file as well as the named one, and a resolution that cannot be followed widens.
+
 ## Distinct states
 
 C131. **Keep failure kinds distinct**: Collection errors, crashes, timeouts, interruptions, skips and unknown tests each keep their own state; none is coerced to passed or folded into a generic failed.

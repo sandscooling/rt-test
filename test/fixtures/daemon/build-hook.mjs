@@ -3,9 +3,10 @@ import { syncBuiltinESMExports } from "node:module";
 
 // Preloaded into an executor a test starts, it acts once the dependency build records that it is about to parse the
 // file the hook names: "hold" writes the marker and never returns, as a parse that never ends; "exit" ends the process
-// before the record names the file; "remove-and-exit" also removes the record first.
-const HOOK_VARIABLE = "RT_FIXTURE_BUILD_HOOK";
-const HOOK_EXIT_CODE = 7;
+// before the record names the file; "remove-and-exit" also removes the record first. A test importing it for its
+// constants arms nothing, since the hook acts only in a process whose entry is the executor's.
+export const HOOK_VARIABLE = "RT_FIXTURE_BUILD_HOOK";
+export const HOOK_EXIT_CODE = 7;
 const hook = process.env[HOOK_VARIABLE];
 const [, entry] = process.argv;
 

@@ -3,6 +3,10 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  HOOK_EXIT_CODE,
+  HOOK_VARIABLE,
+} from "../../../test/fixtures/daemon/build-hook.mjs";
 import { Executor, type JobOutcome } from "../src/daemon/executor.js";
 import {
   createParseRecord,
@@ -363,10 +367,8 @@ describe("holding each executor's tree before its job", () => {
 });
 
 const BUILD_HOOK = join(REPO, "test/fixtures/daemon/build-hook.mjs");
-/** Read by the build-hook preload in each executor process a test starts. */
-const HOOK_VARIABLE = "RT_FIXTURE_BUILD_HOOK";
 /** How the build-hook preload ends an executor. */
-const HOOK_EXIT = "exit code 7";
+const HOOK_EXIT = `exit code ${HOOK_EXIT_CODE}`;
 /** About 45,000 terms still parse; this many end the process inside the native parser on every gate platform. */
 const CRASH_TERMS = 100_000;
 /** How that crash ends a process: Windows reports the stack overflow as the exit code, Linux as SIGSEGV. */

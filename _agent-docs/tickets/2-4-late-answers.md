@@ -125,7 +125,7 @@ Asked by `session_wake` at 12:18 on 2026-09-28, answered at 12:18; decider the o
 - **2.4b** (backlog, builds after this ticket): adds the wait request type and `DaemonHandlers.wait`, returning a promise over this ticket's queue and signal, and `queryWait`, passing its own bound to `DaemonConnection.request`.
 - **2.4c** (backlog, builds after 2.4b): the command; it names no file here.
 - **2.4d** (backlog, builds after this ticket, before 2.4b; orchestrator 13:26): `status <path>` reads its path before answering, so `pathStatus` answers with a promise over this ticket's queue, and `queryPathStatus` passes a bound of its own.
-- **Change requests #31 and #35** (in flight on main): #31 changes `selection/*` and the selection policy version; #35 changes tsconfig `extends` resolution in `selection/tsconfig-edges.ts`. Neither touches this ticket's files.
+- **Change requests #31, #35 and #38** (landed): #31 changes `selection/*` and the selection policy version; #35 and #38 change tsconfig `extends` lookup and `file:` URL edges in `selection/`. None touches this ticket's files.
 
 #### Sizing
 

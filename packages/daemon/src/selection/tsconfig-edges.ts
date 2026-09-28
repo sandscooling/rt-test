@@ -1,19 +1,25 @@
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   joinPath,
   objectField,
   PACKAGE_JSON,
-  realPath,
   type PackageWorkspace,
 } from "../vitest/find-workspaces.js";
+import {
+  isInstalled,
+  isPathLike,
+  locateExtended,
+  readConfig,
+  realOrGiven,
+  subpathImportCause,
+  withForwardSlashes,
+} from "./extends-lookup.js";
 import { isRecord, uncertain } from "./graph-state.js";
 import { MAX_JSON_DEPTH, readJsonc } from "./jsonc.js";
-import { isFile } from "./source-walk.js";
 import {
   addPackageEdges,
   addPathEdges,
   addPatternEdges,
-  isAbsolutePath,
   isBare,
   isRelative,
   observedParse,
@@ -25,9 +31,6 @@ import { EDGE_PRODUCER, UNCERTAINTY } from "./selection-types.js";
 
 /** Configs an `extends` chain may pass through while its `baseUrl` or `paths` is sought. */
 const MAX_EXTENDS_DEPTH = 32;
-const JSON_EXTENSION = ".json";
-const NODE_MODULES = "node_modules";
-const DEFAULT_TSCONFIG = "tsconfig.json";
 const EXTENDS_FIELD = "extends";
 const REFERENCES_FIELD = "references";
 const REFERENCE_PATH_FIELD = "path";
@@ -78,9 +81,11 @@ export function addTsconfigEdges(
     );
   };
   const extended = extendsEntries(config);
+  let unfollowed = false;
   if (extended.ok) {
     for (const target of extended.value) {
-      addExtendsEdges(scan, at(`extends ${JSON.stringify(target)}`), target);
+      const reference = at(`extends ${JSON.stringify(target)}`);
+      unfollowed = addExtendsEdges(scan, reference, target) || unfollowed;
     }
   } else {
     malformed(extended.reason);
@@ -96,6 +101,8 @@ export function addTsconfigEdges(
   }
   const paths = pathTargets(config);
   if (!paths.ok) malformed(paths.reason);
+  // The dependent already depends on every workspace, so the chain's own widening would name it twice.
+  else if (unfollowed) return;
   else if (paths.value !== undefined) {
     addPathsEdges(scan, dependent, file, config, paths.value);
   } else addInheritedPathsEdges(scan, dependent, file, config);
@@ -123,16 +130,55 @@ function addInheritedPathsEdges(
   addPathsEdges(scan, dependent, file, config, found.value, found.file);
 }
 
+/** Answers whether the target cannot be followed, which widens the dependent. */
 function addExtendsEdges(
   scan: Scan,
   reference: Reference,
-  target: string,
-): void {
-  if (isPathLike(target)) {
+  written: string,
+): boolean {
+  const target = withForwardSlashes(written);
+  const subpathImport = subpathImportCause(target);
+  if (subpathImport !== undefined) {
+    uncertain(
+      scan.graph,
+      reference.dependent,
+      UNCERTAINTY.extendsUnfollowed,
+      `${reference.detail}, ${subpathImport}, so the package workspaces it points to are not known`,
+    );
+  } else if (isPathLike(target)) {
     addPathEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);
   } else {
     addPackageEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);
   }
+  return (
+    subpathImport !== undefined || addLocatedEdges(scan, reference, target)
+  );
+}
+
+/**
+ * A `tsconfig` field or a link can place the config TypeScript reads in another workspace than the target
+ * names. Answers whether the lookup cannot be followed, which widens the dependent.
+ */
+function addLocatedEdges(
+  scan: Scan,
+  reference: Reference,
+  target: string,
+): boolean {
+  const located = locateExtended(scan, target, reference.base);
+  if (located.ok) {
+    if (!isInstalled(located.file)) {
+      addPathEdges(scan, reference, located.file, EDGE_PRODUCER.tsconfig);
+    }
+    return false;
+  }
+  if (located.missing) return false;
+  uncertain(
+    scan.graph,
+    reference.dependent,
+    UNCERTAINTY.extendsUnfollowed,
+    `${reference.detail}, ${located.cause}, so the package workspaces it points to are not known`,
+  );
+  return true;
 }
 
 function referencePaths(config: unknown): Checked<string[]> {
@@ -237,7 +283,8 @@ type Nearest<T> =
 
 /**
  * The value `pick` finds first in the file's own options and then along its `extends` chain, later entries
- * first. A config two entries share is searched once, and only a config already on the current chain is a cycle.
+ * first. A config two entries share is searched once, and only a config already on the current chain is a
+ * cycle, each config known by its real path whatever link spelled it.
  */
 function nearestAlongExtends<T>(
   scan: Scan,
@@ -245,7 +292,7 @@ function nearestAlongExtends<T>(
   config: unknown,
   pick: (config: unknown, file: string) => Checked<T | undefined>,
 ): Nearest<T> {
-  const chain = new Set([resolve(file)]);
+  const chain = new Set([realOrGiven(resolve(file))]);
   const searched = new Set<string>();
   const seek = (
     current: unknown,
@@ -272,74 +319,51 @@ function nearestAlongExtends<T>(
         depth,
       );
       if (!next.ok) return next;
-      if (searched.has(next.file)) continue;
-      chain.add(next.file);
+      if (searched.has(next.key)) continue;
+      chain.add(next.key);
       const found = seek(next.value, next.file, depth + 1);
-      chain.delete(next.file);
+      chain.delete(next.key);
       if (!found.ok || found.found !== undefined) return found;
-      searched.add(next.file);
+      searched.add(next.key);
     }
     return { ok: true, found: undefined };
   };
   return seek(config, file, 0);
 }
 
+/** `file` is where the config was located, and `key` its real path, which tells one config from another. */
 function followExtends(
   scan: Scan,
   target: string,
   directory: string,
   chain: ReadonlySet<string>,
   depth: number,
-): { ok: true; value: unknown; file: string } | { ok: false; reason: string } {
+):
+  | { ok: true; value: unknown; file: string; key: string }
+  | { ok: false; reason: string } {
   if (depth >= MAX_EXTENDS_DEPTH) {
     return {
       ok: false,
       reason: `its extends chain is longer than ${MAX_EXTENDS_DEPTH} configs`,
     };
   }
-  const located = locateExtended(target, directory);
-  if (located === undefined) {
+  const located = locateExtended(scan, target, directory);
+  if (!located.ok) {
     return {
       ok: false,
-      reason: `extends ${JSON.stringify(target)}, which could not be found`,
+      reason: `extends ${JSON.stringify(target)}, ${located.cause}`,
     };
   }
-  const label = rootLabel(scan, located);
-  if (chain.has(located)) {
+  const { file } = located;
+  const label = rootLabel(scan, file);
+  const key = realOrGiven(file);
+  if (chain.has(key)) {
     return { ok: false, reason: `its extends chain returns to ${label}` };
   }
-  const real = realPath(located);
-  const key = real.ok ? real.path : located;
-  let read = scan.extendedConfigs.get(key);
-  if (read === undefined) {
-    read = observedParse(scan, label, () => readJsonc(located));
-    scan.extendedConfigs.set(key, read);
-  }
+  const read = readConfig(scan, file);
   return read.ok
-    ? { ok: true, value: read.value, file: located }
+    ? { ok: true, value: read.value, file, key }
     : { ok: false, reason: `${label} ${read.reason}` };
-}
-
-/** A path as given or with `.json` added; a package through the `node_modules` directories above. */
-function locateExtended(target: string, directory: string): string | undefined {
-  if (isPathLike(target)) {
-    const path = resolve(directory, target);
-    return [path, `${path}${JSON_EXTENSION}`].find(isFile);
-  }
-  for (let current = directory; ; current = dirname(current)) {
-    const path = join(current, NODE_MODULES, target);
-    const found = [
-      path,
-      `${path}${JSON_EXTENSION}`,
-      join(path, DEFAULT_TSCONFIG),
-    ].find(isFile);
-    if (found !== undefined) return found;
-    if (dirname(current) === current) return undefined;
-  }
-}
-
-function isPathLike(target: string): boolean {
-  return isRelative(target) || isAbsolutePath(target);
 }
 
 function isStringArray(value: unknown): value is string[] {

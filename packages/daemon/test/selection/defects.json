@@ -899,8 +899,8 @@
     "id": "D1606",
     "defect": "A tsconfig extends path is not followed into its workspace, so it adds no edge.",
     "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "  if (isPathLike(target)) {\n    addPathEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);\n  } else {",
-    "new": "  if (isPathLike(target)) {\n  } else {"
+    "old": "  } else if (isPathLike(target)) {\n    addPathEdges(scan, reference, target, EDGE_PRODUCER.tsconfig);\n  } else {",
+    "new": "  } else if (isPathLike(target)) {\n  } else {"
   },
   {
     "id": "D1607",
@@ -962,8 +962,8 @@
     "id": "D1614",
     "defect": "A config two extends entries share stays on the chain after its search, so the second visit reads as a cycle and paths widens.",
     "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "      if (searched.has(next.file)) continue;\n      chain.add(next.file);\n      const found = seek(next.value, next.file, depth + 1);\n      chain.delete(next.file);\n",
-    "new": "      chain.add(next.file);\n      const found = seek(next.value, next.file, depth + 1);\n"
+    "old": "      if (searched.has(next.key)) continue;\n      chain.add(next.key);\n      const found = seek(next.value, next.file, depth + 1);\n      chain.delete(next.key);\n",
+    "new": "      chain.add(next.key);\n      const found = seek(next.value, next.file, depth + 1);\n"
   },
   {
     "id": "D1615",
@@ -1394,10 +1394,10 @@
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 7, so a selection reports the version from before a ** glob reached every workspace and a glob's literal directory ended before an escape.",
+    "defect": "The selection policy version stays at 8, so a selection reports the version from before a bare extends was located as TypeScript locates it and a file: URL reached its path.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 8;",
-    "new": "export const SELECTION_POLICY_VERSION = 7;"
+    "old": "export const SELECTION_POLICY_VERSION = 9;",
+    "new": "export const SELECTION_POLICY_VERSION = 8;"
   },
   {
     "id": "D2045",
@@ -1703,9 +1703,9 @@
   {
     "id": "D2237",
     "defect": "A config a tsconfig extends is parsed without telling the observer, so a parser crash inside it says the file is not known.",
-    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "    read = observedParse(scan, label, () => readJsonc(located));",
-    "new": "    read = readJsonc(located);"
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    read = observedParse(scan, rootLabel(scan, file), () => readJsonc(file));",
+    "new": "    read = readJsonc(file);"
   },
   {
     "id": "D2247",
@@ -1849,36 +1849,36 @@
   },
   {
     "id": "D2346",
-    "defect": "The extends cache is keyed by the target as written rather than by the located file, so a second config quoting the same relative target in another directory is handed the first directory's base and inherits its paths.",
-    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "  const key = real.ok ? real.path : located;",
+    "defect": "Where an extends target was located is cached by the target as written rather than with the directory it was sought from, so a second config quoting the same relative target in another directory is handed the first directory's base and inherits its paths.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const key = [target, directory].join(KEY_SEPARATOR);",
     "new": "  const key = target;"
   },
   {
     "id": "D2377",
     "defect": "The extends cache is never filled, so a base config sought for its paths and again for its baseUrl is parsed twice, each parse costing the parse record's writes.",
-    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
     "old": "    scan.extendedConfigs.set(key, read);\n",
     "new": ""
   },
   {
     "id": "D2378",
     "defect": "The extends cache is keyed by the located path rather than the real path, so one base config reached through two links is parsed once per link.",
-    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "  const key = real.ok ? real.path : located;",
-    "new": "  const key = located;"
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const key = realOrGiven(file);",
+    "new": "  const key = file;"
   },
   {
     "id": "D2379",
     "defect": "The extends cache stores only reads that succeeded, so a base config that cannot be read is parsed again by every tsconfig that extends it.",
-    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
     "old": "    scan.extendedConfigs.set(key, read);",
     "new": "    if (read.ok) scan.extendedConfigs.set(key, read);"
   },
   {
     "id": "D2380",
     "defect": "A cached failed extends read is handed back as an empty config, so a second walked tsconfig extending the same unreadable base no longer widens and only the first records extends-unfollowed.",
-    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
     "old": "    scan.extendedConfigs.set(key, read);",
     "new": "    scan.extendedConfigs.set(key, read.ok ? read : { ok: true, value: {} });"
   },
@@ -1886,8 +1886,8 @@
     "id": "D2381",
     "defect": "The extends read returns the cache key, the real path, as the config's file, so a base reached through a directory link resolves its relative baseUrl against the link target's directory rather than the link's.",
     "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "    ? { ok: true, value: read.value, file: located }",
-    "new": "    ? { ok: true, value: read.value, file: key }"
+    "old": "    ? { ok: true, value: read.value, file, key }",
+    "new": "    ? { ok: true, value: read.value, file: key, key }"
   },
   {
     "id": "D2382",
@@ -2091,5 +2091,348 @@
     "file": "packages/daemon/src/selection/specifier-edges.ts",
     "old": "  const escape = beforeWildcard.indexOf(GLOB_ESCAPE);",
     "new": "  const escape = -1;"
+  },
+  {
+    "id": "D2428",
+    "defect": "A bare extends found in node_modules is read at the link's path rather than its real path, so a linked base's relative baseUrl and paths resolve under node_modules and miss the workspace TypeScript resolves them to.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  return typeof found === \"string\" ? realOrGiven(found) : found;",
+    "new": "  return found;"
+  },
+  {
+    "id": "D2429",
+    "defect": "A package's exports are ignored in the node_modules walk, so a file of the named path beside them is read instead of the config the exports name.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const exports = objectField(root?.json, EXPORTS_FIELD);",
+    "new": "  const exports = undefined;"
+  },
+  {
+    "id": "D2430",
+    "defect": "The config lookup does not match the require condition, so an exports pattern falls through to its default target.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "const CONFIG_CONDITIONS = [\"require\", \"types\", \"node\"];",
+    "new": "const CONFIG_CONDITIONS = [\"types\", \"node\"];"
+  },
+  {
+    "id": "D2431",
+    "defect": "A package's tsconfig field is never read, so its index tsconfig.json is read in its place.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    typeof field === \"string\" ? fieldConfig(candidate, field) : undefined;",
+    "new": "    undefined;"
+  },
+  {
+    "id": "D2432",
+    "defect": "A tsconfig field ending in a separator is read as a file name first, so a .json file of the directory's name is read rather than the directory's tsconfig.json.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const file = ENDS_IN_SEPARATOR.test(field) ? undefined : configFile(path);",
+    "new": "  const file = configFile(path);"
+  },
+  {
+    "id": "D2433",
+    "defect": "A package's own name is not looked up through its own exports, so a config extending its package's exported config from inside the package is not found.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const own = selfNamed(scan, target, directory);",
+    "new": "  const own = undefined;"
+  },
+  {
+    "id": "D2434",
+    "defect": "A self-name is looked up once, reading .json targets, so the first condition's .json target wins where TypeScript's first look skips it and takes a later condition's.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    [false, true].map(",
+    "new": "    [true].map("
+  },
+  {
+    "id": "D2435",
+    "defect": "A null export target reads as a miss, so a self-name's second look reads the .json target the first look's null excluded.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (target === null) return EXCLUDED;",
+    "new": "  if (target === null) return undefined;"
+  },
+  {
+    "id": "D2436",
+    "defect": "An extends of .. is read as a file path, so the .json file named after the directory above is read rather than that directory's tsconfig.json.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    return isUnfollowed(info) ? info : directoryConfig(candidate, info);",
+    "new": "    return pathTarget(candidate);"
+  },
+  {
+    "id": "D2437",
+    "defect": "The subpath an exports pattern inserts is not checked for .. segments, so a subpath climbing out of the pattern's directory reads a config outside it.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (refused(target.slice(SUBPATH_PREFIX.length)) || refused(subpath)) {",
+    "new": "  if (refused(target.slice(SUBPATH_PREFIX.length))) {"
+  },
+  {
+    "id": "D2438",
+    "defect": "A miss in the nearest node_modules ends the walk, so a nested copy of the package that lacks the config hides the higher copy that has it.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "      if (found !== undefined && found !== EXCLUDED) return found;",
+    "new": "      if (found !== EXCLUDED) return found;"
+  },
+  {
+    "id": "D2439",
+    "defect": "A walked config's # subpath import extends is widened at its edge and then looked up as well, so the lookup widens it again and the cause is recorded twice.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    subpathImport !== undefined || addLocatedEdges(scan, reference, target)",
+    "new": "    addLocatedEdges(scan, reference, target)"
+  },
+  {
+    "id": "D2452",
+    "defect": "A # subpath import along an extends chain is sought in node_modules, so its widening says it could not be found rather than naming the subpath import.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (subpathImport !== undefined) return { cause: subpathImport };\n",
+    "new": ""
+  },
+  {
+    "id": "D2453",
+    "defect": "A typesVersions field on the package the lookup reads is ignored, so its index config is read as if the field could not redirect it.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    if (versioned !== undefined) return versioned;\n",
+    "new": ""
+  },
+  {
+    "id": "D2454",
+    "defect": "A types@<range> export condition is skipped as unmatched, so the next condition's config is read though TypeScript may match the range.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    if (condition.startsWith(VERSIONED_TYPES_CONDITION)) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D2455",
+    "defect": "A package manifest that does not parse is read as no manifest, so the lookup reads the package's index config as if it had no exports.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    : { cause: `which reaches ${label}, which ${read.reason}` };",
+    "new": "    : undefined;"
+  },
+  {
+    "id": "D2456",
+    "defect": "A package manifest in the node_modules walk that could not be read, as one whose exports nest past the JSON bound, is read as a package with no fields, so the lookup reads its index config.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (isUnfollowed(root)) return root;\n",
+    "new": ""
+  },
+  {
+    "id": "D2457",
+    "defect": "An extends chain is told apart by each config's located path, so a cycle through a directory link never returns to a config and is reported as a chain longer than 32 configs.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  const key = realOrGiven(file);\n  if (chain.has(key)) {",
+    "new": "  const key = file;\n  if (chain.has(key)) {"
+  },
+  {
+    "id": "D2458",
+    "defect": "An alias prefix that is a file: URL is read as a plain replacement rather than converted, so it reaches no workspace of the path it names.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (FILE_URL.test(prefix)) return fileUrlResolution(graph, prefix);\n",
+    "new": ""
+  },
+  {
+    "id": "D2459",
+    "defect": "An alias prefix that is a file: URL converting to no path reaches no workspace and does not widen.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (!converted.ok) {\n    return {\n      ok: false,\n      kind: UNCERTAINTY.unresolvableAlias,",
+    "new": "  if (!converted.ok) {\n    return { ok: true, paths: [] };\n    return {\n      ok: false,\n      kind: UNCERTAINTY.unresolvableAlias,"
+  },
+  {
+    "id": "D2460",
+    "defect": "A file: URL prefix converting to the file-system root is read as a directory, so the alias reaches the workspaces under it rather than widening.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (PARTIAL_VOLUME.test(path) || dirname(path) === path) {",
+    "new": "  if (PARTIAL_VOLUME.test(path)) {"
+  },
+  {
+    "id": "D2461",
+    "defect": "A file: URL prefix converting to a bare drive is read as a directory, though a drive fixes no directory the rest must stay under, so the alias adds no widening.",
+    "file": "packages/daemon/src/selection/vitest-edges.ts",
+    "old": "  if (PARTIAL_VOLUME.test(path) || dirname(path) === path) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D2462",
+    "defect": "An import an alias rewrites to a file: URL is not converted, so it adds no edge to the workspace its path lies in.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    const unconverted = addFileUrlEdges(scan, reference, rewritten, producer);",
+    "new": "    const unconverted = undefined;"
+  },
+  {
+    "id": "D2463",
+    "defect": "An import an alias rewrites to a file: URL that converts to no path is dropped without widening.",
+    "file": "packages/daemon/src/selection/alias-specifiers.ts",
+    "old": "    if (unconverted !== undefined) widen(scan, reference, unconverted);\n",
+    "new": ""
+  },
+  {
+    "id": "D2464",
+    "defect": "A glob converted from a file: URL is read as one path, so it reaches only the workspace holding its literal text rather than every workspace its pattern reaches.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  if (form === SPECIFIER_FORM.glob) {\n    addPatternEdges(scan, reference, converted.path, producer);",
+    "new": "  if (false) {\n    addPatternEdges(scan, reference, converted.path, producer);"
+  },
+  {
+    "id": "D2465",
+    "defect": "A file: URL written in source is not converted, so it adds no edge to the workspace its path lies in.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    const unconverted = addFileUrlEdges(scan, reference, specifier, producer);",
+    "new": "    const unconverted = undefined;"
+  },
+  {
+    "id": "D2466",
+    "defect": "A file: URL written in source that converts to no path is dropped without widening its workspace.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    if (unconverted !== undefined && once(scan, key)) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D2467",
+    "defect": "An unconvertible file: URL widens once per occurrence rather than once per quote, so a file importing it twice records two widenings.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    if (unconverted !== undefined && once(scan, key)) {",
+    "new": "    if (unconverted !== undefined) {"
+  },
+  {
+    "id": "D2468",
+    "defect": "A file: URL is recognized only in lower case, so an import whose scheme is upper case is skipped as another URL scheme and adds no edge.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "export const FILE_URL = /^file:/i;",
+    "new": "export const FILE_URL = /^file:/;"
+  },
+  {
+    "id": "D2469",
+    "defect": "A scoped package name is split at its first separator, so a scoped package's subpath is sought in a package named by the scope and a file of the subpath's name is read instead of the config its exports name.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const end = target.startsWith(SCOPE_PREFIX)\n    ? target.indexOf(POSIX_SEPARATOR, first + 1)\n    : first;",
+    "new": "  const end = first;"
+  },
+  {
+    "id": "D2470",
+    "defect": "A named .ts file in a package without exports is sought as written, so the .json file TypeScript reads in its place is not found.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "const JSON_SWAPPED_EXTENSIONS = [\".d.ts\", \".ts\", \".js\"];",
+    "new": "const JSON_SWAPPED_EXTENSIONS = [\".d.ts\", \".js\"];"
+  },
+  {
+    "id": "D2471",
+    "defect": "An extends adds no edge to the workspace holding the config it located, so an extends of . that the package's tsconfig field redirects into another workspace gives no edge to it.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "      addPathEdges(scan, reference, located.file, EDGE_PRODUCER.tsconfig);\n",
+    "new": ""
+  },
+  {
+    "id": "D2476",
+    "defect": "Every located config is treated as installed, so a bare extends reaching a link installed under a name no workspace has gives no edge to the linked workspace.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    if (!isInstalled(located.file)) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D2477",
+    "defect": "A config located in an installed package is followed to the workspace holding it, so every external base ties its dependent to the root workspace.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    if (!isInstalled(located.file)) {",
+    "new": "    if (true) {"
+  },
+  {
+    "id": "D2478",
+    "defect": "A lookup that cannot be followed adds no widening at the extends edge, so a leaf setting its own paths and baseUrl, whose chain is never walked, never widens.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (located.missing) return false;",
+    "new": "  return false;"
+  },
+  {
+    "id": "D2479",
+    "defect": "A missing extends target widens at the edge site, so a leaf setting its own paths and baseUrl widens though TypeScript only reports the missing config.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  if (located.missing) return false;\n",
+    "new": ""
+  },
+  {
+    "id": "D2480",
+    "defect": "A config widened at its extends edge is widened again by its chain, recording the cause twice.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  else if (unfollowed) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D2481",
+    "defect": "An empty tsconfig field is read as the directory's name with .json added, a file TypeScript never reads.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (field === \"\") return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2482",
+    "defect": "A file: URL glob holding ? is converted, which cuts the pattern at the ?, so it reaches only the directory before it and does not widen.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const marks = [QUERY_PREFIX, HASH_PREFIX];",
+    "new": "  const marks = [HASH_PREFIX];"
+  },
+  {
+    "id": "D2483",
+    "defect": "A glob an alias rewrites to a file: URL holding # is converted, which cuts the pattern at the #, so it reaches only the directory before it and does not widen.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const marks = [QUERY_PREFIX, HASH_PREFIX];",
+    "new": "  const marks = [QUERY_PREFIX];"
+  },
+  {
+    "id": "D2484",
+    "defect": "The file: widening is deduped per dependent rather than per quote, so a file quoting two distinct unconvertible URLs records one widening.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "      reference.dependent,\n      UNCERTAINTY.unresolvableSpecifier,\n      reference.detail,\n    ].join(KEY_SEPARATOR);",
+    "new": "      reference.dependent,\n    ].join(KEY_SEPARATOR);"
+  },
+  {
+    "id": "D2485",
+    "defect": "Exports pattern keys are tried in their written order, so a less specific key written first reads its config instead of the longer-prefixed key's.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    .toSorted(comparePatternKeys);",
+    "new": ";"
+  },
+  {
+    "id": "D2486",
+    "defect": "A pattern key's trailer is not required to end the subpath, so a trailer key claims a subpath without its trailer.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    subpath.endsWith(after)\n  ) {",
+    "new": "    true\n  ) {"
+  },
+  {
+    "id": "D2487",
+    "defect": "A folder key ending in a separator is not tried, so a subpath under it is not found.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    .filter((key) => hasOneWildcard(key) || key.endsWith(POSIX_SEPARATOR))",
+    "new": "    .filter((key) => hasOneWildcard(key))"
+  },
+  {
+    "id": "D2488",
+    "defect": "An array export target is read as its first entry whether or not it resolves, so a later entry that resolves is never read.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "    return firstFound(\n      target.map((entry) => () => fromTarget(scope, entry, match, depth + 1)),\n    );",
+    "new": "    return fromTarget(scope, target[0], match, depth + 1);"
+  },
+  {
+    "id": "D2489",
+    "defect": "An export target is not checked for .. segments, so a target climbing out of its package is read.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (refused(target.slice(SUBPATH_PREFIX.length)) || refused(subpath)) {",
+    "new": "  if (refused(subpath)) {"
+  },
+  {
+    "id": "D2490",
+    "defect": "An export target not beginning with ./ is read as a path in its package.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (!written.startsWith(SUBPATH_PREFIX)) return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2491",
+    "defect": "Any bare target is looked up through the scanning package's own exports, so a package with exports extending another package's name reads its own export instead.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  if (!nameParts.every((part, index) => parts[index] === part)) {\n    return undefined;\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2492",
+    "defect": "A typesVersions field is ignored for a subpath extends into a package without exports, so the subpath's file is read though typesVersions may redirect it.",
+    "file": "packages/daemon/src/selection/extends-lookup.ts",
+    "old": "  const versioned = rest === \"\" ? undefined : typesVersionsCause(root);",
+    "new": "  const versioned = undefined;"
   }
 ]

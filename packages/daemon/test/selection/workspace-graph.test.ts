@@ -1,6 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { join, posix, sep } from "node:path";
-import { describe, expect, it } from "vitest";
+import { join, parse, posix, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+import { describe, expect, it, vi } from "vitest";
 import type { DependencyInformation } from "../../src/selection/selection-types.js";
 import { errorText } from "../../src/vitest/error-text.js";
 import { POSIX_SEPARATOR } from "../../src/vitest/find-workspaces.js";
@@ -32,6 +33,22 @@ import {
   type Settled,
   type TreeAlias,
 } from "./harness.js";
+
+/** Converts a `file:` URL as the platform `process.platform` reads as, so a Windows drive form converts on either host. */
+vi.mock("node:url", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:url")>();
+  return {
+    ...actual,
+    fileURLToPath: (
+      url: Parameters<typeof actual.fileURLToPath>[0],
+      options?: Parameters<typeof actual.fileURLToPath>[1],
+    ) =>
+      actual.fileURLToPath(url, {
+        windows: process.platform === "win32",
+        ...options,
+      }),
+  };
+});
 
 const B_CHANGE = "packages/b/src/index.ts";
 const C_CHANGE = "packages/c/src/index.ts";
@@ -1419,6 +1436,187 @@ describe("an alias rewrites each import the source scan reads", () => {
   });
 });
 
+/** A malformed escape, which no host converts to a path. */
+const UNCONVERTIBLE_URL = "file:///C:/x/a%2";
+
+/** The alias `@` to the app's own `src`, spelled as a `file:` URL. */
+function intoAppSourceByUrl(root: string): readonly TreeAlias[] {
+  return intoAppSource({
+    replacement: pathToFileURL(join(root, APP, "src")).href,
+  })(root);
+}
+
+describe("an alias whose replacement is a file: URL reaches the path it converts to", () => {
+  it("D2458: a file: URL prefix reaches the workspace holding the path it converts to", async () => {
+    expect(
+      await aliasScan((root) =>
+        replacedBy(pathToFileURL(join(root, "packages/b/src")).href)(root),
+      ),
+    ).toEqual(REACHES_B);
+  });
+
+  it("D2459: a file: URL prefix that converts to no path widens", async () => {
+    expect(await aliasScan(replacedBy(UNCONVERTIBLE_URL))).toEqual({
+      edges: [],
+      widenings: [ALIAS_WIDENING],
+    });
+  });
+
+  it("D2460: a file: URL prefix converting to the file-system root widens, since the rest can name any file", async () => {
+    expect(
+      await aliasScan((root) =>
+        replacedBy(pathToFileURL(parse(root).root).href)(root),
+      ),
+    ).toEqual({ edges: [], widenings: [ALIAS_WIDENING] });
+  });
+
+  it("D2461: a file: URL prefix converting to a bare Windows drive widens, since the rest can name any file", async () => {
+    expect(
+      await onPlatform("win32", () => aliasScan(replacedBy("file:///C:"))),
+    ).toEqual({ edges: [], widenings: [ALIAS_WIDENING] });
+  });
+
+  it("D2462: an import the alias rewrites to a file: URL depends on the workspace its converted path climbs to with ..", async () => {
+    expect(await rewritesOf(intoAppSourceByUrl, CLIMB_TO_B)).toEqual({
+      edges: ["alias packages/b"],
+      widenings: [],
+    });
+  });
+
+  it("D2463: an import the alias rewrites to a file: URL that converts to no path widens, naming the conversion", async () => {
+    expect(
+      await rewritesOf(intoAppSourceByUrl, 'import { x } from "@/%2";\n'),
+    ).toEqual({
+      edges: [],
+      widenings: [
+        {
+          kind: ALIAS_WIDENING,
+          cause: expect.stringContaining("converts to no path"),
+        },
+      ],
+    });
+  });
+
+  it("D2464: a glob the alias rewrites to a file: URL reaches the workspaces its converted pattern reaches", async () => {
+    expect(
+      await rewritesOf(
+        intoAppSourceByUrl,
+        'export const all = import.meta.glob("@/../../*/src/*.ts");\n',
+      ),
+    ).toEqual({
+      edges: ["alias .", "alias packages/b", "alias packages/c"],
+      widenings: [],
+    });
+  });
+
+  it("D2483: a glob the alias rewrites to a file: URL holding # widens, since the conversion would cut the pattern at it", async () => {
+    expect(
+      await rewritesOf(
+        intoAppSourceByUrl,
+        'export const all = import.meta.glob("@/../../#/src/*.ts");\n',
+      ),
+    ).toEqual({
+      edges: [],
+      widenings: [
+        {
+          kind: ALIAS_WIDENING,
+          cause: expect.stringContaining("pattern is not known"),
+        },
+      ],
+    });
+  });
+});
+
+describe("a file: URL written in source reaches the path it converts to", () => {
+  it("D2465: a file: URL import depends on the workspace holding the path it converts to", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {},
+          {
+            prepare: (root) =>
+              writeFileSync(
+                join(root, "packages/app/url.ts"),
+                `import "${pathToFileURL(join(root, "packages/b/src/x.ts")).href}";\n`,
+              ),
+          },
+        ),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D2468: a file: URL import whose scheme is upper case depends on the workspace holding its path, as a URL scheme ignores case", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {},
+          {
+            prepare: (root) =>
+              writeFileSync(
+                join(root, "packages/app/url.ts"),
+                `import "${pathToFileURL(join(root, "packages/b/src/x.ts")).href.replace("file:", "FILE:")}";\n`,
+              ),
+          },
+        ),
+      ),
+    ).toEqual(["relative-import packages/b"]);
+  });
+
+  it("D2482: a file: URL glob holding ? widens its workspace, since the conversion would cut the pattern at it", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          {},
+          {
+            prepare: (root) =>
+              writeFileSync(
+                join(root, "packages/app/url.ts"),
+                `export const all = import.meta.glob("${pathToFileURL(join(root, "packages")).href}/?/src/*.ts");\n`,
+              ),
+          },
+        ),
+      ),
+    ).toEqual(widenedAt("unresolvable-specifier", "packages/app/url.ts"));
+  });
+
+  it("D2484: two distinct unconvertible file: URLs in one file each widen", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_SOURCE]: `import "${UNCONVERTIBLE_URL}";\nimport "file:///C:/y/b%2";\n`,
+        }),
+      ),
+    ).toEqual([
+      {
+        kind: "unresolvable-specifier",
+        cause: expect.stringContaining(UNCONVERTIBLE_URL),
+      },
+      {
+        kind: "unresolvable-specifier",
+        cause: expect.stringContaining("file:///C:/y/b%2"),
+      },
+    ]);
+  });
+
+  it("D2466: a file: URL import that converts to no path widens its workspace as unresolvable-specifier", async () => {
+    expect(
+      appWidenings(
+        await scanApp({ [APP_SOURCE]: `import "${UNCONVERTIBLE_URL}";\n` }),
+      ),
+    ).toEqual(widenedAt("unresolvable-specifier", APP_SOURCE));
+  });
+
+  it("D2467: a file quoting one unconvertible file: URL twice widens once", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_SOURCE]: `import "${UNCONVERTIBLE_URL}";\nimport "${UNCONVERTIBLE_URL}";\n`,
+        }),
+      ),
+    ).toEqual(widenedAt("unresolvable-specifier", APP_SOURCE));
+  });
+});
+
 describe("local paths through links", () => {
   it("D1515: a local path whose link carries it into another workspace depends on that workspace too", async () => {
     // The walk's link edge from b to c would select the app through b, so the app's own edges are what is observed.
@@ -2441,6 +2639,585 @@ describe("configs a tsconfig inherits", () => {
         }),
       ),
     ).toEqual(widenedAt("unparsed-source", APP_TSCONFIG));
+  });
+});
+
+const EXTENDS_WIDENING = "extends-unfollowed";
+
+/** A config at `path` whose inherited `paths` reach `packages/<name>`, so the edge names which config was read. */
+function reaching(path: string, name: string): Record<string, string> {
+  const up = "../".repeat(path.split(POSIX_SEPARATOR).length - 1);
+  return {
+    [path]: manifest({
+      compilerOptions: {
+        paths: { [`@${name}`]: [`${up}packages/${name}/src`] },
+      },
+    }),
+  };
+}
+
+/** The app's tsconfig extending `target` and nothing more, beside `files`. */
+function extending(
+  target: string,
+  files: Readonly<Record<string, string>> = {},
+): Record<string, string> {
+  return { [APP_TSCONFIG]: manifest({ extends: target }), ...files };
+}
+
+/** `target` under `levels` nested `default` conditions, the outermost being the exports field itself. */
+function nestedDefault(levels: number, target: string): unknown {
+  let value: unknown = target;
+  for (let level = 0; level < levels; level += 1) value = { default: value };
+  return value;
+}
+
+describe("a bare extends is located as TypeScript locates it", () => {
+  it("D2428: a base in a linked package is read at its real path, so its relative baseUrl and paths reach the workspace TypeScript resolves them to", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {
+            ...extending("@x/base/tsconfig.json"),
+            "packages/base/package.json": pkg("@x/base"),
+            "packages/base/tsconfig.json": manifest({
+              compilerOptions: {
+                baseUrl: ".",
+                paths: { "@c/*": ["../c/src/*"] },
+              },
+            }),
+          },
+          { links: { "node_modules/@x/base": "packages/base" } },
+        ),
+      ),
+    ).toEqual(["tsconfig packages/base", "tsconfig packages/c"]);
+  });
+
+  it("D2429: a package's exports decide the config, not a file of the named path beside them", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("cfg/base", {
+            "node_modules/cfg/package.json": pkg("cfg", {
+              exports: { "./base": "./configs/base.json" },
+            }),
+            ...reaching("node_modules/cfg/configs/base.json", "b"),
+            ...reaching("node_modules/cfg/base.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2430: an exports pattern resolves under the require condition before default", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("cfg/star/x", {
+            "node_modules/cfg/package.json": pkg("cfg", {
+              exports: {
+                "./star/*": {
+                  require: "./star/*.json",
+                  default: "./nope.json",
+                },
+              },
+            }),
+            ...reaching("node_modules/cfg/star/x.json", "b"),
+            ...reaching("node_modules/cfg/nope.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2431: a package without exports is read through its package.json tsconfig field before its index tsconfig.json", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("fld", {
+            "node_modules/fld/package.json": pkg("fld", {
+              tsconfig: "./lib/cfg.json",
+            }),
+            ...reaching("node_modules/fld/lib/cfg.json", "b"),
+            ...reaching("node_modules/fld/tsconfig.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2432: a tsconfig field ending in a separator names a directory, so its tsconfig.json is read, not a .json file of its name", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("dir", {
+            "node_modules/dir/package.json": pkg("dir", { tsconfig: "./lib/" }),
+            ...reaching("node_modules/dir/lib/tsconfig.json", "b"),
+            ...reaching("node_modules/dir/lib.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2433: a package's own name, extended from inside it, resolves through its own exports", async () => {
+    expect(
+      appScan(
+        await scanApp(
+          extending("@x/app/tsconfig.base.json", {
+            ...reaching("packages/app/configs/own.json", "b"),
+          }),
+          {
+            app: {
+              exports: { "./tsconfig.base.json": "./configs/own.json" },
+            },
+          },
+        ),
+      ),
+    ).toEqual({ edges: ["tsconfig packages/b"], widenings: [] });
+  });
+
+  it("D2434: a self-name's first look reads no .json target, so a later condition's .ts target swapped to .json wins", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("@x/app", {
+            ...reaching("packages/app/configs/req.json", "c"),
+            ...reaching("packages/app/configs/base.json", "b"),
+          }),
+          {
+            app: {
+              exports: {
+                ".": {
+                  require: "./configs/req.json",
+                  default: "./configs/base.ts",
+                },
+              },
+            },
+          },
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2435: a null target in a self-name's first look stands, so the second look's .json target is never read", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("@x/app/nul", {
+            ...reaching("packages/app/configs/req.json", "c"),
+          }),
+          {
+            app: {
+              exports: {
+                "./nul": { require: "./configs/req.json", default: null },
+              },
+            },
+          },
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, APP_TSCONFIG));
+  });
+
+  it("D2436: .. names the directory above, whose tsconfig.json is read rather than a .json file of the directory's name", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ compilerOptions: { baseUrl: "../c" } }),
+          "packages/app/web/tsconfig.json": manifest({
+            extends: "..",
+            compilerOptions: { paths: { "@x": ["src"] } },
+          }),
+          "packages/app.json": manifest({ compilerOptions: { baseUrl: "b" } }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
+  it("D2437: a subpath climbing out with a backslash .. is refused by the package's exports pattern", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("bs/..\\outside.json", {
+            "node_modules/bs/package.json": pkg("bs", {
+              exports: { "./*": "./inner/*" },
+            }),
+            ...reaching("node_modules/bs/outside.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, APP_TSCONFIG));
+  });
+
+  it("D2438: a nested copy of a package that lacks the config does not end the walk, so a higher copy's config is read", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("nest/sub", {
+            "packages/app/node_modules/nest/package.json": pkg("nest"),
+            "packages/app/node_modules/nest/sub/package.json": pkg("nest-sub"),
+            ...reaching("node_modules/nest/sub/tsconfig.json", "b"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2469: a scoped package's subpath is sought in the scoped package, not in a package named by its scope", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("@s/cfg/base", {
+            "node_modules/@s/cfg/package.json": pkg("@s/cfg", {
+              exports: { "./base": "./configs/base.json" },
+            }),
+            ...reaching("node_modules/@s/cfg/configs/base.json", "b"),
+            ...reaching("node_modules/@s/cfg/base.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2470: in a package without exports, a named .ts file is read as the .json file beside it", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("sw/base.ts", {
+            "node_modules/sw/package.json": pkg("sw"),
+            ...reaching("node_modules/sw/base.json", "b"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2485: the exports pattern key with the longer fixed prefix is tried first, whatever the keys' order", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("pat/star/base", {
+            "node_modules/pat/package.json": pkg("pat", {
+              exports: { "./*": "./a/*.json", "./star/*": "./s/*.json" },
+            }),
+            ...reaching("node_modules/pat/s/base.json", "b"),
+            ...reaching("node_modules/pat/a/star/base.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2486: a pattern key's trailer must end the subpath, so a subpath without it takes the next key", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("trl/base", {
+            "node_modules/trl/package.json": pkg("trl", {
+              exports: { "./*.json": "./c/*.json", "./*": "./d/*.json" },
+            }),
+            ...reaching("node_modules/trl/d/base.json", "b"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2487: a folder key ending in a separator maps every subpath under it", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("fdr/cfg/base.json", {
+            "node_modules/fdr/package.json": pkg("fdr", {
+              exports: { "./cfg/": "./configs/" },
+            }),
+            ...reaching("node_modules/fdr/configs/base.json", "b"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2488: an array export target takes its first entry that resolves", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("arr", {
+            "node_modules/arr/package.json": pkg("arr", {
+              exports: { ".": ["./missing.json", "./tsconfig.json"] },
+            }),
+            ...reaching("node_modules/arr/tsconfig.json", "b"),
+          }),
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+
+  it("D2489: an export target holding a .. segment is refused", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("up", {
+            "node_modules/up/package.json": pkg("up", {
+              exports: { ".": "./../up.json" },
+            }),
+            ...reaching("node_modules/up.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, APP_TSCONFIG));
+  });
+
+  it("D2490: an export target not beginning with ./ is refused", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("bare", {
+            "node_modules/bare/package.json": pkg("bare", {
+              exports: { ".": "x.json" },
+            }),
+            ...reaching("node_modules/bare/x.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, APP_TSCONFIG));
+  });
+
+  it("D2491: a package with exports extending another package's name reads that package, not its own exports", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("other/base", {
+            ...reaching("packages/app/configs/own.json", "c"),
+            "packages/app/node_modules/other/package.json": pkg("other"),
+            ...reaching("packages/app/node_modules/other/base.json", "b"),
+          }),
+          { app: { exports: { ".": "./configs/own.json" } } },
+        ),
+      ),
+    ).toEqual(["tsconfig packages/b"]);
+  });
+});
+
+describe("an extends depends on the workspace holding the config it locates", () => {
+  it("D2471: an extends of . that the package's tsconfig field redirects into another workspace depends on it", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending(".", {
+            "packages/shared/package.json": pkg("@x/shared"),
+            "packages/shared/tsconfig.json": manifest({}),
+          }),
+          { app: { tsconfig: "../shared/tsconfig.json" } },
+        ),
+      ),
+    ).toEqual(["tsconfig packages/shared"]);
+  });
+
+  it("D2476: a bare extends reaching a link installed under a name no workspace has depends on the linked workspace", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("cfg", {
+            "packages/base/package.json": pkg("@x/base"),
+            "packages/base/tsconfig.json": manifest({}),
+          }),
+          { links: { "node_modules/cfg": "packages/base" } },
+        ),
+      ),
+    ).toEqual(["tsconfig packages/base"]);
+  });
+
+  it("D2477: a base found in an installed package adds no edge to the root workspace", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          extending("@tsconfig/x", {
+            "node_modules/@tsconfig/x/package.json": pkg("@tsconfig/x"),
+            "node_modules/@tsconfig/x/tsconfig.json": manifest({}),
+          }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D2481: an empty tsconfig field is ignored, so . reads the directory's tsconfig.json, not a .json file of its name", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          "packages/app/web/package.json": pkg("web", { tsconfig: "" }),
+          "packages/app/web/tsconfig.web.json": manifest({
+            extends: ".",
+            compilerOptions: { paths: { "@x": ["src"] } },
+          }),
+          "packages/app/web/tsconfig.json": manifest({
+            compilerOptions: { baseUrl: "../../c" },
+          }),
+          "packages/app/web.json": manifest({
+            compilerOptions: { baseUrl: "../b" },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+});
+
+/** The app's tsconfig setting its own `paths` and `baseUrl`, so no chain is walked for them, and extending `target`. */
+function extendingWithOwnPaths(
+  target: string,
+  files: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return {
+    [APP_TSCONFIG]: manifest({
+      extends: target,
+      compilerOptions: { baseUrl: ".", paths: { "@b": ["../b/src"] } },
+    }),
+    ...files,
+  };
+}
+
+const TYPES_VERSIONS_PACKAGE = {
+  "node_modules/tv/package.json": pkg("tv", {
+    typesVersions: { "*": { "*": ["types/*"] } },
+  }),
+  ...reaching("node_modules/tv/tsconfig.json", "c"),
+};
+
+describe("an extends the lookup cannot follow widens at its edge", () => {
+  it("D2478: a leaf setting its own paths and baseUrl widens when its extends cannot be followed", async () => {
+    expect(
+      appWidenings(
+        await scanApp(extendingWithOwnPaths("tv", TYPES_VERSIONS_PACKAGE)),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "typesVersions"));
+  });
+
+  it("D2479: a leaf setting its own paths and baseUrl does not widen at its edge when its extends is only missing", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extendingWithOwnPaths("nocfg", {
+            "node_modules/nocfg/package.json": pkg("nocfg"),
+          }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("D2480: a leaf with no paths widened at its extends edge is not widened again by its chain", async () => {
+    expect(
+      appWidenings(await scanApp(extending("tv", TYPES_VERSIONS_PACKAGE))),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "typesVersions"));
+  });
+
+  it("D2492: a typesVersions field widens a subpath extends into a package without exports", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("tv/base", {
+            ...TYPES_VERSIONS_PACKAGE,
+            ...reaching("node_modules/tv/base.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "typesVersions"));
+  });
+});
+
+describe("an extends the lookup cannot follow widens, naming the cause", () => {
+  it("D2439: a # subpath import as a walked config's extends widens once, at the edge it would give", async () => {
+    expect(
+      appWidenings(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({
+            extends: "#cfg",
+            compilerOptions: { baseUrl: ".", paths: {} },
+          }),
+        }),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, '"#" subpath import'));
+  });
+
+  it("D2452: a # subpath import along an extends chain widens, naming the subpath import", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("./configs/base.json", {
+            "packages/app/configs/base.json": manifest({ extends: "#cfg" }),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, '"#" subpath import'));
+  });
+
+  it("D2453: a typesVersions field on the package the lookup reads widens, naming the field", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("tv", {
+            "node_modules/tv/package.json": pkg("tv", {
+              typesVersions: { "*": { "*": ["types/*"] } },
+            }),
+            ...reaching("node_modules/tv/tsconfig.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "typesVersions"));
+  });
+
+  it("D2454: a types@<range> export condition the lookup reaches widens, naming the condition", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("tr", {
+            "node_modules/tr/package.json": pkg("tr", {
+              exports: {
+                ".": { "types@>=5.0": "./a.json", default: "./tsconfig.json" },
+              },
+            }),
+            ...reaching("node_modules/tr/tsconfig.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "types@>=5.0"));
+  });
+
+  it("D2455: a package manifest the lookup reads that does not parse widens, naming the manifest", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("bad", {
+            "node_modules/bad/package.json": "{",
+            ...reaching("node_modules/bad/tsconfig.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "node_modules/bad/package.json"));
+  });
+
+  it("D2456: exports nested past the 64-level JSON bound widen, naming the nesting", async () => {
+    expect(
+      appWidenings(
+        await scanApp(
+          extending("deep", {
+            "node_modules/deep/package.json": manifest({
+              name: "deep",
+              exports: nestedDefault(64, "./tsconfig.json"),
+            }),
+            ...reaching("node_modules/deep/tsconfig.json", "c"),
+          }),
+        ),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "nests deeper than 64 levels"));
+  });
+
+  it("D2457: an extends cycle through a directory link is reported as returning to a config", async () => {
+    expect(
+      appWidenings(
+        await scanApp(extending("./link/tsconfig.json"), {
+          links: { "packages/app/link": "packages/app" },
+        }),
+      ),
+    ).toEqual(widenedAt(EXTENDS_WIDENING, "its extends chain returns to"));
   });
 });
 

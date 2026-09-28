@@ -1,5 +1,7 @@
 import { isAbsolute, posix, resolve, win32 } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WINDOWS } from "../daemon/endpoint.js";
+import { errorText } from "../vitest/error-text.js";
 import {
   climbsOut,
   liesInside,
@@ -15,11 +17,18 @@ import {
   unlistedWhileIncomplete,
   type Graph,
 } from "./graph-state.js";
+import type { ExtendsLookup } from "./extends-lookup.js";
 import type { readJsonc } from "./jsonc.js";
 import { SPECIFIER_FORM, type FoundSpecifier } from "./source-imports.js";
-import { EDGE_PRODUCER, type EdgeProducerKind } from "./selection-types.js";
+import {
+  EDGE_PRODUCER,
+  UNCERTAINTY,
+  type EdgeProducerKind,
+} from "./selection-types.js";
 
 const URL_SCHEME = /^[A-Za-z][A-Za-z\d+.-]+:/;
+/** Begins a `file:` URL in any letter case, which is read as the path it converts to. */
+export const FILE_URL = /^file:/i;
 const SUBPATH_IMPORT_PREFIX = "#";
 const QUERY_PREFIX = "?";
 const HASH_PREFIX = "#";
@@ -50,7 +59,8 @@ export interface ParseObserver {
 /**
  * One scan of the consumer: the graph it adds to, the records already added, the consumer root as listed and
  * as resolved, the workspaces holding each absolute path already resolved, each config an `extends` chain
- * reached, read once by its real path, and who is told of each parse.
+ * reached and each package manifest its lookup read, read once by its real path, where each `extends` target
+ * was located from each directory, and who is told of each parse.
  */
 export interface Scan {
   readonly graph: Graph;
@@ -58,6 +68,7 @@ export interface Scan {
   readonly roots: readonly string[];
   readonly holders: Map<string, readonly string[]>;
   readonly extendedConfigs: Map<string, ReturnType<typeof readJsonc>>;
+  readonly extendsLookups: Map<string, ExtendsLookup>;
   readonly observer: ParseObserver | undefined;
 }
 
@@ -81,6 +92,7 @@ export function newScan(
     roots,
     holders: new Map(),
     extendedConfigs: new Map(),
+    extendsLookups: new Map(),
     observer,
   };
 }
@@ -120,17 +132,35 @@ const IMPORT_PRODUCERS: SpecifierProducers = {
 };
 
 /**
- * A relative or absolute specifier depends on the workspace it resolves into, a bare one on the workspace its
- * package name names; a URL scheme or a subpath import names no workspace.
+ * A relative or absolute specifier or a `file:` URL depends on the workspace it resolves into, a bare one on the
+ * workspace its package name names; any other URL scheme or a subpath import names no workspace.
  */
 export function addSpecifierEdges(
   scan: Scan,
   reference: Reference,
-  { text, form }: FoundSpecifier,
+  specifier: FoundSpecifier,
   producers: SpecifierProducers = IMPORT_PRODUCERS,
 ): void {
-  if (text === "" || URL_SCHEME.test(text)) return;
+  const { text, form } = specifier;
   const producer = producers.path;
+  if (FILE_URL.test(text)) {
+    const unconverted = addFileUrlEdges(scan, reference, specifier, producer);
+    const key = [
+      reference.dependent,
+      UNCERTAINTY.unresolvableSpecifier,
+      reference.detail,
+    ].join(KEY_SEPARATOR);
+    if (unconverted !== undefined && once(scan, key)) {
+      uncertain(
+        scan.graph,
+        reference.dependent,
+        UNCERTAINTY.unresolvableSpecifier,
+        `${reference.detail}, ${unconverted}`,
+      );
+    }
+    return;
+  }
+  if (text === "" || URL_SCHEME.test(text)) return;
   if (form === SPECIFIER_FORM.fileRelative) {
     addPathEdges(scan, reference, withoutSuffix(text), producer);
   } else if (
@@ -148,6 +178,48 @@ export function addSpecifierEdges(
   } else {
     addPathEdges(scan, reference, withoutSuffix(text), producer);
   }
+}
+
+type FileUrlPath =
+  | { readonly ok: true; readonly path: string }
+  | { readonly ok: false; readonly reason: string };
+
+/** The path a `file:` URL names, its query and hash dropped and its escapes decoded, as Vite reads it. */
+export function fileUrlPath(url: string): FileUrlPath {
+  try {
+    return { ok: true, path: fileURLToPath(url) };
+  } catch (error) {
+    return { ok: false, reason: errorText(error) };
+  }
+}
+
+/**
+ * The edges of the path a `file:` URL converts to, which has shed the URL's query and hash. Answers why no
+ * path was named when the URL does not convert or a glob's pattern cannot be read from it.
+ */
+export function addFileUrlEdges(
+  scan: Scan,
+  reference: Reference,
+  { text, form }: FoundSpecifier,
+  producer: EdgeProducerKind,
+): string | undefined {
+  const converted = fileUrlPath(text);
+  if (!converted.ok) {
+    return `which is a file: URL that converts to no path: ${converted.reason}`;
+  }
+  const marks = [QUERY_PREFIX, HASH_PREFIX];
+  if (
+    form === SPECIFIER_FORM.glob &&
+    marks.some((mark) => text.includes(mark))
+  ) {
+    return `which is a file: URL glob whose "${QUERY_PREFIX}" or "${HASH_PREFIX}" may be a wildcard or begin a query or hash, so its pattern is not known`;
+  }
+  if (form === SPECIFIER_FORM.glob) {
+    addPatternEdges(scan, reference, converted.path, producer);
+  } else {
+    addPathEdges(scan, reference, converted.path, producer);
+  }
+  return undefined;
 }
 
 /** A package name and its subpath: not relative, not absolute, no URL scheme and no subpath import. */

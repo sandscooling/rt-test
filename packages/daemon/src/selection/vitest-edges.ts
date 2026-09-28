@@ -1,4 +1,4 @@
-import { isAbsolute, join, posix, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, sep } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { WINDOWS } from "../daemon/endpoint.js";
 import {
@@ -23,6 +23,7 @@ import {
   type Unresolved,
 } from "./graph-state.js";
 import { isLocalPath } from "./package-specs.js";
+import { FILE_URL, fileUrlPath } from "./specifier-edges.js";
 import {
   EDGE_PRODUCER,
   UNCERTAINTY,
@@ -245,6 +246,7 @@ function aliasResolution(
   prefix: string,
   viteRoot: string,
 ): TargetResolution {
+  if (FILE_URL.test(prefix)) return fileUrlResolution(graph, prefix);
   if (prefix.startsWith(POSIX_SEPARATOR)) {
     return rootAbsoluteResolution(graph, prefix, viteRoot);
   }
@@ -297,6 +299,23 @@ function viteFsResolution(graph: Graph, rest: string): TargetResolution {
     return unboundedPath(`${VITE_FS_PREFIX}${rest}`);
   }
   return { ok: true, paths: aliasPathTargets(graph, viteFsPath(rest)) };
+}
+
+/** A prefix converting to a file-system root or a bare drive fixes no directory the rest must stay under. */
+function fileUrlResolution(graph: Graph, prefix: string): TargetResolution {
+  const converted = fileUrlPath(prefix);
+  if (!converted.ok) {
+    return {
+      ok: false,
+      kind: UNCERTAINTY.unresolvableAlias,
+      cause: `is a file: URL whose fixed prefix converts to no path: ${converted.reason}`,
+    };
+  }
+  const { path } = converted;
+  if (PARTIAL_VOLUME.test(path) || dirname(path) === path) {
+    return unboundedPath(prefix);
+  }
+  return { ok: true, paths: aliasPathTargets(graph, path) };
 }
 
 function unboundedPath(prefix: string): Unresolved {

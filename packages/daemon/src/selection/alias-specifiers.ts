@@ -15,8 +15,10 @@ import {
   type SelectionAlias,
 } from "./selection-types.js";
 import {
+  addFileUrlEdges,
   addSpecifierEdges,
   CURRENT_DIRECTORY,
+  FILE_URL,
   KEY_SEPARATOR,
   once,
   type Reference,
@@ -154,7 +156,7 @@ function rewrite({ find, alias }: ScanAlias, text: string): string | undefined {
   return text.replace(find, alias.replacement);
 }
 
-/** A rewritten specifier beginning with `/` is read as Vite reads it; any other, as the scan reads a specifier. */
+/** A `file:` URL or a rewritten specifier beginning with `/` is read as Vite reads it; any other, as the scan reads a specifier. */
 function addRewrittenEdges(
   scan: Scan,
   reference: Reference,
@@ -162,7 +164,11 @@ function addRewrittenEdges(
   viteRoot: string,
 ): void {
   const { text, form } = rewritten;
-  if (text.startsWith(VITE_FS_PREFIX)) {
+  if (FILE_URL.test(text)) {
+    const producer = ALIAS_PRODUCERS.path;
+    const unconverted = addFileUrlEdges(scan, reference, rewritten, producer);
+    if (unconverted !== undefined) widen(scan, reference, unconverted);
+  } else if (text.startsWith(VITE_FS_PREFIX)) {
     addViteFsEdges(scan, reference, rewritten);
   } else if (text.startsWith(SCHEME_RELATIVE_PREFIX)) {
     widen(scan, reference, "which Vite may read as a URL rather than a path");

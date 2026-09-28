@@ -32,6 +32,8 @@ import {
 } from "../harness.js";
 
 const DEFAULT_MODULES = ["unit.test.ts"];
+/** The Vitest a failed discovery loaded before it failed. */
+const DISCOVERED_VITEST_VERSION = "5.0.1";
 
 /** A Vitest workspace as discovery would hand it to selection. */
 export interface TreeWorkspace {
@@ -255,7 +257,10 @@ export function selectInTree(
   });
 }
 
-/** The discovery the tree's workspaces stand for: a workspace the caller will not run was not confirmed. */
+/**
+ * The discovery the tree's workspaces stand for: a workspace the caller will not run was not confirmed, and one
+ * whose tests are not known failed its discovery.
+ */
 function treeDiscovery(root: string, tree: TreeCase): TestDiscovery {
   return {
     workspaces: tree.workspaces.map((entry): WorkspaceDiscovery => {
@@ -268,9 +273,17 @@ function treeDiscovery(root: string, tree: TreeCase): TestDiscovery {
         };
       }
       const tests = entry.tests ?? DEFAULT_MODULES;
+      if (typeof tests === "string") {
+        return {
+          status: "failed",
+          workspace,
+          vitestVersion: DISCOVERED_VITEST_VERSION,
+          error: tests,
+        };
+      }
       return discoveredWorkspace(
         workspace,
-        typeof tests === "string" ? [] : tests,
+        tests,
         entry.factsUnreported === true
           ? { reported: false }
           : {
