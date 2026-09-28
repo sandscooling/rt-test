@@ -56,6 +56,7 @@ import {
   withDaemonConsumer,
   withDaemonKey,
   withDaemons,
+  withNodeOptions,
   withStandIn,
   type StandIn,
 } from "./daemon-harness.js";
@@ -1054,21 +1055,6 @@ describe("two worktrees of one project", () => {
     DAEMON_TEST_TIMEOUT_MS,
   );
 });
-
-/** Runs `body` with `options` added to NODE_OPTIONS, which every process a start spawns inherits. */
-async function withNodeOptions<T>(
-  options: string,
-  body: () => Promise<T>,
-): Promise<T> {
-  const saved = process.env["NODE_OPTIONS"];
-  process.env["NODE_OPTIONS"] = [saved, options].filter(Boolean).join(" ");
-  try {
-    return await body();
-  } finally {
-    if (saved === undefined) delete process.env["NODE_OPTIONS"];
-    else process.env["NODE_OPTIONS"] = saved;
-  }
-}
 
 describe("a process on the endpoint that is not this user's daemon", () => {
   /** Holds `root`'s endpoint as an impostor proving as `proving` says, and hands `body` the endpoint's path. */

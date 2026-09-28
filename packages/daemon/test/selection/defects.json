@@ -1580,5 +1580,145 @@
     "file": "packages/daemon/src/selection/vitest-edges.ts",
     "old": "      `${detail} ${unbounded}`,",
     "new": "      `config alias ${JSON.stringify(alias.find)} to ${JSON.stringify(alias.replacement)} ${unbounded}`,"
+  },
+  {
+    "id": "D2220",
+    "defect": "A discovered workspace's tests are passed as known but empty, so a selection counts none of the tests discovery found and reads the count as complete.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "    ? { known: true, tests: entry.tests.map(({ identity }) => identity) }",
+    "new": "    ? { known: true, tests: [] }"
+  },
+  {
+    "id": "D2221",
+    "defect": "A workspace takes only its first project's setup files, so a change to a later project's setup file selects nothing.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "    setupFiles: [...new Set(projects.flatMap(({ setupFiles }) => setupFiles))],",
+    "new": "    setupFiles: [...(projects[0]?.setupFiles ?? [])],"
+  },
+  {
+    "id": "D2222",
+    "defect": "A workspace takes only its first project's global setup files, so a change to a later project's global setup file selects nothing.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "      ...new Set(projects.flatMap(({ globalSetupFiles }) => globalSetupFiles)),",
+    "new": "      ...(projects[0]?.globalSetupFiles ?? []),"
+  },
+  {
+    "id": "D2223",
+    "defect": "Aliases are told apart without their replacement, so a second project's alias of the same find to another target is dropped as a repeat and its edges never added.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "    left.replacement === right.replacement &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2224",
+    "defect": "A single module that failed to collect is ignored, so the workspace's tests read as known and complete while that module's tests are missing.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "  if (entry.failedModules.length > 0) {",
+    "new": "  if (entry.failedModules.length > 1) {"
+  },
+  {
+    "id": "D2225",
+    "defect": "A single unhandled collection error is ignored, so the workspace's tests read as known and complete.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "  if (entry.unhandledErrors.length > 0) failures.push(UNHANDLED_ERROR_REASON);",
+    "new": "  if (entry.unhandledErrors.length > 1) failures.push(UNHANDLED_ERROR_REASON);"
+  },
+  {
+    "id": "D2226",
+    "defect": "A browser-mode project, which RT Test never runs, makes the workspace's tests not known.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "  if (entry.unhandledErrors.length > 0) failures.push(UNHANDLED_ERROR_REASON);",
+    "new": "  if (entry.unhandledErrors.length + entry.unsupportedProjects.length > 0) failures.push(UNHANDLED_ERROR_REASON);"
+  },
+  {
+    "id": "D2227",
+    "defect": "A workspace whose config failed to load is passed as not runnable, so no selection ever selects it and a retry of it can never run.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "      case \"failed\":\n",
+    "new": "      case \"failed\":\n        notRunnable.push({ workspace: entry.workspace, reason: entry.error });\n        break;\n"
+  },
+  {
+    "id": "D2228",
+    "defect": "An unsupported workspace is left out of the input, so a selection neither reports it as not runnable nor counts it.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "        notRunnable.push({\n          workspace: entry.workspace,\n          reason: entry.vitest.reason,\n        });\n",
+    "new": ""
+  },
+  {
+    "id": "D2229",
+    "defect": "A workspace not confirmed at start is left out of the input, so a selection neither reports it as not runnable nor counts it.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "        notRunnable.push({ workspace: entry.workspace, reason: entry.reason });\n",
+    "new": ""
+  },
+  {
+    "id": "D2230",
+    "defect": "The Vitest listing's unread sources are dropped, so a selection reads its workspace total as complete while a candidate workspace went unchecked.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "      vitestListingNotRead: discovery.notRead,",
+    "new": "      vitestListingNotRead: [],"
+  },
+  {
+    "id": "D2231",
+    "defect": "The protection is built without the discovery in effect, so no declared pattern is kept off the discovery's test modules.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "        protection: protection(discovery, consumerRoot),",
+    "new": "        protection: protection(undefined, consumerRoot),"
+  },
+  {
+    "id": "D2232",
+    "defect": "With no discovery in effect, an empty input is built, so a selection over it reads as a complete selection of nothing.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "    return { built: false, reason: NO_DISCOVERY_REASON };",
+    "new": "    discovery = { workspaces: [], notRead: [] };"
+  },
+  {
+    "id": "D2233",
+    "defect": "A discovered workspace whose selection facts are not reported is skipped, so an input is built without it rather than refused.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "          return {\n            built: false,\n            reason: `${FACTS_NOT_REPORTED_REASON} ${workspaceName(entry.workspace.path)}`,\n          };",
+    "new": "          continue;"
+  },
+  {
+    "id": "D2234",
+    "defect": "The root workspace is named by its path, so the reason ends in a bare \".\" rather than saying the workspace at the consumer root.",
+    "file": "packages/daemon/src/selection/selection-input.ts",
+    "old": "  return path === ROOT_PATH ? ROOT_WORKSPACE : path;",
+    "new": "  return path;"
+  },
+  {
+    "id": "D2235",
+    "defect": "The end of a parse is never reported, so the parse record keeps the label of a file that parsed and a later crash outside any parse blames it.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    scan.observer?.parsed();\n",
+    "new": ""
+  },
+  {
+    "id": "D2236",
+    "defect": "A walked tsconfig is parsed without telling the observer, so a parser crash inside it says the file is not known.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  const read = observedParse(scan, file, () => readJsonc(file));",
+    "new": "  const read = readJsonc(file);"
+  },
+  {
+    "id": "D2237",
+    "defect": "A config a tsconfig extends is parsed without telling the observer, so a parser crash inside it says the file is not known.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  const read = observedParse(scan, located, () => readJsonc(located));",
+    "new": "  const read = readJsonc(located);"
+  },
+  {
+    "id": "D2247",
+    "defect": "A source file is parsed without telling the observer, so a parser crash inside a source file says the file is not known.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  const found = observedParse(scan, file, () => readSourceImports(file));",
+    "new": "  const found = readSourceImports(file);"
+  },
+  {
+    "id": "D2248",
+    "defect": "The observer the build is given never reaches the scan, so no parse is recorded and every parser crash says the file is not known.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  const scan = newScan(graph, root.directory, observer);",
+    "new": "  const scan = newScan(graph, root.directory, undefined);"
   }
 ]

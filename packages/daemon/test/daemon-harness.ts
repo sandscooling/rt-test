@@ -289,6 +289,21 @@ export function settled<T>(work: Promise<T>): Promise<Settled<T>> {
   }));
 }
 
+/** Runs `body` with `options` added to NODE_OPTIONS, which every process a start or a job spawns inherits. */
+export async function withNodeOptions<T>(
+  options: string,
+  body: () => Promise<T>,
+): Promise<T> {
+  const saved = process.env["NODE_OPTIONS"];
+  process.env["NODE_OPTIONS"] = [saved, options].filter(Boolean).join(" ");
+  try {
+    return await body();
+  } finally {
+    if (saved === undefined) delete process.env["NODE_OPTIONS"];
+    else process.env["NODE_OPTIONS"] = saved;
+  }
+}
+
 /** Polls until `ready` holds or `boundMs` passes, and says whether it held. */
 export async function eventually(
   ready: () => boolean | Promise<boolean>,

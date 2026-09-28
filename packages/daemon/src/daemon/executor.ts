@@ -1,4 +1,8 @@
 import { fork, type ChildProcess } from "node:child_process";
+import type {
+  DependencyInformation,
+  SelectableWorkspace,
+} from "../selection/selection-types.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText, exitText } from "../vitest/error-text.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
@@ -8,9 +12,15 @@ import type { DaemonLog } from "./daemon-log.js";
 import { daemonEntryPoint } from "./entry-point.js";
 import {
   EXECUTOR_BOUND_MS,
+  type ExecutorJob,
   type ExecutorReply,
   type ExecutorRequest,
 } from "./executor-jobs.js";
+import {
+  createParseRecord,
+  parsingLabel,
+  removeParseRecord,
+} from "./parse-record.js";
 import {
   endProcessTree,
   hasExited,
@@ -25,6 +35,15 @@ const ABORTED_BEFORE_SEND_REASON =
   "the stop arrived before the job was sent to its executor process, so the job was not run";
 const NOT_STARTED_REASON =
   "the executor process could not be started, so the job was not run";
+const NO_PARSE_RECORD_REASON =
+  "the dependency build's parse record could not be created in the state directory, so the build was not run";
+const BUILD_STOPPED_REASON =
+  "the dependency build was stopped, so its executor process was ended before the build finished";
+const WHILE_PARSING = "while parsing";
+const PARSED_FILE_NOT_KNOWN =
+  "and the file it was parsing, if any, is not known";
+const RECORD_NOT_REMOVED_REASON =
+  "the dependency build's parse record could not be removed";
 
 /** A job either ended and produced its record, or ended with nothing to store and the reason. */
 export type JobOutcome<T> =
@@ -38,8 +57,9 @@ type JobReply =
 type Settle = (reply: JobReply) => void;
 
 /**
- * Hosts Vitest in a child process per job, so its signal handlers, env writes and stuck code stay out of the daemon,
- * and nothing a job started outlives it.
+ * Runs each job, a Vitest discovery or run or a dependency build, in a child process of its own, so Vitest's signal
+ * handlers, env writes and stuck code and a parser's native crash stay out of the daemon, and nothing a job started
+ * outlives it.
  */
 export class Executor {
   readonly #log: DaemonLog;
@@ -47,6 +67,9 @@ export class Executor {
   #settle: Settle | undefined;
   #boundTimer: NodeJS.Timeout | undefined;
   #boundPassed = false;
+  /** The parse record of the dependency build in progress; a build is busy in synchronous code, so it cannot read an abort. */
+  #buildRecord: string | undefined;
+  #buildStopped = false;
   /** An abort that arrived while the job's executor was being contained, before the job was sent to it. */
   #abortBeforeSend = false;
   readonly #containment: TreeContainment = treeContainment();
@@ -72,12 +95,52 @@ export class Executor {
       : { ended: false, reason: failureReason(reply) };
   }
 
-  /** Aborts the job in progress, and ends the executor's process tree when the job has not ended within the bound. */
+  /**
+   * Builds the dependency information over `consumerRoot` as discovery was given it. `stateDirectory` holds the
+   * build's parse record, which names the file a parser crash ended the build in and is removed once the build ends.
+   */
+  async buildDependencies(
+    consumerRoot: string,
+    workspaces: readonly SelectableWorkspace[],
+    stateDirectory: string,
+  ): Promise<JobOutcome<DependencyInformation>> {
+    let parseRecord: string;
+    try {
+      parseRecord = createParseRecord(stateDirectory);
+    } catch (error) {
+      const reason = `${NO_PARSE_RECORD_REASON}: ${errorText(error)}`;
+      this.#log.entry(reason);
+      return { ended: false, reason };
+    }
+    try {
+      const reply = await this.#job({
+        type: "build-dependencies",
+        consumerRoot,
+        workspaces,
+        parseRecord,
+      });
+      return reply.type === "dependencies-built"
+        ? { ended: true, value: reply.dependencies }
+        : { ended: false, reason: failureReason(reply) };
+    } finally {
+      this.#removeRecord(parseRecord);
+    }
+  }
+
+  /**
+   * Aborts the job in progress, and ends the executor's process tree when the job has not ended within the bound.
+   * A dependency build's tree is ended at once.
+   */
   abort(): void {
     const child = this.#child;
     if (child === undefined) return;
     if (this.#settle === undefined) {
       this.#abortBeforeSend = true;
+      return;
+    }
+    if (this.#buildRecord !== undefined) {
+      this.#buildStopped = true;
+      endProcessTree(child);
       return;
     }
     if (child.connected)
@@ -90,9 +153,11 @@ export class Executor {
 
   /**
    * Resolves once no executor process remains. Each job's process tree ends with the job, so only a job still in
-   * progress holds one: closing its channel aborts it, and its tree is ended when the bound passes.
+   * progress holds one: closing its channel aborts it, and its tree is ended when the bound passes. A dependency
+   * build's tree is ended at once, as a stop.
    */
   async close(): Promise<void> {
+    if (this.#buildRecord !== undefined) this.abort();
     await this.#childEnded();
     await this.#containment.close();
   }
@@ -114,9 +179,7 @@ export class Executor {
    * Runs one job in a process of its own, held with every process it starts before the job is sent, and settles once
    * that whole tree has ended.
    */
-  async #job(
-    request: Exclude<ExecutorRequest, { type: "abort" }>,
-  ): Promise<JobReply> {
+  async #job(request: ExecutorJob): Promise<JobReply> {
     this.#abortBeforeSend = false;
     const child = this.#startChild();
     const exited = new Promise<void>((ended) => {
@@ -149,11 +212,15 @@ export class Executor {
       return this.#unsent(child, exited, ABORTED_BEFORE_SEND_REASON);
     }
     return new Promise((resolve) => {
+      this.#buildRecord =
+        request.type === "build-dependencies" ? request.parseRecord : undefined;
       this.#settle = (reply) => {
         this.#settle = undefined;
         clearTimeout(this.#boundTimer);
         this.#boundTimer = undefined;
         this.#boundPassed = false;
+        this.#buildRecord = undefined;
+        this.#buildStopped = false;
         if (this.#child === child) this.#child = undefined;
         void tree.end().then(() => exited.then(() => resolve(reply)));
       };
@@ -224,11 +291,39 @@ export class Executor {
     this.#child = undefined;
     const settle = this.#settle;
     if (settle === undefined) return;
-    const reason = this.#boundPassed
-      ? `the job had not ended ${EXECUTOR_BOUND_MS} ms after its abort, so the executor process ${child.pid} was ended`
-      : `the executor process ${child.pid} exited during the job (${exitText(code, signal)})`;
+    const reason = this.#exitReason(child, code, signal);
     this.#log.entry(reason);
     settle({ type: "lost", reason });
+  }
+
+  #exitReason(
+    child: ChildProcess,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): string {
+    if (this.#boundPassed) {
+      return `the job had not ended ${EXECUTOR_BOUND_MS} ms after its abort, so the executor process ${child.pid} was ended`;
+    }
+    if (this.#buildStopped) {
+      return `${BUILD_STOPPED_REASON} (process ${child.pid})`;
+    }
+    const exited = `the executor process ${child.pid} exited during the job (${exitText(code, signal)})`;
+    if (this.#buildRecord === undefined) return exited;
+    const label = parsingLabel(this.#buildRecord);
+    return label === undefined
+      ? `${exited}, ${PARSED_FILE_NOT_KNOWN}`
+      : `${exited} ${WHILE_PARSING} ${label}`;
+  }
+
+  /** A record left behind names no later build's file, since every build's record has a name of its own. */
+  #removeRecord(parseRecord: string): void {
+    try {
+      removeParseRecord(parseRecord);
+    } catch (error) {
+      this.#log.entry(
+        `${RECORD_NOT_REMOVED_REASON} (${parseRecord}): ${errorText(error)}`,
+      );
+    }
   }
 }
 

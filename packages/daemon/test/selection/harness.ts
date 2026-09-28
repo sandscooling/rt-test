@@ -5,6 +5,8 @@ import { expect } from "vitest";
 import { readNonInputs } from "../../src/inputs/non-inputs.js";
 import { protection } from "../../src/inputs/protection.js";
 import { selectTests } from "../../src/selection/select-tests.js";
+import { buildSelectionInput } from "../../src/selection/selection-input.js";
+import type { ParseObserver } from "../../src/selection/specifier-edges.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
@@ -76,7 +78,10 @@ export function rootManifest(
   return manifest({ name: "consumer", workspaces: ["packages/*"], ...fields });
 }
 
-function writeTree(dir: string, files: Readonly<Record<string, string>>): void {
+export function writeTree(
+  dir: string,
+  files: Readonly<Record<string, string>>,
+): void {
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, file)), { recursive: true });
     writeFileSync(join(dir, file), text);
@@ -135,6 +140,7 @@ function inTree<T>(
 function runnable(
   root: string,
   tree: TreeCase,
+  observer?: ParseObserver,
 ): { selectable: SelectableWorkspace[]; information: DependencyInformation } {
   const workspaces = tree.workspaces
     .filter((workspace) => workspace.notRunnable === undefined)
@@ -144,8 +150,52 @@ function runnable(
     information: buildDependencyInformation(
       findPackageWorkspaces(root),
       workspaces,
+      observer,
     ),
   };
+}
+
+/** What the dependency build over the tree tells its parse observer, in order: `parsing <label>` and `parsed`. */
+export function parsesInTree(tree: TreeCase): Promise<Settled<string[]>> {
+  return inTree(tree, (root) => {
+    const events: string[] = [];
+    runnable(root, tree, {
+      parsing: (label) => events.push(`parsing ${label}`),
+      parsed: () => events.push("parsed"),
+    });
+    return events;
+  });
+}
+
+/** Why no selection input was built, in place of a selection. */
+export interface NotBuilt {
+  readonly notBuilt: string;
+}
+
+/**
+ * Builds selection's input from the discovery `discover` gives for the tree's root, as the daemon will, then the
+ * dependency information over its selectable workspaces, and selects the tree's change over both.
+ */
+export function selectFromDiscovery(
+  tree: Omit<TreeCase, "workspaces">,
+  discover: (root: string) => TestDiscovery | undefined,
+): Promise<Settled<SelectionOutcome | NotBuilt>> {
+  return inTree({ ...tree, workspaces: [] }, (root) => {
+    const build = buildSelectionInput(
+      discover(root),
+      root,
+      readNonInputs(root),
+    );
+    if (!build.built) return { notBuilt: build.reason };
+    return selectTests({
+      ...build.input,
+      change: tree.change ?? [],
+      dependencies: buildDependencyInformation(
+        findPackageWorkspaces(root),
+        build.input.workspaces,
+      ),
+    });
+  });
 }
 
 /** The dependency information the caller builds from the tree's package workspaces and runnable Vitest workspaces. */

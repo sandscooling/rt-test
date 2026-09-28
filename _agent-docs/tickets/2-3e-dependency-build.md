@@ -13,17 +13,17 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: From the discovery in effect, the consumer root and the consumer's non-inputs declaration, RT Test builds everything `SelectionInput` holds except the change and the dependency information, and a selection over it explains and counts the workspaces as discovery found them:
+- [x] AC1: From the discovery in effect, the consumer root and the consumer's non-inputs declaration, RT Test builds everything `SelectionInput` holds except the change and the dependency information, and a selection over it explains and counts the workspaces as discovery found them:
   - a discovered workspace is selectable, with its discovered tests and, as discovery reports them, every setup file, global setup file and alias of any of its projects;
   - its tests are not known, with a reason naming what failed, when discovery reports a module of it that failed to collect or an unhandled error during its collection; a browser-mode project of it leaves its tests known;
   - a workspace whose config failed to load is selectable with its tests not known, its load error the reason;
   - an unsupported workspace and a not-confirmed workspace are not runnable, each with its reason;
   - the Vitest listing's unread sources are the discovery's;
   - the non-inputs hold the declaration and the protection `protection` builds over that same discovery.
-- [ ] AC2: With no discovery in effect, or one that lists a discovered workspace whose selection facts it does not report, no selection input is built, and the answer says why, naming that workspace.
-- [ ] AC3: The dependency information for a selection input is built in a child process of its own that ends with the build. The build answers exactly what `buildDependencyInformation` answers in process over the same consumer root and the selectable workspaces of AC1's input. A consumer file that ends its process inside the source parser fails that build with a reason naming how the process exited, and the process that asked for it keeps running.
-- [ ] AC4: A stop during a build ends the build's process and every process it started without waiting out the bound a Vitest job is given, and the build ends with no dependency information and a reason.
-- [ ] AC5: The reason for a build whose process ended inside the parser (AC3) also names the root-relative path of the file it was parsing. When that file cannot be told, because no record of it was written or the record cannot be read, the reason names the exit and says the file is not known. To tell it, a build writes only inside the daemon's state directory its caller names, and only root-relative paths, never file content. No build reads a record an earlier build left, and a build's record is gone once the daemon has seen the build end; a daemon that itself ends during a build leaves that one record behind, which no later build reads.
+- [x] AC2: With no discovery in effect, or one that lists a discovered workspace whose selection facts it does not report, no selection input is built, and the answer says why, naming that workspace.
+- [x] AC3: The dependency information for a selection input is built in a child process of its own that ends with the build. The build answers exactly what `buildDependencyInformation` answers in process over the same consumer root and the selectable workspaces of AC1's input. A consumer file that ends its process inside the source parser fails that build with a reason naming how the process exited, and the process that asked for it keeps running.
+- [x] AC4: A stop during a build ends the build's process and every process it started without waiting out the bound a Vitest job is given, and the build ends with no dependency information and a reason.
+- [x] AC5: The reason for a build whose process ended inside the parser (AC3) also names the root-relative path of the file it was parsing. When that file cannot be told, because no record of it was written or the record cannot be read, the reason names the exit and says the file is not known. To tell it, a build writes only inside the daemon's state directory its caller names, and only root-relative paths, never file content. No build reads a record an earlier build left, and a build's record is gone once the daemon has seen the build end; a daemon that itself ends during a build leaves that one record behind, which no later build reads.
 
 ## Unverified Assumptions
 
@@ -40,6 +40,16 @@ when that is literally true.
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | U1  | Does a source of about 45,000 `a+` terms (about 100 KB) still end the process inside `oxc-parser` 0.151.0 on Linux under Node 22 and 24, as ticket 2.2b measured on Windows x64 under Node 24.19 (2.2b § F1's residual), and with what exit code or signal on each? AC3's proof needs one consumer file that crashes the parser on every gate platform. | In a child `node` process on each platform, `parseSync("a.ts", "a" + "+a".repeat(45000))` from the installed package, and read the child's exit code and signal. |
 
+**U1: CONFIRMED at 100,000 terms, not at 45,000** (dev, 2026-09-28 08:12 and 08:21). A child `node --input-type=module -e` ran `parseSync("a.ts", "a" + "+a".repeat(N), { sourceType: "module" })` from the installed `oxc-parser` 0.151.0, then read `result.program`:
+
+| Platform                      | 45,000 terms (about 90 KB) | 100,000 terms (about 200 KB)                      | 200,000 terms        |
+| ----------------------------- | -------------------------- | ------------------------------------------------- | -------------------- |
+| Windows x64, Node 24.19.0     | parses, exit 0             | exit code 3221225725 (0xC00000FD, stack overflow) | exit code 3221225725 |
+| Linux x64 (WSL), Node 24.19.0 | parses, exit 0             | signal SIGSEGV                                    | signal SIGSEGV       |
+| Linux x64 (WSL), Node 22.23.3 | parses, exit 0             | signal SIGSEGV                                    | signal SIGSEGV       |
+
+The process ends inside `parseSync` itself, before `program` is read. Linux resolved the package from `~/rt-test/packages/daemon` at ae1f4b0 (frozen install), read-only. So AC3's crash fixture needs about 100,000 terms, and its reason reads `exit code 3221225725` on Windows and `signal SIGSEGV` on Linux; a test should match the exit shape per platform, not one code. The design is unchanged.
+
 ## Tasks / Subtasks
 
 <!--
@@ -48,14 +58,14 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Resolve U1 first and write its answer, with the command and output, beneath the table. Before the first edit, confirm nothing has moved in this ticket's files since the 08:07 re-verify against 2.3d's landed code (§ Pending siblings and their routing): `SelectableWorkspace.aliases` is `readonly ReportedAlias[]`, and `ResolvedAlias` no longer exists.
-- [ ] (AC1, AC2) Create `packages/daemon/src/selection/selection-input.ts`, exporting one function that takes the discovery in effect (`TestDiscovery | undefined`), the consumer root's real path and the `NonInputsDeclaration`, and answers either the selection input without its change and dependency information (a type derived from `SelectionInput` with `Omit`, C14) or why none can be built (AC2). Map each `WorkspaceDiscovery` by its status as AC1 lists, and take the Vitest listing's unread sources from the discovery's `notRead`. A browser-mode project leaves its workspace's tests known and contributes no setup file or alias, since discovery reports none for it (§ Design notes, "Browser-mode projects"). For a discovered workspace, union its projects' `setupFiles`, `globalSetupFiles` and `aliases` in project order without repeats, and take `tests` from its `DiscoveredTest`s; a non-empty `failedModules` or `unhandledErrors` makes them not known, with a reason naming the failed module paths or that collection raised an unhandled error. Build `nonInputs.protection` with `protection(discovery, consumerRoot)`, the one producer (2.3c). Name each reason text as a constant (C3).
-- [ ] (AC3, AC5) In `packages/daemon/src/daemon/executor-jobs.ts`, add a request carrying the consumer root, the selectable workspaces and the absolute path of this build's parse record, and a reply carrying the `DependencyInformation`. Confirm, by reading `DependencyInformation`, `SelectableWorkspace` and the types they hold (`TestIdentity` in `@rt-test/core` among them), that every field of both is plain JSON (no `Map`, `Set`, class instance or `undefined`-valued field), which the executor's channel carries unchanged, and record what you read; if one is not, convert it at the channel and back, so AC3's equality holds.
-- [ ] (AC5) In `packages/daemon/src/selection/workspace-graph.ts`, let `buildDependencyInformation` take an optional observer that `addSourceFileEdges` calls with the file's root label (`rootLabel(scan, file)`, already computed there) immediately before `readSourceImports`, and again with no label once it returns, so the record is empty whenever no parse is in progress; `readSourceImports` is the one call that reaches `oxc-parser`'s native `parseSync` (`rg -n "parseSync|readSourceImports\(" packages/daemon/src`, 05:50). An in-process caller passes none, and the build is otherwise unchanged (P19: an observer, not a mode flag).
-- [ ] (AC3, AC5) In `packages/daemon/src/daemon/executor-main.ts`, answer that request with `buildDependencyInformation(findPackageWorkspaces(consumerRoot), workspaces, observer)`, whose observer writes the label to the parse record synchronously (`fs.writeSync` on a descriptor opened once per build), replacing what the record held, so the last label written survives a native abort that drops any queued asynchronous write. A throw answers `job-failed`, as today. Loading `workspace-graph.js` with a dynamic `import()` inside that branch keeps `oxc-parser`'s native binding out of every discovery and run process; dev decides.
-- [ ] (AC3, AC4, AC5) In `packages/daemon/src/daemon/executor.ts`, add a method that takes the consumer root as discovery was given it (`ConfirmedStart.consumerRoot`, not its real path; § Design notes, "Two spellings of the root"), the selectable workspaces and the state directory, runs the build as one job and answers a `JobOutcome<DependencyInformation>`, through the fork, containment and replaced-child guards every job already has (C157). Name the build's parse record uniquely inside the state directory across daemon lives and across worktrees sharing the directory (a random component, not only a pid or a counter), and create it empty with an exclusive create before the build's process starts, so no build can read another's (AC5), even when its process exits before its first write. An exit during the build settles the job with `the executor process <pid> exited during the job (<exit>)`; for a build, add the record's label to that reason, or say the file is not known when the record is absent, empty or unreadable, each added text a named constant (C3). Remove the record once the build has ended, whatever its outcome. On `abort()` during a build, end the process tree at once rather than after `EXECUTOR_BOUND_MS`, and settle the job with a reason naming the stop, never the exit reason a crash gets (AC4, C131): the build's work is synchronous, so the child cannot read the abort message until it ends, and it writes nothing but its record. Correct the class doc comment, which says it hosts Vitest (C46), and extend `failureReason`'s other-kind message if it no longer reads true.
-- [ ] (Support) Send the orchestrator the doc text in § Doc text, final wording to follow the build.
-- [ ] (Support) Lint and typecheck: `bun x oxlint` over the changed files, and `bun run --filter @rt-test/daemon typecheck`.
+- [x] (Support) Resolve U1 first and write its answer, with the command and output, beneath the table. Before the first edit, confirm nothing has moved in this ticket's files since the 08:07 re-verify against 2.3d's landed code (§ Pending siblings and their routing): `SelectableWorkspace.aliases` is `readonly ReportedAlias[]`, and `ResolvedAlias` no longer exists.
+- [x] (AC1, AC2) Create `packages/daemon/src/selection/selection-input.ts`, exporting one function that takes the discovery in effect (`TestDiscovery | undefined`), the consumer root's real path and the `NonInputsDeclaration`, and answers either the selection input without its change and dependency information (a type derived from `SelectionInput` with `Omit`, C14) or why none can be built (AC2). Map each `WorkspaceDiscovery` by its status as AC1 lists, and take the Vitest listing's unread sources from the discovery's `notRead`. A browser-mode project leaves its workspace's tests known and contributes no setup file or alias, since discovery reports none for it (§ Design notes, "Browser-mode projects"). For a discovered workspace, union its projects' `setupFiles`, `globalSetupFiles` and `aliases` in project order without repeats, and take `tests` from its `DiscoveredTest`s; a non-empty `failedModules` or `unhandledErrors` makes them not known, with a reason naming the failed module paths or that collection raised an unhandled error. Build `nonInputs.protection` with `protection(discovery, consumerRoot)`, the one producer (2.3c). Name each reason text as a constant (C3).
+- [x] (AC3, AC5) In `packages/daemon/src/daemon/executor-jobs.ts`, add a request carrying the consumer root, the selectable workspaces and the absolute path of this build's parse record, and a reply carrying the `DependencyInformation`. Confirm, by reading `DependencyInformation`, `SelectableWorkspace` and the types they hold (`TestIdentity` in `@rt-test/core` among them), that every field of both is plain JSON (no `Map`, `Set`, class instance or `undefined`-valued field), which the executor's channel carries unchanged, and record what you read; if one is not, convert it at the channel and back, so AC3's equality holds.
+- [x] (AC5) In `packages/daemon/src/selection/workspace-graph.ts`, let `buildDependencyInformation` take an optional observer that `addSourceFileEdges` calls with the file's root label (`rootLabel(scan, file)`, already computed there) immediately before `readSourceImports`, and again with no label once it returns, so the record is empty whenever no parse is in progress; `readSourceImports` is the one call that reaches `oxc-parser`'s native `parseSync` (`rg -n "parseSync|readSourceImports\(" packages/daemon/src`, 05:50). An in-process caller passes none, and the build is otherwise unchanged (P19: an observer, not a mode flag).
+- [x] (AC3, AC5) In `packages/daemon/src/daemon/executor-main.ts`, answer that request with `buildDependencyInformation(findPackageWorkspaces(consumerRoot), workspaces, observer)`, whose observer writes the label to the parse record synchronously (`fs.writeSync` on a descriptor opened once per build), replacing what the record held, so the last label written survives a native abort that drops any queued asynchronous write. A throw answers `job-failed`, as today. Loading `workspace-graph.js` with a dynamic `import()` inside that branch keeps `oxc-parser`'s native binding out of every discovery and run process; dev decides.
+- [x] (AC3, AC4, AC5) In `packages/daemon/src/daemon/executor.ts`, add a method that takes the consumer root as discovery was given it (`ConfirmedStart.consumerRoot`, not its real path; § Design notes, "Two spellings of the root"), the selectable workspaces and the state directory, runs the build as one job and answers a `JobOutcome<DependencyInformation>`, through the fork, containment and replaced-child guards every job already has (C157). Name the build's parse record uniquely inside the state directory across daemon lives and across worktrees sharing the directory (a random component, not only a pid or a counter), and create it empty with an exclusive create before the build's process starts, so no build can read another's (AC5), even when its process exits before its first write. An exit during the build settles the job with `the executor process <pid> exited during the job (<exit>)`; for a build, add the record's label to that reason, or say the file is not known when the record is absent, empty or unreadable, each added text a named constant (C3). Remove the record once the build has ended, whatever its outcome. On `abort()` during a build, end the process tree at once rather than after `EXECUTOR_BOUND_MS`, and settle the job with a reason naming the stop, never the exit reason a crash gets (AC4, C131): the build's work is synchronous, so the child cannot read the abort message until it ends, and it writes nothing but its record. Correct the class doc comment, which says it hosts Vitest (C46), and extend `failureReason`'s other-kind message if it no longer reads true.
+- [x] (Support) Send the orchestrator the doc text in § Doc text, final wording to follow the build.
+- [x] (Support) Lint and typecheck: `bun x oxlint` over the changed files, and `bun run --filter @rt-test/daemon typecheck`.
 
 ## Reusable Code
 
@@ -235,41 +245,155 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 894f7ac4-08a7-44e1-961f-dd75b49af2c2
 
 #### Test Files This Change Broke
 
-None.
+None. `bun run --filter @rt-test/daemon typecheck` (which includes `packages/daemon/test`) and root `bun x tsc --noEmit` both exit 0 (08:23). No exit-reason or `failureReason` text a test could quote changed for a discovery or run; only a build's reasons are new. No test builds a `Scan` or calls `newScan` (`rg -n "newScan|holders: new Map" packages/daemon/test test`, no hit), so its new `observer` field breaks none.
 
 #### ACs Owed a Test
 
-None.
+None: each criterion has non-test evidence (§ Completion Notes, "Acceptance evidence"). Every criterion still earns its tests in create-tests.
 
 #### Tests Owed
 
-None.
+- A parser crash inside a tsconfig parse must name the tsconfig: before the review fix, only `readSourceImports` was bracketed, so a walked `tsconfig.json` or an `extends` target that ended the process read "the file it was parsing, if any, is not known". Mutation: in `tsconfig-edges.ts` `addTsconfigEdges`, `observedParse(scan, file, () => readJsonc(file))` becomes `readJsonc(file)`. Fixture: a `tsconfig.json` of `"1" + "+1".repeat(100000)` (AC5).
+- `close()` during a build must settle it as a stop, never as a crash naming the file then being parsed: before the review fix, `close()` waited `EXECUTOR_BOUND_MS` and the exit read "exited during the job ... while parsing <label>". Mutation: delete `if (this.#buildRecord !== undefined) this.abort();` from `Executor.close` (AC4, C131).
+- The crash fixture needs about 100,000 terms, not 45,000, and the exit reads `exit code 3221225725` on Windows and `signal SIGSEGV` on Linux (U1). A test matches the reason's shape per platform.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 0a7a9459-689c-43c1-9ebf-abc730eeae1a
+
+Step 3 (08:30): `bun x vitest related <the nine production files> --run` exited 0, 15 of 61 test files, 588 tests passed; no red, so no broken test and no code bug. The dev's three Tests Owed are D2236 and D2237 (tsconfig and extends parses, proven in process through the observer, which the crash reason reads through the record, D2239), D2246 (close mid-build), and D2239 (the 100,000-term fixture, its exit matched per platform). Orchestrator rulings: D2240 to D2249 added to the range at 08:29, and D2247 to D2249 returned unused; the proof of every named defect folds into the orchestrator's `bun run check`, since `test:defects:changed` selects 1613 of 1613 (08:37, the orchestrator).
 
 #### Named Defects
 
-None.
+- D2220: A discovered workspace's tests are passed as known but empty, so a selection counts none of the tests discovery found and reads the count as complete. (AC1)
+- D2221: A workspace takes only its first project's setup files, so a change to a later project's setup file selects nothing. (AC1)
+- D2222: A workspace takes only its first project's global setup files, so a change to a later project's global setup file selects nothing. (AC1)
+- D2223: Aliases are told apart without their replacement, so a second project's alias of the same find to another target is dropped as a repeat and its edges never added. (AC1)
+- D2224: A single module that failed to collect is ignored, so the workspace's tests read as known and complete while that module's tests are missing. (AC1)
+- D2225: A single unhandled collection error is ignored, so the workspace's tests read as known and complete. (AC1)
+- D2226: A browser-mode project, which RT Test never runs, makes the workspace's tests not known. (AC1)
+- D2227: A workspace whose config failed to load is passed as not runnable, so no selection ever selects it and a retry of it can never run. (AC1)
+- D2228: An unsupported workspace is left out of the input, so a selection neither reports it as not runnable nor counts it. (AC1)
+- D2229: A workspace not confirmed at start is left out of the input, so a selection neither reports it as not runnable nor counts it. (AC1)
+- D2230: The Vitest listing's unread sources are dropped, so a selection reads its workspace total as complete while a candidate workspace went unchecked. (AC1)
+- D2231: The protection is built without the discovery in effect, so no declared pattern is kept off the discovery's test modules. (AC1)
+- D2232: With no discovery in effect, an empty input is built, so a selection over it reads as a complete selection of nothing. (AC2)
+- D2233: A discovered workspace whose selection facts are not reported is skipped, so an input is built without it rather than refused. (AC2)
+- D2234: The root workspace is named by its path, so the reason ends in a bare "." rather than saying the workspace at the consumer root. (AC2)
+- D2235: The end of a parse is never reported, so the parse record keeps the label of a file that parsed and a later crash outside any parse blames it. (AC5)
+- D2236: A walked tsconfig is parsed without telling the observer, so a parser crash inside it says the file is not known. (AC5)
+- D2237: A config a tsconfig extends is parsed without telling the observer, so a parser crash inside it says the file is not known. (AC5)
+- D2238: The build's process ignores the selectable workspaces it is sent, so its dependency information lacks every edge a test module, setup file or alias adds. (AC3)
+- D2239: A build whose process ends inside the parser gives only the exit, so the consumer cannot tell which file to fix or declare. (AC3, AC5)
+- D2240: An empty parse record is read as a file's label, so a process that ends outside a parse is said to have been parsing a file with no name. (AC5)
+- D2241: A parse record that cannot be read is taken for an empty label, so the reason names a file with no name rather than saying the file is not known. (AC5)
+- D2242: A build's parse record is never removed, so every build leaves a file behind in the state directory. (AC5)
+- D2243: Every build's parse record has one fixed name, so a record a daemon left behind when it ended mid-build stops every later build. (AC5)
+- D2244: An abort sends a build's process the abort message and waits out the bound a Vitest job is given, which a build busy in synchronous code can never read. (AC4)
+- D2245: A build the abort ended is reported as a process that exited while parsing the file then in progress, so a stop reads as a parser crash in that file. (AC4)
+- D2246: Closing the executor mid-build waits out the bound and then reports the build as a process that exited while parsing the file then in progress. (AC4)
+- D2247: A source file is parsed without telling the observer, so a parser crash inside a source file says the file is not known. (AC5, review G1)
+- D2248: The observer the build is given never reaches the scan, so no parse is recorded and every parser crash says the file is not known. (AC5, review G2)
+- D2249: A parse is reported only once it has returned, so a process the parser ends leaves the record empty and the reason says the file is not known. (AC3, AC5, review G3; a real 100,000-term tsconfig crash)
+- D2250: A parse record that cannot be created makes the build reject with the raw file-system error rather than end unrun with a reason. (AC5, review G4)
+- D2251: A stop marks the build stopped but ends its process only once the bound a Vitest job is given has passed, so the stop waits the bound out. (AC4, review G5)
+- D2252: A parse record that cannot be removed fails a build that finished, rather than being logged. (AC5, review G6; the removal fails through an explicit module mock of `removeParseRecord`)
 
 #### Deliberately Untested
 
-None.
+- packages/daemon/src/daemon/executor-jobs.ts: message shapes only; the daemon typecheck holds both ends to them, and D2238 proves the channel carries the request and the reply unchanged.
+- packages/daemon/src/daemon/parse-record.ts `EXCLUSIVE_CREATE`: with a random name per record, an exclusive create and a plain one behave alike, so no mutation of the flag is observable; D2243 covers the name.
+- packages/daemon/src/selection/selection-input.ts `nonInputs.declaration`: passed through unchanged, with no branch a test could drive wrong.
+- packages/daemon/src/daemon/executor.ts, ending "every process it started" on a stop (AC4): the stop calls `endProcessTree` on the build's process, whose tree ending `process-tree.test.ts` and `job-tree.test.ts` already prove; D2244 to D2246 prove the stop reaches it at once.
+- packages/daemon/src/inputs/protection.ts: only `ROOT_WORKSPACE` became an export; D2234 pins the text a reason takes from it.
 
 ### Review Record
 
+Review session: threadId 2f058f5b-3fa2-4e4b-b591-33088b28c59e
+
+Fixed in review: `selection-input.ts` `FAILED_MODULES_REASON` read "discovery could not collect these of its test modules:"; it now reads "discovery could not collect these test modules:". No test quotes the text.
+
+Undisposed tech debt, triaged at Step 9 against the commit:
+
+- T1: `packages/daemon/test/daemon-harness.ts` `withNodeOptions` appends its argument to `NODE_OPTIONS`, which Node splits on spaces, and sets it for the whole worker while its body runs. Both callers pass a `pathToFileURL` href, which encodes spaces, so both are safe; a later caller passing a raw Windows path with a space would fail the child at startup and read as an executor crash.
+- T2: `packages/daemon/test/executor.test.ts` `withBuildHook` repeats `withNodeOptions`' save, set and restore-or-delete of an environment variable for `RT_FIXTURE_BUILD_HOOK`; one shared helper in `daemon-harness.ts` would hold the restore once.
+- T3: `packages/daemon/test/daemon.test.ts` D1496 sends the executor a hand-built `run` request with no `satisfies ExecutorRequest`, so a later change to the run request's shape would surface as an executor crash rather than a type error (pre-existing).
+- T4: `packages/daemon/test/selection/harness.ts` `treeDiscovery` models a workspace the caller will not run as `status: "failed"`, which `buildSelectionInput` now makes selectable; `selectInTree` is unaffected, since `protection` skips every status but `discovered`, but the harness now encodes the opposite runnability from the production builder.
+- T5: `packages/daemon/test/selection/harness.ts` `selectInTree` hand-builds each `SelectableWorkspace` rather than going through `buildSelectionInput`, so only D2220, D2227 and D2230 exercise the production builder end to end, and the two ways of building an input can drift.
+- T6: `observedParse(scan, file, read)` computes `rootLabel(scan, file)` again where both `addSourceFileEdges` (`workspace-graph.ts`) and `addTsconfigEdges` (`tsconfig-edges.ts`) computed the same label on the line before; taking the label as its argument answers the question once.
+- T7: `tsconfig-edges.ts` walks a tsconfig's `extends` chain twice, once in `addInheritedPathsEdges` for `paths` and again through `pathsBase` for `baseUrl`, so every shared base config is parsed twice per walked tsconfig, and each parse now also costs the record's writes (pre-existing).
+- F6 (dev's change-request candidate): `selection-input.ts` `workspaceName` and `protection.ts`'s inline `entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path` answer the same question.
+
 #### Test Coverage Gaps
 
-None.
+| #   | Source                                                                  | Named defect                                                                                                                                                                                                                                                                                                                                                                                                                                             | Expected test                                                                                               | Severity             |
+| --- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------- |
+| G1  | `packages/daemon/src/selection/workspace-graph.ts` `addSourceFileEdges` | A source file is parsed without telling the observer, so a parser crash inside a source file, the case AC3's fixture takes, says the file is not known. Mutation: `observedParse(scan, file, () => readSourceImports(file))` becomes `readSourceImports(file)`. D2235's test likely goes red on it, but no record names it.                                                                                                                              | In `workspace-graph.test.ts` through `parsesInTree`, beside D2236 and D2237.                                | MEDIUM, daemon-state |
+| G2  | `packages/daemon/src/selection/workspace-graph.ts` `addUndeclaredEdges` | The observer `buildDependencyInformation` is given never reaches the scan, so no parse is recorded and every crash says the file is not known. Mutation: `newScan(graph, root.directory, observer)` becomes `newScan(graph, root.directory, undefined)`.                                                                                                                                                                                                 | In `workspace-graph.test.ts` through `parsesInTree`.                                                        | MEDIUM, daemon-state |
+| G3  | `packages/daemon/src/selection/specifier-edges.ts` `observedParse`      | A parse is reported only once it has returned, so a process the parser ends leaves the record empty and the reason says the file is not known. Mutation: move `scan.observer?.parsing(rootLabel(scan, file));` from before the `try` to after `read()` returns. `parsesInTree` records only the order of observer calls, so only a real crash (D2239's fixture) or a test that reads the observer's state at the moment the parser is called can see it. | In `executor.test.ts` beside D2239, or in process with the parse call observed.                             | MEDIUM, daemon-state |
+| G4  | `packages/daemon/src/daemon/executor.ts` `buildDependencies`            | A parse record that cannot be created (a state directory that does not exist) makes `buildDependencies` reject with the raw file-system error rather than answer `{ ended: false, reason }` naming `NO_PARSE_RECORD_REASON`, and no process should be forked. Mutation: remove the `try`/`catch` around `createParseRecord(stateDirectory)`, leaving `const parseRecord = createParseRecord(stateDirectory);`.                                           | In `executor.test.ts`, with a state directory that does not exist.                                          | MEDIUM, daemon-state |
+| G5  | `packages/daemon/src/daemon/executor.ts` `abort`                        | A stop marks the build stopped but ends its process only once `EXECUTOR_BOUND_MS` has passed, so the reason reads as a stop while AC4's "without waiting out the bound" is broken. D2244 and D2245 assert only the reason text, so neither pins the time. Mutation: `endProcessTree(child);` inside the build branch becomes `setTimeout(() => endProcessTree(child), EXECUTOR_BOUND_MS);`.                                                              | In `executor.test.ts` through `stoppedMidBuild`, asserting the stop settles well under `EXECUTOR_BOUND_MS`. | LOW, daemon-state    |
+| G6  | `packages/daemon/src/daemon/executor.ts` `#removeRecord`                | A parse record that cannot be removed fails a build that finished, rather than being logged. Mutation: the `catch` in `#removeRecord` rethrows. Reach unknown: `rmSync` with `force` throws only on errors such as EPERM or EBUSY, so a test may need `removeParseRecord` replaced; record it as deliberately untested with that reason if no honest fixture reaches it.                                                                                 | In `executor.test.ts`.                                                                                      | LOW, daemon-state    |
+
+Denominator: 27 named-defect tests (D2220 to D2246) in the touched test files, against the behaviors AC1 to AC5 name; the six rows above are the behaviors with no named test of their own.
 
 ### Completion Notes
 
+**Built.** `buildSelectionInput(discovery, consumerRoot, declaration)` in `selection/selection-input.ts` answers `{ built: true, input }` (a `DiscoveredSelectionInput`, `Omit<SelectionInput, "change" | "dependencies">`) or `{ built: false, reason }`. `Executor.buildDependencies(consumerRoot, workspaces, stateDirectory)` runs the build as a `build-dependencies` job and answers `JobOutcome<DependencyInformation>`. `daemon/parse-record.ts` holds the record's one format: `createParseRecord` (a `dependency-build-<uuid>.parsing` file created empty with `wx` before the fork), `openParseRecord` (the child's synchronous writer: truncate, then `writeSync` at 0; cleared after each parse), `parsingLabel` (the daemon's reader: `undefined` when absent, empty or unreadable) and `removeParseRecord` (in a `finally` after the job settles, so after the tree and the process have ended). `executor-main.ts` loads `workspace-graph.js` by dynamic `import()` in the build branch alone. The parse observer (`ParseObserver`, with `parsing(label)` and `parsed()`) rides on `Scan`, and `observedParse` in `specifier-edges.ts` brackets every parse the build makes.
+
+**U1**: resolved above the task list: CONFIRMED at 100,000 terms on every gate platform, not at 45,000. No re-plan.
+
+**JSON check (task 3)**: `DependencyInformation` holds `PackageWorkspace` (`path`, `directory`), `UnreadWorkspaceSource` (strings), string arrays, `DependencyEdge` and `DependencyUncertainty` (strings); `SelectableWorkspace` holds `VitestWorkspace`, `WorkspaceTests` (a boolean with a string or `TestIdentity[]`; `TestIdentity` is strings, a string array and a number, `packages/core/src/test-identity.ts`), string arrays and `ReportedAlias` (strings and a boolean). No `Map`, `Set`, class or optional field, so `fork`'s default JSON channel carries both unchanged; the smoke run's deep equality confirms it.
+
+**Delegation.** Task 2 went to one implementer agent (partition impl-daemon-selection-input, file-disjoint from the executor group); tasks 3 to 6 ran in the main loop as one typecheck-atomic unit, since a new request variant breaks `runJob`'s two-way branch until `executor-main.ts` answers it.
+
+**Beyond the ticket's file list**, each claimed under t2-3e:
+
+- `daemon/parse-record.ts` (new): the record's writer and reader share one format in one module, which the child and the daemon both import.
+- `inputs/protection.ts`: `ROOT_WORKSPACE` is exported, so `selection-input.ts` names the root workspace with the same text rather than a copy. The declaration line only; the two `defects.json` records anchored on line 89's expression are untouched.
+- `selection/specifier-edges.ts` and `selection/tsconfig-edges.ts` (review F1): `Scan` carries the observer and `observedParse` brackets the two tsconfig parses as well as the source parse.
+
+**Correction to task 4's text, from the adversarial review (F1).** Task 4 says `readSourceImports` is "the one call that reaches `oxc-parser`'s native `parseSync`". It is not: `readJsonc` (`jsonc.ts`) calls `parseGuarded`, and so `parseSync`, for every walked tsconfig (`addTsconfigEdges`) and every `extends` target. All three parse sites are now bracketed, and the smoke run names `packages/b/tsconfig.json` for a tsconfig crash. The task text is left as authored, since this surfaced at Step 7.
+
+**Adversarial review (08:20), 6 findings.**
+
+- F1 (MEDIUM, tsconfig parses not recorded): fixed, above.
+- F3 (MEDIUM, `close()` mid-build reported as a crash naming a file): fixed. `close()` stops a build in progress through `abort()`, so it ends at once with the stop's reason.
+- Discarded F2 (a failed record write fails the build): a write error throws out of the build, which answers `job-failed` with the error, loud and retried at the next input change (Q2), and a failed build widens rather than narrows. A writer that went on after a failed clear could leave the label of a file that parsed, which is the misattribution the ticket review's F3 forbids.
+- Discarded F4 (the reason omits the error texts): AC1 asks for a reason naming what failed; it names the failed module paths, or that collection raised an unhandled error, and the errors stay in the discovery record. An unbounded stack in every selection reason is not wanted.
+- Discarded F5 (an empty record and an unreadable one read alike): AC5 words both as "the file is not known", and "if any" covers a crash outside a parse.
+- F6 (LOW, the root-workspace naming ternary is written twice): a change-request candidate, below.
+
+**Acceptance evidence** (Windows x64, Node 24.19.0, 08:23): `_agent-docs/.scratch/2-3e/smoke.ts`, a one-off script run from source, over a two-workspace fixture with 400 extra source files:
+
+- AC3: the child's answer deep-equals `buildDependencyInformation(findPackageWorkspaces(root), [])` in process; a 100,000-term `crash.ts` settles `the executor process <pid> exited during the job (exit code 3221225725) while parsing packages/b/src/crash.ts`, and the asking process carries on.
+- AC4: `abort()` 700 ms in settles at about 900 ms with `the dependency build was stopped, so its executor process was ended before the build finished (process <pid>)`; `close()` 700 ms in settles the same way.
+- AC5: the crash reasons above name `packages/b/src/crash.ts` and `packages/b/tsconfig.json`; no record remained in the state directory after any of the five builds. The not-known wording is traced: `parsingLabel` answers `undefined` for an absent, empty or unreadable record, and `#exitReason` then appends `PARSED_FILE_NOT_KNOWN`.
+- AC1, AC2: traced in `buildSelectionInput`: each of the four statuses maps as AC1 lists; `failedModules` or `unhandledErrors` make the tests not known with a reason; `vitestListingNotRead` is `discovery.notRead`; `protection(discovery, consumerRoot)` fills the non-inputs; no discovery, or a discovered workspace with `selectionFacts.reported` false, answers `built: false`, naming that workspace.
+- Linux: not run for AC3 to AC5; U1 shows the crash there ends the child with `SIGSEGV`.
+
+**A label outside the root.** `rootLabel` climbs with `..` for an `extends` target outside the consumer root, and on Windows gives an absolute path for one on another drive, as every other cause the build writes does. Walked sources and tsconfigs lie inside a listed workspace, which is inside the root.
+
+**Change-request candidates** (for review-changes):
+
+- F6: one helper for naming a workspace in a reason. `selection-input.ts` `workspaceName` and `protection.ts`'s inline `entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path` answer the same question. Export `workspaceName` from beside `ROOT_WORKSPACE` and call it in both; the protection line is the `old` anchor of two records in `packages/daemon/test/defects.json`, so its re-anchor belongs to the tests session.
+
+**README**: no change; nothing user-visible changes until 2.3g.
+
 ### File List
 
-- _agent-docs/tickets/2-3e-dependency-build.md (created by create-ticket)
+- _agent-docs/tickets/2-3e-dependency-build.md (created by create-ticket; dev: checkboxes, U1 resolution, Dev Agent Record)
+- packages/daemon/src/selection/selection-input.ts (new)
+- packages/daemon/src/daemon/parse-record.ts (new)
+- packages/daemon/src/selection/workspace-graph.ts
+- packages/daemon/src/selection/specifier-edges.ts
+- packages/daemon/src/selection/tsconfig-edges.ts
+- packages/daemon/src/daemon/executor-jobs.ts
+- packages/daemon/src/daemon/executor-main.ts
+- packages/daemon/src/daemon/executor.ts
+- packages/daemon/src/inputs/protection.ts
 - _agent-docs/sprints/sprint-2-fresh-runs.md (§ Ticket 2.3d's caller, § Ticket 2.3e rewritten, § Ticket 2.3g added, § Ticket 2.3f's build order and Q4 clause, and the split note, under the orchestrator's 05:45 grant)

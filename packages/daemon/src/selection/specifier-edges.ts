@@ -30,15 +30,24 @@ const GLOB_SYNTAX = /[*?[\]{}()]/;
 const CURRENT_DIRECTORY = ".";
 const KEY_SEPARATOR = "\0";
 
+/** Told which file the parser is reading, so a process the parser ends can still name it. */
+export interface ParseObserver {
+  /** The file's root-relative label, just before its parse starts. */
+  parsing(label: string): void;
+  /** Its parse returned. */
+  parsed(): void;
+}
+
 /**
  * One scan of the consumer: the graph it adds to, the records already added, the consumer root as listed and
- * as resolved, and the workspaces holding each absolute path already resolved.
+ * as resolved, the workspaces holding each absolute path already resolved, and who is told of each parse.
  */
 export interface Scan {
   readonly graph: Graph;
   readonly added: Set<string>;
   readonly roots: readonly string[];
   readonly holders: Map<string, readonly string[]>;
+  readonly observer: ParseObserver | undefined;
 }
 
 /** Where a specifier was found: the workspace it makes a dependent, the directory it resolves against, and its quote. */
@@ -48,10 +57,24 @@ export interface Reference {
   readonly detail: string;
 }
 
-export function newScan(graph: Graph, root: string): Scan {
+export function newScan(
+  graph: Graph,
+  root: string,
+  observer: ParseObserver | undefined,
+): Scan {
   const real = realPath(root);
   const roots = real.ok && real.path !== root ? [root, real.path] : [root];
-  return { graph, added: new Set(), roots, holders: new Map() };
+  return { graph, added: new Set(), roots, holders: new Map(), observer };
+}
+
+/** Runs one read that parses `file`, with the scan's observer told of it before and after. */
+export function observedParse<T>(scan: Scan, file: string, read: () => T): T {
+  scan.observer?.parsing(rootLabel(scan, file));
+  try {
+    return read();
+  } finally {
+    scan.observer?.parsed();
+  }
 }
 
 /**

@@ -27,7 +27,7 @@ The local process that alone executes a started consumer's tests and answers que
 _Avoid_: server, watcher
 
 **Executor process**:
-The daemon's child process that alone hosts Vitest, one discovery or run at a time.
+A child process of the daemon that runs one job, a discovery, a run or a dependency build, and ends with it; only an executor process hosts Vitest.
 _Avoid_: worker, runner
 
 **Confirmed start**:

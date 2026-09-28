@@ -17,6 +17,7 @@ import {
   graphInTree,
   inspectTree,
   manifest,
+  parsesInTree,
   pkg,
   plainPackages,
   reasonVias,
@@ -1764,5 +1765,73 @@ describe("configs a tsconfig inherits", () => {
         }),
       ),
     ).toEqual(widenedAt("unparsed-source", APP_TSCONFIG));
+  });
+});
+
+describe("the build tells its observer of each parse", () => {
+  it("D2235: a source file's parse is reported by its root-relative path before it starts, and its end once it returns", async () => {
+    expect(
+      await parsesInTree(
+        appTree({ files: { "packages/app/src/x.ts": "" }, change: "" }),
+      ),
+    ).toStrictEqual(["parsing packages/app/src/x.ts", "parsed"]);
+  });
+
+  it("D2236: a walked tsconfig's parse is reported like a source file's", async () => {
+    expect(
+      await parsesInTree(
+        appTree({ files: { [APP_TSCONFIG]: manifest({}) }, change: "" }),
+      ),
+    ).toStrictEqual([`parsing ${APP_TSCONFIG}`, "parsed"]);
+  });
+
+  it("D2237: the parse of a config a tsconfig extends is reported like the tsconfig's own", async () => {
+    expect(
+      await parsesInTree(
+        appTree({
+          files: {
+            [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+            "packages/app/configs/base.json": manifest({}),
+          },
+          change: "",
+        }),
+      ),
+    ).toStrictEqual([
+      `parsing ${APP_TSCONFIG}`,
+      "parsed",
+      "parsing packages/app/configs/base.json",
+      "parsed",
+    ]);
+  });
+
+  it("D2247: a source file in a plain package is reported before its parse, like a Vitest workspace's", async () => {
+    const events = await parsesInTree(
+      appTree({ files: { "packages/b/src/y.ts": "" }, change: "" }),
+    );
+    expect(
+      Array.isArray(events)
+        ? events.filter((event) => event.startsWith("parsing"))
+        : events,
+    ).toStrictEqual(["parsing packages/b/src/y.ts"]);
+  });
+
+  it("D2248: the observer the build is given hears of every parse, source files and tsconfigs alike", async () => {
+    const events = await parsesInTree(
+      appTree({
+        files: {
+          "packages/app/src/x.ts": "",
+          "packages/c/tsconfig.json": manifest({}),
+        },
+        change: "",
+      }),
+    );
+    expect(
+      Array.isArray(events)
+        ? events.filter((event) => event.startsWith("parsing")).sort()
+        : events,
+    ).toStrictEqual([
+      "parsing packages/app/src/x.ts",
+      "parsing packages/c/tsconfig.json",
+    ]);
   });
 });

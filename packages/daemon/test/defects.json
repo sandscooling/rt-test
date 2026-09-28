@@ -4289,5 +4289,96 @@
     "file": "packages/daemon/src/inputs/input-filter.ts",
     "old": "      lstatSync(path, { throwIfNoEntry: false })?.isDirectory() !== true",
     "new": "      true"
+  },
+  {
+    "id": "D2238",
+    "defect": "The build's process ignores the selectable workspaces it is sent, so its dependency information lacks every edge a test module, setup file or alias adds.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "      request.workspaces,",
+    "new": "      [],"
+  },
+  {
+    "id": "D2239",
+    "defect": "A build whose process ends inside the parser gives only the exit, so the consumer cannot tell which file to fix or declare.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      : `${exited} ${WHILE_PARSING} ${label}`;",
+    "new": "      : exited;"
+  },
+  {
+    "id": "D2240",
+    "defect": "An empty parse record is read as a file's label, so a process that ends outside a parse is said to have been parsing a file with no name.",
+    "file": "packages/daemon/src/daemon/parse-record.ts",
+    "old": "  return text === EMPTY ? undefined : text;",
+    "new": "  return text;"
+  },
+  {
+    "id": "D2241",
+    "defect": "A parse record that cannot be read is taken for an empty label, so the reason names a file with no name rather than saying the file is not known.",
+    "file": "packages/daemon/src/daemon/parse-record.ts",
+    "old": "  } catch {\n    return undefined;\n  }",
+    "new": "  } catch {\n    return EMPTY;\n  }"
+  },
+  {
+    "id": "D2242",
+    "defect": "A build's parse record is never removed, so every build leaves a file behind in the state directory.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      this.#removeRecord(parseRecord);\n",
+    "new": ""
+  },
+  {
+    "id": "D2243",
+    "defect": "Every build's parse record has one fixed name, so a record a daemon left behind when it ended mid-build stops every later build.",
+    "file": "packages/daemon/src/daemon/parse-record.ts",
+    "old": "    `${RECORD_PREFIX}${randomUUID()}${RECORD_SUFFIX}`,",
+    "new": "    `${RECORD_PREFIX}${RECORD_SUFFIX}`,"
+  },
+  {
+    "id": "D2244",
+    "defect": "An abort sends a build's process the abort message and waits out the bound a Vitest job is given, which a build busy in synchronous code can never read.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (this.#buildRecord !== undefined) {\n      this.#buildStopped = true;\n      endProcessTree(child);\n      return;\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D2245",
+    "defect": "A build the abort ended is reported as a process that exited while parsing the file then in progress, so a stop reads as a parser crash in that file.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      this.#buildStopped = true;\n",
+    "new": ""
+  },
+  {
+    "id": "D2246",
+    "defect": "Closing the executor mid-build waits out the bound and then reports the build as a process that exited while parsing the file then in progress.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (this.#buildRecord !== undefined) this.abort();\n",
+    "new": ""
+  },
+  {
+    "id": "D2249",
+    "defect": "A parse is reported only once it has returned, so a process the parser ends leaves the record empty and the reason says the file is not known.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  scan.observer?.parsing(rootLabel(scan, file));\n  try {\n    return read();",
+    "new": "  try {\n    const value = read();\n    scan.observer?.parsing(rootLabel(scan, file));\n    return value;"
+  },
+  {
+    "id": "D2250",
+    "defect": "A parse record that cannot be created makes the build reject with the raw file-system error rather than end unrun with a reason.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    let parseRecord: string;\n    try {\n      parseRecord = createParseRecord(stateDirectory);\n    } catch (error) {\n      const reason = `${NO_PARSE_RECORD_REASON}: ${errorText(error)}`;\n      this.#log.entry(reason);\n      return { ended: false, reason };\n    }\n",
+    "new": "    const parseRecord = createParseRecord(stateDirectory);\n"
+  },
+  {
+    "id": "D2251",
+    "defect": "A stop marks the build stopped but ends its process only once the bound a Vitest job is given has passed, so the stop waits the bound out.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      this.#buildStopped = true;\n      endProcessTree(child);\n      return;",
+    "new": "      this.#buildStopped = true;\n      setTimeout(() => endProcessTree(child), EXECUTOR_BOUND_MS);\n      return;"
+  },
+  {
+    "id": "D2252",
+    "defect": "A parse record that cannot be removed fails a build that finished, rather than being logged.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    } catch (error) {\n      this.#log.entry(\n        `${RECORD_NOT_REMOVED_REASON} (${parseRecord}): ${errorText(error)}`,\n      );\n    }",
+    "new": "    } catch (error) {\n      throw error;\n    }"
   }
 ]

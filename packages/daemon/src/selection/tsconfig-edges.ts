@@ -15,6 +15,7 @@ import {
   isAbsolutePath,
   isBare,
   isRelative,
+  observedParse,
   rootLabel,
   type Reference,
   type Scan,
@@ -50,7 +51,7 @@ export function addTsconfigEdges(
   file: string,
 ): void {
   const label = rootLabel(scan, file);
-  const read = readJsonc(file);
+  const read = observedParse(scan, file, () => readJsonc(file));
   if (!read.ok) {
     uncertain(
       scan.graph,
@@ -308,7 +309,7 @@ function followExtends(
       reason: `its extends chain returns to ${rootLabel(scan, located)}`,
     };
   }
-  const read = readJsonc(located);
+  const read = observedParse(scan, located, () => readJsonc(located));
   return read.ok
     ? { ok: true, value: read.value, file: located }
     : { ok: false, reason: `${rootLabel(scan, located)} ${read.reason}` };

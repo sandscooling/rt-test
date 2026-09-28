@@ -16,7 +16,8 @@ import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
 const PATTERNS_DO_NOT_APPLY = `${NON_INPUTS_FILE}'s patterns do not apply, so every file stays an input`;
 const NO_DISCOVERY_REASON = `${PATTERNS_DO_NOT_APPLY}: no discovery in effect reports which files they may not remove`;
 const NOT_REPORTED_REASON = `${PATTERNS_DO_NOT_APPLY}: the discovery in effect does not report which files they may not remove for the workspace`;
-const ROOT_WORKSPACE = "at the consumer root";
+/** How a reason names the workspace at the consumer root, whose path is `.`. */
+export const ROOT_WORKSPACE = "at the consumer root";
 const REFUSED_REASON = `${PATTERNS_DO_NOT_APPLY}: picomatch cannot compile the test file pattern`;
 const REFUSED_CONSEQUENCE = "so the files it finds are not known";
 /** A refused pattern can be longer than picomatch's input limit, and its quote goes into every answer. */

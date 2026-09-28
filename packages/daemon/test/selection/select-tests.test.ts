@@ -1,15 +1,37 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  NON_INPUTS_ABSENT,
+  NON_INPUTS_FILE,
+  type NonInputsDeclaration,
+} from "../../src/inputs/non-inputs.js";
+import {
+  buildSelectionInput,
+  type SelectionInputBuild,
+} from "../../src/selection/selection-input.js";
 import {
   SELECTION_POLICY_VERSION,
   type Selection,
   type SelectionOutcome,
 } from "../../src/selection/selection-types.js";
-import { onPlatform } from "../harness.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../../src/vitest/discover-tests.js";
+import type { VitestWorkspace } from "../../src/vitest/find-workspaces.js";
+import {
+  STRING_FIND,
+  type ProjectSelectionFacts,
+  type ReportedAlias,
+} from "../../src/vitest/selection-facts.js";
+import { discoveredWorkspace, onPlatform, projectFacts } from "../harness.js";
 import {
   manifest,
   rootManifest,
   selectedPaths,
+  selectFromDiscovery,
   selectInTree,
+  type NotBuilt,
   type Settled,
   type TreeCase,
   type TreeWorkspace,
@@ -977,5 +999,314 @@ describe("each changed path on its own", () => {
         notRunnable.map(({ workspace, reason }) => [workspace.path, reason]),
       ),
     ).toEqual([["packages/legacy", NOT_CONFIRMED]]);
+  });
+});
+
+const INPUT_ROOT = join("/", "consumer");
+const APP_PATH = "packages/app";
+const NO_DECLARATION: NonInputsDeclaration = {
+  file: NON_INPUTS_FILE,
+  state: NON_INPUTS_ABSENT,
+};
+const LOAD_ERROR = "Cannot find module './missing.js'";
+const UNSUPPORTED_VITEST = "no Vitest resolves: Cannot find module 'vitest'";
+const APP_FILES = {
+  "package.json": rootManifest(),
+  "packages/app/package.json": manifest({ name: "@x/app" }),
+  "packages/app/vitest.config.ts": CONFIG,
+};
+
+type Discovered = Extract<WorkspaceDiscovery, { status: "discovered" }>;
+
+function vitestWorkspace(root: string, path: string): VitestWorkspace {
+  return { path, directory: join(root, path) };
+}
+
+/** `packages/app` as discovery reports it: one test in `unit.test.ts`, its projects' facts, then `fields` over that. */
+function appDiscovered(
+  fields: Partial<Discovered> = {},
+  projects: readonly ProjectSelectionFacts[] = [projectFacts()],
+  root = INPUT_ROOT,
+): Discovered {
+  const base = discoveredWorkspace(
+    vitestWorkspace(root, APP_PATH),
+    ["unit.test.ts"],
+    { reported: true, projects },
+  ) as Discovered;
+  return { ...base, ...fields };
+}
+
+function inputFrom(...workspaces: WorkspaceDiscovery[]): SelectionInputBuild {
+  return buildSelectionInput(
+    { workspaces, notRead: [] },
+    INPUT_ROOT,
+    NO_DECLARATION,
+  );
+}
+
+/** Each selectable workspace's `field`, or why no input was built. */
+function selectableField<
+  K extends "tests" | "setupFiles" | "globalSetupFiles" | "aliases",
+>(build: SelectionInputBuild, field: K): unknown {
+  return build.built
+    ? build.input.workspaces.map((workspace) => workspace[field])
+    : build.reason;
+}
+
+/** The selectable and not-runnable workspace paths, the latter with their reasons, or why no input was built. */
+function runnability(build: SelectionInputBuild): unknown {
+  return build.built
+    ? {
+        selectable: build.input.workspaces.map(
+          ({ workspace }) => workspace.path,
+        ),
+        notRunnable: build.input.notRunnable.map(({ workspace, reason }) => [
+          workspace.path,
+          reason,
+        ]),
+      }
+    : build.reason;
+}
+
+/** Selects a change in `packages/app` over the input built from the discovery `discover` gives. */
+function selectAppFrom(
+  discover: (root: string) => TestDiscovery,
+): Promise<Settled<SelectionOutcome | NotBuilt>> {
+  return selectFromDiscovery(
+    { files: APP_FILES, change: ["packages/app/src/x.ts"] },
+    discover,
+  );
+}
+
+function fromBuilt<T>(
+  outcome: Settled<SelectionOutcome | NotBuilt>,
+  read: (selection: Selection) => T,
+): T | Settled<SelectionOutcome | NotBuilt> {
+  return "workspaces" in outcome ? read(outcome) : outcome;
+}
+
+describe("selection's input, built from the discovery in effect", () => {
+  it("D2220: a discovered workspace's tests are the ones discovery found, so a selection counts each as known", async () => {
+    const outcome = await selectAppFrom((root) => ({
+      workspaces: [
+        discoveredWorkspace(
+          vitestWorkspace(root, APP_PATH),
+          ["a.test.ts", "b.test.ts"],
+          { reported: true, projects: [projectFacts({ directory: APP_PATH })] },
+        ),
+      ],
+      notRead: [],
+    }));
+    expect(
+      fromBuilt(outcome, ({ counts }) => counts.selectedTests),
+    ).toStrictEqual({ count: 2, complete: true });
+  });
+
+  it("D2221: a workspace's setup files are those of every project, in project order, each once", () => {
+    const build = inputFrom(
+      appDiscovered({}, [
+        projectFacts({
+          projectName: "unit",
+          setupFiles: ["packages/app/a.ts", "packages/app/b.ts"],
+        }),
+        projectFacts({
+          projectName: "e2e",
+          setupFiles: ["packages/app/b.ts", "packages/app/c.ts"],
+        }),
+      ]),
+    );
+    expect(selectableField(build, "setupFiles")).toStrictEqual([
+      ["packages/app/a.ts", "packages/app/b.ts", "packages/app/c.ts"],
+    ]);
+  });
+
+  it("D2222: a workspace's global setup files are those of every project, in project order, each once", () => {
+    const build = inputFrom(
+      appDiscovered({}, [
+        projectFacts({
+          projectName: "unit",
+          globalSetupFiles: ["packages/app/g1.ts", "global.ts"],
+        }),
+        projectFacts({
+          projectName: "e2e",
+          globalSetupFiles: ["packages/app/g2.ts", "global.ts"],
+        }),
+      ]),
+    );
+    expect(selectableField(build, "globalSetupFiles")).toStrictEqual([
+      ["packages/app/g1.ts", "global.ts", "packages/app/g2.ts"],
+    ]);
+  });
+
+  it("D2223: two projects' aliases that differ only in replacement both reach the workspace, and an identical one is kept once", () => {
+    const alias: ReportedAlias = {
+      find: "@lib",
+      findKind: STRING_FIND,
+      flags: "",
+      replacement: "/consumer/packages/lib/src",
+      hasCustomResolver: false,
+    };
+    const elsewhere = { ...alias, replacement: "/consumer/packages/lib/dist" };
+    const build = inputFrom(
+      appDiscovered({}, [
+        { ...projectFacts({ projectName: "unit" }), aliases: [alias] },
+        {
+          ...projectFacts({ projectName: "e2e" }),
+          aliases: [alias, elsewhere],
+        },
+      ]),
+    );
+    expect(selectableField(build, "aliases")).toStrictEqual([
+      [alias, elsewhere],
+    ]);
+  });
+
+  it("D2224: one module that failed to collect leaves the workspace's tests not known, the reason naming it", () => {
+    const build = inputFrom(
+      appDiscovered({
+        failedModules: [
+          {
+            projectName: "unit",
+            modulePath: "broken.test.ts",
+            errors: ["SyntaxError: Unexpected token"],
+          },
+        ],
+      }),
+    );
+    expect(selectableField(build, "tests")).toStrictEqual([
+      { known: false, reason: expect.stringContaining("broken.test.ts") },
+    ]);
+  });
+
+  it("D2225: one unhandled error during collection leaves the workspace's tests not known, the reason saying so", () => {
+    const build = inputFrom(
+      appDiscovered({ unhandledErrors: ["Error: a timer threw"] }),
+    );
+    expect(selectableField(build, "tests")).toStrictEqual([
+      { known: false, reason: expect.stringContaining("unhandled error") },
+    ]);
+  });
+
+  it("D2226: a browser-mode project leaves the workspace's tests known", () => {
+    const build = inputFrom(
+      appDiscovered({
+        unsupportedProjects: [
+          { projectName: "browser", reason: "browser mode is not supported" },
+        ],
+      }),
+    );
+    expect(selectableField(build, "tests")).toStrictEqual([
+      {
+        known: true,
+        tests: [expect.objectContaining({ modulePath: "unit.test.ts" })],
+      },
+    ]);
+  });
+
+  it("D2227: a workspace whose config failed to load is selected with its tests not known, its load error the reason", async () => {
+    const outcome = await selectAppFrom((root) => ({
+      workspaces: [
+        {
+          status: "failed",
+          workspace: vitestWorkspace(root, APP_PATH),
+          vitestVersion: "5.0.1",
+          error: LOAD_ERROR,
+        },
+      ],
+      notRead: [],
+    }));
+    expect(
+      fromBuilt(outcome, ({ workspaces }) =>
+        workspaces.map(({ path, tests }) => ({ path, tests })),
+      ),
+    ).toStrictEqual([
+      { path: APP_PATH, tests: { known: false, reason: LOAD_ERROR } },
+    ]);
+  });
+
+  it("D2228: an unsupported workspace is not runnable, with its reason", () => {
+    const build = inputFrom({
+      status: "unsupported",
+      workspace: vitestWorkspace(INPUT_ROOT, APP_PATH),
+      vitest: {
+        supported: false,
+        supportedRange: ">=4.1.0 <6",
+        reason: UNSUPPORTED_VITEST,
+      },
+    });
+    expect(runnability(build)).toStrictEqual({
+      selectable: [],
+      notRunnable: [[APP_PATH, UNSUPPORTED_VITEST]],
+    });
+  });
+
+  it("D2229: a workspace not confirmed at start is not runnable, with its reason", () => {
+    const build = inputFrom({
+      status: "not-confirmed",
+      workspace: vitestWorkspace(INPUT_ROOT, APP_PATH),
+      reason: NOT_CONFIRMED,
+    });
+    expect(runnability(build)).toStrictEqual({
+      selectable: [],
+      notRunnable: [[APP_PATH, NOT_CONFIRMED]],
+    });
+  });
+
+  it("D2230: a source the Vitest listing did not read leaves a selection's workspace total incomplete", async () => {
+    const outcome = await selectAppFrom((root) => ({
+      workspaces: [
+        appDiscovered({}, [projectFacts({ directory: APP_PATH })], root),
+      ],
+      notRead: [UNREAD_SOURCE],
+    }));
+    expect(
+      fromBuilt(outcome, ({ counts }) => counts.totalWorkspaces),
+    ).toStrictEqual({ count: 1, complete: false });
+  });
+
+  it("D2231: the non-inputs protect the test modules of the same discovery", () => {
+    const build = inputFrom(appDiscovered());
+    const { protection } = build.built
+      ? build.input.nonInputs
+      : { protection: build };
+    expect(
+      "files" in protection ? [...protection.files] : protection,
+    ).toStrictEqual(["packages/app/unit.test.ts"]);
+  });
+
+  it("D2232: with no discovery in effect, no input is built, and the answer says so", () => {
+    expect(
+      buildSelectionInput(undefined, INPUT_ROOT, NO_DECLARATION),
+    ).toStrictEqual({
+      built: false,
+      reason: expect.stringContaining("no discovery"),
+    });
+  });
+
+  it("D2233: a discovered workspace whose selection facts are not reported stops the build, naming it", () => {
+    const build = inputFrom(
+      appDiscovered({ selectionFacts: { reported: false } }),
+      discoveredWorkspace(
+        vitestWorkspace(INPUT_ROOT, "packages/web"),
+        ["unit.test.ts"],
+        { reported: true, projects: [projectFacts()] },
+      ),
+    );
+    expect(build).toStrictEqual({
+      built: false,
+      reason: expect.stringContaining(APP_PATH),
+    });
+  });
+
+  it("D2234: the root workspace whose selection facts are not reported is named as the one at the consumer root", () => {
+    const build = inputFrom(
+      discoveredWorkspace(vitestWorkspace(INPUT_ROOT, "."), ["unit.test.ts"], {
+        reported: false,
+      }),
+    );
+    expect(build).toStrictEqual({
+      built: false,
+      reason: expect.stringContaining("at the consumer root"),
+    });
   });
 });

@@ -42,7 +42,9 @@ import {
   addPathEdges,
   addSpecifierEdges,
   newScan,
+  observedParse,
   rootLabel,
+  type ParseObserver,
   type Scan,
 } from "./specifier-edges.js";
 import { addManifestImportsEdges, addTsconfigEdges } from "./tsconfig-edges.js";
@@ -78,6 +80,7 @@ interface OverrideEntry {
 export function buildDependencyInformation(
   listing: WorkspaceListing,
   vitestWorkspaces: readonly SelectableWorkspace[],
+  observer?: ParseObserver,
 ): DependencyInformation {
   const manifests = listing.workspaces.map((workspace) => ({
     workspace,
@@ -103,7 +106,7 @@ export function buildDependencyInformation(
   if (root?.read.ok === true) {
     addOverrideEdges(graph, root.workspace, root.read.manifest);
   }
-  addUndeclaredEdges(graph, manifests);
+  addUndeclaredEdges(graph, manifests, observer);
   for (const workspace of vitestWorkspaces) addVitestEdges(graph, workspace);
   return {
     packageWorkspaces: listing.workspaces,
@@ -371,10 +374,11 @@ function rootDependencySpecs(
 function addUndeclaredEdges(
   graph: Graph,
   manifests: readonly ReadManifest[],
+  observer: ParseObserver | undefined,
 ): void {
   const [root] = graph.workspaces;
   if (root === undefined) return;
-  const scan = newScan(graph, root.directory);
+  const scan = newScan(graph, root.directory, observer);
   const ignored = ignoredPathsReader(root.directory);
   for (const { workspace, read } of manifests) {
     addWorkspaceSourceEdges(scan, workspace, ignored);
@@ -447,7 +451,7 @@ function linkTarget(
 /** Relative specifiers resolve against the file's real directory, as Node and Vite resolve a linked file's imports. */
 function addSourceFileEdges(scan: Scan, dependent: string, file: string): void {
   const label = rootLabel(scan, file);
-  const found = readSourceImports(file);
+  const found = observedParse(scan, file, () => readSourceImports(file));
   if (!found.ok) {
     uncertain(
       scan.graph,
