@@ -50,7 +50,20 @@ Never send a standby or roll-call message: a settled member answers it by going 
 
 **To PAUSE a live member, `session_wake` it** with: finish the tool call in hand, stop every background agent it started and check the files those touched, end the turn, keep the claims, and wait for your wake. It lands right after the tool call in hand. **A pause does not hold while the member has a question open in its own thread**: the owner's answer starts a new turn. Before a window where the tree must stay still, ask the owner to hold thread answers until you say it is over.
 
-**Spawn on your own model** by omitting `model` and `options`. Escalate a problem the default has already failed on by spawning a NEW session on a stronger model, or on another provider's model for a second view (`session_models` lists them), with a written brief (the record, every measured attempt, every traced failure and what was ruled out), never by switching a live session's model, which drops its reasoning. The next round of that work goes back to a default-model member.
+**Pass `model` and `options` on every `session_spawn`, by role; never let a member inherit yours.** The owner sets this table:
+
+| Role                                                | `model`             | `effort`                                             |
+| --------------------------------------------------- | ------------------- | ---------------------------------------------------- |
+| create (`create-ticket`, `change-request`, scoping) | `claude-opus-5-5`   | `high`                                               |
+| review                                              | `claude-opus-5-5`   | `medium`; `high` for contracts, the server, security |
+| dev                                                 | `claude-sonnet-5-5` | `medium`                                             |
+| tests                                               | `claude-sonnet-5-5` | `medium`; `high` for a mutation-proof suite          |
+| spike                                               | `claude-sonnet-5-5` | `medium`                                             |
+| trivial or mechanical, editing no code              | `claude-sonnet-5-5` | `low`                                                |
+
+Every spawn also passes `{"id":"contextWindow","value":"1m"}`: Sonnet starts at 200k, and the context hook's handoff warning assumes a 1M window, so a 200k member compacts before it is warned. Never run a coding member at `low` effort, since it then may report a change done without running its checks. Tell a Sonnet spike to read its sources rather than answer from memory. `session_models` lists the slugs and option ids. The successor orchestrator in a handoff stays on `claude-opus-5-5`.
+
+Escalate a problem the table's model has already failed on by spawning a NEW session on `claude-fable-5-1`, or on another provider's model for a second view, with a written brief (the record, every measured attempt, every traced failure and what was ruled out), never by switching a live session's model, which drops its reasoning. The next round of that work goes back to the table's model.
 
 **A member at about 60% context hands off to a successor** by `_agent-docs/handoff.md` and sends you the successor's threadId. Its claims carry over, because claims belong to the lane. Settle the old member once the successor reports in, then send the new threadId to every session holding the old one as an address (tests holds dev's, the review holds the tests member's). **A second handoff within one stage means the lane is too big for one session**: before the next stage, weigh splitting its remaining work into a new lane (§ Claims and grants, on a widening).
 
