@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { createConnection, type Socket } from "node:net";
+import { createConnection, Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import {
   daemonVerifier,
@@ -506,5 +506,45 @@ describe("proving each answer to a challenge", () => {
       return answer === CLOSED ? CLOSED : verifier.refusal("stop", answer);
     });
     expect(refusal).toBeUndefined();
+  });
+});
+
+describe("the raw connection a test reads lines from", () => {
+  /** Resolves on the next turn of the event loop, once every callback already queued has run. */
+  function afterQueuedCallbacks(): Promise<void> {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("D2410: a connection an error closes reads as closed, rather than waiting on a line that cannot come", async () => {
+    const connect = vi.spyOn(Socket.prototype, "connect");
+    let read: unknown = "still waiting";
+    try {
+      await withTestEndpoint(
+        () => undefined,
+        (path) =>
+          withConnection(path, async (connection) => {
+            const socket = connect.mock.contexts[0];
+            if (!(socket instanceof Socket)) {
+              throw new Error("the raw connection opened no socket");
+            }
+            void connection.next().then((line) => {
+              read = line;
+            });
+            const closed = new Promise((resolve) =>
+              socket.once("close", resolve),
+            );
+            socket.destroy(
+              Object.assign(new Error("read ECONNRESET"), {
+                code: "ECONNRESET",
+              }),
+            );
+            await closed;
+            await afterQueuedCallbacks();
+          }),
+      );
+    } finally {
+      connect.mockRestore();
+    }
+    expect(read).toBe(CLOSED);
   });
 });

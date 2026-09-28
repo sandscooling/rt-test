@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
-import { createInterface } from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { LONGEST_TEST_TIMEOUT_MS } from "../../../test/scripts/longest-test-timeout.mjs";
@@ -39,6 +39,34 @@ export const CLOSED = "closed";
 
 type Line = Readonly<Record<string, unknown>>;
 
+/**
+ * The lines of a connection this side also writes to, with each of its errors handed to `onError` once. readline
+ * re-emits the socket's errors on its interface until the socket ends, where one nobody listens for is thrown uncaught.
+ * The interface does not close when an error closes the socket, so read the end of the connection from the socket.
+ */
+export function readLines(
+  socket: Socket,
+  onError: (error: NodeJS.ErrnoException) => void,
+): Interface {
+  socket.on("error", onError);
+  const lines = createInterface({ input: socket });
+  lines.on("error", () => undefined);
+  return lines;
+}
+
+/** A request line parsed, or undefined for one that is not a JSON object. */
+function parsedRequest(line: string): Line | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const isObject =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  return isObject ? (parsed as Line) : undefined;
+}
+
 /** A client that writes raw text, as a client of another protocol version or a broken one would, and reads each line back. */
 export class RawConnection {
   readonly #socket: Socket;
@@ -48,13 +76,13 @@ export class RawConnection {
 
   private constructor(socket: Socket) {
     this.#socket = socket;
-    const reader = createInterface({ input: socket });
-    reader.on("line", (line) => this.#deliver(line));
-    reader.on("close", () => {
+    readLines(socket, () => undefined).on("line", (line) =>
+      this.#deliver(line),
+    );
+    socket.once("close", () => {
       this.#closed = true;
       for (const wake of this.#waiting.splice(0)) wake(CLOSED);
     });
-    socket.on("error", () => undefined);
   }
 
   static open(path: string): Promise<RawConnection> {
@@ -210,17 +238,25 @@ export async function withStandIn<T>(
   let connections = 0;
   let closing: Promise<void> | undefined;
   let standIn: StandIn | undefined;
+  let unreadable: Error | undefined;
   recordEndpointOf(worktreeIdentity, defaultStateDirectory(worktreeIdentity));
   const listening = await listenOnEndpoint(worktreeIdentity, (socket) => {
     connections += 1;
     sockets.add(socket);
-    socket.on("error", () => undefined);
     const connectionClosed = new Promise<void>((resolve) =>
       socket.once("close", () => resolve()),
     );
-    createInterface({ input: socket }).on("line", (line) => {
-      if (standIn === undefined) return;
-      const reply = answer(JSON.parse(line) as Line, standIn, connectionClosed);
+    readLines(socket, () => undefined).on("line", (line) => {
+      if (standIn === undefined || socket.destroyed) return;
+      const request = parsedRequest(line);
+      if (request === undefined) {
+        unreadable ??= new Error(
+          `the stand-in read a line that is not a JSON object: ${line}`,
+        );
+        socket.destroy();
+        return;
+      }
+      const reply = answer(request, standIn, connectionClosed);
       if (reply !== undefined) socket.write(`${JSON.stringify(reply)}\n`);
     });
   });
@@ -239,7 +275,12 @@ export async function withStandIn<T>(
     },
   };
   try {
-    return await body(standIn);
+    const result = await body(standIn);
+    if (unreadable !== undefined) throw unreadable;
+    return result;
+  } catch (error) {
+    if (unreadable === undefined || error === unreadable) throw error;
+    throw new Error(unreadable.message, { cause: error });
   } finally {
     await standIn.close();
   }

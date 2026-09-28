@@ -4415,5 +4415,103 @@
     "file": "packages/daemon/src/vitest/selection-facts.ts",
     "old": "    viteRoot: rootRelative(project.vite.config.root),",
     "new": "    viteRoot: rootRelative(session.instance.getRootProject().vite.config.root),"
+  },
+  {
+    "id": "D2402",
+    "defect": "The daemon tests' line reader leaves readline's interface with no error listener, so a write that fails because a heartbeat child has just exited is thrown uncaught and reds a run whose tests passed.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  lines.on(\"error\", () => undefined);\n  return lines;",
+    "new": "  return lines;"
+  },
+  {
+    "id": "D2412",
+    "defect": "A reset connection is not read as the peer having gone, so a heartbeat child killed as its job ended fails the test rather than reading as ended.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "const PEER_GONE = new Set([\"EPIPE\", \"ECONNRESET\", \"EOF\"]);",
+    "new": "const PEER_GONE = new Set([\"EPIPE\", \"EOF\"]);"
+  },
+  {
+    "id": "D2413",
+    "defect": "A write that meets the end of the connection is not read as the peer having gone, so a heartbeat child that has ended fails the test rather than reading as ended.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "const PEER_GONE = new Set([\"EPIPE\", \"ECONNRESET\", \"EOF\"]);",
+    "new": "const PEER_GONE = new Set([\"EPIPE\", \"ECONNRESET\"]);"
+  },
+  {
+    "id": "D2403",
+    "defect": "Every connection error is read as the peer having gone, so a connection that failed while its heartbeat child may still run counts the child as ended.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "      if (PEER_GONE.has(error.code ?? \"\")) return;",
+    "new": "      return;"
+  },
+  {
+    "id": "D2407",
+    "defect": "Any integer a heartbeat child answers is taken as its process id, so an answer of -1 counts as a running child the test then kills, reaching every process it may signal.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "    if (PROCESS_ID.test(line)) {",
+    "new": "    if (Number.isInteger(Number(line))) {"
+  },
+  {
+    "id": "D2408",
+    "defect": "A heartbeat child that loses its connection exits without writing why, so the test reads its closed connection as a child the job ended.",
+    "file": "test/fixtures/daemon/daemon-lifecycle/packages/a/heartbeat.mjs",
+    "old": "  fail(`lost its connection to the test: ${lostBecause}`);",
+    "new": "  process.exit(1);"
+  },
+  {
+    "id": "D2409",
+    "defect": "Asking which heartbeat children still run checks the failure files as soon as every connection has answered or closed, so a child whose close the test saw before the child wrote why reads as a child the job ended.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "      failedHeartbeats(root).length > 0 || everySilentChildExited(root, alive),",
+    "new": "      failedHeartbeats(root).length > 0 || true,"
+  },
+  {
+    "id": "D2410",
+    "defect": "The raw connection reads its end from readline's interface, which does not close when an error closes the socket, so a test waiting on the next line waits to its timeout.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "    readLines(socket, () => undefined).on(\"line\", (line) =>\n      this.#deliver(line),\n    );\n    socket.once(\"close\", () => {",
+    "new": "    readLines(socket, () => undefined)\n      .on(\"line\", (line) => this.#deliver(line))\n      .once(\"close\", () => {"
+  },
+  {
+    "id": "D2411",
+    "defect": "A request line the stand-in cannot parse is dropped without failing anything, so the test that holds the stand-in passes on a request its stand-in never read.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "    if (unreadable !== undefined) throw unreadable;\n",
+    "new": ""
+  },
+  {
+    "id": "D2414",
+    "defect": "A test body that fails after the stand-in read a line it cannot parse fails with the body's own error, so the unreadable line is dropped and a test expecting a failure passes on a request its stand-in never read.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "    throw new Error(unreadable.message, { cause: error });",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D2415",
+    "defect": "A request line that is JSON but not an object is handed to the stand-in's answer as a request, where one that reads a field throws inside the line listener and no test can catch it.",
+    "file": "packages/daemon/test/daemon-harness.ts",
+    "old": "  return isObject ? (parsed as Line) : undefined;",
+    "new": "  return parsed as Line;"
+  },
+  {
+    "id": "D2416",
+    "defect": "An answer of 0 is taken as a heartbeat child's process id, so the test kills process 0, which reaches its whole process group.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "const PROCESS_ID = /^[1-9]\\d*$/;",
+    "new": "const PROCESS_ID = /^\\d+$/;"
+  },
+  {
+    "id": "D2420",
+    "defect": "A heartbeat child whose connection is reset leaves readline's re-emitted error unheard, so it throws uncaught and exits without writing why, and the test reads it as ended.",
+    "file": "test/fixtures/daemon/daemon-lifecycle/packages/a/heartbeat.mjs",
+    "old": "  .on(\"error\", () => undefined)\n",
+    "new": ""
+  },
+  {
+    "id": "D2421",
+    "defect": "Asking a connection that failed for a reason other than the child having gone, once it has closed, reads as the child having ended, since the question settles without its failure.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "      if (this.#closed) this.#settle(undefined);",
+    "new": "      if (this.#closed) resolve(undefined);"
   }
 ]
