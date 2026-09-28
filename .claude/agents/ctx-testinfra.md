@@ -5,7 +5,7 @@ description: >-
   helpers, defects.json files) a subject's tests should reuse, and returns a REUSE-versus-CREATE inventory
   as its final message. Spawned by create-tests while scale.ctx_agents is on. Never mutates a file.
 tools: Read, Grep, Glob, Bash, SendMessage
-model: sonnet
+model: inherit
 color: cyan
 ---
 

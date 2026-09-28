@@ -6,7 +6,7 @@ description: >-
   Spawned by the workflow skills alongside the other ctx-* agents while scale.ctx_agents is on. Never
   mutates a file.
 tools: Read, Grep, Glob, Bash, SendMessage
-model: sonnet
+model: inherit
 color: cyan
 ---
 
