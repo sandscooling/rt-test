@@ -50,8 +50,9 @@ export interface LifecycleParts {
 
 /**
  * Once the first reconciliation of the inputs has ended, discovers once, runs each confirmed workspace once, then
- * idles until a stop, answering status and queries throughout. Each job is stored under the input fingerprint it
- * started from, or not fingerprinted when its inputs moved while it ran.
+ * idles until a stop, answering status and queries throughout. Each job begins once the input events seen before
+ * it are read, and is stored under the input fingerprint it started from, or not fingerprinted when its inputs
+ * moved while it ran.
  */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;
@@ -152,6 +153,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   async #startSequence(): Promise<void> {
     const { log, executor, start, inputs } = this.#parts;
     await inputs.firstReconciled();
+    await inputs.settled();
     if (this.isStopping()) return;
     log.entry("discovery started");
     const mark = inputs.beginJob();
@@ -197,6 +199,9 @@ export class DaemonLifecycle implements DaemonHandlers {
     startedAt: number,
   ): Promise<JobVerdict> {
     const { inputs } = this.#parts;
+    await inputs.settled();
+    if (this.isStopping())
+      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };
     const unwatched = inputs
       .current()
       .testModuleChangedSince(discovery, startedAt);
@@ -218,6 +223,8 @@ export class DaemonLifecycle implements DaemonHandlers {
       return;
     }
     this.#activity = { state: "running", workspacePath: workspace.path };
+    await inputs.settled();
+    if (this.isStopping()) return;
     log.entry(`run started: ${workspace.path}`);
     const mark = inputs.beginJob();
     const started = inputs.current().workspaceFingerprint(entry);

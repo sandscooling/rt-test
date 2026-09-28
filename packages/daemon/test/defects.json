@@ -1667,10 +1667,10 @@
   },
   {
     "id": "D1460",
-    "defect": "The workspaces not yet run when the stop arrives are still run.",
+    "defect": "The workspaces not yet run when the stop arrives are still run, since neither the loop over them nor each run heeds the stop.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      if (this.isStopping()) break;",
-    "new": ""
+    "old": "    return this.#stopping !== undefined;",
+    "new": "    return false;"
   },
   {
     "id": "D1461",
@@ -2415,13 +2415,6 @@
     "new": "  return true;"
   },
   {
-    "id": "D1766",
-    "defect": "The daemon never reads itself as stopping, so a stop that arrives between the serving report and the acceptance is followed by the start sequence, and discovery starts after the stop.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return this.#stopping !== undefined;",
-    "new": "    return false;"
-  },
-  {
     "id": "D1767",
     "defect": "startDaemon never sends the acceptance, so every start resolves as started while the daemon it reports runs nothing.",
     "file": "packages/daemon/src/client.ts",
@@ -2957,8 +2950,8 @@
     "id": "D1888",
     "defect": "An event naming an edited input is read but its new digest is never kept, so the fingerprint and the revision stay as they were.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    this.#state.set(relative, digest);\n",
-    "new": ""
+    "old": "    if (this.#state.set(relative, read)) record([relative]);\n",
+    "new": "    record([relative]);\n"
   },
   {
     "id": "D1891",
@@ -3293,8 +3286,8 @@
     "id": "D1953",
     "defect": "A stop that arrives during the first reconciliation of the inputs is followed by the discovery once the reconciliation ends.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.firstReconciled();\n    if (this.isStopping()) return;\n",
-    "new": "    await inputs.firstReconciled();\n"
+    "old": "    await inputs.firstReconciled();\n    await inputs.settled();\n    if (this.isStopping()) return;\n",
+    "new": "    await inputs.firstReconciled();\n    await inputs.settled();\n"
   },
   {
     "id": "D1960",
@@ -3418,9 +3411,9 @@
   {
     "id": "D1998",
     "defect": "The current inputs drop the reason an unusable rt-test.json declares nothing, so no answer can carry it.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "      facts,\n      ...declaration,\n      workspaceFingerprint: (entry) =>",
-    "new": "      facts,\n      workspaceFingerprint: (entry) =>"
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "    facts,\n    ...declaration,\n    workspaceFingerprint: (entry) =>",
+    "new": "    facts,\n    workspaceFingerprint: (entry) =>"
   },
   {
     "id": "D1999",
@@ -3568,5 +3561,187 @@
     "file": "packages/daemon/src/vitest/find-workspaces.ts",
     "old": "    return { ok: false, reason: `is not valid JSON: ${errorText(error)}` };",
     "new": "    return { ok: false, reason: `cannot be read: ${errorText(error)}` };"
+  },
+  {
+    "id": "D2065",
+    "defect": "Every event read of an input marks the running jobs, so a last-access event on a file untouched for an hour leaves a job not fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (this.#state.set(relative, read)) record([relative]);\n",
+    "new": "    this.#state.set(relative, read);\n    record([relative]);\n"
+  },
+  {
+    "id": "D2066",
+    "defect": "A read whose content digest alone differs from the held read counts as unmoved, so an edit on a file system whose times do not move marks no job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    held.digest === next.digest &&\n    held.stamp.size",
+    "new": "    held.stamp.size"
+  },
+  {
+    "id": "D2067",
+    "defect": "A read whose modification time alone differs from the held read counts as unmoved, so the job is not marked.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    held.stamp.modifiedMs === next.stamp.modifiedMs &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2068",
+    "defect": "A read whose change time alone differs from the held read counts as unmoved, so an edit reverted with its modification time restored marks no job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    held.stamp.modifiedMs === next.stamp.modifiedMs &&\n    held.stamp.changedMs === next.stamp.changedMs\n",
+    "new": "    held.stamp.modifiedMs === next.stamp.modifiedMs\n"
+  },
+  {
+    "id": "D2069",
+    "defect": "A read records the input's modification time as its change time, so an edit reverted with its modification time restored reads as unmoved and marks no job.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "    changedMs: stats.ctimeMs,\n",
+    "new": "    changedMs: stats.mtimeMs,\n"
+  },
+  {
+    "id": "D2070",
+    "defect": "An event naming a path the tracker held no read of marks no job, so a file created during a job leaves it fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    return held === undefined || !restedSince(held, read);",
+    "new": "    return held !== undefined && !restedSince(held, read);"
+  },
+  {
+    "id": "D2071",
+    "defect": "A held read taken 1999 ms after the input's last write counts as clear of the 2 s timestamp step, so an event with nothing moved marks no job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    held.stamp.readAtMs - lastWriteMs >= MODIFIED_TIME_RESOLUTION_MS\n",
+    "new": "    held.stamp.readAtMs - lastWriteMs >= MODIFIED_TIME_RESOLUTION_MS - 1\n"
+  },
+  {
+    "id": "D2072",
+    "defect": "A held read taken exactly 2000 ms after the input's last write does not count as clear of the timestamp step, so an event with nothing moved still marks the job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    held.stamp.readAtMs - lastWriteMs >= MODIFIED_TIME_RESOLUTION_MS\n",
+    "new": "    held.stamp.readAtMs - lastWriteMs > MODIFIED_TIME_RESOLUTION_MS\n"
+  },
+  {
+    "id": "D2073",
+    "defect": "The 2 s bar is measured from the modification time alone, so an input whose modification time was restored but whose change time is recent is exempted.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "  const lastWriteMs = Math.max(held.stamp.modifiedMs, held.stamp.changedMs);",
+    "new": "  const lastWriteMs = held.stamp.modifiedMs;"
+  },
+  {
+    "id": "D2074",
+    "defect": "The 2 s bar is measured from the change time alone, so an input whose modification time lies after the held read is exempted.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "  const lastWriteMs = Math.max(held.stamp.modifiedMs, held.stamp.changedMs);",
+    "new": "  const lastWriteMs = held.stamp.changedMs;"
+  },
+  {
+    "id": "D2075",
+    "defect": "A reconciliation's read replaces the held read while an event naming the input is unread, so that event is judged against a read that may postdate its write.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "        (unread(path) || !unmoved(before, read));",
+    "new": "        !unmoved(before, read);"
+  },
+  {
+    "id": "D2076",
+    "defect": "A reconciliation that finds an input's times moved and its content unchanged replaces the held read, so a later event is judged against a read taken after the write.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "        (unread(path) || !unmoved(before, read));",
+    "new": "        unread(path);"
+  },
+  {
+    "id": "D2077",
+    "defect": "A directory walk replaces the held reads of the inputs it finds unmoved, though an event on them may be unread, so that event is judged against the walk's read.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    for (const [input, read] of keptReads(before, inputs, () => true)) {",
+    "new": "    for (const [input, read] of keptReads(before, inputs, () => false)) {"
+  },
+  {
+    "id": "D2078",
+    "defect": "A reconciliation that finds an input's content changed keeps the held read, so the fingerprint is computed from the old digest.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "        before.digest === read.digest &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2079",
+    "defect": "A link to a file is stamped with its target's times alone, so a retarget to another file and back reads as unmoved and marks no job.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "      modifiedMs: Math.max(link.mtimeMs, target.mtimeMs),\n      changedMs: Math.max(link.ctimeMs, target.ctimeMs),\n",
+    "new": "      modifiedMs: target.mtimeMs,\n      changedMs: target.ctimeMs,\n"
+  },
+  {
+    "id": "D2080",
+    "defect": "The discovery's job begins as soon as the first reconciliation ends, before the events it left unread are read.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.firstReconciled();\n    await inputs.settled();\n",
+    "new": "    await inputs.firstReconciled();\n"
+  },
+  {
+    "id": "D2081",
+    "defect": "The guard around protecting the discovery's test modules begins without waiting for the inputs to settle.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n",
+    "new": "    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n"
+  },
+  {
+    "id": "D2082",
+    "defect": "A run's job begins without waiting for the inputs to settle.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(`run started",
+    "new": "    if (this.isStopping()) return;\n    log.entry(`run started"
+  },
+  {
+    "id": "D2083",
+    "defect": "A stop that arrives while the guard waits for the inputs to settle is followed by the guard's job.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n    const unwatched",
+    "new": "    const unwatched"
+  },
+  {
+    "id": "D2084",
+    "defect": "A stop that arrives while a run waits for the inputs to settle is followed by the run.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(`run started",
+    "new": "    await inputs.settled();\n    log.entry(`run started"
+  },
+  {
+    "id": "D2085",
+    "defect": "A wait for the inputs to settle begun after the tracker stopped waits on events no one will read, so it never resolves.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    return this.#stopped ? Promise.resolve() : this.#ledger.waitForRead();",
+    "new": "    return this.#ledger.waitForRead();"
+  },
+  {
+    "id": "D2086",
+    "defect": "The tracker's wait for the inputs to settle resolves at once, so the discovery begins while the first reconciliation's events are unread and is stored not fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    return this.#stopped ? Promise.resolve() : this.#ledger.waitForRead();",
+    "new": "    return Promise.resolve();"
+  },
+  {
+    "id": "D2088",
+    "defect": "A run sets its activity only after the inputs settle, so a status during that wait does not name the workspace about to run.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#activity = { state: \"running\", workspacePath: workspace.path };\n    await inputs.settled();\n",
+    "new": "    await inputs.settled();\n    this.#activity = { state: \"running\", workspacePath: workspace.path };\n"
+  },
+  {
+    "id": "D2090",
+    "defect": "The check for test modules no watch covers runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n",
+    "new": "    const unwatched = inputs\n      .current()\n      .testModuleChangedSince(discovery, startedAt);\n    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n"
+  },
+  {
+    "id": "D2091",
+    "defect": "A directory walk counts only a changed digest, so a directory replaced by a copy with the same content and other times marks no running job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    return [...changed, ...unrestedPaths(before, inputs)];",
+    "new": "    return changed;"
+  },
+  {
+    "id": "D2092",
+    "defect": "The start sequence checks for a stop before waiting for the inputs to settle, so a stop arriving during that wait is followed by the discovery.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(\"discovery started\");",
+    "new": "    if (this.isStopping()) return;\n    await inputs.settled();\n    log.entry(\"discovery started\");"
   }
 ]

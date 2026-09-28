@@ -23,14 +23,33 @@ const FILE_KIND = "file";
 const LINK_KIND = "link";
 const SPECIAL_KIND = "special";
 const KIND_SEPARATOR = ":";
+/** The coarsest timestamp step a supported file system records, FAT's two seconds. */
+export const MODIFIED_TIME_RESOLUTION_MS = 2000;
 
 /** Each input's digest by its root-relative, `/`-separated path. */
 export type InputDigests = ReadonlyMap<string, string>;
 
+/** What one read of an input saw beside its content, all times in ms. */
+export interface InputStamp {
+  readonly size: number;
+  readonly modifiedMs: number;
+  readonly changedMs: number;
+  /** Taken before the read's stat, so a write the read missed lands after it. */
+  readonly readAtMs: number;
+}
+
+export interface InputRead {
+  readonly digest: string;
+  readonly stamp: InputStamp;
+}
+
+/** Each input's read by its root-relative, `/`-separated path. */
+export type InputReads = ReadonlyMap<string, InputRead>;
+
 export type InventoryResult =
   | {
       readonly ok: true;
-      readonly inputs: InputDigests;
+      readonly inputs: InputReads;
       /** Every directory walked that is not excluded, empty ones included, `start` first, as absolute paths. */
       readonly directories: readonly string[];
       /** Directories walked that git turned out to ignore, whose watches must close. */
@@ -40,7 +59,7 @@ export type InventoryResult =
 
 /** What a path holds now, read without following a directory link. */
 export type EntryDigest =
-  | { readonly kind: "input"; readonly digest: string }
+  | { readonly kind: "input"; readonly read: InputRead }
   | { readonly kind: "directory" }
   | { readonly kind: "absent" }
   | { readonly kind: "unreadable"; readonly reason: string };
@@ -172,8 +191,8 @@ async function checkUncertain(walk: Walk): Promise<void> {
 async function hashFiles(
   walk: Walk,
   files: readonly string[],
-): Promise<InputDigests> {
-  const inputs = new Map<string, string>();
+): Promise<InputReads> {
+  const inputs = new Map<string, InputRead>();
   let next = 0;
   let failed = false;
   const worker = async (): Promise<void> => {
@@ -181,15 +200,15 @@ async function hashFiles(
       const path = files[next] as string;
       next += 1;
       walk.signal.throwIfAborted();
-      const read = await readEntryDigest(path, walk.signal);
-      if (read.kind === "unreadable") {
+      const entry = await readEntryDigest(path, walk.signal);
+      if (entry.kind === "unreadable") {
         failed = true;
         throw new Incomplete(
-          `${label(walk, path)} cannot be read: ${read.reason}`,
+          `${label(walk, path)} cannot be read: ${entry.reason}`,
         );
       }
-      if (read.kind === "input") {
-        inputs.set(relativePosixPath(walk.root, path), read.digest);
+      if (entry.kind === "input") {
+        inputs.set(relativePosixPath(walk.root, path), entry.read);
       }
     }
   };
@@ -199,12 +218,14 @@ async function hashFiles(
 
 /**
  * The digest of what `path` holds: a file's content, read through a link to a file; a link to anything else by
- * its target; a FIFO, socket or device by its type alone, since reading one could block or never end.
+ * its target; a FIFO, socket or device by its type alone, since reading one could block or never end. Its stamp is
+ * the entry's stat, and for a link to a file the file's size with the later of each time, so a retarget moves it.
  */
 export async function readEntryDigest(
   path: string,
   signal?: AbortSignal,
 ): Promise<EntryDigest> {
+  const readAtMs = Date.now();
   let stats: Stats;
   try {
     stats = await lstat(path);
@@ -213,10 +234,17 @@ export async function readEntryDigest(
   }
   if (stats.isDirectory()) return { kind: "directory" };
   try {
-    if (stats.isSymbolicLink()) return await linkDigest(path, signal);
-    if (stats.isFile())
-      return inputDigest(FILE_KIND, await contentDigest(path, signal));
-    return inputDigest(SPECIAL_KIND, specialKind(stats));
+    if (stats.isSymbolicLink())
+      return await linkDigest(path, stats, readAtMs, signal);
+    if (stats.isFile()) {
+      const digest = await contentDigest(path, signal);
+      return inputDigest(FILE_KIND, digest, stampOf(stats, readAtMs));
+    }
+    return inputDigest(
+      SPECIAL_KIND,
+      specialKind(stats),
+      stampOf(stats, readAtMs),
+    );
   } catch (error) {
     return failedRead(error);
   }
@@ -224,6 +252,8 @@ export async function readEntryDigest(
 
 async function linkDigest(
   path: string,
+  link: Stats,
+  readAtMs: number,
   signal: AbortSignal | undefined,
 ): Promise<EntryDigest> {
   const target = await stat(path).catch((error: unknown) => {
@@ -231,9 +261,25 @@ async function linkDigest(
     throw error;
   });
   if (target?.isFile() === true) {
-    return inputDigest(FILE_KIND, await contentDigest(path, signal));
+    const digest = await contentDigest(path, signal);
+    return inputDigest(FILE_KIND, digest, {
+      size: target.size,
+      modifiedMs: Math.max(link.mtimeMs, target.mtimeMs),
+      changedMs: Math.max(link.ctimeMs, target.ctimeMs),
+      readAtMs,
+    });
   }
-  return inputDigest(LINK_KIND, textDigest(await readlink(path)));
+  const digest = textDigest(await readlink(path));
+  return inputDigest(LINK_KIND, digest, stampOf(link, readAtMs));
+}
+
+function stampOf(stats: Stats, readAtMs: number): InputStamp {
+  return {
+    size: stats.size,
+    modifiedMs: stats.mtimeMs,
+    changedMs: stats.ctimeMs,
+    readAtMs,
+  };
 }
 
 async function contentDigest(
@@ -260,8 +306,15 @@ function specialKind(stats: Stats): string {
   return "character-device";
 }
 
-function inputDigest(kind: string, digest: string): EntryDigest {
-  return { kind: "input", digest: `${kind}${KIND_SEPARATOR}${digest}` };
+function inputDigest(
+  kind: string,
+  digest: string,
+  stamp: InputStamp,
+): EntryDigest {
+  return {
+    kind: "input",
+    read: { digest: `${kind}${KIND_SEPARATOR}${digest}`, stamp },
+  };
 }
 
 function failedRead(error: unknown): EntryDigest {

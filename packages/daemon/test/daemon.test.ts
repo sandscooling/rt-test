@@ -603,35 +603,6 @@ describe("a start its starter never accepted", () => {
   );
 
   it(
-    "D1766: a stop that arrives before the acceptance is not followed by discovery once the acceptance comes",
-    async () => {
-      const outcome = await withDaemonConsumer((root, pids) =>
-        withServingFork(root, pids, async (daemon, files) => {
-          const stop = settled(stopDaemon(root));
-          const requested = await eventually(() =>
-            logged(files.logFile, "stop requested"),
-          );
-          daemon.send({ type: "begin" });
-          const stopped = await stop;
-          return {
-            requested,
-            stopped: !("thrown" in stopped),
-            exited: await exitedOf(daemon),
-            discovered: logEntries(files.logFile).includes("discovery started"),
-          };
-        }),
-      );
-      expect(outcome).toStrictEqual({
-        requested: true,
-        stopped: true,
-        exited: true,
-        discovered: false,
-      });
-    },
-    DAEMON_TEST_TIMEOUT_MS,
-  );
-
-  it(
     "D1767: a daemon startDaemon has resolved with keeps running and runs its start sequence to idle, never abandoning the start",
     async () => {
       const outcome = await withDaemonConsumer(async (root, pids) => {

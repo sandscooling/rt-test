@@ -1,6 +1,10 @@
 import { liesInside, POSIX_SEPARATOR } from "../vitest/find-workspaces.js";
 import { ProjectInputs } from "./fingerprint.js";
-import type { InputDigests } from "./input-inventory.js";
+import {
+  MODIFIED_TIME_RESOLUTION_MS,
+  type InputRead,
+  type InputReads,
+} from "./input-inventory.js";
 
 /** Each daemon life counts its revisions from here. */
 const INITIAL_REVISION = 0;
@@ -8,12 +12,12 @@ const INITIAL_REVISION = 0;
 const ROOT_RELATIVE_PATH = "";
 
 /**
- * The inputs the tracker holds, by root-relative path, and the directories that hold them. Changes collect until
- * `commit`, which raises the revision once when any digest changed.
+ * The inputs the tracker holds, each as its last read saw it, by root-relative path, and the directories that hold
+ * them. Changes collect until `commit`, which raises the revision once when any digest changed.
  */
 export class InputState {
   readonly #root: string;
-  #inputs = new Map<string, string>();
+  #inputs = new Map<string, InputRead>();
   #directories = new Set<string>();
   #everEstablished = false;
   #established = false;
@@ -46,13 +50,18 @@ export class InputState {
 
   /**
    * Replaces every input with a whole inventory's, returning the paths whose digest changed since the last input set
-   * established. The first one establishes the set and changes nothing.
+   * established. The first one establishes the set and changes nothing. `unread` holds the paths an event named
+   * that has not been read yet.
    */
-  establish(inputs: InputDigests, directories: readonly string[]): string[] {
+  establish(
+    inputs: InputReads,
+    directories: readonly string[],
+    unread: ReadonlySet<string>,
+  ): string[] {
     const changed = this.#everEstablished
       ? changedPaths(this.#inputs, inputs)
       : [];
-    this.#inputs = new Map(inputs);
+    this.#inputs = keptReads(this.#inputs, inputs, (path) => unread.has(path));
     this.#directories = new Set(directories);
     this.#everEstablished = true;
     this.#established = true;
@@ -66,11 +75,15 @@ export class InputState {
     this.#established = false;
   }
 
-  /** Records the digest of the input at `path`, marking a change when it differs from the one held. */
-  set(path: string, digest: string): void {
-    if (this.#inputs.get(path) === digest) return;
-    this.#inputs.set(path, digest);
-    this.#changed = true;
+  /**
+   * Records a read of the input at `path`, marking a change when its digest differs from the one held. Returns
+   * whether a write may have landed since the last read, which only a read seeing all of it unmoved can rule out.
+   */
+  set(path: string, read: InputRead): boolean {
+    const held = this.#inputs.get(path);
+    this.#inputs.set(path, read);
+    if (held?.digest !== read.digest) this.#changed = true;
+    return held === undefined || !restedSince(held, read);
   }
 
   /** Removes the input at `path`, or every input and directory at or under it; returns the inputs removed. */
@@ -87,11 +100,14 @@ export class InputState {
     return removed;
   }
 
-  /** Replaces what lies at or under `path` with a walk of it; returns the inputs added, changed or removed. */
+  /**
+   * Replaces what lies at or under `path` with a walk of it; returns the inputs added, changed or removed, and each
+   * one a write may have reached since its last read, whose content the walk found unchanged.
+   */
   replaceUnder(
     path: string,
     absolutePath: string,
-    inputs: InputDigests,
+    inputs: InputReads,
     directories: readonly string[],
   ): string[] {
     const before = new Map(
@@ -99,11 +115,13 @@ export class InputState {
     );
     for (const input of before.keys()) this.#inputs.delete(input);
     this.#removeDirectoriesInside(absolutePath);
-    for (const [input, digest] of inputs) this.#inputs.set(input, digest);
+    for (const [input, read] of keptReads(before, inputs, () => true)) {
+      this.#inputs.set(input, read);
+    }
     for (const directory of directories) this.#directories.add(directory);
     const changed = changedPaths(before, inputs);
     this.#changed = changed.length > 0 || this.#changed;
-    return changed;
+    return [...changed, ...unrestedPaths(before, inputs)];
   }
 
   /** Raises the revision once when anything changed since the last commit. */
@@ -116,7 +134,10 @@ export class InputState {
 
   /** The committed inputs, whose digest is computed once per revision. */
   project(): ProjectInputs {
-    this.#project ??= new ProjectInputs(this.#root, new Map(this.#inputs));
+    this.#project ??= new ProjectInputs(
+      this.#root,
+      new Map([...this.#inputs].map(([path, read]) => [path, read.digest])),
+    );
     return this.#project;
   }
 
@@ -133,9 +154,65 @@ function liesUnder(input: string, path: string): boolean {
   return input === path || input.startsWith(`${path}${POSIX_SEPARATOR}`);
 }
 
-function changedPaths(before: InputDigests, after: InputDigests): string[] {
+/**
+ * Whether `next` sees the input as `held` left it, with `held` taken late enough after the input's last write that
+ * a write since would have moved a time. A last-access update moves none of what is compared.
+ */
+function restedSince(held: InputRead, next: InputRead): boolean {
+  const lastWriteMs = Math.max(held.stamp.modifiedMs, held.stamp.changedMs);
+  return (
+    unmoved(held, next) &&
+    held.stamp.readAtMs - lastWriteMs >= MODIFIED_TIME_RESOLUTION_MS
+  );
+}
+
+function unmoved(held: InputRead, next: InputRead): boolean {
+  return (
+    held.digest === next.digest &&
+    held.stamp.size === next.stamp.size &&
+    held.stamp.modifiedMs === next.stamp.modifiedMs &&
+    held.stamp.changedMs === next.stamp.changedMs
+  );
+}
+
+/**
+ * The reads to hold after a walk. A walk that found an input's content unchanged replaces its held read only when
+ * it saw nothing move and no event on it is unread, so a write the walk read past is judged against a read before it.
+ */
+function keptReads(
+  held: InputReads,
+  walked: InputReads,
+  unread: (path: string) => boolean,
+): Map<string, InputRead> {
+  return new Map(
+    [...walked].map(([path, read]) => {
+      const before = held.get(path);
+      const keep =
+        before !== undefined &&
+        before.digest === read.digest &&
+        (unread(path) || !unmoved(before, read));
+      return [path, keep ? before : read];
+    }),
+  );
+}
+
+/** The inputs whose content `after` found as `before` held it, but which a write may have reached since. */
+function unrestedPaths(before: InputReads, after: InputReads): string[] {
+  return [...after]
+    .filter(([path, read]) => {
+      const held = before.get(path);
+      return (
+        held !== undefined &&
+        held.digest === read.digest &&
+        !restedSince(held, read)
+      );
+    })
+    .map(([path]) => path);
+}
+
+function changedPaths(before: InputReads, after: InputReads): string[] {
   const changed = [...after]
-    .filter(([path, digest]) => before.get(path) !== digest)
+    .filter(([path, read]) => before.get(path)?.digest !== read.digest)
     .map(([path]) => path);
   for (const path of before.keys()) {
     if (!after.has(path)) changed.push(path);
