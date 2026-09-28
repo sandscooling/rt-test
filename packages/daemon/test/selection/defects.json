@@ -106,10 +106,10 @@
   },
   {
     "id": "D1361",
-    "defect": "An alias replaced by an absolute path adds no edge to the workspace it points into.",
+    "defect": "An alias's path prefix is not looked up in the workspace holding the path it names, so an alias replaced by an absolute path into another workspace adds no edge.",
     "file": "packages/daemon/src/selection/vitest-edges.ts",
-    "old": "    return { ok: true, paths: aliasPathTargets(graph, prefix) };",
-    "new": "    return { ok: true, paths: [] };"
+    "old": "  const paths = holdersOf(graph, resolved);",
+    "new": "  const paths: string[] = [];"
   },
   {
     "id": "D1362",
