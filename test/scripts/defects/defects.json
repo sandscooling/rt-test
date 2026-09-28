@@ -914,14 +914,14 @@
     "defect": "A mutated run that fails without its named assertion failure is reported with no stderr or stdout tail, so its cause goes unsaid.",
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "export function detectionProblem(run, sandbox, defect) {",
-    "new": "export function detectionProblem(run, sandbox, defect, withOutputEvidence = (problem) => problem) {"
+    "new": "export function detectionProblem(run, sandbox, defect, withRunEvidence = (problem) => problem) {"
   },
   {
     "id": "D2058",
     "defect": "A baseline that fails to pass every named test is reported with no stderr or stdout tail, so its cause goes unsaid.",
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "export function baselineProblem(run, sandbox, defects, files) {",
-    "new": "export function baselineProblem(run, sandbox, defects, files, withOutputEvidence = (problem) => problem) {"
+    "new": "export function baselineProblem(run, sandbox, defects, files, withRunEvidence = (problem) => problem) {"
   },
   {
     "id": "D2059",
@@ -941,8 +941,8 @@
     "id": "D2061",
     "defect": "A mutated run that collected another test file is reported with no stderr or stdout tail, so why Vitest ran more than the one file goes unsaid.",
     "file": "scripts/lib/defects/vitest.mjs",
-    "old": "return withOutputEvidence(`expected a run of ${defect.test} alone`, run);",
-    "new": "return `expected a run of ${defect.test} alone`;"
+    "old": "return withRunEvidence(\n      `expected a run of ${defect.test} alone`,",
+    "new": "return `expected a run of ${defect.test} alone`;\n    withRunEvidence(\n      `expected a run of ${defect.test} alone`,"
   },
   {
     "id": "D2062",
@@ -964,5 +964,138 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "failWithOutput(overLongText(log));",
     "new": "fail(new Error(overLongText(log)));"
+  },
+  {
+    "id": "D2172",
+    "defect": "An unhandled error is quoted without its causes, so a dead worker's exit code or signal, runner state and test file, which Vitest puts in the cause, go unsaid.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "const MAX_CAUSES = 3;",
+    "new": "const MAX_CAUSES = 0;"
+  },
+  {
+    "id": "D2173",
+    "defect": "An unhandled error is quoted by its message alone, so where an error thrown beside a passing test came from goes unsaid.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "const STACK_HEAD_LINES = 4;",
+    "new": "const STACK_HEAD_LINES = 1;"
+  },
+  {
+    "id": "D2174",
+    "defect": "A verdict leaves out the report's file errors, so a test file whose import threw fails with no word of why.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": ".filter((file) => file.message)",
+    "new": ".filter(() => false)"
+  },
+  {
+    "id": "D2175",
+    "defect": "A verdict names every pending test rather than the first 10 and a count, so a dead worker's long file floods the report.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "const shown = numbered(items.slice(0, QUOTED_ITEMS));",
+    "new": "const shown = numbered(items);"
+  },
+  {
+    "id": "D2176",
+    "defect": "The exit witness never records an unhandled rejection, so a Vitest process that exits on a host-side rejection before its report says only that it exited.",
+    "file": "scripts/lib/defects/exit-witness.mjs",
+    "old": "watchRejections(path);\n  witnessExitCalls(path);",
+    "new": "witnessExitCalls(path);"
+  },
+  {
+    "id": "D2177",
+    "defect": "A named assertion failure beside an unhandled error counts as a detection, so a run that did not end cleanly proves a test.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "if (run.runEnd.errorCount > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2178",
+    "defect": "A named assertion failure from a process that recorded no exit counts as a detection, so a run killed after writing its report proves a test.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "if (exitOf(run.exitRecord) === undefined) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2179",
+    "defect": "A process that recorded no exit is reported as having exited, so a run killed from outside reads like one that ended by itself.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "parts.push(exit ? `exited with code ${exit.code}` : NO_EXIT);",
+    "new": "parts.push(`exited with code ${exit?.code}`);"
+  },
+  {
+    "id": "D2180",
+    "defect": "The exit witness listens for unhandled rejections from the start, which stops Node's default crash, so a bare rejection exits 0 with nothing on stderr.",
+    "file": "scripts/lib/defects/exit-witness.mjs",
+    "old": "watchRejections(path);\n  witnessExitCalls(path);",
+    "new": "process.on(REJECTION, () => {});\n  watchRejections(path);\n  witnessExitCalls(path);"
+  },
+  {
+    "id": "D2181",
+    "defect": "The progress reporter never reports the run's end, so every clean real detection and baseline fails as a run with no run end.",
+    "file": "scripts/lib/defects/progress-reporter.mjs",
+    "old": "onTestRunEnd(_testModules, unhandledErrors, reason) {",
+    "new": "onTestRunEnded(_testModules, unhandledErrors, reason) {"
+  },
+  {
+    "id": "D2182",
+    "defect": "The exit witness's process.exit records the call and returns without exiting, so the process runs on past its exit.",
+    "file": "scripts/lib/defects/exit-witness.mjs",
+    "old": "return exit.apply(process, args);",
+    "new": "return undefined;"
+  },
+  {
+    "id": "D2183",
+    "defect": "The exit witness keeps its rejection listener after the last other one left, so a later bare rejection is swallowed instead of crashing.",
+    "file": "scripts/lib/defects/exit-witness.mjs",
+    "old": "    watching = false;\n    process.off(REJECTION, onRejection);",
+    "new": "    watching = false;"
+  },
+  {
+    "id": "D2184",
+    "defect": "A failed write to the exit record throws out of the witness, so an unwritable record replaces the process.exit code being recorded.",
+    "file": "scripts/lib/defects/exit-witness.mjs",
+    "old": "  try {\n    appendFileSync(path, `${JSON.stringify(entryOf())}\\n`);\n  } catch {\n    return;\n  }",
+    "new": "  appendFileSync(path, `${JSON.stringify(entryOf())}\\n`);"
+  },
+  {
+    "id": "D2185",
+    "defect": "A verdict naming exactly 10 pending tests adds \"and 0 more\", counting a rest that does not exist.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "total > QUOTED_ITEMS",
+    "new": "total >= QUOTED_ITEMS"
+  },
+  {
+    "id": "D2186",
+    "defect": "An exit record line cut short goes uncounted, so a record a kill damaged reads as whole.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "unreadable += 1;",
+    "new": "unreadable += 0;"
+  },
+  {
+    "id": "D2187",
+    "defect": "A named assertion failure from a process that recorded an uncaught exception or unhandled rejection counts as a detection, so a run whose host crashed after Vitest closed proves a test.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "if (recorded > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2188",
+    "defect": "A named assertion failure from a process that recorded a process.exit call counts as a detection, so a run that hung past its close timeout proves a test.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "(entry) => entry.kind === EXIT_ENTRY.EXIT_CALLED,",
+    "new": "(entry) => entry.kind === \"never\","
+  },
+  {
+    "id": "D2189",
+    "defect": "The baseline never asks whether the run ended cleanly, so an all-pass baseline that exited 0 with no recorded exit passes.",
+    "file": "scripts/lib/defects/vitest.mjs",
+    "old": "  const unclean = uncleanEndProblem(run);\n  if (unclean !== null) {\n    return withRunEvidence(\n      `the unmodified baseline",
+    "new": "  const unclean = uncleanEndProblem(run);\n  if (false) {\n    return withRunEvidence(\n      `the unmodified baseline"
+  },
+  {
+    "id": "D2190",
+    "defect": "A run whose reporter never wrote a run-end line is judged clean when its process exited, so a run Vitest never finished reporting proves a test.",
+    "file": "scripts/lib/defects/run-evidence.mjs",
+    "old": "if (run.runEnd === null) return \"Vitest reported no run end\";",
+    "new": "if (run.runEnd === null) return exitOf(run.exitRecord) === undefined ? \"Vitest reported no run end\" : null;"
   }
 ]

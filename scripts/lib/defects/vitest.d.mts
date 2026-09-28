@@ -1,4 +1,5 @@
 import type { Defect } from "./catalog.mjs";
+import type { ExitRecord, RunEnd } from "./run-evidence.mjs";
 
 export interface AssertionResult {
   readonly title: string;
@@ -11,6 +12,8 @@ export interface VitestReport {
   readonly numFailedTests: number;
   readonly testResults: readonly {
     readonly name: string;
+    /** The file's first error, such as a failed import; empty when it had none. */
+    readonly message?: string;
     readonly assertionResults: readonly AssertionResult[];
   }[];
 }
@@ -22,6 +25,10 @@ export interface RunResult {
   readonly stderr: string;
   /** The last non-blank stdout lines that were not progress, cut to a bounded length. */
   readonly stdoutTail: string;
+  /** How Vitest said the run ended, with its unhandled errors; null when it never said. */
+  readonly runEnd: RunEnd | null;
+  /** How the Vitest main process ended, as its exit witness recorded it. */
+  readonly exitRecord: ExitRecord;
 }
 
 export interface RunRequest {

@@ -11,6 +11,16 @@ import {
 } from "../../../test/scripts/run-cleanup.mjs";
 import { toPosix } from "../paths.mjs";
 import { PROGRESS_EVENT, PROGRESS_MARKER } from "./progress-reporter.mjs";
+import {
+  CUT_MARKER,
+  EXIT_RECORD_ENV,
+  exitRecordText,
+  NOT_FOUND,
+  readExitRecord,
+  reportEvidence,
+  runEndText,
+  uncleanEndProblem,
+} from "./run-evidence.mjs";
 
 /** A test may stay silent for its whole timeout, and a hook after it for as long again. */
 export const IDLE_WINDOW_MS = 2 * LONGEST_TEST_TIMEOUT_MS;
@@ -20,14 +30,15 @@ const KILL_SIGNAL = "SIGKILL";
 const PROGRESS_REPORTER = fileURLToPath(
   new URL("./progress-reporter.mjs", import.meta.url),
 );
+const EXIT_WITNESS = new URL("./exit-witness.mjs", import.meta.url).href;
+/** Beside the report, so whatever removes the report's folder removes the record too. */
+const EXIT_RECORD_SUFFIX = ".exit-record.jsonl";
 const PROGRESS_EVENTS = new Set(Object.values(PROGRESS_EVENT));
 const ASSERTION_FAILURE = /^AssertionError: /;
 const NO_MESSAGE = "no failure message";
-const NOT_FOUND = "ENOENT";
 const REPORT_HEAD_CHARS = 200;
 const STDOUT_TAIL_LINES = 20;
 const STDOUT_TAIL_CHARS = 2000;
-const CUT_MARKER = "...";
 
 function vitestEntry() {
   const require = createRequire(import.meta.url);
@@ -38,6 +49,8 @@ function vitestEntry() {
 
 export function vitestArgs({ entry, config, sandbox, report, files, pattern }) {
   const args = [
+    "--import",
+    EXIT_WITNESS,
     entry,
     "run",
     "--root",
@@ -71,6 +84,7 @@ function progressLog() {
   const running = new Map();
   const overLong = [];
   let last = "none";
+  let ended = null;
   const checkLimit = (what, timeoutMs) => {
     if (timeoutMs > LONGEST_TEST_TIMEOUT_MS) {
       overLong.push(`${what} (${timeoutMs} ms)`);
@@ -92,12 +106,28 @@ function progressLog() {
       if (left > 0) running.set(entry.test, left);
       else running.delete(entry.test);
     },
+    [PROGRESS_EVENT.RUN_ENDED]: (entry) => {
+      const errors = Array.isArray(entry.errors)
+        ? entry.errors.map(String)
+        : [];
+      ended = {
+        reason: String(entry.reason),
+        errorCount: Number.isInteger(entry.errorCount)
+          ? entry.errorCount
+          : errors.length,
+        errors,
+      };
+    },
   };
   return {
     overLong,
     running: () => [...running.keys()],
     get last() {
       return last;
+    },
+    /** How Vitest said the run ended, or null when it never said. */
+    get ended() {
+      return ended;
     },
     /** Takes in one stdout line, and says whether it was progress. */
     read(line) {
@@ -151,14 +181,24 @@ const overLongText = (log) =>
 
 const orEmpty = (output) => output || "(empty)";
 
-/** The run's stderr and stdout tail, as a failure quotes them. */
+/** How the run ended, by Vitest's word and by its process's, then its stderr and stdout tail, as a failure quotes them. */
 const outputEvidence = (run) => [
+  runEndText(run.runEnd),
+  exitRecordText(run.exitRecord),
   `stderr: ${orEmpty(run.stderr)}`,
   `stdout tail: ${orEmpty(run.stdoutTail)}`,
 ];
 
 const withOutputEvidence = (problem, run) =>
   [problem, ...outputEvidence(run)].join("; ");
+
+/** A verdict on a run that wrote a report: its problem, what the report says went wrong, then the output evidence. */
+const withRunEvidence = (problem, run, sandbox) =>
+  [
+    problem,
+    ...reportEvidence(run.report, sandbox),
+    ...outputEvidence(run),
+  ].join("; ");
 
 function stallText(log, idleWindowMs, stopProblem, output) {
   const running =
@@ -197,10 +237,11 @@ function stopRun(child) {
   return problem;
 }
 
-function spawnRun(args, cwd, idleWindowMs) {
+function spawnRun(args, cwd, idleWindowMs, exitRecord) {
   return new Promise((done, fail) => {
     const child = spawn(process.execPath, args, {
       cwd,
+      env: { ...process.env, [EXIT_RECORD_ENV]: exitRecord },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -229,9 +270,18 @@ function spawnRun(args, cwd, idleWindowMs) {
       clearTimeout(idle);
       fail(error);
     });
-    const runOutput = () => ({ stderr, stdoutTail: tail.text() });
-    const failStalled = () =>
+    const runOutput = () => ({
+      stderr,
+      stdoutTail: tail.text(),
+      runEnd: log.ended,
+      exitRecord: readExitRecord(exitRecord),
+    });
+    let stallReported = false;
+    const failStalled = () => {
+      if (stallReported) return;
+      stallReported = true;
       fail(new Error(stallText(log, idleWindowMs, stopProblem, runOutput())));
+    };
     const failWithOutput = (problem) =>
       fail(new Error(withOutputEvidence(problem, runOutput())));
     // A worker still holding the stopped process's pipes delays "close" until the worker is ended.
@@ -249,8 +299,7 @@ function spawnRun(args, cwd, idleWindowMs) {
       else
         done({
           status,
-          stderr,
-          stdoutTail: tail.text(),
+          ...runOutput(),
           exitMs:
             exitedAt === undefined ? null : elapsedMs(startedAt, exitedAt),
           closeLagMs:
@@ -267,9 +316,11 @@ export function createVitestRunner({
 }) {
   const config = join(root, "vitest.config.ts");
   return async ({ sandbox, report, files, pattern }) => {
+    const exitRecord = `${report}${EXIT_RECORD_SUFFIX}`;
     rmSync(report, { force: true });
+    rmSync(exitRecord, { force: true });
     const args = vitestArgs({ entry, config, sandbox, report, files, pattern });
-    const run = await spawnRun(args, root, idleWindowMs);
+    const run = await spawnRun(args, root, idleWindowMs, exitRecord);
     const read = readReport(report);
     if (read.problem === undefined) {
       return {
@@ -277,6 +328,8 @@ export function createVitestRunner({
         report: read.report,
         stderr: run.stderr,
         stdoutTail: run.stdoutTail,
+        runEnd: run.runEnd,
+        exitRecord: run.exitRecord,
       };
     }
     throw new Error(noReportText(run, read.problem), { cause: read.error });
@@ -353,15 +406,25 @@ export function baselineProblem(run, sandbox, defects, files) {
     report.numPassedTests !== ids.length ||
     [...passed].sort().join() !== [...ids].sort().join()
   ) {
-    return withOutputEvidence(
+    return withRunEvidence(
       `the unmodified baseline must pass every named test and no other (passed ${report.numPassedTests} for ${ids.length} named; failed: ${failedLines(report)})`,
       run,
+      sandbox,
     );
   }
   if (files && reportedFiles(report, sandbox).join() !== files.join()) {
-    return withOutputEvidence(
+    return withRunEvidence(
       "the baseline ran a different set of test files",
       run,
+      sandbox,
+    );
+  }
+  const unclean = uncleanEndProblem(run);
+  if (unclean !== null) {
+    return withRunEvidence(
+      `the unmodified baseline did not end cleanly: ${unclean}`,
+      run,
+      sandbox,
     );
   }
   return null;
@@ -372,7 +435,11 @@ export function detectionProblem(run, sandbox, defect) {
   const failures = testsOf(report).filter((test) => test.status === "failed");
   const target = failures[0];
   if (reportedFiles(report, sandbox).join() !== defect.test) {
-    return withOutputEvidence(`expected a run of ${defect.test} alone`, run);
+    return withRunEvidence(
+      `expected a run of ${defect.test} alone`,
+      run,
+      sandbox,
+    );
   }
   if (
     status !== 1 ||
@@ -382,9 +449,18 @@ export function detectionProblem(run, sandbox, defect) {
     !target?.title.startsWith(`${defect.id}:`) ||
     !target.failureMessages.some((message) => ASSERTION_FAILURE.test(message))
   ) {
-    return withOutputEvidence(
+    return withRunEvidence(
       `expected one named assertion failure; inspect the mutation (exit ${status}; passed ${report.numPassedTests}; failed: ${failedLines(report)})`,
       run,
+      sandbox,
+    );
+  }
+  const unclean = uncleanEndProblem(run);
+  if (unclean !== null) {
+    return withRunEvidence(
+      `the named assertion failed, but a run that did not end cleanly is not a detection: ${unclean}`,
+      run,
+      sandbox,
     );
   }
   return null;

@@ -152,7 +152,7 @@ describe("stopping a stalled Vitest run", PROCESS_SCENARIO, () => {
         ).outcome,
     );
     expect(outcome).toBe(
-      "Bootstrap runner interrupted: SIGKILL; stderr: (empty); stdout tail: said before the signal",
+      "Bootstrap runner interrupted: SIGKILL; Vitest reported no run end; the Vitest process recorded no exit, so it was killed, crashed below JavaScript, or could not write its record; stderr: (empty); stdout tail: said before the signal",
     );
   });
 });

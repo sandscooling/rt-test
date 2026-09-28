@@ -1,3 +1,5 @@
+import { errorText, QUOTED_ITEMS } from "./run-evidence.mjs";
+
 /** Starts each stdout line this reporter writes, so the runner tells progress from other output. */
 export const PROGRESS_MARKER = "rt-test-progress ";
 
@@ -8,6 +10,7 @@ export const PROGRESS_EVENT = Object.freeze({
   FINISHED: "finished",
   HOOK_STARTED: "hook-started",
   HOOK_FINISHED: "hook-finished",
+  RUN_ENDED: "run-ended",
 });
 
 function emit(event) {
@@ -25,7 +28,10 @@ function silenceBound({ timeout = 0, retry, repeats = 0 }) {
   return timeout * (retriesOf(retry) + 1) * (repeats + 1);
 }
 
-/** A Vitest reporter that writes one line per collected module, test and hook, as a liveness signal. */
+/**
+ * A Vitest reporter that writes one line per collected module, test and hook, as a liveness signal, and one at the
+ * run's end with the unhandled errors, which the JSON report leaves out.
+ */
 export default class ProgressReporter {
   onInit(vitest) {
     emit({
@@ -60,5 +66,16 @@ export default class ProgressReporter {
 
   onHookEnd(hook) {
     emit({ event: PROGRESS_EVENT.HOOK_FINISHED, hook: hook.name });
+  }
+
+  onTestRunEnd(_testModules, unhandledErrors, reason) {
+    emit({
+      event: PROGRESS_EVENT.RUN_ENDED,
+      reason,
+      errorCount: unhandledErrors.length,
+      errors: unhandledErrors
+        .slice(0, QUOTED_ITEMS)
+        .map((error) => errorText(error)),
+    });
   }
 }

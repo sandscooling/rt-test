@@ -29,6 +29,22 @@ import {
 
 export type Tree = Readonly<Record<string, string>>;
 
+/** How a run that ended cleanly with `status` says it ended: Vitest reported no unhandled error, and its process exited. */
+export const cleanEnd = (
+  status: number | null,
+): Pick<RunResult, "runEnd" | "exitRecord"> => ({
+  runEnd: {
+    reason: status === 0 ? "passed" : "failed",
+    errorCount: 0,
+    errors: [],
+  },
+  exitRecord: {
+    entries: [{ kind: "exited", code: status }],
+    unreadable: 0,
+    problem: null,
+  },
+});
+
 const record = (
   id: string,
   file: string,
@@ -160,8 +176,9 @@ export function fakeVitest(catalog: Catalog, hooks: FakeHooks = {}): RunTests {
     const tests = testResults.flatMap((file) => file.assertionResults);
     const count = (status: string) =>
       tests.filter((test) => test.status === status).length;
+    const status = count("failed") ? 1 : 0;
     return {
-      status: count("failed") ? 1 : 0,
+      status,
       report: {
         numPassedTests: count("passed"),
         numFailedTests: count("failed"),
@@ -169,6 +186,7 @@ export function fakeVitest(catalog: Catalog, hooks: FakeHooks = {}): RunTests {
       },
       stderr: "",
       stdoutTail: "",
+      ...cleanEnd(status),
     };
   };
 }
