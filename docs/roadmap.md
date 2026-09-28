@@ -32,7 +32,7 @@ Acceptance: a weakened assertion retires earlier evidence; setup failure cannot 
 
 Compute reverse module dependencies for file-level selection. Introduce the adapter contract, and port Fleet Cooling's `scripts/test-blast-radius.mjs` as the Convex adapter over a synthetic Convex fixture covering function references, dynamic dispatch, schema changes, and module registry behavior.
 
-Acceptance: precision reduces work without losing failures in the edit corpus; unresolved references widen selection; falsification re-verifies only the defects an edit can affect. Measure selection latency and warm feedback time against native Vitest.
+Acceptance: precision reduces work without losing failures in the edit corpus; unresolved references widen selection; a test module that reads a file by a path it builds at run time, such as `readFileSync(path.join(import.meta.dirname, ...))`, widens to its whole workspace; falsification re-verifies only the defects an edit can affect. Measure selection latency and warm feedback time against native Vitest.
 
 ## M4: Mechanical suggestions
 
