@@ -1,3 +1,4 @@
+import { WINDOWS } from "../daemon/endpoint.js";
 import { errorText } from "../vitest/error-text.js";
 import { POSIX_SEPARATOR } from "../vitest/find-workspaces.js";
 import { REGEXP_FIND } from "../vitest/selection-facts.js";
@@ -21,7 +22,6 @@ import {
   type Reference,
   type Scan,
   type SpecifierProducers,
-  WINDOWS_PLATFORM,
 } from "./specifier-edges.js";
 import {
   aliasDetail,
@@ -133,7 +133,7 @@ export function addAliasedSpecifierEdges(
  * glob keeps its `\`, which the globber reads as an escape on every platform.
  */
 function hostSeparated(text: string, form: SpecifierForm): string {
-  return form === SPECIFIER_FORM.glob && process.platform === WINDOWS_PLATFORM
+  return form === SPECIFIER_FORM.glob && process.platform === WINDOWS
     ? text.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR)
     : text;
 }

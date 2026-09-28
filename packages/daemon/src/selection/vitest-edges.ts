@@ -1,5 +1,6 @@
 import { isAbsolute, join, posix, resolve, sep } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
+import { WINDOWS } from "../daemon/endpoint.js";
 import {
   POSIX_SEPARATOR,
   realPath,
@@ -28,7 +29,6 @@ import {
   type SelectableWorkspace,
   type SelectionAlias,
 } from "./selection-types.js";
-import { WINDOWS_PLATFORM } from "./specifier-edges.js";
 
 const REPLACEMENT_REFERENCE = /\$(?:\d|&|<|`|'|\$)/;
 /** A trailing separator ends a directory name, so the prefix must not also begin a longer sibling name. */
@@ -345,7 +345,5 @@ function aliasPathTargets(graph: Graph, prefix: string): string[] {
 /** `/`-separated, and lower-cased where the file system ignores case, as `path.relative` compares on Windows. */
 function comparable(path: string): string {
   const posixPath = path.split(sep).join(POSIX_SEPARATOR);
-  return process.platform === WINDOWS_PLATFORM
-    ? posixPath.toLowerCase()
-    : posixPath;
+  return process.platform === WINDOWS ? posixPath.toLowerCase() : posixPath;
 }

@@ -136,8 +136,8 @@
     "id": "D1365",
     "defect": "On Windows a capture alias's directory match is case-sensitive, so a replacement spelled in another case reaches no workspace.",
     "file": "packages/daemon/src/selection/vitest-edges.ts",
-    "old": "    ? posixPath.toLowerCase()",
-    "new": "    ? posixPath"
+    "old": "  return process.platform === WINDOWS ? posixPath.toLowerCase() : posixPath;",
+    "new": "  return process.platform === WINDOWS ? posixPath : posixPath;"
   },
   {
     "id": "D1366",
@@ -1249,8 +1249,8 @@
     "id": "D1667",
     "defect": "A file-relative specifier keeps its query suffix, so new URL(\"../../b?url\", import.meta.url) resolves to a sibling the root owns instead of packages/b.",
     "file": "packages/daemon/src/selection/specifier-edges.ts",
-    "old": "    addPathEdges(scan, reference, withoutSuffix(text), producer);\n  } else if (isBare(text)) {",
-    "new": "    addPathEdges(scan, reference, text, producer);\n  } else if (isBare(text)) {"
+    "old": "    addPathEdges(scan, reference, withoutSuffix(text), producer);\n  } else if (\n",
+    "new": "    addPathEdges(scan, reference, text, producer);\n  } else if (\n"
   },
   {
     "id": "D1668",
@@ -1394,10 +1394,10 @@
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 6, so a selection reports the version from before each alias rewrote the imports the source scan reads.",
+    "defect": "The selection policy version stays at 7, so a selection reports the version from before a ** glob reached every workspace and a glob's literal directory ended before an escape.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 7;",
-    "new": "export const SELECTION_POLICY_VERSION = 6;"
+    "old": "export const SELECTION_POLICY_VERSION = 8;",
+    "new": "export const SELECTION_POLICY_VERSION = 7;"
   },
   {
     "id": "D2045",
@@ -2061,7 +2061,7 @@
     "id": "D2418",
     "defect": "An aliased glob's \\ is turned into / on every platform, so off Windows a replacement whose name holds \\ is cut inside that name.",
     "file": "packages/daemon/src/selection/alias-specifiers.ts",
-    "old": "  return form === SPECIFIER_FORM.glob && process.platform === WINDOWS_PLATFORM",
+    "old": "  return form === SPECIFIER_FORM.glob && process.platform === WINDOWS",
     "new": "  return form === SPECIFIER_FORM.glob"
   },
   {
@@ -2077,5 +2077,19 @@
     "file": "packages/daemon/src/selection/specifier-edges.ts",
     "old": "    ? pattern.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR)",
     "new": "    ? pattern"
+  },
+  {
+    "id": "D2426",
+    "defect": "A glob beginning with ** is read as a package named **, so import.meta.glob(\"**/*.ts\") gives no edge though Vite globs it from the file-system root.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "    text.startsWith(ANY_DEPTH_PREFIX)",
+    "new": "    text.startsWith(`${ANY_DEPTH_PREFIX}\\0`)"
+  },
+  {
+    "id": "D2427",
+    "defect": "A glob's literal directory keeps an escaping \\, so ../../a\\b/(x)/*.ts reaches only under a\\b and misses the workspace ab whose name the escape spells.",
+    "file": "packages/daemon/src/selection/specifier-edges.ts",
+    "old": "  const escape = beforeWildcard.indexOf(GLOB_ESCAPE);",
+    "new": "  const escape = -1;"
   }
 ]

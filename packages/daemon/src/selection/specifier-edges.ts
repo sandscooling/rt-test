@@ -1,4 +1,5 @@
-import { posix, resolve, win32 } from "node:path";
+import { isAbsolute, posix, resolve, win32 } from "node:path";
+import { WINDOWS } from "../daemon/endpoint.js";
 import {
   climbsOut,
   liesInside,
@@ -30,8 +31,10 @@ const RELATIVE_NAMES = [".", ".."];
 const GLOB_SYNTAX = /[*?[\]{}()]/;
 /** Vite globs a pattern beginning with one of these as written, and resolves any other as an id. */
 const GLOB_PATH_PREFIXES = ["/", "./", "../"];
+/** Vite globs a pattern beginning with it from the file-system root. */
+const ANY_DEPTH_PREFIX = "**";
 const WINDOWS_SEPARATOR = "\\";
-export const WINDOWS_PLATFORM = "win32";
+const GLOB_ESCAPE = "\\";
 export const CURRENT_DIRECTORY = ".";
 /** Joins the parts of a key `once` is given. */
 export const KEY_SEPARATOR = "\0";
@@ -130,6 +133,11 @@ export function addSpecifierEdges(
   const producer = producers.path;
   if (form === SPECIFIER_FORM.fileRelative) {
     addPathEdges(scan, reference, withoutSuffix(text), producer);
+  } else if (
+    form === SPECIFIER_FORM.glob &&
+    text.startsWith(ANY_DEPTH_PREFIX)
+  ) {
+    addPatternEdges(scan, reference, `${POSIX_SEPARATOR}${text}`, producer);
   } else if (isBare(text)) {
     const specifier = form === SPECIFIER_FORM.glob ? text : withoutSuffix(text);
     addPackageEdges(scan, reference, specifier, producers.bare);
@@ -179,7 +187,7 @@ export function addPathEdges(
   path: string,
   producer: EdgeProducerKind,
 ): void {
-  const absolute = resolve(reference.base, path);
+  const absolute = resolvedPath(scan, reference.base, path);
   let holders = scan.holders.get(absolute);
   if (holders === undefined) {
     holders = holdersOf(scan.graph, absolute);
@@ -188,9 +196,14 @@ export function addPathEdges(
   for (const holder of holders) addEdge(scan, reference, holder, producer);
 }
 
+/** A driveless absolute path takes the consumer root's drive, as the Vitest process running there reads it. */
+function resolvedPath(scan: Scan, base: string, path: string): string {
+  return resolve(isAbsolute(path) ? (scan.roots[0] ?? base) : base, path);
+}
+
 /**
- * A pattern reaches the workspace owning the directory before its first wildcard and every workspace nested
- * under that directory; a pattern with no wildcard is a path.
+ * A pattern reaches the workspace owning the directory before its first wildcard or escape and every workspace
+ * nested under that directory; a pattern with no wildcard is a path.
  */
 export function addPatternEdges(
   scan: Scan,
@@ -204,12 +217,14 @@ export function addPatternEdges(
     return;
   }
   const beforeWildcard = hostSeparated(pattern).slice(0, wildcard);
-  const separator = beforeWildcard.lastIndexOf(POSIX_SEPARATOR);
-  const directory = resolve(
+  const escape = beforeWildcard.indexOf(GLOB_ESCAPE);
+  const literal =
+    escape === -1 ? beforeWildcard : beforeWildcard.slice(0, escape);
+  const separator = literal.lastIndexOf(POSIX_SEPARATOR);
+  const directory = resolvedPath(
+    scan,
     reference.base,
-    separator === -1
-      ? CURRENT_DIRECTORY
-      : beforeWildcard.slice(0, separator + 1),
+    separator === -1 ? CURRENT_DIRECTORY : literal.slice(0, separator + 1),
   );
   const reached = new Set([
     ...holdersOf(scan.graph, directory),
@@ -228,7 +243,7 @@ function hostSeparated(pattern: string): string {
   const resolvedAsId = !GLOB_PATH_PREFIXES.some((prefix) =>
     pattern.startsWith(prefix),
   );
-  return resolvedAsId && process.platform === WINDOWS_PLATFORM
+  return resolvedAsId && process.platform === WINDOWS
     ? pattern.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR)
     : pattern;
 }

@@ -1358,6 +1358,36 @@ describe("an alias rewrites each import the source scan reads", () => {
     expect(appEdges(information)).toEqual(["relative-import packages/b"]);
   });
 
+  it("D2426: a glob beginning with ** reaches every package workspace, since Vite globs it from the file-system root", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]: 'export const all = import.meta.glob("**/*.ts");\n',
+        }),
+      ),
+    ).toEqual([
+      "relative-import .",
+      "relative-import packages/b",
+      "relative-import packages/c",
+    ]);
+  });
+
+  it("D2427: a glob's literal directory ends before an escaping \\, so the glob reaches the workspace whose name the escape spells", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_SOURCE]: `${String.raw`export const all = import.meta.glob("../../a\\b/(x)/*.ts");`}\n`,
+          "packages/ab/package.json": pkg("@x/ab"),
+        }),
+      ),
+    ).toEqual([
+      "relative-import .",
+      "relative-import packages/ab",
+      "relative-import packages/b",
+      "relative-import packages/c",
+    ]);
+  });
+
   it("D2418: off Windows an aliased glob's \\ stays a character of a name, so the glob widens to the directory before that name", async () => {
     const information = await onPlatform("linux", () =>
       graphInTree(
