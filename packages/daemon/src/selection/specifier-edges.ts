@@ -14,6 +14,7 @@ import {
   unlistedWhileIncomplete,
   type Graph,
 } from "./graph-state.js";
+import type { readJsonc } from "./jsonc.js";
 import { SPECIFIER_FORM, type FoundSpecifier } from "./source-imports.js";
 import { EDGE_PRODUCER, type EdgeProducerKind } from "./selection-types.js";
 
@@ -40,13 +41,15 @@ export interface ParseObserver {
 
 /**
  * One scan of the consumer: the graph it adds to, the records already added, the consumer root as listed and
- * as resolved, the workspaces holding each absolute path already resolved, and who is told of each parse.
+ * as resolved, the workspaces holding each absolute path already resolved, each config an `extends` chain
+ * reached, read once by its real path, and who is told of each parse.
  */
 export interface Scan {
   readonly graph: Graph;
   readonly added: Set<string>;
   readonly roots: readonly string[];
   readonly holders: Map<string, readonly string[]>;
+  readonly extendedConfigs: Map<string, ReturnType<typeof readJsonc>>;
   readonly observer: ParseObserver | undefined;
 }
 
@@ -64,12 +67,19 @@ export function newScan(
 ): Scan {
   const real = realPath(root);
   const roots = real.ok && real.path !== root ? [root, real.path] : [root];
-  return { graph, added: new Set(), roots, holders: new Map(), observer };
+  return {
+    graph,
+    added: new Set(),
+    roots,
+    holders: new Map(),
+    extendedConfigs: new Map(),
+    observer,
+  };
 }
 
-/** Runs one read that parses `file`, with the scan's observer told of it before and after. */
-export function observedParse<T>(scan: Scan, file: string, read: () => T): T {
-  scan.observer?.parsing(rootLabel(scan, file));
+/** Runs one read that parses the file `label` names, with the scan's observer told of it before and after. */
+export function observedParse<T>(scan: Scan, label: string, read: () => T): T {
+  scan.observer?.parsing(label);
   try {
     return read();
   } finally {

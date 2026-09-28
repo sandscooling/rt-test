@@ -28,7 +28,10 @@ import { daemonLogFile } from "../src/daemon/daemon-log.js";
 import type { DaemonKey } from "../src/daemon/endpoint-proof.js";
 import { clientEndpoint, identityHash } from "../src/daemon/endpoint.js";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
-import { EXECUTOR_BOUND_MS } from "../src/daemon/executor-jobs.js";
+import {
+  EXECUTOR_BOUND_MS,
+  type ExecutorRequest,
+} from "../src/daemon/executor-jobs.js";
 import { RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
@@ -56,7 +59,7 @@ import {
   withDaemonConsumer,
   withDaemonKey,
   withDaemons,
-  withNodeOptions,
+  withPreload,
   withStandIn,
   type StandIn,
 } from "./daemon-harness.js";
@@ -955,7 +958,7 @@ describe("the executor process", () => {
               directory: join(root, WORKSPACE_A),
             },
             configFile: `${WORKSPACE_A}/vitest.config.mjs`,
-          });
+          } satisfies ExecutorRequest);
           const holding = () => existsSync(fixtureFile(root, "holding"));
           await until(() => watched.settled || holding());
           const endedBeforeDisconnect = watched.settled || !executor.connected;
@@ -982,8 +985,8 @@ describe("the executor process", () => {
     async () => {
       const outcome = await withDaemonConsumer(async (root, pids) => {
         holdAt(root, "hold");
-        const identity = await withNodeOptions(
-          `--import=${pathToFileURL(join(FIXTURES, "emit-sigterm.mjs")).href}`,
+        const identity = await withPreload(
+          join(FIXTURES, "emit-sigterm.mjs"),
           () => started(root, pids, confirmEvery(root)),
         );
         if ("thrown" in identity) return identity;

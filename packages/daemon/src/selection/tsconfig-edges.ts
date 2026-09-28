@@ -3,6 +3,7 @@ import {
   joinPath,
   objectField,
   PACKAGE_JSON,
+  realPath,
   type PackageWorkspace,
 } from "../vitest/find-workspaces.js";
 import { isRecord, uncertain } from "./graph-state.js";
@@ -51,7 +52,7 @@ export function addTsconfigEdges(
   file: string,
 ): void {
   const label = rootLabel(scan, file);
-  const read = observedParse(scan, file, () => readJsonc(file));
+  const read = observedParse(scan, label, () => readJsonc(file));
   if (!read.ok) {
     uncertain(
       scan.graph,
@@ -303,16 +304,20 @@ function followExtends(
       reason: `extends ${JSON.stringify(target)}, which could not be found`,
     };
   }
+  const label = rootLabel(scan, located);
   if (chain.has(located)) {
-    return {
-      ok: false,
-      reason: `its extends chain returns to ${rootLabel(scan, located)}`,
-    };
+    return { ok: false, reason: `its extends chain returns to ${label}` };
   }
-  const read = observedParse(scan, located, () => readJsonc(located));
+  const real = realPath(located);
+  const key = real.ok ? real.path : located;
+  let read = scan.extendedConfigs.get(key);
+  if (read === undefined) {
+    read = observedParse(scan, label, () => readJsonc(located));
+    scan.extendedConfigs.set(key, read);
+  }
   return read.ok
     ? { ok: true, value: read.value, file: located }
-    : { ok: false, reason: `${rootLabel(scan, located)} ${read.reason}` };
+    : { ok: false, reason: `${label} ${read.reason}` };
 }
 
 /** A path as given or with `.json` added; a package through the `node_modules` directories above. */

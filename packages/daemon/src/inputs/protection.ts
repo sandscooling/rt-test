@@ -17,7 +17,7 @@ const PATTERNS_DO_NOT_APPLY = `${NON_INPUTS_FILE}'s patterns do not apply, so ev
 const NO_DISCOVERY_REASON = `${PATTERNS_DO_NOT_APPLY}: no discovery in effect reports which files they may not remove`;
 const NOT_REPORTED_REASON = `${PATTERNS_DO_NOT_APPLY}: the discovery in effect does not report which files they may not remove for the workspace`;
 /** How a reason names the workspace at the consumer root, whose path is `.`. */
-export const ROOT_WORKSPACE = "at the consumer root";
+const ROOT_WORKSPACE = "at the consumer root";
 const REFUSED_REASON = `${PATTERNS_DO_NOT_APPLY}: picomatch cannot compile the test file pattern`;
 const REFUSED_CONSEQUENCE = "so the files it finds are not known";
 /** A refused pattern can be longer than picomatch's input limit, and its quote goes into every answer. */
@@ -69,6 +69,11 @@ type Compiled =
   | { readonly ok: true; readonly matches: PathMatcher }
   | { readonly ok: false; readonly reason: string };
 
+/** A workspace as a reason names it: by its path, or as the one at the consumer root. */
+export function workspaceName(path: string): string {
+  return path === ROOT_PATH ? ROOT_WORKSPACE : path;
+}
+
 /**
  * The one producer of protection, for the tracker and for selection alike. A workspace the discovery did not
  * discover contributes nothing; one that does not report its selection facts, or a pattern picomatch refuses,
@@ -87,7 +92,7 @@ export function protection(
     if (!entry.selectionFacts.reported) {
       return {
         applies: false,
-        reason: `${NOT_REPORTED_REASON} ${entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path}`,
+        reason: `${NOT_REPORTED_REASON} ${workspaceName(entry.workspace.path)}`,
       };
     }
     projects.push(...entry.selectionFacts.projects);

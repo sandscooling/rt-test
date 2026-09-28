@@ -50,7 +50,7 @@ import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
-import { readJson } from "../src/vitest/find-workspaces.js";
+import { readJson, ROOT_PATH } from "../src/vitest/find-workspaces.js";
 import type { SelectionFacts } from "../src/vitest/selection-facts.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
@@ -121,7 +121,6 @@ const { readEntryDigest: realReadEntryDigest } = await vi.importActual<
   typeof import("../src/inputs/input-inventory.js")
 >("../src/inputs/input-inventory.js");
 
-const ROOT_WORKSPACE = ".";
 const STATE_DIRECTORY = ".rt-test";
 /** Far longer than the tracker takes to read an edit on an idle machine; a wait this long has failed. */
 const SETTLE_MS = 10_000;
@@ -251,7 +250,7 @@ function workspaceAt(
   facts: SelectionFacts = { reported: true, projects: [] },
 ): WorkspaceDiscovery {
   return discoveredWorkspace(
-    { path: ROOT_WORKSPACE, directory: root },
+    { path: ROOT_PATH, directory: root },
     testModules,
     facts,
   );

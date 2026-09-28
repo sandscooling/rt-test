@@ -1,11 +1,10 @@
 import { resolve } from "node:path";
 import type { NonInputsDeclaration } from "../inputs/non-inputs.js";
-import { protection, ROOT_WORKSPACE } from "../inputs/protection.js";
+import { protection, workspaceName } from "../inputs/protection.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
-import { ROOT_PATH } from "../vitest/find-workspaces.js";
 import type { ProjectSelectionFacts } from "../vitest/selection-facts.js";
 import type {
   NotRunnableWorkspace,
@@ -110,10 +109,6 @@ export function buildSelectionInput(
       },
     },
   };
-}
-
-function workspaceName(path: string): string {
-  return path === ROOT_PATH ? ROOT_WORKSPACE : path;
 }
 
 /** A browser-mode project's tests are never run, so its unsupported entry leaves the workspace's tests known. */

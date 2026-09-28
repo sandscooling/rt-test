@@ -1917,6 +1917,67 @@ describe("configs a tsconfig inherits", () => {
     ).toEqual(["tsconfig packages/b"]);
   });
 
+  it("D2346: two configs in different directories that extend the same relative target each inherit the paths of their own base", async () => {
+    expect(
+      appEdges(
+        await scanApp({
+          [APP_TSCONFIG]: manifest({ extends: "./base.json" }),
+          "packages/app/base.json": manifest({
+            compilerOptions: { paths: { "@b": ["../b/src"] } },
+          }),
+          "packages/app/web/tsconfig.json": manifest({
+            extends: "./base.json",
+          }),
+          "packages/app/web/base.json": manifest({
+            compilerOptions: { paths: { "@c": ["../../c/src"] } },
+          }),
+        }),
+      ),
+    ).toEqual(["tsconfig packages/b", "tsconfig packages/c"]);
+  });
+
+  it("D2380: two configs extending one unreadable base each widen, naming themselves", async () => {
+    const widenings = appWidenings(
+      await scanApp({
+        [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+        "packages/app/tsconfig.web.json": manifest({
+          extends: "./configs/base.json",
+        }),
+        "packages/app/configs/base.json": "{",
+      }),
+    );
+    expect(
+      Array.isArray(widenings)
+        ? widenings.toSorted((a, b) => a.cause.localeCompare(b.cause))
+        : widenings,
+    ).toEqual([
+      {
+        kind: "extends-unfollowed",
+        cause: expect.stringMatching(/^packages\/app\/tsconfig\.json /),
+      },
+      {
+        kind: "extends-unfollowed",
+        cause: expect.stringMatching(/^packages\/app\/tsconfig\.web\.json /),
+      },
+    ]);
+  });
+
+  it("D2381: a base reached through a directory link resolves its relative baseUrl from the link's directory", async () => {
+    expect(
+      appEdges(
+        await scanApp(
+          {
+            [APP_TSCONFIG]: manifest({ extends: "./linked/base.json" }),
+            "packages/app/configs/deep/base.json": manifest({
+              compilerOptions: { baseUrl: "..", paths: { "@c": ["../c/src"] } },
+            }),
+          },
+          { links: { "packages/app/linked": "packages/app/configs/deep" } },
+        ),
+      ),
+    ).toEqual(["tsconfig packages/c"]);
+  });
+
   it("D1672: a config with no paths of its own whose extends cannot be read widens, naming the config", async () => {
     expect(
       appWidenings(
@@ -2015,5 +2076,67 @@ describe("the build tells its observer of each parse", () => {
       "parsing packages/app/src/x.ts",
       "parsing packages/c/tsconfig.json",
     ]);
+  });
+
+  it("D2377: a base config sought once for its paths and again for its baseUrl is parsed once", async () => {
+    expect(
+      await parsesInTree(
+        appTree({
+          files: {
+            [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+            "packages/app/configs/base.json": manifest({
+              compilerOptions: { paths: { "@c": ["../../c/src"] } },
+            }),
+          },
+          change: "",
+        }),
+      ),
+    ).toStrictEqual([
+      `parsing ${APP_TSCONFIG}`,
+      "parsed",
+      "parsing packages/app/configs/base.json",
+      "parsed",
+    ]);
+  });
+
+  it("D2378: a base config two tsconfigs reach through different links to one directory is parsed once", async () => {
+    const events = await parsesInTree({
+      ...appTree({
+        files: {
+          [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+          "packages/app/tsconfig.web.json": manifest({
+            extends: "./linked/base.json",
+          }),
+          "packages/app/configs/base.json": manifest({}),
+        },
+        change: "",
+      }),
+      links: { "packages/app/linked": "packages/app/configs" },
+    });
+    expect(
+      Array.isArray(events)
+        ? events.filter((event) => event.endsWith("/base.json")).length
+        : events,
+    ).toBe(1);
+  });
+
+  it("D2379: a base config two tsconfigs extend that cannot be read is parsed once", async () => {
+    const events = await parsesInTree(
+      appTree({
+        files: {
+          [APP_TSCONFIG]: manifest({ extends: "./configs/base.json" }),
+          "packages/app/tsconfig.web.json": manifest({
+            extends: "./configs/base.json",
+          }),
+          "packages/app/configs/base.json": "{",
+        },
+        change: "",
+      }),
+    );
+    expect(
+      Array.isArray(events)
+        ? events.filter((event) => event.endsWith("/base.json"))
+        : events,
+    ).toStrictEqual(["parsing packages/app/configs/base.json"]);
   });
 });

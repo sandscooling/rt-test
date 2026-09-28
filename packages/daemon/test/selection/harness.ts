@@ -255,17 +255,16 @@ export function selectInTree(
   });
 }
 
-/** The discovery the tree's workspaces stand for: a workspace the caller will not run failed to load. */
+/** The discovery the tree's workspaces stand for: a workspace the caller will not run was not confirmed. */
 function treeDiscovery(root: string, tree: TreeCase): TestDiscovery {
   return {
     workspaces: tree.workspaces.map((entry): WorkspaceDiscovery => {
       const workspace = { path: entry.path, directory: join(root, entry.path) };
       if (entry.notRunnable !== undefined) {
         return {
-          status: "failed",
+          status: "not-confirmed",
           workspace,
-          vitestVersion: "5.0.1",
-          error: entry.notRunnable,
+          reason: entry.notRunnable,
         };
       }
       const tests = entry.tests ?? DEFAULT_MODULES;

@@ -68,6 +68,8 @@ C92. **Test type-level guards with a failing fixture**: A type-level assertion s
 
 C161. **Classify a child's end by its positive signature**: A test that tells the end of a child process it launched apart from a crash checks the exit code and signal that end produces on each platform, and reads a crash marker on stderr only in addition, never alone, since a signal death, an abort or an out-of-memory exit prints no marker.
 
+C162. **Prove a cache keeps its outcome on a hit**: A test of a cache or memo pairs its saved-work assertion with one proving a hit yields the same observable outcome as a miss, for a cached failure as well as a success, and that a hit returns the caller's own identity (path, label or key) rather than the entry's.
+
 ## Inputs, fixtures and mocks
 
 C93. **Call the production function**: A test drives the real function, script or CLI entry, never a reimplementation of its logic inside the test.

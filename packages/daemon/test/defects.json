@@ -4075,10 +4075,10 @@
   },
   {
     "id": "D2147",
-    "defect": "A root workspace that does not report its selection facts is named by its path, so the reason ends with the workspace \".\" instead of naming the one at the consumer root.",
+    "defect": "The protection reason names a workspace by its bare path rather than through the shared workspace name, so a root workspace that does not report its selection facts ends the reason with the workspace \".\" instead of naming the one at the consumer root.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "${entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path}",
-    "new": "${entry.workspace.path}"
+    "old": "${NOT_REPORTED_REASON} ${workspaceName(entry.workspace.path)}",
+    "new": "${NOT_REPORTED_REASON} ${entry.workspace.path}"
   },
   {
     "id": "D2148",
@@ -4215,10 +4215,10 @@
   },
   {
     "id": "D2168",
-    "defect": "A discovered workspace below the root that does not report its facts is named as the one at the consumer root in the reason.",
+    "defect": "The shared workspace name calls every workspace the one at the consumer root, so a discovered workspace below the root that does not report its facts is named as the root one in the reason.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "${entry.workspace.path === ROOT_PATH ? ROOT_WORKSPACE : entry.workspace.path}",
-    "new": "${ROOT_WORKSPACE}"
+    "old": "  return path === ROOT_PATH ? ROOT_WORKSPACE : path;",
+    "new": "  return ROOT_WORKSPACE;"
   },
   {
     "id": "D2169",
@@ -4357,8 +4357,8 @@
     "id": "D2249",
     "defect": "A parse is reported only once it has returned, so a process the parser ends leaves the record empty and the reason says the file is not known.",
     "file": "packages/daemon/src/selection/specifier-edges.ts",
-    "old": "  scan.observer?.parsing(rootLabel(scan, file));\n  try {\n    return read();",
-    "new": "  try {\n    const value = read();\n    scan.observer?.parsing(rootLabel(scan, file));\n    return value;"
+    "old": "  scan.observer?.parsing(label);\n  try {\n    return read();",
+    "new": "  try {\n    const value = read();\n    scan.observer?.parsing(label);\n    return value;"
   },
   {
     "id": "D2250",

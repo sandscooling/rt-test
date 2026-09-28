@@ -451,7 +451,7 @@ function linkTarget(
 /** Relative specifiers resolve against the file's real directory, as Node and Vite resolve a linked file's imports. */
 function addSourceFileEdges(scan: Scan, dependent: string, file: string): void {
   const label = rootLabel(scan, file);
-  const found = observedParse(scan, file, () => readSourceImports(file));
+  const found = observedParse(scan, label, () => readSourceImports(file));
   if (!found.ok) {
     uncertain(
       scan.graph,

@@ -1681,10 +1681,10 @@
   },
   {
     "id": "D2234",
-    "defect": "The root workspace is named by its path, so the reason ends in a bare \".\" rather than saying the workspace at the consumer root.",
+    "defect": "The input build names a workspace by its bare path rather than through the shared workspace name, so the root workspace's reason ends in a bare \".\" rather than saying the workspace at the consumer root.",
     "file": "packages/daemon/src/selection/selection-input.ts",
-    "old": "  return path === ROOT_PATH ? ROOT_WORKSPACE : path;",
-    "new": "  return path;"
+    "old": "${FACTS_NOT_REPORTED_REASON} ${workspaceName(entry.workspace.path)}",
+    "new": "${FACTS_NOT_REPORTED_REASON} ${entry.workspace.path}"
   },
   {
     "id": "D2235",
@@ -1697,21 +1697,21 @@
     "id": "D2236",
     "defect": "A walked tsconfig is parsed without telling the observer, so a parser crash inside it says the file is not known.",
     "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "  const read = observedParse(scan, file, () => readJsonc(file));",
+    "old": "  const read = observedParse(scan, label, () => readJsonc(file));",
     "new": "  const read = readJsonc(file);"
   },
   {
     "id": "D2237",
     "defect": "A config a tsconfig extends is parsed without telling the observer, so a parser crash inside it says the file is not known.",
     "file": "packages/daemon/src/selection/tsconfig-edges.ts",
-    "old": "  const read = observedParse(scan, located, () => readJsonc(located));",
-    "new": "  const read = readJsonc(located);"
+    "old": "    read = observedParse(scan, label, () => readJsonc(located));",
+    "new": "    read = readJsonc(located);"
   },
   {
     "id": "D2247",
     "defect": "A source file is parsed without telling the observer, so a parser crash inside a source file says the file is not known.",
     "file": "packages/daemon/src/selection/workspace-graph.ts",
-    "old": "  const found = observedParse(scan, file, () => readSourceImports(file));",
+    "old": "  const found = observedParse(scan, label, () => readSourceImports(file));",
     "new": "  const found = readSourceImports(file);"
   },
   {
@@ -1846,5 +1846,47 @@
     "file": "packages/daemon/src/selection/vitest-edges.ts",
     "old": "    if (character === ESCAPE) {\n      index++;\n",
     "new": "    if (character === ESCAPE) {\n"
+  },
+  {
+    "id": "D2346",
+    "defect": "The extends cache is keyed by the target as written rather than by the located file, so a second config quoting the same relative target in another directory is handed the first directory's base and inherits its paths.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  const key = real.ok ? real.path : located;",
+    "new": "  const key = target;"
+  },
+  {
+    "id": "D2377",
+    "defect": "The extends cache is never filled, so a base config sought for its paths and again for its baseUrl is parsed twice, each parse costing the parse record's writes.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    scan.extendedConfigs.set(key, read);\n",
+    "new": ""
+  },
+  {
+    "id": "D2378",
+    "defect": "The extends cache is keyed by the located path rather than the real path, so one base config reached through two links is parsed once per link.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "  const key = real.ok ? real.path : located;",
+    "new": "  const key = located;"
+  },
+  {
+    "id": "D2379",
+    "defect": "The extends cache stores only reads that succeeded, so a base config that cannot be read is parsed again by every tsconfig that extends it.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    scan.extendedConfigs.set(key, read);",
+    "new": "    if (read.ok) scan.extendedConfigs.set(key, read);"
+  },
+  {
+    "id": "D2380",
+    "defect": "A cached failed extends read is handed back as an empty config, so a second walked tsconfig extending the same unreadable base no longer widens and only the first records extends-unfollowed.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    scan.extendedConfigs.set(key, read);",
+    "new": "    scan.extendedConfigs.set(key, read.ok ? read : { ok: true, value: {} });"
+  },
+  {
+    "id": "D2381",
+    "defect": "The extends read returns the cache key, the real path, as the config's file, so a base reached through a directory link resolves its relative baseUrl against the link target's directory rather than the link's.",
+    "file": "packages/daemon/src/selection/tsconfig-edges.ts",
+    "old": "    ? { ok: true, value: read.value, file: located }",
+    "new": "    ? { ok: true, value: read.value, file: key }"
   }
 ]

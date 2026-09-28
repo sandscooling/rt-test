@@ -2,7 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { Executor, type JobOutcome } from "../src/daemon/executor.js";
 import {
@@ -23,7 +22,8 @@ import {
   eventually,
   memoryLog,
   settled,
-  withNodeOptions,
+  withEnvironment,
+  withPreload,
 } from "./daemon-harness.js";
 import { inTempDir, REPO, waitUntil } from "./harness.js";
 import { manifest, rootManifest, writeTree } from "./selection/harness.js";
@@ -362,9 +362,7 @@ describe("holding each executor's tree before its job", () => {
   );
 });
 
-const BUILD_HOOK = pathToFileURL(
-  join(REPO, "test/fixtures/daemon/build-hook.mjs"),
-).href;
+const BUILD_HOOK = join(REPO, "test/fixtures/daemon/build-hook.mjs");
 /** Read by the build-hook preload in each executor process a test starts. */
 const HOOK_VARIABLE = "RT_FIXTURE_BUILD_HOOK";
 /** How the build-hook preload ends an executor. */
@@ -388,18 +386,10 @@ interface BuildHook {
 }
 
 /** Runs `body` with every executor it starts preloading the build hook. */
-async function withBuildHook<T>(
-  hook: BuildHook,
-  body: () => Promise<T>,
-): Promise<T> {
-  const saved = process.env[HOOK_VARIABLE];
-  process.env[HOOK_VARIABLE] = JSON.stringify(hook);
-  try {
-    return await withNodeOptions(`--import=${BUILD_HOOK}`, body);
-  } finally {
-    if (saved === undefined) delete process.env[HOOK_VARIABLE];
-    else process.env[HOOK_VARIABLE] = saved;
-  }
+function withBuildHook<T>(hook: BuildHook, body: () => Promise<T>): Promise<T> {
+  return withEnvironment(HOOK_VARIABLE, JSON.stringify(hook), () =>
+    withPreload(BUILD_HOOK, body),
+  );
 }
 
 interface BuildConsumer {

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { LONGEST_TEST_TIMEOUT_MS } from "../../../test/scripts/longest-test-timeout.mjs";
 import {
   endProcess,
@@ -289,19 +290,35 @@ export function settled<T>(work: Promise<T>): Promise<Settled<T>> {
   }));
 }
 
-/** Runs `body` with `options` added to NODE_OPTIONS, which every process a start or a job spawns inherits. */
-export async function withNodeOptions<T>(
-  options: string,
+/** Runs `body` with the environment variable `name` set to `value`, then restores what it held before. */
+export async function withEnvironment<T>(
+  name: string,
+  value: string,
   body: () => Promise<T>,
 ): Promise<T> {
-  const saved = process.env["NODE_OPTIONS"];
-  process.env["NODE_OPTIONS"] = [saved, options].filter(Boolean).join(" ");
+  const saved = process.env[name];
+  process.env[name] = value;
   try {
     return await body();
   } finally {
-    if (saved === undefined) delete process.env["NODE_OPTIONS"];
-    else process.env["NODE_OPTIONS"] = saved;
+    if (saved === undefined) delete process.env[name];
+    else process.env[name] = saved;
   }
+}
+
+const NODE_OPTIONS = "NODE_OPTIONS";
+
+/**
+ * Runs `body` with every process a start or a job spawns preloading the module at `modulePath`. The preload is
+ * passed as a file URL, since NODE_OPTIONS splits a raw path at each space.
+ */
+export function withPreload<T>(
+  modulePath: string,
+  body: () => Promise<T>,
+): Promise<T> {
+  const preload = `--import=${pathToFileURL(modulePath).href}`;
+  const options = [process.env[NODE_OPTIONS], preload].filter(Boolean);
+  return withEnvironment(NODE_OPTIONS, options.join(" "), body);
 }
 
 /** Polls until `ready` holds or `boundMs` passes, and says whether it held. */
