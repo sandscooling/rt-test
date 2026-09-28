@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { crashError, WatchedChild } from "../child-end.js";
 import { clientEndpoint } from "../../../packages/daemon/src/daemon/endpoint.js";
 import { consumerIdentity } from "../../../packages/daemon/src/store/consumer-identity.js";
 import {
@@ -115,15 +116,18 @@ async function providingRunRoot<T>(
   }
 }
 
+/** The guarded run's first stdout line; a run that ends before writing one has crashed. */
 function firstLine(child: ChildProcess): Promise<string> {
-  return new Promise((resolveLine, fail) => {
-    createInterface({ input: child.stdout! }).once("line", resolveLine);
-    child.once("exit", (code) =>
-      fail(
-        new Error(`the guarded run exited with ${code} before it was ready`),
-      ),
-    );
-  });
+  const label = "the guarded run";
+  const watched = new WatchedChild(child, label);
+  return Promise.race([
+    new Promise<string>((resolveLine) => {
+      createInterface({ input: child.stdout! }).once("line", resolveLine);
+    }),
+    watched.end.then((end) => {
+      throw crashError(label, end);
+    }),
+  ]);
 }
 
 describe("cleaning up a test run", PROCESS_SCENARIO, () => {
@@ -247,7 +251,7 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
     const cleaned = await inRunRoot(async (runRoot) => {
       const run = spawn(process.execPath, [GUARDED_RUN, runRoot], {
         cwd: tmpdir(),
-        stdio: ["ignore", "pipe", "ignore"],
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
       let daemon: number | undefined;

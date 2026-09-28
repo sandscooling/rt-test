@@ -11,6 +11,11 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  crashError,
+  listedModules,
+  syncChildEnd,
+} from "../../../test/scripts/child-end.js";
+import {
   daemonStatus,
   servingDaemon,
   TEST_STATES,
@@ -54,7 +59,7 @@ import {
   notDiscoveredLines,
 } from "../src/answer-text.js";
 import { main } from "../src/main.js";
-import { Output, type ExitCode } from "../src/output.js";
+import { EXIT_FAILURE, Output, type ExitCode } from "../src/output.js";
 import { decideTrust, type TrustDecision } from "../src/trust-prompt.js";
 
 const BIN = fileURLToPath(new URL("../src/bin.ts", import.meta.url));
@@ -275,6 +280,30 @@ async function trustAfter(
       ),
       session,
     );
+  } finally {
+    session.close();
+  }
+}
+
+/** The reason a start over `root` is refused with no terminal to ask on, as `decideTrust` words it. */
+async function noTerminalRefusal(root: string): Promise<string> {
+  const session = simulatedSession({ cwd: root });
+  const plan: StartPlan = {
+    start: { consumerRoot: root, workspaces: [] },
+    stateDirectory: join(root, ".rt-test"),
+    notRead: [],
+    nonInputs: { file: NON_INPUTS_FILE, state: "absent" },
+  };
+  try {
+    const decision = await decideTrust(
+      session.io,
+      new Output(session.io, "start", false),
+      plan,
+      false,
+    );
+    if (decision.trusted)
+      throw new Error("a start with no terminal was trusted");
+    return decision.reason;
   } finally {
     session.close();
   }
@@ -1799,10 +1828,16 @@ describe("the CLI's own process", () => {
             windowsHide: true,
           },
         );
-        const modules = JSON.parse(listed.stdout || "[]") as string[];
+        const label = "the CLI's own process";
+        const end = syncChildEnd(label, listed);
+        const refused =
+          end.code === EXIT_FAILURE &&
+          end.signal === null &&
+          end.stderr.includes(await noTerminalRefusal(root));
+        if (!refused) throw crashError(label, end);
+        const modules = listedModules(label, end);
         const consumer = pathToFileURL(root).href;
         return {
-          status: listed.status,
           binLoaded: modules.includes(pathToFileURL(BIN).href),
           forbidden: modules.filter(
             (url) =>
@@ -1812,11 +1847,7 @@ describe("the CLI's own process", () => {
           ),
         };
       });
-      expect(outcome).toStrictEqual({
-        status: 1,
-        binLoaded: true,
-        forbidden: [],
-      });
+      expect(outcome).toStrictEqual({ binLoaded: true, forbidden: [] });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

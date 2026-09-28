@@ -22,6 +22,11 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  crashError,
+  WatchedChild,
+  type ChildEnd,
+} from "../../../test/scripts/child-end.js";
 import { recordStarted } from "../../../test/scripts/run-cleanup.mjs";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
 import {
@@ -176,6 +181,8 @@ const TRACKER_MODULE = new URL(
 /** Far past the idle tracker child's start, first reconciliation and timer on a loaded machine. */
 const TRACKER_LIFETIME_MS = 30_000;
 const LIFETIME_LINE = "lifetime";
+const RECONCILED_LINE = "reconciled";
+const IDLE_TRACKER_CHILD = "the idle tracker child";
 /**
  * Ends the idle tracker child from a thread of its own, whose timers run however the main thread's event loop is held,
  * writing a line first, so a child whose tracker holds that loop still exits and says why. The worker runs with no
@@ -198,9 +205,23 @@ const IDLE_TRACKER_SCRIPT = [
   "const tracker = new InputTracker({ consumerRoot: root, exclusions: [], log });",
   "tracker.start();",
   "await tracker.firstReconciled();",
-  'process.stdout.write("reconciled\\n");',
+  `process.stdout.write("${RECONCILED_LINE}\\n");`,
   'setTimeout(() => { process.stdout.write("timer fired\\n"); void tracker.stop(); }, 50);',
 ].join("\n");
+
+/**
+ * The idle tracker child's stdout lines, from an end the tracker produces once it has reconciled: a clean exit, or the
+ * lifetime worker's kill, whose exit status differs by platform. Any other end is the child crashing.
+ */
+function idleTrackerLines(end: ChildEnd): string[] {
+  const lines = end.stdout.split("\n").filter((line) => line !== "");
+  const exitedClean = end.code === 0 && end.signal === null;
+  const heldToItsLifetime = lines.at(-1) === LIFETIME_LINE;
+  if (lines.includes(RECONCILED_LINE) && (exitedClean || heldToItsLifetime)) {
+    return lines;
+  }
+  throw crashError(IDLE_TRACKER_CHILD, end);
+}
 
 /** Writes each file, relative to `root`, creating the directories it lies in. */
 function writeTree(
@@ -1764,17 +1785,13 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
           TRACKER_MODULE,
           root,
         ],
-        { cwd: REPO, stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+        { cwd: REPO, stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
       );
+      const watched = new WatchedChild(child, IDLE_TRACKER_CHILD);
       if (child.pid !== undefined) {
         recordStarted(runTempRoot(), { pids: [child.pid] });
       }
-      let stdout = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
-      });
-      await new Promise((resolve) => child.once("close", resolve));
-      return stdout.split("\n").filter((line) => line !== "");
+      return idleTrackerLines(await watched.end);
     });
     expect(lines.slice(0, 2)).toStrictEqual(["reconciled", "timer fired"]);
   });
