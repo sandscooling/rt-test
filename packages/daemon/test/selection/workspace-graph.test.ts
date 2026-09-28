@@ -1,10 +1,12 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type {
-  DependencyInformation,
-  ResolvedAlias,
-} from "../../src/selection/selection-types.js";
+import type { DependencyInformation } from "../../src/selection/selection-types.js";
+import {
+  REGEXP_FIND,
+  STRING_FIND,
+  type ReportedAlias,
+} from "../../src/vitest/selection-facts.js";
 import { onPlatform } from "../harness.js";
 import {
   APP,
@@ -58,10 +60,46 @@ function appDependencies(
     : information;
 }
 
+/** A string alias as discovery reports one Vite analyzes by its replacement alone. */
+const STRING_ALIAS = {
+  find: "@alias",
+  findKind: STRING_FIND,
+  flags: "",
+  hasCustomResolver: false,
+} as const;
+
 function aliases(
   replacement: (root: string) => string,
-): (root: string) => readonly ResolvedAlias[] {
-  return (root) => [{ find: "@alias", replacement: replacement(root) }];
+): (root: string) => readonly ReportedAlias[] {
+  return (root) => [{ ...STRING_ALIAS, replacement: replacement(root) }];
+}
+
+/** One alias over `STRING_ALIAS`, whose replacement reaches into `packages/b` unless `fields` says otherwise. */
+function alias(
+  fields: Partial<ReportedAlias>,
+): (root: string) => readonly ReportedAlias[] {
+  return (root) => [
+    {
+      ...STRING_ALIAS,
+      replacement: join(root, "packages/b/src"),
+      ...fields,
+    },
+  ];
+}
+
+/** The steps of the first reason the app was selected for when `change` changed, under `aliasList`. */
+function aliasReasonSteps(
+  aliasList: (root: string) => readonly ReportedAlias[],
+  change: string,
+) {
+  return selectInTree({
+    ...appTree({ vitest: { aliases: aliasList }, change }),
+    change: [change],
+  }).then((outcome) =>
+    "workspaces" in outcome
+      ? outcome.workspaces[0]?.reasons[0]?.steps
+      : outcome,
+  );
 }
 
 describe("listing a consumer's package workspaces", () => {
@@ -553,6 +591,215 @@ describe("config aliases reach every workspace their fixed prefix begins", () =>
         change: B_CHANGE,
       }),
     ).toEqual([APP]);
+  });
+});
+
+describe("an alias whose replacement does not bound where an import ends up widens", () => {
+  it("D2192: an alias with a customResolver makes the workspace depend on every package workspace, whatever its replacement", async () => {
+    expect(
+      await selectedFor({
+        vitest: { aliases: alias({ hasCustomResolver: true }) },
+        change: C_CHANGE,
+      }),
+    ).toEqual([APP]);
+  });
+
+  it("D2193: an alias whose string find is empty makes the workspace depend on every package workspace, whatever its replacement", async () => {
+    expect(
+      await selectedFor({
+        vitest: { aliases: alias({ find: "" }) },
+        change: C_CHANGE,
+      }),
+    ).toEqual([APP]);
+  });
+
+  it("D2194: an alias whose string find is / makes the workspace depend on every package workspace, whatever its replacement", async () => {
+    expect(
+      await selectedFor({
+        vitest: { aliases: alias({ find: "/" }) },
+        change: C_CHANGE,
+      }),
+    ).toEqual([APP]);
+  });
+
+  it("D2195: a RegExp alias with no customResolver reaches only the workspaces its replacement reaches", async () => {
+    expect(
+      await selectedFor({
+        vitest: {
+          aliases: alias({ find: "^@b\\/(.*)$", findKind: REGEXP_FIND }),
+        },
+        change: C_CHANGE,
+      }),
+    ).toEqual([]);
+  });
+
+  it("D2196: a RegExp alias with a customResolver makes the workspace depend on every package workspace", async () => {
+    expect(
+      await selectedFor({
+        vitest: {
+          aliases: alias({
+            find: "^@b\\/(.*)$",
+            findKind: REGEXP_FIND,
+            hasCustomResolver: true,
+          }),
+        },
+        change: C_CHANGE,
+      }),
+    ).toEqual([APP]);
+  });
+
+  it("D2197: a string find that begins with / but is not / reaches only the workspaces its replacement reaches", async () => {
+    expect(
+      await selectedFor({
+        vitest: { aliases: alias({ find: "/src" }) },
+        change: C_CHANGE,
+      }),
+    ).toEqual([]);
+  });
+
+  it("D2198: the reason a customResolver alias adds names its customResolver", async () => {
+    expect(
+      await aliasReasonSteps(alias({ hasCustomResolver: true }), C_CHANGE),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "unresolvable-alias",
+        detail: expect.stringContaining("customResolver"),
+      },
+    ]);
+  });
+
+  it("D2199: the reason an empty-find alias adds names its empty find", async () => {
+    expect(await aliasReasonSteps(alias({ find: "" }), C_CHANGE)).toEqual([
+      {
+        workspace: APP,
+        via: "unresolvable-alias",
+        detail: expect.stringContaining("empty find"),
+      },
+    ]);
+  });
+
+  it("D2200: the reason a / find alias adds says it maps /", async () => {
+    expect(await aliasReasonSteps(alias({ find: "/" }), C_CHANGE)).toEqual([
+      {
+        workspace: APP,
+        via: "unresolvable-alias",
+        detail: expect.stringContaining("maps /"),
+      },
+    ]);
+  });
+
+  it("D2201: the reason a customResolver alias adds quotes the alias's find and replacement", async () => {
+    expect(
+      await aliasReasonSteps(
+        alias({ hasCustomResolver: true, replacement: "@x/b/src" }),
+        C_CHANGE,
+      ),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "unresolvable-alias",
+        detail: expect.stringContaining('config alias "@alias" to "@x/b/src"'),
+      },
+    ]);
+  });
+});
+
+describe("an explanation quotes an alias's find as the kind of find it is", () => {
+  it("D2202: an alias edge quotes a RegExp find as a regular expression literal", async () => {
+    expect(
+      await aliasReasonSteps(
+        alias({
+          find: "^@b\\/(.*)$",
+          findKind: REGEXP_FIND,
+          replacement: "@x/b/$1",
+        }),
+        B_CHANGE,
+      ),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "alias",
+        detail: expect.stringContaining(
+          'config alias /^@b\\/(.*)$/ to "@x/b/$1"',
+        ),
+      },
+    ]);
+  });
+
+  it("D2203: an alias edge quotes a RegExp find's flags after the literal", async () => {
+    expect(
+      await aliasReasonSteps(
+        alias({
+          find: "^@b\\/(.*)$",
+          findKind: REGEXP_FIND,
+          flags: "i",
+          replacement: "@x/b/$1",
+        }),
+        B_CHANGE,
+      ),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "alias",
+        detail: expect.stringContaining("config alias /^@b\\/(.*)$/i to "),
+      },
+    ]);
+  });
+
+  it("D2204: an alias edge quotes a string find as a JSON string", async () => {
+    expect(
+      await aliasReasonSteps(
+        alias({ find: "@b", replacement: "@x/b" }),
+        B_CHANGE,
+      ),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "alias",
+        detail: expect.stringContaining('config alias "@b" to "@x/b"'),
+      },
+    ]);
+  });
+
+  it("D2205: the widening for a relative replacement quotes a RegExp find as a regular expression literal", async () => {
+    expect(
+      await aliasReasonSteps(
+        alias({
+          find: "^~\\/(.*)$",
+          findKind: REGEXP_FIND,
+          replacement: "./src/$1",
+        }),
+        C_CHANGE,
+      ),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "unresolvable-alias",
+        detail: expect.stringContaining(
+          'config alias /^~\\/(.*)$/ to "./src/$1"',
+        ),
+      },
+    ]);
+  });
+
+  it("D2212: the widening for a customResolver alias quotes a RegExp find as a regular expression literal", async () => {
+    expect(
+      await aliasReasonSteps(
+        alias({
+          find: "^@b\\/(.*)$",
+          findKind: REGEXP_FIND,
+          hasCustomResolver: true,
+        }),
+        C_CHANGE,
+      ),
+    ).toEqual([
+      {
+        workspace: APP,
+        via: "unresolvable-alias",
+        detail: expect.stringContaining("config alias /^@b\\/(.*)$/ to "),
+      },
+    ]);
   });
 });
 

@@ -7,11 +7,11 @@ import { protection } from "../../src/inputs/protection.js";
 import { selectTests } from "../../src/selection/select-tests.js";
 import type {
   DependencyInformation,
-  ResolvedAlias,
   SelectableWorkspace,
   SelectionOutcome,
 } from "../../src/selection/selection-types.js";
 import { buildDependencyInformation } from "../../src/selection/workspace-graph.js";
+import type { ReportedAlias } from "../../src/vitest/selection-facts.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
@@ -38,7 +38,7 @@ export interface TreeWorkspace {
   readonly setupFiles?: readonly string[];
   readonly globalSetupFiles?: readonly string[];
   /** Given the consumer root selection sees, so a replacement can be an absolute path into it. */
-  readonly aliases?: (root: string) => readonly ResolvedAlias[];
+  readonly aliases?: (root: string) => readonly ReportedAlias[];
   /** The reason the caller will not run it. */
   readonly notRunnable?: string;
   /** Its one project's test file patterns, matched from the workspace's directory unless they name another. */

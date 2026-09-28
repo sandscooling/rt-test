@@ -4,6 +4,7 @@ import {
   type Selection,
   type SelectionOutcome,
 } from "../../src/selection/selection-types.js";
+import { onPlatform } from "../harness.js";
 import {
   manifest,
   rootManifest,
@@ -753,13 +754,63 @@ describe("declared non-inputs", () => {
     ).toEqual(DECLARATION_FALLBACK);
   });
 
-  it("D2014: a selection carries policy version 4", async () => {
+  it("D2014: a selection carries policy version 5", async () => {
     const outcome = await select({ vitest: { app: {} } }, [
       "packages/app/src/x.ts",
     ]);
     expect("policyVersion" in outcome ? outcome.policyVersion : outcome).toBe(
-      4,
+      5,
     );
+  });
+
+  /** The non-inputs-file fallback a change to `path` raises over the three apps, as `DECLARATION_FALLBACK` for that path. */
+  function declarationFallbackAt(path: string) {
+    return [{ ...DECLARATION_FALLBACK[0], path }];
+  }
+
+  it("D2206: with process.platform read as win32, a change to RT-Test.json is the non-inputs-file fallback", async () => {
+    const outcome = await onPlatform("win32", () =>
+      select({ ...THREE_APPS, files: declaring("docs/**") }, ["RT-Test.json"]),
+    );
+    expect(declarationFallbacks(outcome)).toEqual(
+      declarationFallbackAt("RT-Test.json"),
+    );
+  });
+
+  it("D2207: with process.platform read as win32, RT-Test.json is still that fallback when a declared pattern matches its name", async () => {
+    const outcome = await onPlatform("win32", () =>
+      select({ ...THREE_APPS, files: declaring("**") }, ["RT-Test.json"]),
+    );
+    expect(declarationFallbacks(outcome)).toEqual(
+      declarationFallbackAt("RT-Test.json"),
+    );
+  });
+
+  it("D2208: a change to a path under rt-test.json is the non-inputs-file fallback", async () => {
+    expect(
+      declarationFallbacks(
+        await select({ ...THREE_APPS, files: declaring("docs/**") }, [
+          "rt-test.json/x",
+        ]),
+      ),
+    ).toEqual(declarationFallbackAt("rt-test.json/x"));
+  });
+
+  it("D2209: with process.platform read as linux, RT-Test.json is an ordinary path a declared pattern makes a declared non-input", async () => {
+    const outcome = await onPlatform("linux", () =>
+      select({ ...THREE_APPS, files: declaring("*.json") }, ["RT-Test.json"]),
+    );
+    expect(from(outcome, ({ paths }) => paths[0]?.nothingSelected?.kind)).toBe(
+      "declared-non-input",
+    );
+  });
+
+  it("D2210: a change to an rt-test.json inside a workspace selects only that workspace", async () => {
+    expect(
+      await select(THREE_APPS, ["packages/app1/rt-test.json"]).then(
+        selectedPaths,
+      ),
+    ).toEqual(["packages/app1"]);
   });
 
   it("D2128: a setup file selects as it does with no rt-test.json, though a declared pattern matches it", async () => {

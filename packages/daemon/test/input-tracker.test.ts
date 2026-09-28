@@ -1824,6 +1824,40 @@ describe("the fingerprint's parts", () => {
     }
   });
 
+  it("D2211: a raised selection policy version changes the workspace fingerprint", async () => {
+    const types = "../src/selection/selection-types.js";
+    const inputs = new Map([["a.ts", "file:1"]]);
+    const digestRaisedBy = async (
+      raise: number,
+    ): Promise<string | undefined> => {
+      vi.resetModules();
+      vi.doMock(types, async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/selection/selection-types.js")
+          >();
+        return {
+          ...actual,
+          SELECTION_POLICY_VERSION: actual.SELECTION_POLICY_VERSION + raise,
+        };
+      });
+      const fresh = await import("../src/inputs/fingerprint.js");
+      const print = fresh.workspaceFingerprint(
+        new fresh.ProjectInputs(REPO, inputs),
+        workspaceAt(REPO),
+      );
+      return print.ok ? print.digest : undefined;
+    };
+    try {
+      const current = await digestRaisedBy(0);
+      const raised = await digestRaisedBy(1);
+      expect(current !== undefined && current !== raised).toBe(true);
+    } finally {
+      vi.doUnmock(types);
+      vi.resetModules();
+    }
+  });
+
   it("D1915: a change of the Vitest version a workspace resolves changes its fingerprint", async () => {
     const changed = await inTempDir((root) => {
       const project = new ProjectInputs(root, new Map([["a.ts", "file:1"]]));

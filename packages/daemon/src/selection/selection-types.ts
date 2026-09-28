@@ -6,9 +6,10 @@ import type {
   UnreadWorkspaceSource,
   VitestWorkspace,
 } from "../vitest/find-workspaces.js";
+import type { ReportedAlias } from "../vitest/selection-facts.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 4;
+export const SELECTION_POLICY_VERSION = 5;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -75,12 +76,6 @@ export type WorkspaceTests =
   | { readonly known: true; readonly tests: readonly TestIdentity[] }
   | { readonly known: false; readonly reason: string };
 
-/** A config alias as Vite's resolved config holds it: the replacement is an absolute path or a bare package name. */
-export interface ResolvedAlias {
-  readonly find: string;
-  readonly replacement: string;
-}
-
 export interface SelectableWorkspace {
   readonly workspace: VitestWorkspace;
   readonly tests: WorkspaceTests;
@@ -88,7 +83,8 @@ export interface SelectableWorkspace {
   readonly setupFiles: readonly string[];
   /** Root-relative and `/`-separated. */
   readonly globalSetupFiles: readonly string[];
-  readonly aliases: readonly ResolvedAlias[];
+  /** As discovery reports them: a replacement may be any string, and a find may be a RegExp's source. */
+  readonly aliases: readonly ReportedAlias[];
 }
 
 export interface NotRunnableWorkspace {

@@ -6,6 +6,11 @@ import {
   type VitestWorkspace,
 } from "../vitest/find-workspaces.js";
 import {
+  REGEXP_FIND,
+  STRING_FIND,
+  type ReportedAlias,
+} from "../vitest/selection-facts.js";
+import {
   edge,
   holdersOf,
   normalizeRelativePath,
@@ -19,12 +24,14 @@ import { isLocalPath } from "./package-specs.js";
 import {
   EDGE_PRODUCER,
   UNCERTAINTY,
-  type ResolvedAlias,
   type SelectableWorkspace,
 } from "./selection-types.js";
 
 const REPLACEMENT_REFERENCE = /\$(?:\d|&|<|`|')/;
 const WINDOWS_PLATFORM = "win32";
+const ROOT_FIND = "/";
+/** A consumer's own empty find, or what Vite makes of a `/` find whose replacement ends in `/`. */
+const EMPTY_FIND = "";
 
 export function addVitestEdges(
   graph: Graph,
@@ -100,9 +107,19 @@ function addSetupEdge(
 function addAliasEdges(
   graph: Graph,
   dependent: string,
-  alias: ResolvedAlias,
+  alias: ReportedAlias,
 ): void {
-  const detail = `config alias ${JSON.stringify(alias.find)} to ${JSON.stringify(alias.replacement)}`;
+  const detail = `config alias ${quotedFind(alias)} to ${JSON.stringify(alias.replacement)}`;
+  const unbounded = unboundedAliasCause(alias);
+  if (unbounded !== undefined) {
+    uncertain(
+      graph,
+      dependent,
+      UNCERTAINTY.unresolvableAlias,
+      `${detail} ${unbounded}`,
+    );
+    return;
+  }
   const reference = alias.replacement.search(REPLACEMENT_REFERENCE);
   const prefix =
     reference === -1
@@ -121,6 +138,28 @@ function addAliasEdges(
   for (const dependency of resolution.paths) {
     edge(graph, dependent, dependency, EDGE_PRODUCER.alias, detail);
   }
+}
+
+/** A RegExp find as a regular expression literal, so it never reads like a string find of the same text. */
+function quotedFind(alias: ReportedAlias): string {
+  return alias.findKind === REGEXP_FIND
+    ? `/${alias.find}/${alias.flags}`
+    : JSON.stringify(alias.find);
+}
+
+/** Why the alias's find or resolver defeats analysis by its replacement's prefix, or undefined when neither does. */
+function unboundedAliasCause(alias: ReportedAlias): string | undefined {
+  if (alias.hasCustomResolver) {
+    return "has a customResolver, which picks the module after the replacement";
+  }
+  if (alias.findKind !== STRING_FIND) return undefined;
+  if (alias.find === EMPTY_FIND) {
+    return "has an empty find, which rewrites every import that begins with /";
+  }
+  if (alias.find === ROOT_FIND) {
+    return "maps /, which Vite warns against, and rewrites / and every import that begins with //";
+  }
+  return undefined;
 }
 
 /**

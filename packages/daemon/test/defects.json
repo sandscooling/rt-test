@@ -4240,5 +4240,12 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    const changed = unwatched ?? released;\n",
     "new": "    const changed = unwatched;\n"
+  },
+  {
+    "id": "D2211",
+    "defect": "The selection policy version is left out of the fingerprint's shared parts, so raising it leaves every stored result's fingerprint unchanged and results stored under the old policy read current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    selectionPolicyVersion: SELECTION_POLICY_VERSION,\n",
+    "new": ""
   }
 ]

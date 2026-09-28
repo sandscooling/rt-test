@@ -16,6 +16,7 @@ import {
   VITE_CONFIG_FILES,
   VITEST_CONFIG_FILES,
 } from "../vitest/find-workspaces.js";
+import { liesInsideOnHost } from "./input-filter.js";
 import type { Protection } from "./protection.js";
 
 /** The consumer's RT Test settings file, at the consumer root and committed with the project. */
@@ -93,9 +94,21 @@ export function unusableReason(
 }
 
 /**
+ * Whether a root-relative, `/`-separated path is `rt-test.json` or lies under it, its name compared as the host
+ * compares names. Both are anchored at `/`, so on POSIX the comparison never reads the working directory, which may
+ * no longer exist, and on Windows both sides take the same drive from it.
+ */
+export function namesDeclarationFile(path: string): boolean {
+  return liesInsideOnHost(
+    `${POSIX_SEPARATOR}${NON_INPUTS_FILE}`,
+    `${POSIX_SEPARATOR}${path}`,
+  );
+}
+
+/**
  * Decides declared non-inputs for one declaration and one protection. No pattern applies while the protection says
- * none does. `rt-test.json` itself, every manifest, workspace list, lockfile, Vitest or Vite config, tsconfig or
- * jsconfig file, and each file the protection protects is never one.
+ * none does. `rt-test.json` itself or a path under it, every manifest, workspace list, lockfile, Vitest or Vite
+ * config, tsconfig or jsconfig file, and each file the protection protects is never one.
  */
 export function declaredNonInputs(
   declaration: NonInputsDeclaration,
@@ -114,7 +127,7 @@ export function declaredNonInputs(
   }));
   return (path) => {
     if (
-      path === NON_INPUTS_FILE ||
+      namesDeclarationFile(path) ||
       TYPESCRIPT_CONFIG_NAME.test(posix.basename(path)) ||
       PROTECTED_NAMES.has(posix.basename(path))
     ) {
