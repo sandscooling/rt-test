@@ -156,3 +156,5 @@ C62. **Sweep the parsers when adding a ban**: A new ban on a character, word or 
 C63. **Write control characters as escapes**: No source file contains a raw non-printing character; write the escape (`"\u0000"`) through a named constant, since one raw NUL makes grep treat the file as binary.
 
 C64. **Prove a lint rule's scope and evasions**: A new or widened lint rule is proved to fire on the least obvious file in its intended scope, its `overrides` glob covers every file where the construct does harm, and each alternate spelling of the banned construct has a probe.
+
+C164. **Stop a PowerShell script on its first error**: A multi-statement PowerShell script that Node runs through `-Command` starts with `$ErrorActionPreference = 'Stop'`, so a failing cmdlet exits non-zero. FAIL on one without it: a non-terminating cmdlet error leaves the script to run on, and its exit status follows the last statement, so a failed query prints an empty answer and exits 0.
