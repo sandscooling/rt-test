@@ -24,6 +24,8 @@ sprint-2: in-progress
 2-3f-schedule-runs: done
 2-3h-judge-runs: ready-for-dev
 2-3i-schedule-answers: ready-for-dev
+2-3k-hold-self-changing-runs: backlog
+2-3l-hold-self-changing-discovery: backlog
 2-4-late-answers: ready-for-dev
 2-4d-read-named-paths: ready-for-dev
 2-4b-wait-for-files: ready-for-dev
