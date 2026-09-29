@@ -16,7 +16,7 @@ import {
   type StoreBindings,
   type StoredRun,
 } from "./stored-records.js";
-import { inWriteTransaction } from "./transaction.js";
+import { inRecordWrite } from "./transaction.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 type RunSequence = number | bigint;
@@ -84,7 +84,7 @@ export function writeRun(
     runId: randomUUID(),
     run,
   };
-  return inWriteTransaction(database, () => {
+  return inRecordWrite(database, () => {
     insertRun(database, stored);
     return readBack(selectRun(database, stored, stored.runId), stored.runId);
   });

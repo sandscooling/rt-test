@@ -235,8 +235,9 @@ function storedRun(
 function results(
   discovery: StoredDiscovery | undefined,
   latestRuns: readonly StoredRun[] = [],
+  discoveryRefusal?: string,
 ): LatestResults {
-  return { discovery, latestRuns };
+  return { discovery, discoveryRefusal, latestRuns };
 }
 
 function answered<A extends object>(answer: A | NoAnswer): A {
@@ -1466,6 +1467,46 @@ describe("a summary with nothing to answer", () => {
     expect("noAnswer" in answer ? answer.noAnswer : answer).toMatch(
       /running workspace packages\/a/,
     );
+  });
+
+  /** The reason a summary gives for answering nothing while the latest discovery is refused with `refusal`. */
+  function refusedDiscoveryReason(refusal: string): string {
+    const answer = summaryAnswer(
+      results(undefined, [], refusal),
+      { ...IDLE, activity: { state: "running", workspacePath: WORKSPACE_A } },
+      UNSETTLED,
+    );
+    return "noAnswer" in answer ? answer.noAnswer : "answered";
+  }
+
+  it("D2933: with the latest discovery refused, the reason names the refusal, that the daemon answers once a new discovery replaces it, and its activity", () => {
+    const refusal = 'The store holds an unreadable not_read: {"x":1}';
+    const reason = refusedDiscoveryReason(refusal);
+    expect({
+      refusal: reason.includes(refusal),
+      replaced: reason.includes("answers once a new discovery replaces it"),
+      activity: reason.includes("running workspace packages/a"),
+    }).toStrictEqual({ refusal: true, replaced: true, activity: true });
+  });
+
+  it("D2934: a refusal past 1,000 characters is quoted cut to 1,000, counting the rest, and one of exactly 1,000 whole", () => {
+    const kept = "r".repeat(1000);
+    const over = refusedDiscoveryReason(`${kept}#####`);
+    const atLimit = refusedDiscoveryReason(kept);
+    expect({
+      over: {
+        kept: over.includes(kept),
+        cut: !over.includes("#"),
+        counted: over.includes("(5 more characters are in the daemon log)"),
+      },
+      atLimit: {
+        kept: atLimit.includes(kept),
+        counted: atLimit.includes("more characters"),
+      },
+    }).toStrictEqual({
+      over: { kept: true, cut: true, counted: true },
+      atLimit: { kept: true, counted: false },
+    });
   });
 });
 

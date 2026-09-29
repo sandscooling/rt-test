@@ -8,6 +8,7 @@ import {
   type WatchListener,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { DependencyBuilds } from "../src/daemon/dependency-builds.js";
 import {
@@ -49,12 +50,14 @@ import {
   type LatestResults,
   type RtTestStore,
 } from "../src/store/open-store.js";
+import { STORE_SCHEMA_VERSION } from "../src/store/schema.js";
 import type {
   StoreBindings,
   StoredDiscovery,
   StoredRun,
   StoreScope,
 } from "../src/store/stored-records.js";
+import { NewerStoreSchemaError } from "../src/store/transaction.js";
 import type { ConfirmedStart } from "../src/vitest/confirmed-start.js";
 import type {
   TestDiscovery,
@@ -987,6 +990,298 @@ describe(
         ),
         idle: started.log.entries.includes(IDLE_ENTRY),
       }).toStrictEqual({ returned: true, logged: true, idle: true });
+    });
+  },
+);
+
+describe(
+  "a latest discovery the store refuses, and a store a newer RT Test migrated",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    const UNREADABLE = "The store holds an unreadable";
+    const REFUSAL = `${UNREADABLE} not_read: {"x":1}`;
+    const OTHER_REFUSAL = `${UNREADABLE} not_read: {"y":2}`;
+    const MADE_UNREADABLE = `UPDATE discoveries SET not_read = '{"x":1}'`;
+    const MADE_OTHERWISE_UNREADABLE = `UPDATE discoveries SET not_read = '{"y":2}'`;
+    const MADE_READABLE = "UPDATE discoveries SET not_read = '[]'";
+    const NEWER = STORE_SCHEMA_VERSION + 1;
+    const UNFINGERPRINTED = { kind: "not-fingerprinted" } as const;
+
+    /** Runs `sql` over the store's file through a second connection, as another process would. */
+    function alterStore(file: string, sql: string): void {
+      const database = new DatabaseSync(file);
+      try {
+        database.exec(sql);
+      } finally {
+        database.close();
+      }
+    }
+
+    /** A store under `dir` whose latest discovery an earlier life stored, since made unreadable by `REFUSAL`. */
+    function refusedDiscoveryStore(dir: string): RtTestStore {
+      const store = openStore(join(dir, "state"));
+      store.writeDiscovery(
+        { ...SCOPE, inputFingerprint: UNFINGERPRINTED },
+        discovery(discovered("a")),
+      );
+      alterStore(store.file, MADE_UNREADABLE);
+      return store;
+    }
+
+    /** Each log entry quoting the refusal, by what it says. */
+    function refusalEntries(log: MemoryLog) {
+      return log.entries
+        .filter((entry) => entry.includes(REFUSAL))
+        .map((entry) => ({
+          warning: entry.startsWith("warning: "),
+          due: entry.includes("a discovery is due as if none were stored"),
+          noRun: entry.includes("no workspace runs until it is stored"),
+          whole: entry.endsWith(`: ${REFUSAL}`),
+        }));
+    }
+
+    function summaryOutcome(lifecycle: DaemonLifecycle): string {
+      try {
+        lifecycle.summary();
+        return "answered";
+      } catch (error) {
+        return error instanceof NewerStoreSchemaError &&
+          error.message.includes("nothing was read")
+          ? "refused for a newer schema, nothing read"
+          : String(error);
+      }
+    }
+
+    /** Begins `started` and runs `body`, then stops the daemon, whose stop closes its store, so no job outlives the test. */
+    function begunThenStopped<T>(
+      started: Daemon,
+      body: (begun: Daemon) => T | Promise<T>,
+    ): Promise<T> {
+      return thenStopped(started, async () => body(await begun(started)));
+    }
+
+    /** The refusal each warning entry quotes, in the order logged. */
+    function quotedRefusals(log: MemoryLog): string[] {
+      return log.entries
+        .filter((entry) => entry.startsWith("warning: "))
+        .flatMap((entry) => {
+          const at = entry.indexOf(UNREADABLE);
+          return at === -1 ? [] : [entry.slice(at)];
+        });
+    }
+
+    /**
+     * Runs a daemon over a readable store to idle, so it has stored and read its own discovery, then runs `after`
+     * against the store's file and the daemon, and returns the refusals the log quotes.
+     */
+    function afterIdle(
+      after: (file: string, lifecycle: DaemonLifecycle) => void,
+    ): Promise<string[]> {
+      return inTempDir((dir) => {
+        const store = openStore(join(dir, "state"));
+        const started = daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          store,
+        );
+        return begunThenStopped(started, ({ lifecycle, log }) => {
+          after(store.file, lifecycle);
+          return quotedRefusals(log);
+        });
+      });
+    }
+
+    it("D2927: a latest discovery refused as unreadable leaves a discovery due, and the workspaces run from the discovery that replaces it", async () => {
+      const outcome = await inTempDir((dir) => {
+        const store = refusedDiscoveryStore(dir);
+        const started = daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          store,
+        );
+        return begunThenStopped(started, ({ executor }) => ({
+          discoveries: executor.discoveries,
+          runs: executor.runs,
+          latest: settle(() => {
+            const latest = store.readLatestResults(SCOPE);
+            return {
+              readable: latest.discovery !== undefined,
+              discoveryRefusal: latest.discoveryRefusal,
+            };
+          }),
+        }));
+      });
+      expect(outcome).toStrictEqual({
+        discoveries: 1,
+        runs: ["a"],
+        latest: { readable: true, discoveryRefusal: undefined },
+      });
+    });
+
+    it("D2928: a refusal of the latest discovery read at every plan is logged once, as a warning that a discovery is due and no workspace runs, with its whole text", async () => {
+      const entries = await inTempDir((dir) => {
+        const store = refusedDiscoveryStore(dir);
+        const started = daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: false,
+            reason: "the test's discovery stores nothing",
+          }),
+          store,
+        );
+        return begunThenStopped(started, ({ log }) => refusalEntries(log));
+      });
+      expect(entries).toStrictEqual([
+        { warning: true, due: true, noRun: true, whole: true },
+      ]);
+    });
+
+    it("D2929: at start a refused latest discovery is logged as the refusal, not as a failed read, before the first reconciliation ends", async () => {
+      const outcome = await inTempDir((dir) => {
+        const store = refusedDiscoveryStore(dir);
+        const inputs = new StandInInputs({ heldReconciliation: true });
+        const started = daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          store,
+          IDENTITY,
+          inputs,
+        );
+        return begunThenStopped(started, ({ log, executor }) => {
+          const atStart = {
+            refusals: refusalEntries(log).length,
+            readErrors: log.entries.filter((entry) =>
+              entry.startsWith("error: reading the latest stored discovery"),
+            ).length,
+            discoveries: executor.discoveries,
+          };
+          return atStart;
+        });
+      });
+      expect(outcome).toStrictEqual({
+        refusals: 1,
+        readErrors: 0,
+        discoveries: 0,
+      });
+    });
+
+    it("D2930: a store a newer RT Test migrated plans no discovery, and a summary is refused naming it", async () => {
+      const outcome = await inTempDir((dir) => {
+        const store = openStore(join(dir, "state"));
+        alterStore(store.file, `PRAGMA user_version = ${NEWER}`);
+        const started = daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          store,
+        );
+        return begunThenStopped(started, ({ executor, lifecycle }) => ({
+          discoveries: executor.discoveries,
+          summary: summaryOutcome(lifecycle),
+        }));
+      });
+      expect(outcome).toStrictEqual({
+        discoveries: 0,
+        summary: "refused for a newer schema, nothing read",
+      });
+    });
+
+    it("D2931: a run whose store write was refused for a newer schema is listed as stored nothing, with the refusal in its reason", async () => {
+      const outcome = await inTempDir((dir) => {
+        const store = openStore(join(dir, "state"));
+        const executor = new ScriptedExecutor(
+          { ended: true, value: discovery(discovered("a")) },
+          (path) => {
+            alterStore(store.file, `PRAGMA user_version = ${NEWER}`);
+            return { ended: true, value: interrupted(path) };
+          },
+        );
+        const started = daemon(confirmed("a"), executor, store);
+        return begunThenStopped(started, ({ lifecycle }) =>
+          lifecycle.status().unstoredJobs.map((job) => ({
+            workspacePath: job.workspacePath,
+            failed: job.reason.startsWith("the store write failed: "),
+            namesRefusal: job.reason.endsWith(
+              "so nothing was stored. Restart the daemon with the newer RT Test.",
+            ),
+          })),
+        );
+      });
+      expect(outcome).toStrictEqual([
+        { workspacePath: "a", failed: true, namesRefusal: true },
+      ]);
+    });
+
+    it("D2932: a run whose store write failed for any other reason is listed with the plain reason, its detail only in the log", async () => {
+      const { lifecycle, log } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          new RecordingStore(["a"]),
+        ),
+      );
+      expect({
+        unstored: lifecycle.status().unstoredJobs,
+        logged: log.entries
+          .filter((entry) => entry.includes("database is locked"))
+          .map((entry) => entry.startsWith("error: storing")),
+      }).toStrictEqual({
+        unstored: [{ workspacePath: "a", reason: "the store write failed" }],
+        logged: [true],
+      });
+    });
+
+    it("D2958: a refusal a summary reads first is logged before the answer quotes it", async () => {
+      const refusals = await afterIdle((file, lifecycle) => {
+        alterStore(file, MADE_UNREADABLE);
+        lifecycle.summary();
+      });
+      expect(refusals).toStrictEqual([REFUSAL]);
+    });
+
+    it("D2959: a refusal a path status reads first is logged before the answer quotes it", async () => {
+      const refusals = await afterIdle((file, lifecycle) => {
+        alterStore(file, MADE_UNREADABLE);
+        lifecycle.pathStatus(join(IDENTITY.consumerRoot, "a"));
+      });
+      expect(refusals).toStrictEqual([REFUSAL]);
+    });
+
+    it("D2960: a different refusal of the latest discovery is logged too, once each", async () => {
+      const refusals = await afterIdle((file, lifecycle) => {
+        alterStore(file, MADE_UNREADABLE);
+        lifecycle.summary();
+        lifecycle.summary();
+        alterStore(file, MADE_OTHERWISE_UNREADABLE);
+        lifecycle.summary();
+      });
+      expect(refusals).toStrictEqual([REFUSAL, OTHER_REFUSAL]);
+    });
+
+    it("D2961: a refusal that returns after a readable discovery replaced it is logged again", async () => {
+      const refusals = await afterIdle((file, lifecycle) => {
+        alterStore(file, MADE_UNREADABLE);
+        lifecycle.summary();
+        alterStore(file, MADE_READABLE);
+        lifecycle.summary();
+        alterStore(file, MADE_UNREADABLE);
+        lifecycle.summary();
+      });
+      expect(refusals).toStrictEqual([REFUSAL, REFUSAL]);
     });
   },
 );

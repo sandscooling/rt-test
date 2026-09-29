@@ -245,6 +245,7 @@ export class RecordingStore implements RtTestStore {
               discoveryId: "discovery",
               discovery,
             },
+      discoveryRefusal: undefined,
       latestRuns: [...latest.values()].flatMap((index) => {
         const run = this.runs[index];
         return run === undefined

@@ -14,7 +14,7 @@ import {
   type StoreBindings,
   type StoredDiscovery,
 } from "./stored-records.js";
-import { inWriteTransaction } from "./transaction.js";
+import { inRecordWrite } from "./transaction.js";
 
 interface WorkspaceColumns {
   readonly vitestVersion: string | null;
@@ -70,7 +70,7 @@ export function writeDiscovery(
   const { fingerprintKind, fingerprintDigest } =
     fingerprintColumns(inputFingerprint);
   const discoveryId = randomUUID();
-  return inWriteTransaction(database, () => {
+  return inRecordWrite(database, () => {
     const { lastInsertRowid } = database
       .prepare(INSERT_DISCOVERY)
       .run(

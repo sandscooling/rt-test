@@ -2,7 +2,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
+import { errorText } from "../vitest/error-text.js";
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
+import { UnreadableRecordError } from "./columns.js";
 import {
   readLatestDiscovery,
   selectLatestDiscovery,
@@ -23,13 +25,20 @@ import {
   type StoredRun,
   type StoreScope,
 } from "./stored-records.js";
-import { inReadTransaction, inWriteTransaction } from "./transaction.js";
+import {
+  inRecordRead,
+  inWriteTransaction,
+  isNewerSchema,
+} from "./transaction.js";
 import { writeDiscovery } from "./write-discovery.js";
 import { writeRun } from "./write-run.js";
 
 /** What a query counts from, read from one snapshot. */
 export interface LatestResults {
+  /** Undefined when none was stored, or when the one stored last was refused. */
   readonly discovery: StoredDiscovery | undefined;
+  /** Why the discovery stored last was refused as unreadable. */
+  readonly discoveryRefusal: string | undefined;
   /** The run stored last for each workspace path, in stored order. */
   readonly latestRuns: readonly StoredRun[];
 }
@@ -138,7 +147,7 @@ function refusalReason(header: StoreHeader): string | undefined {
   if (header.applicationId !== STORE_APPLICATION_ID) {
     return "it is not an RT Test store";
   }
-  if (header.userVersion > STORE_SCHEMA_VERSION) {
+  if (isNewerSchema(header.userVersion)) {
     return "it was written by a newer RT Test";
   }
   if (isMigratable(header)) return undefined;
@@ -202,8 +211,24 @@ function readLatestResults(
   scope: StoreScope,
 ): LatestResults {
   requireScope(scope);
-  return inReadTransaction(database, () => ({
-    discovery: selectLatestDiscovery(database, scope),
+  return inRecordRead(database, () => ({
+    ...latestDiscovery(database, scope),
     latestRuns: selectLatestRuns(database, scope),
   }));
+}
+
+/** A refused discovery reads as none, beside why, so the daemon discovers again rather than never planning. */
+function latestDiscovery(
+  database: DatabaseSync,
+  scope: StoreScope,
+): Pick<LatestResults, "discovery" | "discoveryRefusal"> {
+  try {
+    return {
+      discovery: selectLatestDiscovery(database, scope),
+      discoveryRefusal: undefined,
+    };
+  } catch (error) {
+    if (!(error instanceof UnreadableRecordError)) throw error;
+    return { discovery: undefined, discoveryRefusal: errorText(error) };
+  }
 }

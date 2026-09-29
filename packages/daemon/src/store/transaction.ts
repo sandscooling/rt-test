@@ -1,4 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
+import { STORE_SCHEMA_VERSION } from "./schema.js";
+
+const SELECT_SCHEMA_VERSION = "SELECT user_version FROM pragma_user_version";
+const NOTHING_READ = "nothing was read";
+const NOTHING_STORED = "nothing was stored";
+
+/** A store a newer RT Test migrated after this one opened it, whose records this one may misread or write in an older shape. */
+export class NewerStoreSchemaError extends Error {}
 
 /** Takes the write lock up front, so a second writer waits on `busy_timeout` instead of failing to upgrade a read. */
 export function inWriteTransaction<T>(
@@ -9,10 +17,45 @@ export function inWriteTransaction<T>(
   return finishTransaction(database, write);
 }
 
-/** Every statement inside reads one snapshot, so a write committed part way through a read is not seen by half of it. */
-export function inReadTransaction<T>(database: DatabaseSync, read: () => T): T {
+/** Writes records under the write lock, refused whole in a store whose schema is newer than this RT Test's. */
+export function inRecordWrite<T>(database: DatabaseSync, write: () => T): T {
+  return inWriteTransaction(database, () => {
+    refuseNewerSchema(database, NOTHING_STORED);
+    return write();
+  });
+}
+
+/**
+ * Every statement inside, the schema version's read among them, reads one snapshot, so a write committed part way
+ * through a read is not seen by half of it; refused in a store whose schema is newer than this RT Test's.
+ */
+export function inRecordRead<T>(database: DatabaseSync, read: () => T): T {
   database.exec("BEGIN");
-  return finishTransaction(database, read);
+  return finishTransaction(database, () => {
+    refuseNewerSchema(database, NOTHING_READ);
+    return read();
+  });
+}
+
+/** The opener checks the version once, so this catches a newer RT Test migrating the store while it is open. */
+function refuseNewerSchema(database: DatabaseSync, outcome: string): void {
+  const version = database.prepare(SELECT_SCHEMA_VERSION).get()?.[
+    "user_version"
+  ];
+  if (typeof version !== "number") {
+    throw new Error(
+      `The store's schema version read as ${String(version)}, not a number`,
+    );
+  }
+  if (!isNewerSchema(version)) return;
+  throw new NewerStoreSchemaError(
+    `The RT Test store is at schema version ${version}, newer than the version ${STORE_SCHEMA_VERSION} this RT Test reads and writes: a newer RT Test migrated it after this daemon opened it, so ${outcome}. Restart the daemon with the newer RT Test.`,
+  );
+}
+
+/** Written by a newer RT Test, whose records this one may misread or write in an older shape. */
+export function isNewerSchema(userVersion: number): boolean {
+  return userVersion > STORE_SCHEMA_VERSION;
 }
 
 function finishTransaction<T>(database: DatabaseSync, work: () => T): T {

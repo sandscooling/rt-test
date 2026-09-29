@@ -98,10 +98,13 @@ export function queryBasis(
   daemon: DaemonView,
   inputs: CurrentInputs,
 ): QueryBasis | NoAnswer {
-  const { discovery } = results;
+  const { discovery, discoveryRefusal } = results;
   if (discovery === undefined) {
     return {
-      noAnswer: `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; it is ${activityText(daemon.activity)}`,
+      noAnswer:
+        discoveryRefusal === undefined
+          ? `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; ${activityClause(daemon)}`
+          : refusedDiscoveryReason(discoveryRefusal, daemon),
     };
   }
   const latestRuns = new Map(
@@ -249,6 +252,20 @@ function discoveredWorkspaceEntries(
       ...cutReason(project.reason),
     })),
   ];
+}
+
+/** The refusal quotes the stored value it could not read, so the answer carries it cut and the daemon log whole. */
+function refusedDiscoveryReason(refusal: string, daemon: DaemonView): string {
+  const { reason, omittedCharacters } = cutReason(refusal);
+  const omitted =
+    omittedCharacters === 0
+      ? ""
+      : ` (${omittedCharacters} more characters are in the daemon log)`;
+  return `the daemon serving ${daemon.consumerRoot} refused the latest discovery stored for this worktree as unreadable, so it answers once a new discovery replaces it; ${activityClause(daemon)}. The refusal: ${reason}${omitted}`;
+}
+
+function activityClause(daemon: DaemonView): string {
+  return `it is ${activityText(daemon.activity)}`;
 }
 
 /** Cuts by code point, so no character is split. */

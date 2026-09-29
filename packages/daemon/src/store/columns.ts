@@ -244,14 +244,17 @@ function spelledDirectory(value: unknown): SpelledDirectory {
   };
 }
 
+/** A stored record this RT Test cannot rebuild, told apart from a failure of the store itself. */
+export class UnreadableRecordError extends Error {}
+
 export function unreadable(
   name: string,
   value: unknown,
   cause?: unknown,
-): Error {
+): UnreadableRecordError {
   const shown =
     typeof value === "bigint" ? String(value) : JSON.stringify(value);
-  return new Error(
+  return new UnreadableRecordError(
     `The store holds an unreadable ${name}: ${shown}`,
     cause === undefined ? undefined : { cause },
   );
