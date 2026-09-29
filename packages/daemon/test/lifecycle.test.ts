@@ -17,7 +17,11 @@ import {
   type JobOutcome,
 } from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
-import type { DaemonActivity, DaemonIdentity } from "../src/daemon/protocol.js";
+import {
+  PROTOCOL_VERSION,
+  type DaemonActivity,
+  type DaemonIdentity,
+} from "../src/daemon/protocol.js";
 import { RunWatch, type RunJudgment } from "../src/daemon/run-judgment.js";
 import {
   ProjectInputs,
@@ -116,7 +120,7 @@ const IDENTITY: DaemonIdentity = {
   ...SCOPE,
   stateDirectory: "/consumer/.rt-test",
   logFile: "/consumer/.rt-test/daemon.log",
-  protocolVersion: 1,
+  protocolVersion: PROTOCOL_VERSION,
 };
 /** No quiet window, so a job begins as soon as the inputs have settled; the window itself is pinned in the scheduler's tests. */
 const NO_QUIET_WINDOW_MS = 0;
@@ -316,17 +320,18 @@ function daemon(
 }
 
 /**
- * A daemon over one confirmed workspace `a`, discovered and run once, with inputs the test scripts. Each run calls
- * `during` with the inputs and the run's count from 1, as what the run sees change while it runs. Every build fails,
- * so each workspace's inputs are the whole project's.
+ * A daemon over one confirmed workspace `a`, discovered as `entryOf` gives it and run once, with inputs the test
+ * scripts. Each run calls `during` with the inputs and the run's count from 1, as what the run sees change while it
+ * runs. Every build fails, so each workspace's inputs are the whole project's.
  */
 function scripted(
   script: InputsScript,
   during: (inputs: StandInInputs, run: number) => void = () => undefined,
+  entryOf: (path: string) => WorkspaceDiscovery = discovered,
 ): Daemon {
   const inputs = new StandInInputs(script);
   const executor: ScriptedExecutor = new ScriptedExecutor(
-    { ended: true, value: discovery(discovered("a")) },
+    { ended: true, value: discovery(entryOf("a")) },
     (path) => {
       during(inputs, executor.runs.length);
       return { ended: true, value: interrupted(path) };
@@ -560,6 +565,20 @@ interface IdleStart {
   readonly storedFingerprint: string | undefined;
 }
 
+/**
+ * `change` until protection has taken a discovery, and nothing after: as the tracker answers for a listed file a
+ * declared pattern kept unwatched, which protection then reads into the inputs, where no later check of the file looks.
+ */
+function untilProtected(
+  started: Daemon | undefined,
+  change: string,
+): string | undefined {
+  const protectedOne = started?.inputs.protected.some(
+    (discovered) => discovered !== undefined,
+  );
+  return protectedOne === true ? undefined : change;
+}
+
 /** Starts the sequence and lets every job that has already settled run to the sequence's end. */
 async function begun(started: Daemon): Promise<Daemon> {
   started.lifecycle.begin();
@@ -750,10 +769,16 @@ describe("the start sequence", () => {
     });
   });
 
-  it("D1879: a discovery during which a listed test module no watch covers may have changed is stored not fingerprinted, naming the module", async () => {
+  it("D1879: a discovery during which a listed test module a declared pattern kept unwatched may have changed is stored not fingerprinted, naming the module", async () => {
     const moduleChanged =
       "packages/a/gen/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran";
-    const { store, log } = await begun(scripted({ moduleChanged }));
+    const held: { daemon?: Daemon } = {};
+    held.daemon = scripted({
+      get moduleChanged() {
+        return untilProtected(held.daemon, moduleChanged);
+      },
+    });
+    const { store, log } = await begun(held.daemon);
     expect({
       discovery: store.discoveryFingerprints,
       logged: log.entries.filter((entry) =>
@@ -763,6 +788,60 @@ describe("the start sequence", () => {
       discovery: [{ kind: "not-fingerprinted" }],
       logged: [`the discovery is stored not fingerprinted: ${moduleChanged}`],
     });
+  });
+
+  it("D3030: a listed test module no watch covers, edited after protection's check and before the discovery's fingerprint is composed, leaves the discovery stored not fingerprinted, naming the module", async () => {
+    const moduleChanged =
+      "packages/a/gen/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran";
+    const held: { daemon?: Daemon } = {};
+    held.daemon = scripted({
+      // The edit lands once the discovery's protection has begun, after its own check of the module and before the fingerprint.
+      get moduleChanged() {
+        return held.daemon?.inputs.protected.some(
+          (protectedDiscovery) => protectedDiscovery !== undefined,
+        ) === true
+          ? moduleChanged
+          : undefined;
+      },
+    });
+    const { store, log } = await begun(held.daemon);
+    expect({
+      discovery: store.discoveryFingerprints,
+      logged: log.entries.filter((entry) =>
+        entry.startsWith("the discovery is stored not fingerprinted"),
+      ),
+    }).toStrictEqual({
+      discovery: [{ kind: "not-fingerprinted" }],
+      logged: [`the discovery is stored not fingerprinted: ${moduleChanged}`],
+    });
+  });
+
+  it("D3100: both checks for a listed file no watch covers are measured from the discovery's start, so an edit during the job is caught however long before the fingerprint it landed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const inputs = new StandInInputs();
+      const executor = new EditingExecutor(
+        discovery(discovered("a")),
+        async () => {
+          vi.setSystemTime(Date.now() + 5000);
+        },
+      );
+      const { lifecycle } = await begun(
+        daemon(
+          confirmed("a"),
+          executor,
+          new RecordingStore(),
+          IDENTITY,
+          inputs,
+        ),
+      );
+      lifecycle.stop();
+      await lifecycle.stopped();
+      const start = inputs.jobStarts.find((jobStart) => jobStart !== undefined);
+      expect(inputs.changedSince).toStrictEqual([start, start]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("D2159: a discovery during which a file only protection's walk found may have changed is stored not fingerprinted, naming the file", async () => {
@@ -1380,16 +1459,19 @@ describe(
 
     it("D2090: a declared test module that changes while the guard waits for the inputs to settle leaves the discovery stored not fingerprinted", async () => {
       const moduleChange = { settled: false };
-      const { inputs, store } = await begun(
-        scripted({
-          heldSettle: 2,
-          get moduleChanged() {
-            return moduleChange.settled
-              ? "src/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran"
-              : undefined;
-          },
-        }),
-      );
+      const held: { daemon?: Daemon } = {};
+      held.daemon = scripted({
+        heldSettle: 2,
+        get moduleChanged() {
+          return moduleChange.settled
+            ? untilProtected(
+                held.daemon,
+                "src/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran",
+              )
+            : undefined;
+        },
+      });
+      const { inputs, store } = await begun(held.daemon);
       moduleChange.settled = true;
       inputs.settleHeld.resolve();
       await flush();
@@ -1535,6 +1617,19 @@ describe("answering a query", () => {
     expect(jobs).toStrictEqual([
       { workspacePath: "a", reason: "the store write failed" },
     ]);
+  });
+
+  it("D3020: a summary during a run reads that run's workspace running, as the answer's activity names it", async () => {
+    const { started } = heldAt("b", ["a", "b"], discoveredWithTest);
+    const { lifecycle } = await begun(started);
+    const answer = lifecycle.summary();
+    expect(
+      "schedule" in answer
+        ? answer.schedule.workspaces.find(
+            (execution) => execution.workspacePath === "b",
+          )
+        : answer,
+    ).toStrictEqual({ workspacePath: "b", state: "running" });
   });
 });
 
@@ -3060,8 +3155,12 @@ class HoldingExecutor extends ScriptedExecutor {
   #held: Deferred<RunOutcome> | undefined;
 
   /** `during` is called as each run starts, with the run's count from 1. */
-  constructor(aborted: RunOutcome, during: (run: number) => void) {
-    super({ ended: true, value: discovery(discovered("a")) });
+  constructor(
+    aborted: RunOutcome,
+    during: (run: number) => void,
+    found: TestDiscovery = discovery(discovered("a")),
+  ) {
+    super({ ended: true, value: found });
     this.#aborted = aborted;
     this.#during = during;
   }
@@ -3212,6 +3311,70 @@ describe(
         ),
       );
       expect(executor.runs).toStrictEqual(["a"]);
+    });
+
+    it("D3018: a run during which a path inside its inputs changed, whose fingerprint could not be taken at its end, reads invalidated in the summary with the verdict's reason", async () => {
+      const phase = { ended: false };
+      const { lifecycle } = await begun(
+        scripted(
+          {
+            fingerprintOf: () =>
+              phase.ended
+                ? { ok: false, reason: UNHEALTHY }
+                : { ok: true, digest: "a-digest" },
+          },
+          (inputs) => {
+            inputs.recordPath(INSIDE);
+            phase.ended = true;
+          },
+          discoveredWithTest,
+        ),
+      );
+      const answer = lifecycle.summary();
+      expect(
+        "workspaces" in answer
+          ? answer.workspaces[0]?.latestRun?.invalidated
+          : answer,
+      ).toStrictEqual({
+        reason: `its inputs changed while it ran: ${INSIDE}`,
+        omittedCharacters: 0,
+      });
+    });
+
+    it("D3019: a workspace whose run a change interrupted reads interrupted in an answer, naming the path, until the next round decides it", async () => {
+      const executions = await inTempDir(async (root) => {
+        const held: { daemon?: Daemon } = {};
+        const inputs: StandInInputs = new StandInInputs({
+          heldSettleIf: () =>
+            held.daemon !== undefined &&
+            held.daemon.executor.runs.length === 1 &&
+            inputs.revision === 2 &&
+            held.daemon.lifecycle.status().activity.state === "idle",
+        });
+        const executor = new HoldingExecutor(
+          INTERRUPTED_RUN,
+          (run) => {
+            if (run !== 1) return;
+            inputs.recordPath(INSIDE);
+            inputs.moveRevision();
+          },
+          discovery(discoveredWithTest("a")),
+        );
+        held.daemon = narrowedDaemon(root, inputs, executor);
+        const started = await begun(held.daemon);
+        await flush();
+        return thenStopped(started, async ({ lifecycle }) => {
+          const answer = lifecycle.summary();
+          return "schedule" in answer ? answer.schedule.workspaces : answer;
+        });
+      });
+      expect(executions).toStrictEqual([
+        {
+          workspacePath: "a",
+          state: "interrupted",
+          interruptedBy: { named: [INSIDE], more: 0 },
+        },
+      ]);
     });
 
     it("D2870: a run a change inside its workspace's inputs made worthless is interrupted once the newer build has ended, stores nothing, is listed with the reason naming the path, and runs again", async () => {

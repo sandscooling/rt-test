@@ -143,9 +143,14 @@ export function digestOf(digest: string): StoreBindings["inputFingerprint"] {
   return { kind: "digest", digest };
 }
 
+/** Each run a recording store holds has its own id, so a later run of a workspace never shares an earlier one's. */
+function runIdAt(index: number): string {
+  return `run-${index}`;
+}
+
 /**
  * A store that records what was written to it, and refuses a write once closed, as a closed store does. It reads each
- * record back under the fingerprint and adapter version it was written with.
+ * record back under the fingerprint, adapter version and run id it was written with.
  */
 export class RecordingStore implements RtTestStore {
   readonly file = "/consumer/.rt-test/store.sqlite";
@@ -172,7 +177,7 @@ export class RecordingStore implements RtTestStore {
     return {
       ...bindings,
       adapterVersion: VITEST_ADAPTER_VERSION,
-      runId: "run",
+      runId: runIdAt(this.runs.length - 1),
       run,
     };
   }
@@ -257,7 +262,7 @@ export class RecordingStore implements RtTestStore {
                   this.runFingerprints[index] ?? UNFINGERPRINTED,
                 adapterVersion:
                   this.runVersions[index] ?? VITEST_ADAPTER_VERSION,
-                runId: `run-${run.workspace.path}`,
+                runId: runIdAt(index),
                 run,
               },
             ];
@@ -333,6 +338,8 @@ export class StandInInputs implements TrackedInputs {
   readonly protected: (TestDiscovery | undefined)[] = [];
   /** The job start each protection was given, in call order. */
   readonly jobStarts: (number | undefined)[] = [];
+  /** The time each check for a protected file changing was measured from, in call order. */
+  readonly changedSince: number[] = [];
   /** The narrowing each view of the inputs was asked for, in call order. */
   readonly narrowings: (QueryNarrowing | undefined)[] = [];
   readonly reconciled = new Deferred<void>();
@@ -379,7 +386,10 @@ export class StandInInputs implements TrackedInputs {
           ok: true,
           digest: DISCOVERY_DIGEST,
         },
-      protectedFileChangedSince: () => this.#script.moduleChanged,
+      protectedFileChangedSince: (_discovery, since) => {
+        this.changedSince.push(since);
+        return this.#script.moduleChanged;
+      },
     };
   }
 

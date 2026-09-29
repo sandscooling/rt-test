@@ -41,11 +41,13 @@ import type {
 import {
   changedWhileRunning,
   keptAlthoughChanged,
+  notKeptVerdict,
   RunWatch,
   runVerdict,
 } from "./run-judgment.js";
 import { Scheduler, type DiscoverReport, type RunReport } from "./scheduler.js";
 import type { DaemonHandlers } from "./server.js";
+import type { EndedRun } from "./workspace-schedule.js";
 
 const DISCOVERY_STOPPED_REASON =
   "the stop arrived during the discovery, so it was not stored";
@@ -222,7 +224,9 @@ export class DaemonLifecycle implements DaemonHandlers {
 
   #view(): DaemonView {
     const { activity, unstoredJobs } = this.status();
-    return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };
+    const { consumerRoot } = this.identity;
+    const { schedule } = this.#scheduler;
+    return { consumerRoot, activity, unstoredJobs, schedule };
   }
 
   stop(): void {
@@ -259,8 +263,16 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);
       return { stored: false };
     }
-    const bindings = this.#bindings("the discovery", held, () =>
-      inputs.current().discoveryFingerprint(discovery),
+    const bindings = this.#bindings(
+      "the discovery",
+      held,
+      (): FingerprintResult => {
+        const now = inputs.current();
+        const print = now.discoveryFingerprint(discovery);
+        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.
+        const moved = now.protectedFileChangedSince(discovery, startedAt);
+        return moved === undefined ? print : { ok: false, reason: moved };
+      },
     );
     const stored = this.#store("the discovery", undefined, () =>
       this.#builds.use(this.#parts.store.writeDiscovery(bindings, discovery)),
@@ -369,15 +381,20 @@ export class DaemonLifecycle implements DaemonHandlers {
     const { log } = this.#parts;
     const path = entry.workspace.path;
     const job = `the run of ${path}`;
-    const report = (stored: boolean, changed: boolean): RunReport => ({
+    const report = (
+      stored: boolean,
+      changed: boolean,
+      ended: EndedRun = {},
+    ): RunReport => ({
       revision,
       stored,
       changedWhileRunning: changed,
+      ...ended,
     });
-    const { interruption } = watch;
+    const { interruption, interruptedBy = [] } = watch;
     if (interruption !== undefined && interruptedRun(outcome)) {
       this.#nothingStored(path, interruption);
-      return report(false, true);
+      return report(false, true, { interruptedBy });
     }
     const left = runToStore(outcome);
     if ("unstored" in left) {
@@ -392,9 +409,12 @@ export class DaemonLifecycle implements DaemonHandlers {
       runVerdict(judgment),
       () => watch.started,
     );
-    const stored = this.#store(job, path, () =>
-      this.#parts.store.writeRun(bindings, run),
-    );
+    let ended: EndedRun = {};
+    const stored = this.#store(job, path, () => {
+      const { runId } = this.#parts.store.writeRun(bindings, run);
+      const notKept = notKeptVerdict(judgment);
+      ended = notKept === undefined ? { runId } : { runId, notKept };
+    });
     if (stored) {
       const kept = keptAlthoughChanged(judgment);
       if (kept !== undefined) log.entry(`${job} ${kept}`);
@@ -402,7 +422,7 @@ export class DaemonLifecycle implements DaemonHandlers {
         `run ended: ${path} ${run.status}${"execution" in run ? ` ${run.execution}` : ""}`,
       );
     }
-    return report(stored, changedWhileRunning(judgment));
+    return report(stored, changedWhileRunning(judgment), ended);
   }
 
   /** A job starts only at the revision that was planned and settled, and never after a stop; otherwise the scheduler plans again. */

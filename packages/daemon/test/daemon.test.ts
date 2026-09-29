@@ -39,7 +39,7 @@ import {
   EXECUTOR_BOUND_MS,
   type ExecutorRequest,
 } from "../src/daemon/executor-jobs.js";
-import { RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
+import { PROTOCOL_VERSION, RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
 import {
@@ -94,7 +94,8 @@ const LOADED_MARGIN_MS = 25_000;
 const HOLD_LIFETIME_MS = EXECUTOR_BOUND_MS + LOADED_MARGIN_MS;
 /** The marker the fixture writes once a hold's lifetime has run out. */
 const HELD_OUT = "held-out";
-const NEXT_PROTOCOL_VERSION = 2;
+/** A version the daemon does not speak, derived so that raising the daemon's own never makes it match. */
+const NEXT_PROTOCOL_VERSION = PROTOCOL_VERSION + 1;
 const STARTER = "the starter";
 const FORKED_DAEMON = "the forked daemon";
 const EXECUTOR = "the executor";
@@ -206,12 +207,12 @@ function answerAs(pid: number, proving: Proving) {
         case "hello":
           return {
             type: "hello",
-            protocolVersion: 1,
+            protocolVersion: PROTOCOL_VERSION,
             pid,
             ...proofField(proving, context, request, pid),
           };
         case "status":
-          return { type: "status", protocolVersion: 1, pid };
+          return { type: "status", protocolVersion: PROTOCOL_VERSION, pid };
         case "stop":
           void connectionClosed.then(() => standIn.close());
           return {
@@ -428,7 +429,7 @@ describe("starting a daemon", () => {
             ...consumerIdentity(root),
             stateDirectory: join(root, ".rt-test"),
             logDirectory: join(root, ".rt-test"),
-            protocolVersion: 1,
+            protocolVersion: PROTOCOL_VERSION,
           },
         };
       });
@@ -584,7 +585,7 @@ describe("starting a daemon", () => {
             (entry) => entry.startsWith("start") || entry === "stopped",
           ),
           expected: [
-            `start: consumer root ${root}, state directory ${join(root, ".rt-test")}, process ${identity.pid}, protocol version 1`,
+            `start: consumer root ${root}, state directory ${join(root, ".rt-test")}, process ${identity.pid}, protocol version ${PROTOCOL_VERSION}`,
             "stopped",
           ],
         };
@@ -856,7 +857,7 @@ describe("stopping a daemon", () => {
           type: "error",
           code: "protocol-version-mismatch",
           message: expect.any(String),
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           clientProtocolVersion: NEXT_PROTOCOL_VERSION,
           pid,
         },
@@ -877,7 +878,7 @@ describe("stopping a daemon", () => {
           code: "protocol-version-mismatch",
           message: "another version",
           protocolVersion: NEXT_PROTOCOL_VERSION,
-          clientProtocolVersion: 1,
+          clientProtocolVersion: PROTOCOL_VERSION,
           pid: 4242,
           ...proofField("key", context, request, 4242),
         }),
@@ -887,7 +888,9 @@ describe("stopping a daemon", () => {
     );
     expect(start).toStrictEqual({
       thrown: expect.stringMatching(
-        /process 4242\b.*protocol version 2\b.*can be stopped/,
+        new RegExp(
+          String.raw`process 4242\b.*protocol version ${NEXT_PROTOCOL_VERSION}\b.*can be stopped`,
+        ),
       ),
     });
   });

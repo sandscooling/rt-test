@@ -5,7 +5,10 @@ import {
   daemonVerifier,
   type DaemonVerifier,
 } from "../src/daemon/endpoint-proof.js";
-import type { DaemonIdentity } from "../src/daemon/protocol.js";
+import {
+  PROTOCOL_VERSION,
+  type DaemonIdentity,
+} from "../src/daemon/protocol.js";
 import type { SummaryAnswer } from "../src/query/answer.js";
 import {
   CLOSE_GRACE_MS,
@@ -37,10 +40,12 @@ const IDENTITY: DaemonIdentity = {
   worktreeIdentity: "/consumer",
   stateDirectory: "/consumer/.rt-test",
   logFile: LOG_FILE,
-  protocolVersion: 1,
+  protocolVersion: PROTOCOL_VERSION,
 };
-const HELLO = { type: "hello", protocolVersion: 1 };
-const STATUS = { type: "status", protocolVersion: 1 };
+/** A version the daemon does not speak, derived so that raising the daemon's own never makes it match. */
+const OTHER_PROTOCOL_VERSION = PROTOCOL_VERSION + 1;
+const HELLO = { type: "hello", protocolVersion: PROTOCOL_VERSION };
+const STATUS = { type: "status", protocolVersion: PROTOCOL_VERSION };
 const STOP = { type: "stop" };
 /** One byte past the frozen 1 MiB line limit. */
 const OVERLONG_LINE = `${"a".repeat(1024 * 1024 + 1)}\n`;
@@ -162,7 +167,10 @@ describe("answering a bad line and serving on", () => {
   it("D1446: an unknown request gets an unknown-request error, and the status after it is answered", async () => {
     const kinds = await onServer((connection) => {
       connection.sendLine(HELLO);
-      connection.sendLine({ type: "frobnicate", protocolVersion: 1 });
+      connection.sendLine({
+        type: "frobnicate",
+        protocolVersion: PROTOCOL_VERSION,
+      });
       connection.sendLine(STATUS);
       return answerKinds(connection, 3);
     });
@@ -188,7 +196,10 @@ describe("answering a bad line and serving on", () => {
   it("D1440: a request other than status or stop while the daemon stops gets a stopping error", async () => {
     const kinds = await onServer((connection) => {
       connection.sendLine(HELLO);
-      connection.sendLine({ type: "frobnicate", protocolVersion: 1 });
+      connection.sendLine({
+        type: "frobnicate",
+        protocolVersion: PROTOCOL_VERSION,
+      });
       return answerKinds(connection, 2);
     }, true);
     expect(kinds).toStrictEqual([
@@ -206,14 +217,14 @@ describe("writing only in answer to a line", () => {
     });
     expect(first).toStrictEqual({
       type: "hello",
-      protocolVersion: 1,
+      protocolVersion: PROTOCOL_VERSION,
       pid: DAEMON_PID,
     });
   });
 });
 
 describe("answering a query", () => {
-  const SUMMARY = { type: "summary", protocolVersion: 1 };
+  const SUMMARY = { type: "summary", protocolVersion: PROTOCOL_VERSION };
   /** The frozen 1 MiB line limit, in bytes. */
   const LINE_LIMIT_BYTES = 1_048_576;
 
@@ -345,7 +356,7 @@ describe("answering a query", () => {
         connection.sendLine(HELLO);
         connection.sendLine({
           type: "path-status",
-          protocolVersion: 1,
+          protocolVersion: PROTOCOL_VERSION,
           path: "packages/a",
         });
         return answerKinds(connection, 2);
@@ -368,7 +379,10 @@ describe("answering a query", () => {
 describe("a client of another protocol version", () => {
   it("D1449: after a hello of another version, any line but the stop closes the connection unanswered", async () => {
     const kinds = await onServer((connection) => {
-      connection.sendLine({ type: "hello", protocolVersion: 2 });
+      connection.sendLine({
+        type: "hello",
+        protocolVersion: OTHER_PROTOCOL_VERSION,
+      });
       connection.sendLine(STATUS);
       return answerKinds(connection, 2);
     });
@@ -454,7 +468,7 @@ describe("proving each answer to a challenge", () => {
     });
     expect(answer).toStrictEqual({
       type: "hello",
-      protocolVersion: 1,
+      protocolVersion: PROTOCOL_VERSION,
       pid: process.pid,
     });
   });
@@ -477,7 +491,7 @@ describe("proving each answer to a challenge", () => {
     });
     expect(answer).toStrictEqual({
       type: "hello",
-      protocolVersion: 1,
+      protocolVersion: PROTOCOL_VERSION,
       pid: process.pid,
     });
   });
@@ -486,7 +500,7 @@ describe("proving each answer to a challenge", () => {
     const refusal = await onProvingServer(async (connection, verifier) => {
       connection.sendLine({
         type: "hello",
-        protocolVersion: 2,
+        protocolVersion: OTHER_PROTOCOL_VERSION,
         challenge: "mismatch",
       });
       const answer = await connection.next();
@@ -499,7 +513,7 @@ describe("proving each answer to a challenge", () => {
     const refusal = await onProvingServer(async (connection, verifier) => {
       connection.sendLine({
         type: "hello",
-        protocolVersion: 2,
+        protocolVersion: OTHER_PROTOCOL_VERSION,
         challenge: "mismatch",
       });
       await connection.next();

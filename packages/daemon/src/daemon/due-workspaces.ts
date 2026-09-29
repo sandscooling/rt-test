@@ -1,6 +1,6 @@
 import type { TestOutcome } from "@rt-test/core";
 import { workspaceTestModules } from "../inputs/non-inputs.js";
-import { CURRENT } from "../query/answer.js";
+import { CURRENT, DUE_REASON, type DueReason } from "../query/answer.js";
 import {
   isCurrentAdapterVersion,
   recordFreshness,
@@ -9,21 +9,25 @@ import { NOT_FINGERPRINTED } from "../store/schema.js";
 import type { StoredRun } from "../store/stored-records.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 
-export const DUE_REASON = {
-  noRun: "it has no stored run",
-  anotherAdapterVersion:
+/** How the log's `due:` line gives each due reason. */
+export const DUE_REASON_TEXT: Readonly<Record<DueReason, string>> = {
+  [DUE_REASON.noRun]: "it has no stored run",
+  [DUE_REASON.anotherAdapterVersion]:
     "its latest run was stored under another adapter version",
-  notFingerprinted: "its latest run was stored not fingerprinted",
-  noCurrentFingerprint: "its current input fingerprint cannot be computed",
-  inputsChanged: "its inputs differ from those of its latest run",
-  failedRun:
+  [DUE_REASON.notFingerprinted]: "its latest run was stored not fingerprinted",
+  [DUE_REASON.noCurrentFingerprint]:
+    "its current input fingerprint cannot be computed",
+  [DUE_REASON.inputsChanged]: "its inputs differ from those of its latest run",
+  [DUE_REASON.failedRun]:
     "its latest run failed with no input change to blame, so the periodic reconciliation retries it",
-  crashedRun:
+  [DUE_REASON.crashedRun]:
     "its latest run's executor process ended during the run with no input change to blame, so the periodic reconciliation retries it",
-} as const;
+};
 
 /** Why the periodic reconciliation retries a workspace by its latest run: that run failed or crashed. Undefined for any other run. */
-export function retryReason(latest: StoredRun | undefined): string | undefined {
+export function retryReason(
+  latest: StoredRun | undefined,
+): DueReason | undefined {
   switch (latest?.run.status) {
     case "failed":
       return DUE_REASON.failedRun;
@@ -32,6 +36,21 @@ export function retryReason(latest: StoredRun | undefined): string | undefined {
     default:
       return undefined;
   }
+}
+
+/**
+ * Whether the next periodic reconciliation retries the workspace: its latest run failed or crashed, or its last run
+ * attempted stored nothing while it is still not current.
+ */
+export function retryOwed(
+  latest: StoredRun | undefined,
+  stale: DueReason | undefined,
+  attemptStoredNothing: boolean,
+): boolean {
+  return (
+    retryReason(latest) !== undefined ||
+    (attemptStoredNothing && stale !== undefined)
+  );
 }
 
 export const QUEUE_GROUP = {
@@ -62,7 +81,7 @@ const FAILING_OUTCOMES: readonly TestOutcome[] = ["failed", "error"];
 /** A workspace to run, with why it is due and where it falls in the round's order. */
 export interface QueuedWorkspace {
   readonly entry: WorkspaceDiscovery;
-  readonly reason: string;
+  readonly reason: DueReason;
   readonly group: QueueGroup;
 }
 
@@ -73,7 +92,7 @@ export interface QueuedWorkspace {
 export function staleReason(
   latest: StoredRun | undefined,
   currentDigest: string | undefined,
-): string | undefined {
+): DueReason | undefined {
   if (latest === undefined) return DUE_REASON.noRun;
   if (recordFreshness(latest, currentDigest) === CURRENT) return undefined;
   if (!isCurrentAdapterVersion(latest.adapterVersion)) {

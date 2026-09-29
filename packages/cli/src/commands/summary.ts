@@ -74,8 +74,18 @@ function summaryText(answer: SummaryResponse): string {
 
 function workspaceLine(workspace: WorkspaceFacts): string {
   const run = workspace.latestRun;
-  const facts = run === null ? ["no run stored"] : runFacts(run);
+  const facts = run === null ? ["no run stored"] : labelledRunFacts(run);
   return `${INDENT}${oneLine(workspace.workspacePath)}: ${facts.join(DETAIL_SEPARATOR)}`;
+}
+
+/** The run's status, then its invalidated label when it has one, then the rest of its facts. */
+function labelledRunFacts(run: LatestRunFacts): string[] {
+  const [status = "", ...rest] = runFacts(run);
+  const label =
+    run.invalidated === undefined
+      ? []
+      : [`invalidated${REASON_SEPARATOR}${cutReasonText(run.invalidated)}`];
+  return [status, ...label, ...rest];
 }
 
 function runFacts(run: LatestRunFacts): string[] {

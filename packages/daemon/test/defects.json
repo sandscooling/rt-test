@@ -2796,15 +2796,15 @@
     "id": "D1841",
     "defect": "A query's answer says the daemon is idle while it runs a workspace.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };",
-    "new": "return { consumerRoot: this.identity.consumerRoot, activity: { state: \"idle\" as const }, unstoredJobs };"
+    "old": "    return { consumerRoot, activity, unstoredJobs, schedule };",
+    "new": "    return { consumerRoot, activity: { state: \"idle\" as const }, unstoredJobs, schedule };"
   },
   {
     "id": "D1842",
     "defect": "A query's answer leaves out the jobs that ended with nothing stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };",
-    "new": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs: [] };"
+    "old": "    return { consumerRoot, activity, unstoredJobs, schedule };",
+    "new": "    return { consumerRoot, activity, unstoredJobs: [], schedule };"
   },
   {
     "id": "D1843",
@@ -2838,8 +2838,8 @@
     "id": "D1845",
     "defect": "A real daemon's answer says it is idle while it runs a workspace: D1841's defect and mutation, re-proved end to end through the protocol and client.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "return { consumerRoot: this.identity.consumerRoot, activity, unstoredJobs };",
-    "new": "return { consumerRoot: this.identity.consumerRoot, activity: { state: \"idle\" as const }, unstoredJobs };"
+    "old": "    return { consumerRoot, activity, unstoredJobs, schedule };",
+    "new": "    return { consumerRoot, activity: { state: \"idle\" as const }, unstoredJobs, schedule };"
   },
   {
     "id": "D1846",
@@ -3328,7 +3328,7 @@
     "id": "D1987",
     "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }\n    const bindings = this.#bindings(\"the discovery\", held, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );",
+    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }\n    const bindings = this.#bindings(\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
     "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }"
   },
   {
@@ -5092,8 +5092,8 @@
     "id": "D2655",
     "defect": "A round begins before the events the inputs have not yet read are read, so it plans over inputs that are about to change.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      await inputs.settled();\n      await awaitBuild(\"the round\");",
-    "new": "      await awaitBuild(\"the round\");"
+    "old": "      await inputs.settled();\n      waiting(ROUND_WAIT.dependencyBuild);",
+    "new": "      waiting(ROUND_WAIT.dependencyBuild);"
   },
   {
     "id": "D2656",
@@ -5337,8 +5337,8 @@
     "id": "D2693",
     "defect": "A workspace whose run ended with nothing stored and is still due is not retried when a periodic reconciliation ends, so it stays without a result until an input changes.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "        this.#attempts.get(path)?.nothingStored === true && stale !== undefined;",
-    "new": "        false;"
+    "old": "retryOwed(latest, stale, this.#storedNothing(path))",
+    "new": "retryOwed(latest, stale, false)"
   },
   {
     "id": "D2694",
@@ -5379,8 +5379,8 @@
     "id": "D2734",
     "defect": "A round whose build wait was released with no build ended at its revision, after an earlier build failed, is logged as that earlier failure, so the warning names a cause from another revision.",
     "file": "packages/daemon/src/daemon/round-selection.ts",
-    "old": "    NO_BUILD_ENDED_KIND,\n    noBuildEndedReason(at.notNarrowed),\n",
-    "new": "    at.notNarrowed?.kind ?? NO_BUILD_ENDED_KIND,\n    noBuildEndedReason(at.notNarrowed),\n"
+    "old": "    NO_BUILD_ENDED,\n    noBuildEndedReason(at.notNarrowed),",
+    "new": "    at.notNarrowed?.kind ?? NO_BUILD_ENDED,\n    noBuildEndedReason(at.notNarrowed),"
   },
   {
     "id": "D2735",
@@ -5400,8 +5400,8 @@
     "id": "D2741",
     "defect": "A round whose selection is refused is logged below warning level, so a refused change passes unnoticed.",
     "file": "packages/daemon/src/daemon/round-selection.ts",
-    "old": "    return noSelection(log, SELECTION_REFUSED, outcome.reason);",
-    "new": "    log.entry(`selection refused: ${outcome.reason}`);\n    return NO_SELECTION;"
+    "old": "    return noSelection(log, revision, SELECTION_REFUSED, outcome.reason);",
+    "new": "    log.entry(`selection refused: ${outcome.reason}`);\n    return unselectedRound(revision, SELECTION_REFUSED, outcome.reason);"
   },
   {
     "id": "D2742",
@@ -5484,8 +5484,8 @@
     "id": "D2740",
     "defect": "The run's report never says its inputs changed while it ran, so a save of identical bytes during a run is not rerun once at the revision it left unmoved.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return report(stored, changedWhileRunning(judgment));",
-    "new": "    return report(stored, false);"
+    "old": "    return report(stored, changedWhileRunning(judgment), ended);",
+    "new": "    return report(stored, false, ended);"
   },
   {
     "id": "D2747",
@@ -6891,8 +6891,8 @@
     "id": "D2933",
     "defect": "A refused latest discovery answers as though none was ever stored, hiding the refusal and that a new discovery will replace it.",
     "file": "packages/daemon/src/query/summary.ts",
-    "old": "          : refusedDiscoveryReason(discoveryRefusal, daemon),",
-    "new": "          : `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; ${activityClause(daemon)}`,"
+    "old": "          : refusedDiscoveryReason(discoveryRefusal, daemon, doing),",
+    "new": "          : `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; ${doing}`,"
   },
   {
     "id": "D2934",
@@ -6949,5 +6949,446 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);",
     "new": "    log.entry(`discovery ended: ${discoverySummary(discovery)}`);"
+  },
+  {
+    "id": "D2971",
+    "defect": "A daemon still reconciling its inputs for the first time reports its round as waiting out the quiet window, so an answer names a wait that has not begun.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "  #wait: RoundWait = ROUND_WAIT.firstReconciliation;",
+    "new": "  #wait: RoundWait = ROUND_WAIT.quietWindow;"
+  },
+  {
+    "id": "D2972",
+    "defect": "The scheduler records no quiet-window wait, so while the input revision is still moving the round keeps naming the wait before it.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      waiting(ROUND_WAIT.quietWindow);\n      if (!(await this.#quietWindow())) return undefined;",
+    "new": "      if (!(await this.#quietWindow())) return undefined;"
+  },
+  {
+    "id": "D2973",
+    "defect": "The scheduler records no wait for the unread input events, so while they are read the round names the quiet window it already waited out.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      waiting(ROUND_WAIT.inputsSettling);\n      await inputs.settled();",
+    "new": "      await inputs.settled();"
+  },
+  {
+    "id": "D2974",
+    "defect": "The scheduler records no wait for the dependency build, so while the build runs the round names the settling of the inputs instead.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      waiting(ROUND_WAIT.dependencyBuild);\n      await awaitBuild(\"the round\");",
+    "new": "      await awaitBuild(\"the round\");"
+  },
+  {
+    "id": "D2975",
+    "defect": "A plan that returns a rediscovery leaves the round naming the dependency build it already waited for, so an answer never says a rediscovery is what the round waits on.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      this.#schedule.pending(ROUND_WAIT.rediscovery);\n      return { kind: \"discover\", retry };",
+    "new": "      return { kind: \"discover\", retry };"
+  },
+  {
+    "id": "D2976",
+    "defect": "Once the revision moves while a run begun at an earlier one is still in progress, the round names the last wait the scheduler passed instead of the job it now waits on.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "job !== undefined && job !== revision",
+    "new": "job === undefined && job !== revision"
+  },
+  {
+    "id": "D2977",
+    "defect": "A plan is recorded at the wrong revision, so an answer at the revision the round planned at reads the round as still pending.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "this.#round = { state: ROUND.planned, revision, due: new Map(due) };",
+    "new": "this.#round = { state: ROUND.planned, revision: revision + 1, due: new Map(due) };"
+  },
+  {
+    "id": "D2978",
+    "defect": "A scheduling step that throws leaves the round reading planned, so an answer never says the round is held until the daemon tries again at the next input event or reconciliation, nor names the failure.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#schedule.held(errorText(error));\n",
+    "new": ""
+  },
+  {
+    "id": "D2979",
+    "defect": "A workspace whose run the answer's activity names is not read as running, so it reads queued while its run is in progress.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      activity.state === \"running\" &&",
+    "new": "      activity.state === \"idle\" &&"
+  },
+  {
+    "id": "D2980",
+    "defect": "A workspace the latest plan found due, whose run has not begun, reads idle rather than queued.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    return recorded.due.get(path);",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D2981",
+    "defect": "A workspace an older plan found due still reads queued after the input revision moves past that plan, a reason RT Test no longer acts on.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (round.state !== ROUND.planned || recorded.state !== ROUND.planned) {",
+    "new": "    if (recorded.state !== ROUND.planned) {"
+  },
+  {
+    "id": "D2982",
+    "defect": "While a round is pending, an idle workspace that is not current claims no run comes until the next input change, although the pending round is about to decide it.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (round.state === ROUND.pending) return {};",
+    "new": ""
+  },
+  {
+    "id": "D2983",
+    "defect": "A workspace whose run has returned stays on the plan's due list, so it reads queued for a run that has already ended.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    } else if (!owedAgain) {",
+    "new": "    } else if (owedAgain) {"
+  },
+  {
+    "id": "D2984",
+    "defect": "A workspace whose run a change interrupted is never marked interrupted, so after its run returns it reads idle rather than interrupted.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    this.#interrupted.add(path);",
+    "new": ""
+  },
+  {
+    "id": "D2985",
+    "defect": "An interrupted workspace keeps reading interrupted after the next round has found it due, instead of queued.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    this.#interrupted.clear();",
+    "new": ""
+  },
+  {
+    "id": "D2986",
+    "defect": "An interruption names more paths than the bound its reason text uses, so an answer's interruption list grows past 20.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "boundedList(interruption, MAX_NAMED_CHANGES)",
+    "new": "boundedList(interruption, MAX_NAMED_CHANGES + 1)"
+  },
+  {
+    "id": "D2987",
+    "defect": "An idle workspace whose latest run failed says no run comes until the next input change, although the periodic reconciliation retries it.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "retryOwed(latest, stale, this.#parts.storedNothing(path))",
+    "new": "false"
+  },
+  {
+    "id": "D2988",
+    "defect": "An idle workspace whose results are not current but owe no retry says nothing about why no run has begun, so it looks like a forgotten rerun.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    const due = stale ?? retryReason(latest);",
+    "new": "    const due = retryReason(latest);"
+  },
+  {
+    "id": "D2989",
+    "defect": "After a scheduling step fails, an idle workspace that is not current says nothing, so an answer never says no run comes until the next input change.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (round.state === ROUND.pending) return {};",
+    "new": "    if (round.state !== ROUND.planned) return {};"
+  },
+  {
+    "id": "D2990",
+    "defect": "A run stored not fingerprinted because a path inside its inputs changed while it ran reads only as stored not fingerprinted, never as invalidated.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      kind: INVALIDATING.has(notKept.kind) ? INVALIDATED : due,",
+    "new": "      kind: due,"
+  },
+  {
+    "id": "D2991",
+    "defect": "A run stored not fingerprinted because its workspace's fingerprint moved while it ran is not called invalidated.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "  JUDGMENT.changedInside,\n  JUDGMENT.moved,\n]);",
+    "new": "  JUDGMENT.changedInside,\n]);"
+  },
+  {
+    "id": "D2992",
+    "defect": "A run stored not fingerprinted for a cause that names no path, such as a watcher failure, is called invalidated although no input is known to have changed.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "  JUDGMENT.changedInside,\n  JUDGMENT.moved,\n]);",
+    "new": "  JUDGMENT.changedInside,\n  JUDGMENT.moved,\n  JUDGMENT.causes,\n]);"
+  },
+  {
+    "id": "D2993",
+    "defect": "A run stored not fingerprinted in an earlier daemon life, whose verdict this daemon does not hold, reads as stored not fingerprinted with no word that its reason is unknown.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (notKept === undefined) return { kind: EARLIER_DAEMON_LIFE };",
+    "new": "    if (notKept === undefined) return { kind: due };"
+  },
+  {
+    "id": "D2994",
+    "defect": "A verdict held for a workspace's earlier run labels whatever run of it is latest, so a later run stored under its fingerprint reads invalidated.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    return stored?.runId === run.runId ? stored.notKept : undefined;",
+    "new": "    return stored?.notKept;"
+  },
+  {
+    "id": "D2995",
+    "defect": "The scheduler never hands the schedule the round's selection, so a queued workspace names no changed path that chose it.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      this.#directTargets = selection.directTargets;\n      this.#schedule.selected(selection.explanation);",
+    "new": "      this.#directTargets = selection.directTargets;"
+  },
+  {
+    "id": "D2996",
+    "defect": "A queued workspace names more than 3 of the reasons that chose it.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "const MAX_CHOOSING_REASONS = 3;",
+    "new": "const MAX_CHOOSING_REASONS = 4;"
+  },
+  {
+    "id": "D2997",
+    "defect": "A reason that chose a workspace through a broad fallback does not name the fallback's scope, so it reads like a direct selection.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "const scope = scopes.get(fallbackKey({ path: report.path, trigger }));",
+    "new": "const scope = scopes.get(fallbackKey({ path: \"\", trigger }));"
+  },
+  {
+    "id": "D2998",
+    "defect": "A queued workspace names a changed path that the answer's explanation leaves out past its 20, so the reason points at a path the answer never shows.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "        position < MAX_EXPLAINED &&",
+    "new": "        position <= MAX_EXPLAINED &&"
+  },
+  {
+    "id": "D2999",
+    "defect": "Before any round has planned in this daemon life, the answer reads as though a selection was made rather than saying no round has planned.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      return { state: ROUND_SELECTION.noRoundYet };",
+    "new": "      return { state: ROUND_SELECTION.made } as SelectionExplanation;"
+  },
+  {
+    "id": "D3000",
+    "defect": "The first round of a daemon life, which has no earlier round to compare with, is explained as one whose inputs' digests could not be read.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      return unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON);",
+    "new": "      return unselectedRound(revision, INPUT_DIGESTS_UNREAD, FIRST_ROUND_REASON);"
+  },
+  {
+    "id": "D3001",
+    "defect": "A round whose inputs' digests could not be read is explained as a first round, hiding that the inputs were unreadable.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        INPUT_DIGESTS_UNREAD,\n        NO_SNAPSHOT_REASON,",
+    "new": "        FIRST_ROUND,\n        NO_SNAPSHOT_REASON,"
+  },
+  {
+    "id": "D3002",
+    "defect": "A round's selection is explained at the wrong input revision, so an answer cannot tell which change the explanation is for.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    explanation: {\n      revision,\n      state: ROUND_SELECTION.made,",
+    "new": "    explanation: {\n      revision: revision - 1,\n      state: ROUND_SELECTION.made,"
+  },
+  {
+    "id": "D3003",
+    "defect": "A round with no selection because the dependency build failed is explained as one whose build wait was released, losing the build's kind.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    return noSelection(log, revision, kind, reason);",
+    "new": "    return noSelection(log, revision, NO_BUILD_ENDED, reason);"
+  },
+  {
+    "id": "D3004",
+    "defect": "A round whose selection refused the change is explained as one whose build wait was released.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    return noSelection(log, revision, SELECTION_REFUSED, outcome.reason);",
+    "new": "    return noSelection(log, revision, NO_BUILD_ENDED, outcome.reason);"
+  },
+  {
+    "id": "D3005",
+    "defect": "A round whose build wait was released with no build ended is explained as a refused selection.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    NO_BUILD_ENDED,\n    noBuildEndedReason(at.notNarrowed),",
+    "new": "    SELECTION_REFUSED,\n    noBuildEndedReason(at.notNarrowed),"
+  },
+  {
+    "id": "D3006",
+    "defect": "An answer names more than 20 changed paths, so a branch switch's thousands of paths grow every answer past its bound.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "const MAX_EXPLAINED = 20;",
+    "new": "const MAX_EXPLAINED = 21;"
+  },
+  {
+    "id": "D3007",
+    "defect": "An answer names more than 20 broad fallbacks.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "        explanation.fallbacks,\n        MAX_EXPLAINED,",
+    "new": "        explanation.fallbacks,\n        MAX_EXPLAINED + 1,"
+  },
+  {
+    "id": "D3008",
+    "defect": "A changed path names more than 20 of the workspaces it selected.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    selected: mappedList(report.selected, MAX_EXPLAINED, explainedSelection),",
+    "new": "    selected: mappedList(report.selected, MAX_EXPLAINED + 1, explainedSelection),"
+  },
+  {
+    "id": "D3009",
+    "defect": "A changed path names more than 20 of the workspaces it reached that cannot run.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      report.notRunnable,\n      MAX_EXPLAINED,",
+    "new": "      report.notRunnable,\n      MAX_EXPLAINED + 1,"
+  },
+  {
+    "id": "D3010",
+    "defect": "A broad fallback names more than 20 of its workspaces.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    workspaces: boundedList(fallback.workspaces, MAX_EXPLAINED),",
+    "new": "    workspaces: boundedList(fallback.workspaces, MAX_EXPLAINED + 1),"
+  },
+  {
+    "id": "D3011",
+    "defect": "Why a round made no selection is carried whole, so a reason quoting a long path list is not cut to 1,000 characters.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      return { ...explanation, reason: cutReason(explanation.reason) };",
+    "new": "      return { ...explanation, reason: { reason: explanation.reason, omittedCharacters: 0 } };"
+  },
+  {
+    "id": "D3012",
+    "defect": "Why a workspace a changed path reached cannot run is carried whole, so the bound on the list no longer bounds its bytes.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      ({ workspace, reason }) => ({ workspace, ...cutReason(reason) }),",
+    "new": "      ({ workspace, reason }) => ({ workspace, reason, omittedCharacters: 0 }),"
+  },
+  {
+    "id": "D3013",
+    "defect": "A summary never reads the invalidated label the daemon holds, so a workspace's latest run stored not fingerprinted by a change inside its inputs reads like any other run stored not fingerprinted.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  const invalidated = schedule.invalidation(stored);",
+    "new": "  const invalidated = undefined;"
+  },
+  {
+    "id": "D3014",
+    "defect": "A query with no stored discovery to answer from says only the daemon's activity, never what its round waits for, so an agent cannot tell a rediscovery on its way from none.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  return `it is ${activityText(daemon.activity)}; ${round}${unstoredClause(daemon.unstoredJobs)}`;",
+    "new": "  return `it is ${activityText(daemon.activity)}${unstoredClause(daemon.unstoredJobs)}`;"
+  },
+  {
+    "id": "D3015",
+    "defect": "A query whose latest discovery was refused as unreadable says only the daemon's activity, never that the round is held after a failed step nor the failure.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "so it answers once a new discovery replaces it; ${doing}.",
+    "new": "so it answers once a new discovery replaces it; it is ${activityText(daemon.activity)}."
+  },
+  {
+    "id": "D3016",
+    "defect": "A nothing-to-answer reason names more than 20 of the jobs that ended with nothing stored, so it grows without bound, unchecked by the answer's size check.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "const MAX_NAMED_UNSTORED_JOBS = 20;",
+    "new": "const MAX_NAMED_UNSTORED_JOBS = 21;"
+  },
+  {
+    "id": "D3017",
+    "defect": "A nothing-to-answer reason quotes each unstored job's reason whole, so one long reason grows it without bound.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    const { reason, omittedCharacters } = cutReason(job.reason);",
+    "new": "    const { reason, omittedCharacters } = { reason: job.reason, omittedCharacters: 0 };"
+  },
+  {
+    "id": "D3018",
+    "defect": "The invalidated label is read from whether a rerun could be bound to a fingerprint rather than from the verdict's kind, so a run with a changed path inside its inputs and no end fingerprint is not called invalidated.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      ended = notKept === undefined ? { runId } : { runId, notKept };",
+    "new": "      ended = notKept === undefined || !changedWhileRunning(judgment) ? { runId } : { runId, notKept };"
+  },
+  {
+    "id": "D3019",
+    "defect": "The lifecycle's report of an interrupted run leaves out the paths that interrupted it, so an answer reads the workspace idle rather than interrupted by a change.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      return report(false, true, { interruptedBy });",
+    "new": "      return report(false, true);"
+  },
+  {
+    "id": "D3020",
+    "defect": "The schedule is read against an activity other than the answer's own, so a workspace whose run the answer's activity names reads queued rather than running.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    activity: daemon.activity,\n    workspaces: discovery.discovery.workspaces,",
+    "new": "    activity: { state: \"idle\" },\n    workspaces: discovery.discovery.workspaces,"
+  },
+  {
+    "id": "D3030",
+    "defect": "A discovery is stored bound to its fingerprint although a listed file no watch covers was edited after protection's check and before the fingerprint was composed, so it reads current under content it never collected.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        return moved === undefined ? print : { ok: false, reason: moved };",
+    "new": "        return print;"
+  },
+  {
+    "id": "D3031",
+    "defect": "A workspace's interruption is kept after a later run of it has ended, so when it is next queued it still names paths that interrupted a run before its last.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    this.#interruptions.delete(path);\n    if (run.interruptedBy === undefined) return;",
+    "new": "    if (run.interruptedBy === undefined) return;"
+  },
+  {
+    "id": "D3035",
+    "defect": "A workspace's interruption is kept after a later run of it threw, so when it is next queued it still names paths that interrupted a run before its last.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    this.#leaveDue(path);\n    this.#interruptions.delete(path);",
+    "new": "    this.#leaveDue(path);"
+  },
+  {
+    "id": "D3087",
+    "defect": "A chain step's detail is carried whole, so one long widening cause repeated across the named paths and workspaces grows an answer past its bound.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "        detail: cutReason(step.detail),",
+    "new": "        detail: { reason: step.detail, omittedCharacters: 0 },"
+  },
+  {
+    "id": "D3089",
+    "defect": "Under a held round, an idle workspace that is not current says no run comes until the next input change, although the daemon tries the round again at the next input event or reconciliation.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "  if (round.state === ROUND.held) return IDLE_REASON.roundHeld;\n",
+    "new": ""
+  },
+  {
+    "id": "D3090",
+    "defect": "A queued workspace whose current input fingerprint cannot be computed does not say why.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "        : { kind: due, detail: cutReason(current.reason) };",
+    "new": "        : { kind: due };"
+  },
+  {
+    "id": "D3095",
+    "defect": "Between two runs of one round at an unmoved revision, the round flips to pending and every workspace still due reads idle instead of queued.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (round.state === ROUND.planned && round.revision === revision) {\n      this.#wait = waitsFor;\n      return;\n    }\n    this.pending(waitsFor);",
+    "new": "    this.pending(waitsFor);"
+  },
+  {
+    "id": "D3096",
+    "defect": "A discovery begun at an earlier revision leaves the round naming a rediscovery rather than the job in progress once the revision moves.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    const report = await this.#schedule.during(\n      this.#parts.discover(revision),\n      revision,\n    );",
+    "new": "    const report = await this.#parts.discover(revision);"
+  },
+  {
+    "id": "D3097",
+    "defect": "A run stored not fingerprinted and owed once more at an unmoved revision leaves the due list, so until the next plan it reads idle with no run coming, although it is about to run again.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "this.#schedule.runEnded(path, report, unmoved && !isRerun);",
+    "new": "this.#schedule.runEnded(path, report, false);"
+  },
+  {
+    "id": "D3098",
+    "defect": "A run that stored nothing, though its inputs changed at an unmoved revision, is requeued as stored not fingerprinted, so its due reason is read from an older run.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (owedAgain && run.runId !== undefined) {",
+    "new": "    if (owedAgain) {"
+  },
+  {
+    "id": "D3099",
+    "defect": "A query reads the schedule at a revision other than the answer's, so a round planned at the answer's revision reads pending and every queued workspace reads idle.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    revision: inputs.facts.revision,\n    activity: daemon.activity,",
+    "new": "    revision: inputs.facts.revision - 1,\n    activity: daemon.activity,"
+  },
+  {
+    "id": "D3100",
+    "defect": "The discovery's re-check measures from when the fingerprint is composed rather than from the job's start, so an edit during the job more than 2 s before the fingerprint escapes it.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        const moved = now.protectedFileChangedSince(discovery, startedAt);",
+    "new": "        const moved = now.protectedFileChangedSince(discovery, Date.now());"
+  },
+  {
+    "id": "D3105",
+    "defect": "After a failed step, the round stays held once the scheduler tries again, so an answer names a failure the daemon has moved past.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "  waiting(waitsFor: RoundWait, revision: number): void {\n    const round = this.#round;",
+    "new": "  waiting(waitsFor: RoundWait, revision: number): void {\n    const round = this.#round;\n    if (round.state === ROUND.held) return;"
   }
 ]

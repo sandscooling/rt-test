@@ -593,5 +593,131 @@
     "file": "packages/cli/src/trust-prompt.ts",
     "old": "    `Environment variables declared in ${declaration.file}, whose values change no result (each counts only as set or not):`,\n",
     "new": ""
+  },
+  {
+    "id": "D3021",
+    "defect": "The CLI's text answer leaves out the daemon's round, so a person reading it cannot tell a pending round from a held one.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    `Round: ${firstLine(roundText(answer.schedule.round))}`,\n",
+    "new": ""
+  },
+  {
+    "id": "D3022",
+    "defect": "The CLI's text phrases an invalidated latest run as merely stored not fingerprinted, so the text never says the run is invalidated.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  [INVALIDATED]: \"its latest run is invalidated\",",
+    "new": "  [INVALIDATED]: \"its latest run was stored not fingerprinted\","
+  },
+  {
+    "id": "D3023",
+    "defect": "The CLI's line for a queued workspace leaves out the changed paths and fallbacks that chose it.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "        ...(isEmpty(workspace.chosenBy)\n          ? []\n          : [chosenText(workspace.chosenBy)]),",
+    "new": "        ...[],"
+  },
+  {
+    "id": "D3024",
+    "defect": "The CLI's line for an idle workspace that is not current says only idle, never why no run has begun.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "      return workspace.notRunning === undefined",
+    "new": "      return true"
+  },
+  {
+    "id": "D3025",
+    "defect": "The CLI's text names a bounded list's items without counting those it left out, so an interruption's path list reads as complete.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return list.more === 0 ? named : `${named} and ${list.more} more`;",
+    "new": "  return named;"
+  },
+  {
+    "id": "D3026",
+    "defect": "The CLI's latest selection leaves out how many changed paths the answer did not name, so a cut list reads as every changed path.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "        ...moreLines(selection.paths.more, \"changed paths\"),\n",
+    "new": ""
+  },
+  {
+    "id": "D3027",
+    "defect": "The CLI's latest selection prints an incomplete total count as though it were complete.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return `${count.count}${count.complete ? \"\" : INCOMPLETE_MARK}`;",
+    "new": "  return `${count.count}`;"
+  },
+  {
+    "id": "D3028",
+    "defect": "The CLI phrases why a round made no selection from the inputs' not-narrowed causes alone, so a cause only a round has, such as unreadable digests, reads as undefined.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "since ${NO_SELECTION_CAUSES[selection.kind]}",
+    "new": "since ${NOT_NARROWED_CAUSES[selection.kind]}"
+  },
+  {
+    "id": "D3029",
+    "defect": "A human summary's workspace line leaves out its latest run's invalidated label and reason.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "    run.invalidated === undefined",
+    "new": "    true"
+  },
+  {
+    "id": "D3032",
+    "defect": "The CLI's line for a changed path that selected no workspace leaves out why, so a path no workspace depends on reads like an unexplained gap.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "      ? `: ${cutReasonText(none.detail)}`\n      : \"\";",
+    "new": "      ? \"\"\n      : \"\";"
+  },
+  {
+    "id": "D3033",
+    "defect": "The CLI's line for a changed path leaves out the workspaces it reached that cannot run, so a broken workspace the change affects goes unmentioned.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  const notRunnable = isEmpty(path.notRunnable)",
+    "new": "  const notRunnable = true"
+  },
+  {
+    "id": "D3034",
+    "defect": "The CLI's selection reason leaves out the chain of workspaces it passed through, so a workspace selected through a dependency reads as though its own file changed.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return `${reason.trigger}${from}${steps === \"\" ? \"\" : ` through ${steps}`}`;",
+    "new": "  return `${reason.trigger}${from}`;"
+  },
+  {
+    "id": "D3086",
+    "defect": "The CLI's selection reason leaves out a chain step's detail, so why a workspace was reached through a dependency goes unsaid.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "        step.detail.reason === \"\" ? \"\" : ` (${cutReasonText(step.detail)})`;",
+    "new": "        \"\";"
+  },
+  {
+    "id": "D3088",
+    "defect": "A changed path that selected no workspace because every workspace it reached cannot run lists none of them, so those workspaces vanish uncounted.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  const notRunnable = isEmpty(path.notRunnable)",
+    "new": "  const notRunnable = isEmpty(path.selected) || isEmpty(path.notRunnable)"
+  },
+  {
+    "id": "D3101",
+    "defect": "The CLI's latest selection drops how many broad fallbacks it did not name.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "        ...moreLines(selection.fallbacks.more, \"broad fallbacks\"),\n",
+    "new": ""
+  },
+  {
+    "id": "D3102",
+    "defect": "The CLI's latest selection prints an incomplete workspace total as complete.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "${totalWorkspaces.count}${totalWorkspaces.complete ? \"\" : INCOMPLETE_MARK}`;",
+    "new": "${totalWorkspaces.count}`;"
+  },
+  {
+    "id": "D3103",
+    "defect": "The CLI's line for a queued workspace leaves out that its last run was interrupted and by which paths.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "          : [\n              `its last run was interrupted by a change to ${namedText(workspace.interruptedBy, oneLine)}`,\n            ]),",
+    "new": "          : []),"
+  },
+  {
+    "id": "D3104",
+    "defect": "The CLI's line for a queued workspace every reason of which the answer leaves unnamed says nothing of them.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return chosenBy.named.length === 0",
+    "new": "  return false"
   }
 ]

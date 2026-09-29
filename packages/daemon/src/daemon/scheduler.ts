@@ -1,7 +1,14 @@
 import type { InputDigests } from "../inputs/input-inventory.js";
 import type { CurrentInputs, TrackedInputs } from "../inputs/input-tracker.js";
 import type { QueryNarrowing } from "../inputs/narrowed-inputs.js";
-import { CURRENT } from "../query/answer.js";
+import {
+  CURRENT,
+  FIRST_ROUND,
+  INPUT_DIGESTS_UNREAD,
+  ROUND_WAIT,
+  type DueReason,
+  type RoundWait,
+} from "../query/answer.js";
 import { fingerprintDigest, recordFreshness } from "../query/test-states.js";
 import type { LatestResults } from "../store/open-store.js";
 import type { StoredRun } from "../store/stored-records.js";
@@ -10,11 +17,14 @@ import {
   type ConfirmedStart,
 } from "../vitest/confirmed-start.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
+import { errorText } from "../vitest/error-text.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
+  DUE_REASON_TEXT,
   GROUP_REASON,
   orderQueue,
   queueGroup,
+  retryOwed,
   retryReason,
   staleReason,
   testModulesKey,
@@ -24,15 +34,23 @@ import {
   changedPaths,
   explainRound,
   NO_SELECTION_CONSEQUENCE,
+  unselectedRound,
+  type RoundSelection,
 } from "./round-selection.js";
+import {
+  WorkspaceSchedule,
+  type EndedRun,
+  type ScheduleReader,
+} from "./workspace-schedule.js";
 
 /** A target until measured: how long the input revision must hold still before any discovery or run starts. */
 export const QUIET_WINDOW_MS = 1_000;
 
 const IDLE_ENTRY = "idle: no confirmed workspace is due";
-const NO_SNAPSHOT_ENTRY = `warning: no selection was made, because the inputs' digests cannot be read now, ${NO_SELECTION_CONSEQUENCE}`;
-const FIRST_ROUND_ENTRY =
-  "round without a selection: no previous round read the inputs to compare with";
+const NO_SNAPSHOT_REASON = "the inputs' digests cannot be read now";
+const NO_SNAPSHOT_ENTRY = `warning: no selection was made, because ${NO_SNAPSHOT_REASON}, ${NO_SELECTION_CONSEQUENCE}`;
+const FIRST_ROUND_REASON = "no previous round read the inputs to compare with";
+const FIRST_ROUND_ENTRY = `round without a selection: ${FIRST_ROUND_REASON}`;
 
 /** What a discovery job left. */
 export interface DiscoverReport {
@@ -40,8 +58,8 @@ export interface DiscoverReport {
   readonly stored: boolean;
 }
 
-/** What a run job left. */
-export interface RunReport {
+/** What a run job left: with the stored run's id, its verdict when stored not fingerprinted, and what interrupted it. */
+export interface RunReport extends EndedRun {
   /** The input revision the run began at. */
   readonly revision: number;
   /** Whether a run record was stored. */
@@ -97,7 +115,7 @@ interface EligibleWorkspace {
 }
 
 interface DueWorkspace extends EligibleWorkspace {
-  readonly reason: string;
+  readonly reason: DueReason;
 }
 
 type Step =
@@ -136,12 +154,22 @@ export class Scheduler {
   readonly #retryWorkspaces = new Set<string>();
   /** Whether a round has done or found work since the last idle entry. */
   #dirty = true;
+  readonly #schedule: WorkspaceSchedule;
 
   constructor(parts: SchedulerParts) {
     this.#parts = parts;
+    this.#schedule = new WorkspaceSchedule({
+      confirmed: (entry) => this.#confirmed(entry),
+      storedNothing: (path) => this.#storedNothing(path),
+    });
   }
 
-  /** Runs until a stop; a step that throws is logged and tried again at the next change of the inputs. */
+  /** What the scheduler is doing, as every answer reads it. */
+  get schedule(): ScheduleReader {
+    return this.#schedule;
+  }
+
+  /** Runs until a stop; a step that throws is logged and tried again at the next input event or reconciliation. */
   async start(): Promise<void> {
     await this.#parts.inputs.firstReconciled();
     this.#periodicSeen = this.#parts.inputs.periodicReconciliations();
@@ -149,6 +177,7 @@ export class Scheduler {
       try {
         if (!(await this.#step())) return;
       } catch (error) {
+        this.#schedule.held(errorText(error));
         this.#parts.log.error("a scheduling step failed", error);
         await this.#untilChangeOrStop();
       }
@@ -190,9 +219,14 @@ export class Scheduler {
    */
   async #quiesce(): Promise<number | undefined> {
     const { inputs, awaitBuild } = this.#parts;
+    const waiting = (wait: RoundWait): void =>
+      this.#schedule.waiting(wait, this.#revision());
     for (;;) {
+      waiting(ROUND_WAIT.quietWindow);
       if (!(await this.#quietWindow())) return undefined;
+      waiting(ROUND_WAIT.inputsSettling);
       await inputs.settled();
+      waiting(ROUND_WAIT.dependencyBuild);
       await awaitBuild("the round");
       if (this.#isStopping()) return undefined;
       const revision = this.#revision();
@@ -244,10 +278,15 @@ export class Scheduler {
       this.#discoveryTriedAt = revision;
       this.#retryDiscovery = false;
       this.#dirty = true;
+      this.#schedule.pending(ROUND_WAIT.rediscovery);
       return { kind: "discover", retry };
     }
     const due = this.#due(revision, view, eligible);
     this.#explain(revision, view, eligible, due);
+    this.#schedule.planned(
+      revision,
+      new Map(due.map(({ entry, reason }) => [entry.workspace.path, reason])),
+    );
     const [queued] = orderQueue(
       due.map(({ entry, reason, latest }) => ({
         entry,
@@ -291,9 +330,7 @@ export class Scheduler {
         latest,
         fingerprintDigest(view.inputs.workspaceFingerprint(entry)),
       );
-      const nothingStored =
-        this.#attempts.get(path)?.nothingStored === true && stale !== undefined;
-      if (retryReason(latest) !== undefined || nothingStored) {
+      if (retryOwed(latest, stale, this.#storedNothing(path))) {
         this.#retryWorkspaces.add(path);
       }
     }
@@ -322,12 +359,16 @@ export class Scheduler {
     );
     const workspaces = view.results.discovery?.discovery.workspaces ?? [];
     return workspaces
-      .filter(
-        (entry) =>
-          entry.status !== "not-confirmed" &&
-          confirmedEntry(this.#parts.start, entry.workspace) !== undefined,
-      )
+      .filter((entry) => this.#confirmed(entry))
       .map((entry) => ({ entry, latest: runs.get(entry.workspace.path) }));
+  }
+
+  /** The discovery lists the workspace confirmed and the confirmed start holds it, so it can run. */
+  #confirmed(entry: WorkspaceDiscovery): boolean {
+    return (
+      entry.status !== "not-confirmed" &&
+      confirmedEntry(this.#parts.start, entry.workspace) !== undefined
+    );
   }
 
   /** Each confirmed workspace whose latest run is not bound to its current fingerprint, or failed or crashed while its retry is owed. */
@@ -350,6 +391,11 @@ export class Scheduler {
       due.push({ entry, latest, reason });
     }
     return due;
+  }
+
+  /** Whether the last run attempted for the workspace ended with nothing stored. */
+  #storedNothing(path: string): boolean {
+    return this.#attempts.get(path)?.nothingStored === true;
   }
 
   #ranAlready(
@@ -375,14 +421,16 @@ export class Scheduler {
   ): void {
     if (this.#selectionOwed) {
       this.#selectionOwed = false;
-      this.#directTargets = this.#selectRound(revision, view, eligible, due);
+      const selection = this.#selectRound(revision, view, eligible, due);
+      this.#directTargets = selection.directTargets;
+      this.#schedule.selected(selection.explanation);
     }
     for (const { entry, reason } of due) {
       const path = entry.workspace.path;
       const key = `${revision}:${testModulesKey(entry)}`;
       if (this.#announced.get(path) === key) continue;
       this.#announced.set(path, key);
-      this.#parts.log.entry(`due: ${path}, ${reason}`);
+      this.#parts.log.entry(`due: ${path}, ${DUE_REASON_TEXT[reason]}`);
     }
   }
 
@@ -391,18 +439,22 @@ export class Scheduler {
     view: ScheduleView,
     eligible: readonly EligibleWorkspace[],
     due: readonly DueWorkspace[],
-  ): ReadonlySet<string> {
+  ): RoundSelection {
     const { log, narrowing } = this.#parts;
     const now = view.inputs.snapshot?.digests;
     const before = this.#snapshot;
     if (now === undefined) {
       log.entry(NO_SNAPSHOT_ENTRY);
-      return new Set();
+      return unselectedRound(
+        revision,
+        INPUT_DIGESTS_UNREAD,
+        NO_SNAPSHOT_REASON,
+      );
     }
     this.#snapshot = now;
     if (before === undefined) {
       log.entry(FIRST_ROUND_ENTRY);
-      return new Set();
+      return unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON);
     }
     const selection = explainRound(
       log,
@@ -421,7 +473,7 @@ export class Scheduler {
         );
       }
     }
-    return selection.directTargets;
+    return selection;
   }
 
   /** A discovery that did not begin keeps its retry; one that throws counts as having stored nothing. */
@@ -429,7 +481,10 @@ export class Scheduler {
     this.#dirty = true;
     const before = this.#discoveryNothingStored;
     this.#discoveryNothingStored = true;
-    const report = await this.#parts.discover(revision);
+    const report = await this.#schedule.during(
+      this.#parts.discover(revision),
+      revision,
+    );
     if (report !== undefined) {
       this.#discoveryNothingStored = !report.stored;
       return;
@@ -459,7 +514,7 @@ export class Scheduler {
     });
     this.#dirty = true;
     log.entry(`next in the queue: ${path}, ${GROUP_REASON[group]}`);
-    const report = await this.#parts.run(entry, revision);
+    const report = await this.#runJob(entry, revision);
     if (report === undefined) {
       if (retried) this.#retryWorkspaces.add(path);
       return;
@@ -481,6 +536,23 @@ export class Scheduler {
       nothingStored: !report.stored,
       rerunOwed: unmoved && !isRerun,
     });
+    this.#schedule.runEnded(path, report, unmoved && !isRerun);
+  }
+
+  /** A run that throws has ended as surely as one that returns, so it leaves the plan's due list before the throw goes on. */
+  async #runJob(
+    entry: WorkspaceDiscovery,
+    revision: number,
+  ): Promise<RunReport | undefined> {
+    try {
+      return await this.#schedule.during(
+        this.#parts.run(entry, revision),
+        revision,
+      );
+    } catch (error) {
+      this.#schedule.runThrew(entry.workspace.path);
+      throw error;
+    }
   }
 
   /** Logs once after work, then waits for a change of revision or a periodic reconciliation; false after a stop. */

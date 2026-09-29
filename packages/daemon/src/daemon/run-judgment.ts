@@ -31,7 +31,7 @@ const INTERRUPTION_ASKED =
 const KEPT_ALTHOUGH_CHANGED =
   "is stored under its input fingerprint, since only paths outside its workspace's inputs changed while it ran";
 
-const JUDGMENT = {
+export const JUDGMENT = {
   noStartFingerprint: "no-start-fingerprint",
   changedInside: "changed-inside",
   causes: "causes",
@@ -39,6 +39,15 @@ const JUDGMENT = {
   moved: "moved",
   kept: "kept",
 } as const;
+
+/** Each kind of judgment that stores a run not fingerprinted. */
+export type NotKeptKind = Exclude<RunJudgment["kind"], typeof JUDGMENT.kept>;
+
+/** Why a run was stored not fingerprinted, as the predicate judged it. */
+export interface NotKeptVerdict {
+  readonly kind: NotKeptKind;
+  readonly reason: string;
+}
 
 /** Whether a run can still be stored under the fingerprint it started from, and when not, the first reason that applies. */
 export type RunJudgment =
@@ -159,6 +168,14 @@ export function runVerdict(judgment: RunJudgment): JobVerdict {
   };
 }
 
+/** The judgment's kind and reason when it stores the run not fingerprinted; undefined when the run is kept. */
+export function notKeptVerdict(
+  judgment: RunJudgment,
+): NotKeptVerdict | undefined {
+  if (judgment.kind === JUDGMENT.kept) return undefined;
+  return { kind: judgment.kind, reason: judgmentReason(judgment) };
+}
+
 /** Whether its inputs changed while it ran and a rerun could be bound to a fingerprint, as the scheduler reads it. */
 export function changedWhileRunning(judgment: RunJudgment): boolean {
   const verdict = runVerdict(judgment);
@@ -265,6 +282,7 @@ export class RunWatch {
   #returned = false;
   #closed = false;
   #interruption: string | undefined;
+  #interruptedBy: readonly string[] | undefined;
   #wake: () => void = () => undefined;
   readonly #watching: Promise<void>;
 
@@ -290,6 +308,11 @@ export class RunWatch {
   /** Why the run was interrupted; undefined when it was not. */
   get interruption(): string | undefined {
     return this.#interruption;
+  }
+
+  /** The changed paths inside its workspace's inputs that interrupted the run, all of them; undefined when it was not. */
+  get interruptedBy(): readonly string[] | undefined {
+    return this.#interruptedBy;
   }
 
   /** From now on nothing interrupts the run, since its executor has returned it. */
@@ -383,6 +406,7 @@ export class RunWatch {
     if (this.#interruption !== undefined) return;
     const paths = interruptingPaths(this.#judgment(undefined));
     if (paths === undefined || !interrupt()) return;
+    this.#interruptedBy = paths;
     const named = namedList(paths);
     this.#interruption = `${INTERRUPTED_REASON}: ${named}`;
     log.entry(

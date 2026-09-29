@@ -4,7 +4,13 @@ import {
   narrowingAt,
   type QueryNarrowing,
 } from "../inputs/narrowed-inputs.js";
-import { SELECTION_REFUSED, type InputsNotNarrowed } from "../query/answer.js";
+import {
+  NO_BUILD_ENDED,
+  ROUND_SELECTION,
+  SELECTION_REFUSED,
+  type InputsNotNarrowed,
+  type NoRoundSelection,
+} from "../query/answer.js";
 import {
   SELECTION_STATE,
   type BroadFallback,
@@ -20,9 +26,20 @@ import type { DaemonLog } from "./daemon-log.js";
 const LIST_SEPARATOR = ", ";
 export const NO_SELECTION_CONSEQUENCE =
   "so every workspace whose latest run is not bound to its current fingerprint still runs";
-const NO_BUILD_ENDED_KIND = "no-build-ended";
 const NO_BUILD_ENDED_REASON =
   "no dependency build ended at this input revision, because the wait for it was released";
+
+/** What a round logged of its selection: the changed paths, fallbacks and counts, or why it made none. */
+export type RoundExplanation = { readonly revision: number } & (
+  | ({
+      readonly state: typeof ROUND_SELECTION.made;
+    } & Pick<Selection, "paths" | "fallbacks" | "counts">)
+  | {
+      readonly state: typeof ROUND_SELECTION.notMade;
+      readonly kind: NoRoundSelection;
+      readonly reason: string;
+    }
+);
 
 /** What a round's selection gives the scheduler. */
 export interface RoundSelection {
@@ -30,12 +47,21 @@ export interface RoundSelection {
   readonly directTargets: ReadonlySet<string>;
   /** Workspaces some changed path selected; none when no selection was made. */
   readonly selected: ReadonlySet<string>;
+  readonly explanation: RoundExplanation;
 }
 
-const NO_SELECTION: RoundSelection = {
-  directTargets: new Set(),
-  selected: new Set(),
-};
+/** A round that selected nothing, because no selection was made, with the kind and reason the log gives. */
+export function unselectedRound(
+  revision: number,
+  kind: NoRoundSelection,
+  reason: string,
+): RoundSelection {
+  return {
+    directTargets: new Set(),
+    selected: new Set(),
+    explanation: { revision, state: ROUND_SELECTION.notMade, kind, reason },
+  };
+}
 
 /** The paths whose digest changed, appeared or disappeared between two snapshots of the inputs, in path order. */
 export function changedPaths(
@@ -66,16 +92,18 @@ export function explainRound(
   if (at.kind === NARROWING.narrowed) {
     const outcome = at.narrowing.select(changed);
     if (outcome.state !== SELECTION_STATE.refused) {
-      return logSelection(log, outcome);
+      return logSelection(log, revision, outcome);
     }
-    return noSelection(log, SELECTION_REFUSED, outcome.reason);
+    return noSelection(log, revision, SELECTION_REFUSED, outcome.reason);
   }
   if (at.kind === NARROWING.widened) {
-    return noSelection(log, at.notNarrowed.kind, at.notNarrowed.reason);
+    const { kind, reason } = at.notNarrowed;
+    return noSelection(log, revision, kind, reason);
   }
   return noSelection(
     log,
-    NO_BUILD_ENDED_KIND,
+    revision,
+    NO_BUILD_ENDED,
     noBuildEndedReason(at.notNarrowed),
   );
 }
@@ -89,26 +117,37 @@ function noBuildEndedReason(earlier: InputsNotNarrowed | undefined): string {
 
 function noSelection(
   log: DaemonLog,
-  kind: string,
+  revision: number,
+  kind: NoRoundSelection,
   reason: string,
 ): RoundSelection {
   log.entry(
     `warning: no selection was made (${kind}), ${NO_SELECTION_CONSEQUENCE}: ${reason}`,
   );
-  return NO_SELECTION;
+  return unselectedRound(revision, kind, reason);
 }
 
-function logSelection(log: DaemonLog, selection: Selection): RoundSelection {
+function logSelection(
+  log: DaemonLog,
+  revision: number,
+  selection: Selection,
+): RoundSelection {
+  const { paths, fallbacks, counts } = selection;
   for (const report of selection.paths) log.entry(pathText(report));
   for (const fallback of selection.fallbacks) log.entry(fallbackText(fallback));
   log.entry(countsText(selection.counts));
   return {
     directTargets: new Set(
-      selection.paths.flatMap(({ owner }) =>
-        owner === undefined ? [] : [owner],
-      ),
+      paths.flatMap(({ owner }) => (owner === undefined ? [] : [owner])),
     ),
     selected: new Set(selection.workspaces.map(({ path }) => path)),
+    explanation: {
+      revision,
+      state: ROUND_SELECTION.made,
+      paths,
+      fallbacks,
+      counts,
+    },
   };
 }
 

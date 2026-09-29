@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { WorkspaceSchedule } from "../src/daemon/workspace-schedule.js";
 import { currentInputs } from "../src/inputs/current-inputs.js";
 import { countEnvironment } from "../src/inputs/environment-digest.js";
 import {
@@ -13,12 +14,14 @@ import type {
   NarrowingState,
   QueryNarrowing,
 } from "../src/inputs/narrowed-inputs.js";
-import type {
-  InputFacts,
-  NoAnswer,
-  PathStatusAnswer,
-  SummaryAnswer,
-  TestCounts,
+import {
+  DUE_REASON,
+  ROUND_WAIT,
+  type InputFacts,
+  type NoAnswer,
+  type PathStatusAnswer,
+  type SummaryAnswer,
+  type TestCounts,
 } from "../src/query/answer.js";
 import { pathStatusAnswer } from "../src/query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../src/query/summary.js";
@@ -63,10 +66,19 @@ const DIGEST = {
 } as const satisfies InputFingerprint;
 /** Any adapter version but the daemon's current one. */
 const OTHER_ADAPTER_VERSION = VITEST_ADAPTER_VERSION + 1;
+/** A schedule as the daemon's starts, pending on the first reconciliation with no round planned yet. */
+function freshSchedule(): WorkspaceSchedule {
+  return new WorkspaceSchedule({
+    confirmed: () => true,
+    storedNothing: () => false,
+  });
+}
+
 const IDLE: DaemonView = {
   consumerRoot: ROOT,
   activity: { state: "idle" },
   unstoredJobs: [],
+  schedule: freshSchedule(),
 };
 const FIRST_RECONCILIATION = "the first reconciliation has not ended";
 const OTHER_DIGEST = "sha256:2C26B46B68FFC68F";
@@ -1420,6 +1432,84 @@ describe("each workspace's latest run", () => {
     ).toBe("no-module");
   });
 
+  it("D3099: a summary reads the schedule at its own input revision, so a round planned there reads planned, with the workspace it found due queued and a stale one idle, saying why", () => {
+    const schedule = freshSchedule();
+    schedule.planned(
+      SETTLED_FACTS.revision,
+      new Map([[WORKSPACE_A, DUE_REASON.inputsChanged]]),
+    );
+    const summary = answered(
+      summaryAnswer(
+        results(
+          storedDiscovery([
+            discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+            discoveredWorkspace(WORKSPACE_B, []),
+          ]),
+          [
+            storedRun(ranRun([], {}, WORKSPACE_B), VITEST_ADAPTER_VERSION, {
+              kind: "digest",
+              digest: OTHER_DIGEST,
+            }),
+          ],
+        ),
+        { ...IDLE, schedule },
+        settled({
+          [WORKSPACE_A]: { ok: true, digest: DIGEST.digest },
+          [WORKSPACE_B]: { ok: true, digest: DIGEST.digest },
+        }),
+      ),
+    );
+    expect(summary.schedule).toStrictEqual({
+      round: { state: "planned", revision: SETTLED_FACTS.revision },
+      workspaces: [
+        {
+          workspacePath: WORKSPACE_A,
+          state: "queued",
+          due: { kind: "inputs-changed" },
+          chosenBy: { named: [], more: 0 },
+        },
+        {
+          workspacePath: WORKSPACE_B,
+          state: "idle",
+          notRunning: {
+            why: "no-run-until-input-change",
+            due: { kind: "inputs-changed" },
+          },
+        },
+      ],
+    });
+  });
+
+  it("D3013: a workspace's latest run, stored in this daemon life not fingerprinted because a path inside its inputs changed while it ran, reads invalidated with the verdict's reason", () => {
+    const reason = "its inputs changed while it ran: packages/a/src/a.ts";
+    const run = storedRun(
+      ranRun([ranModule([finished(discovered("a"), "passed")])]),
+    );
+    const schedule = freshSchedule();
+    schedule.runEnded(
+      WORKSPACE_A,
+      { runId: run.runId, notKept: { kind: "changed-inside", reason } },
+      false,
+    );
+    const summary = answered(
+      summaryAnswer(
+        results(
+          storedDiscovery([
+            discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+          ]),
+          [run],
+        ),
+        { ...IDLE, schedule },
+        UNSETTLED,
+      ),
+    );
+    const latestRun = summary.workspaces[0]?.latestRun;
+    expect(latestRun?.invalidated).toStrictEqual({
+      reason,
+      omittedCharacters: 0,
+    });
+  });
+
   it("D1865: a workspace whose latest run failed to load it gives that run's status and adapter version", () => {
     const run: WorkspaceRun = {
       status: "failed",
@@ -1507,6 +1597,70 @@ describe("a summary with nothing to answer", () => {
       over: { kept: true, cut: true, counted: true },
       atLimit: { kept: true, counted: false },
     });
+  });
+
+  /** The reason a summary gives for answering nothing while no discovery is stored, from `view`. */
+  function noDiscoveryReason(view: Partial<DaemonView>): string {
+    const answer = summaryAnswer(
+      results(undefined),
+      { ...IDLE, ...view },
+      UNSETTLED,
+    );
+    return "noAnswer" in answer ? answer.noAnswer : "answered";
+  }
+
+  it("D3014: with no stored discovery, the reason also says what the daemon's round waits for", () => {
+    const schedule = freshSchedule();
+    schedule.pending(ROUND_WAIT.rediscovery);
+    expect(
+      noDiscoveryReason({ schedule }).includes(
+        "a round is pending, waiting for a rediscovery",
+      ),
+    ).toBe(true);
+  });
+
+  it("D3015: with the latest discovery refused, the reason also says the round is held after a failed scheduling step, when it is tried again, and the failure", () => {
+    const schedule = freshSchedule();
+    schedule.held("the store was migrated by a newer RT Test");
+    const answer = summaryAnswer(
+      results(undefined, [], "The store holds an unreadable not_read"),
+      { ...IDLE, schedule },
+      UNSETTLED,
+    );
+    expect(
+      ("noAnswer" in answer ? answer.noAnswer : "answered").includes(
+        "a scheduling step failed, so the daemon tries again at the next input event or reconciliation: the store was migrated by a newer RT Test",
+      ),
+    ).toBe(true);
+  });
+
+  it("D3016: the reason names at most 20 of the jobs that ended with nothing stored and counts the rest, and names exactly 20 whole", () => {
+    const jobs = Array.from({ length: 21 }, (_, index) => ({
+      workspacePath: `packages/w${index}`,
+      reason: "the store write failed",
+    }));
+    const named = jobs
+      .slice(0, 20)
+      .map((job) => `the run of ${job.workspacePath}: ${job.reason}`)
+      .join("; ");
+    const over = noDiscoveryReason({ unstoredJobs: jobs });
+    const atBound = noDiscoveryReason({ unstoredJobs: jobs.slice(0, 20) });
+    expect({
+      over: over.endsWith(`; ended with nothing stored: ${named}; and 1 more`),
+      atBound: atBound.endsWith(`; ended with nothing stored: ${named}`),
+    }).toStrictEqual({ over: true, atBound: true });
+  });
+
+  it("D3017: each job that ended with nothing stored has its reason cut to 1,000 characters in the reason, counting the rest", () => {
+    const kept = "r".repeat(1000);
+    const reason = noDiscoveryReason({
+      unstoredJobs: [{ reason: `${kept}#####` }],
+    });
+    expect(
+      reason.endsWith(
+        `; ended with nothing stored: the discovery: ${kept} (5 more characters are in the daemon log)`,
+      ),
+    ).toBe(true);
   });
 });
 

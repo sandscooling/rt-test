@@ -1,4 +1,5 @@
-import type { StatusResponse } from "../daemon/protocol.js";
+import type { StatusResponse, UnstoredJob } from "../daemon/protocol.js";
+import type { ScheduleReader } from "../daemon/workspace-schedule.js";
 import type { FingerprintResult } from "../inputs/fingerprint.js";
 import type { CurrentInputs } from "../inputs/input-tracker.js";
 import type { LatestResults } from "../store/open-store.js";
@@ -11,6 +12,8 @@ import type {
 import {
   activityText,
   CURRENT,
+  omittedText,
+  roundText,
   FAILED_MODULE,
   SOURCE_NOT_READ,
   TYPECHECK_MODULE,
@@ -38,11 +41,11 @@ import {
   type TestStanding,
 } from "./test-states.js";
 
-/** What the daemon knows of itself that an answer carries. */
+/** What an answer reads of the daemon: what it knows of itself, and its schedule. */
 export type DaemonView = Pick<
   StatusResponse,
   "consumerRoot" | "activity" | "unstoredJobs"
->;
+> & { readonly schedule: ScheduleReader };
 
 /** What a query answers from once a discovery is stored. */
 export interface QueryBasis {
@@ -57,6 +60,9 @@ export interface QueryBasis {
 /** Bounds each entry's reason; the server's size check bounds the whole answer. */
 const MAX_REASON_CHARACTERS = 1000;
 const REASON_SEPARATOR = "\n";
+/** How many of the jobs that ended with nothing stored a nothing-to-answer reason names. */
+const MAX_NAMED_UNSTORED_JOBS = 20;
+const JOB_SEPARATOR = "; ";
 const TYPECHECK_MODULE_REASON =
   "a typecheck module, whose tests RT Test does not discover or run";
 
@@ -87,7 +93,10 @@ export function summaryAnswer(
     notDiscovered,
     workspaces: discovery.discovery.workspaces.map((entry): WorkspaceFacts => ({
       workspacePath: entry.workspace.path,
-      latestRun: latestRunFacts(runs.get(entry.workspace.path)),
+      latestRun: latestRunFacts(
+        runs.get(entry.workspace.path),
+        daemon.schedule,
+      ),
     })),
   };
 }
@@ -100,11 +109,12 @@ export function queryBasis(
 ): QueryBasis | NoAnswer {
   const { discovery, discoveryRefusal } = results;
   if (discovery === undefined) {
+    const doing = daemonClause(daemon, inputs.facts.revision);
     return {
       noAnswer:
         discoveryRefusal === undefined
-          ? `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; ${activityClause(daemon)}`
-          : refusedDiscoveryReason(discoveryRefusal, daemon),
+          ? `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; ${doing}`
+          : refusedDiscoveryReason(discoveryRefusal, daemon, doing),
     };
   }
   const latestRuns = new Map(
@@ -115,6 +125,15 @@ export function queryBasis(
     discovery,
     fingerprintDigest(inputs.discoveryFingerprint(discovery.discovery)),
   );
+  const { schedule, latestSelection } = daemon.schedule.read({
+    revision: inputs.facts.revision,
+    activity: daemon.activity,
+    workspaces: discovery.discovery.workspaces,
+    latestRuns,
+    fingerprint: (entry) =>
+      fingerprints.get(entry.workspace.path) ??
+      inputs.workspaceFingerprint(entry),
+  });
   return {
     discovery,
     latestRuns,
@@ -144,6 +163,8 @@ export function queryBasis(
         : { inputsNotNarrowed: inputs.inputsNotNarrowed }),
       activity: daemon.activity,
       unstoredJobs: daemon.unstoredJobs,
+      schedule,
+      latestSelection,
     },
   };
 }
@@ -255,21 +276,38 @@ function discoveredWorkspaceEntries(
 }
 
 /** The refusal quotes the stored value it could not read, so the answer carries it cut and the daemon log whole. */
-function refusedDiscoveryReason(refusal: string, daemon: DaemonView): string {
+function refusedDiscoveryReason(
+  refusal: string,
+  daemon: DaemonView,
+  doing: string,
+): string {
   const { reason, omittedCharacters } = cutReason(refusal);
-  const omitted =
-    omittedCharacters === 0
-      ? ""
-      : ` (${omittedCharacters} more characters are in the daemon log)`;
-  return `the daemon serving ${daemon.consumerRoot} refused the latest discovery stored for this worktree as unreadable, so it answers once a new discovery replaces it; ${activityClause(daemon)}. The refusal: ${reason}${omitted}`;
+  return `the daemon serving ${daemon.consumerRoot} refused the latest discovery stored for this worktree as unreadable, so it answers once a new discovery replaces it; ${doing}. The refusal: ${reason}${omittedText(omittedCharacters)}`;
 }
 
-function activityClause(daemon: DaemonView): string {
-  return `it is ${activityText(daemon.activity)}`;
+/** What the daemon is doing about a query it cannot answer: its activity, its round and each job that stored nothing. */
+function daemonClause(daemon: DaemonView, revision: number): string {
+  const round = roundText(daemon.schedule.round(revision));
+  return `it is ${activityText(daemon.activity)}; ${round}${unstoredClause(daemon.unstoredJobs)}`;
+}
+
+function unstoredClause(jobs: readonly UnstoredJob[]): string {
+  if (jobs.length === 0) return "";
+  const named = jobs.slice(0, MAX_NAMED_UNSTORED_JOBS).map((job) => {
+    const { reason, omittedCharacters } = cutReason(job.reason);
+    const who =
+      job.workspacePath === undefined
+        ? "the discovery"
+        : `the run of ${job.workspacePath}`;
+    return `${who}: ${reason}${omittedText(omittedCharacters)}`;
+  });
+  const more = jobs.length - named.length;
+  const rest = more === 0 ? "" : `${JOB_SEPARATOR}and ${more} more`;
+  return `; ended with nothing stored: ${named.join(JOB_SEPARATOR)}${rest}`;
 }
 
 /** Cuts by code point, so no character is split. */
-function cutReason(text: string): CutReason {
+export function cutReason(text: string): CutReason {
   const characters = Array.from(text);
   return {
     reason: characters.slice(0, MAX_REASON_CHARACTERS).join(""),
@@ -284,10 +322,15 @@ function adapterVersionFacts(adapterVersion: number): AdapterVersionFacts {
   };
 }
 
-function latestRunFacts(stored: StoredRun | undefined): LatestRunFacts | null {
+function latestRunFacts(
+  stored: StoredRun | undefined,
+  schedule: ScheduleReader,
+): LatestRunFacts | null {
   if (stored === undefined) return null;
+  const invalidated = schedule.invalidation(stored);
   const base = {
     runId: stored.runId,
+    ...(invalidated === undefined ? {} : { invalidated }),
     ...adapterVersionFacts(stored.adapterVersion),
   };
   const run = stored.run;

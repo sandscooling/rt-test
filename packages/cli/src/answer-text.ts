@@ -3,19 +3,39 @@ import {
   DEPENDENCY_BUILD_FAILED,
   DEPENDENCY_BUILD_TIMED_OUT,
   DEPENDENCY_BUILDS_ENDED,
+  DUE_REASON,
+  EARLIER_DAEMON_LIFE,
+  EXECUTION_STATE,
+  FIRST_ROUND,
   FRESHNESS_VALUES,
+  IDLE_REASON,
+  INPUT_DIGESTS_UNREAD,
+  INVALIDATED,
+  NO_BUILD_ENDED,
   NO_SELECTION_INPUT,
   RECONCILIATION_INCOMPLETE,
+  ROUND_SELECTION,
+  roundText,
   SELECTION_REFUSED,
   TEST_STATES,
   WATCHER_UNHEALTHY,
+  type ChoosingReason,
   type CutReason,
+  type DueFacts,
+  type ExplainedFallback,
+  type ExplainedPath,
+  type IdleReason,
   type InputFacts,
   type InputsNotNarrowed,
+  type NamedList,
+  type NoRoundSelection,
   type NotDiscoveredEntry,
   type PathStatusResponse,
+  type ScheduleDueReason,
+  type SelectionExplanation,
   type SummaryResponse,
   type TestCounts,
+  type WorkspaceExecution,
 } from "@rt-test/daemon/client";
 import { oneLine } from "./output.js";
 
@@ -43,6 +63,37 @@ const NOT_NARROWED_CAUSES: Record<InputsNotNarrowed["kind"], string> = {
   [NO_SELECTION_INPUT]: "the discovery yields no selection input",
   [SELECTION_REFUSED]: "selection refused an input's path",
 };
+const NO_SELECTION_CAUSES: Record<NoRoundSelection, string> = {
+  ...NOT_NARROWED_CAUSES,
+  [NO_BUILD_ENDED]: "no dependency build ended at the round's input revision",
+  [INPUT_DIGESTS_UNREAD]: "the inputs' digests could not be read",
+  [FIRST_ROUND]:
+    "it was the first round of this daemon life, with no earlier round to compare with",
+};
+const DUE_PHRASES: Record<ScheduleDueReason, string> = {
+  [DUE_REASON.noRun]: "it has no stored run",
+  [DUE_REASON.anotherAdapterVersion]:
+    "its latest run was stored under another adapter version",
+  [DUE_REASON.notFingerprinted]: "its latest run was stored not fingerprinted",
+  [INVALIDATED]: "its latest run is invalidated",
+  [EARLIER_DAEMON_LIFE]:
+    "its latest run was stored not fingerprinted in an earlier daemon life",
+  [DUE_REASON.noCurrentFingerprint]:
+    "its current input fingerprint cannot be computed",
+  [DUE_REASON.inputsChanged]: "its inputs differ from those of its latest run",
+  [DUE_REASON.failedRun]: "its latest run failed",
+  [DUE_REASON.crashedRun]: "its latest run crashed",
+};
+const IDLE_PHRASES: Record<IdleReason, string> = {
+  [IDLE_REASON.retryPending]: "a retry is pending",
+  [IDLE_REASON.noRunUntilInputChange]:
+    "no run comes until the next input change",
+  [IDLE_REASON.roundHeld]: "no run comes until the held round is tried again",
+};
+const DETAIL_SEPARATOR = "; ";
+const INCOMPLETE_MARK = " (incomplete)";
+const NO_OWNER = "no package workspace";
+const EXECUTION_HEADING = "Execution:";
 
 /** The answer's fields for `--json`, without the daemon protocol's own. */
 export function answerFields(answer: Answer): Record<string, unknown> {
@@ -68,7 +119,8 @@ export function countLines(counts: TestCounts): string[] {
 
 /**
  * The discovery's adapter version when it is not current and its freshness, the inputs the answer was given from,
- * then the daemon's activity and each job it stored nothing for.
+ * then the daemon's activity, its round, each workspace's execution state, each job it stored nothing for, and the
+ * latest selection.
  */
 export function contextLines(answer: Answer): string[] {
   const { discovery, currentAdapterVersion } = answer;
@@ -101,10 +153,165 @@ export function contextLines(answer: Answer): string[] {
       ? []
       : [UNFINGERPRINTED_HEADING, ...unfingerprinted]),
     `Daemon: ${oneLine(activityText(answer.activity))}`,
+    `Round: ${firstLine(roundText(answer.schedule.round))}`,
+    ...executionLines(answer.schedule.workspaces),
     ...(unstored.length === 0
       ? []
       : ["Ended with nothing stored:", ...unstored]),
+    ...selectionLines(answer.latestSelection),
   ];
+}
+
+function executionLines(workspaces: readonly WorkspaceExecution[]): string[] {
+  if (workspaces.length === 0) return [];
+  return [
+    EXECUTION_HEADING,
+    ...workspaces.map(
+      (workspace) =>
+        `${INDENT}${oneLine(workspace.workspacePath)}: ${executionText(workspace)}`,
+    ),
+  ];
+}
+
+function executionText(workspace: WorkspaceExecution): string {
+  switch (workspace.state) {
+    case EXECUTION_STATE.running:
+      return workspace.state;
+    case EXECUTION_STATE.interrupted:
+      return `${workspace.state} by a change to ${namedText(workspace.interruptedBy, oneLine)}`;
+    case EXECUTION_STATE.queued:
+      return [
+        `${workspace.state}: ${dueText(workspace.due)}`,
+        ...(isEmpty(workspace.chosenBy)
+          ? []
+          : [chosenText(workspace.chosenBy)]),
+        ...(workspace.interruptedBy === undefined
+          ? []
+          : [
+              `its last run was interrupted by a change to ${namedText(workspace.interruptedBy, oneLine)}`,
+            ]),
+      ].join(DETAIL_SEPARATOR);
+    case EXECUTION_STATE.idle:
+      return workspace.notRunning === undefined
+        ? workspace.state
+        : `${workspace.state}: ${IDLE_PHRASES[workspace.notRunning.why]}, since ${dueText(workspace.notRunning.due)}`;
+  }
+}
+
+function dueText(due: DueFacts): string {
+  const detail =
+    due.detail === undefined ? "" : `: ${cutReasonText(due.detail)}`;
+  return `${DUE_PHRASES[due.kind]}${detail}`;
+}
+
+/** A workspace chosen only for reasons whose path or fallback the answer leaves out gets a count, not an empty list. */
+function chosenText(chosenBy: NamedList<ChoosingReason>): string {
+  return chosenBy.named.length === 0
+    ? `chosen for ${chosenBy.more} reasons the latest selection does not name`
+    : `chosen by ${namedText(chosenBy, choosingText)}`;
+}
+
+function choosingText(reason: ChoosingReason): string {
+  const fallback =
+    reason.scope === undefined
+      ? ""
+      : `, a broad fallback to the ${reason.scope}`;
+  return `${oneLine(reason.path)} (${reason.trigger}${fallback})`;
+}
+
+function isEmpty<T>(list: NamedList<T>): boolean {
+  return list.named.length === 0 && list.more === 0;
+}
+
+/** The items an answer named, then how many it left out. */
+function namedText<T>(list: NamedList<T>, text: (item: T) => string): string {
+  const named = list.named.map(text).join(LIST_SEPARATOR);
+  return list.more === 0 ? named : `${named} and ${list.more} more`;
+}
+
+function selectionLines(selection: SelectionExplanation): string[] {
+  switch (selection.state) {
+    case ROUND_SELECTION.noRoundYet:
+      return ["Latest selection: no round has planned in this daemon life"];
+    case ROUND_SELECTION.notMade:
+      return [
+        `Latest selection: none was made at input revision ${selection.revision}, since ${NO_SELECTION_CAUSES[selection.kind]}: ${cutReasonText(selection.reason)}`,
+      ];
+    case ROUND_SELECTION.made:
+      return [
+        `Latest selection, at input revision ${selection.revision}: ${countsText(selection.counts)}`,
+        ...selection.paths.named.map((path) => `${INDENT}${pathText(path)}`),
+        ...moreLines(selection.paths.more, "changed paths"),
+        ...selection.fallbacks.named.map(
+          (fallback) => `${INDENT}${fallbackText(fallback)}`,
+        ),
+        ...moreLines(selection.fallbacks.more, "broad fallbacks"),
+      ];
+  }
+}
+
+type SelectionCounts = Extract<
+  SelectionExplanation,
+  { readonly state: typeof ROUND_SELECTION.made }
+>["counts"];
+type TestCount = SelectionCounts["selectedTests"];
+type SelectionReason =
+  ExplainedPath["selected"]["named"][number]["reasons"][number];
+
+function countsText(counts: SelectionCounts): string {
+  const { totalWorkspaces } = counts;
+  const workspaces = `${counts.selectedWorkspaces} of ${totalWorkspaces.count}${totalWorkspaces.complete ? "" : INCOMPLETE_MARK}`;
+  return `selected ${countText(counts.selectedTests)} of ${countText(counts.totalTests)} tests and ${workspaces} workspaces, ${counts.notRunnableWorkspaces} not runnable`;
+}
+
+function countText(count: TestCount): string {
+  return `${count.count}${count.complete ? "" : INCOMPLETE_MARK}`;
+}
+
+function moreLines(more: number, what: string): string[] {
+  return more === 0 ? [] : [`${INDENT}and ${more} more ${what}`];
+}
+
+/** The workspaces the path reached that cannot run, bounded and counted, whether or not it selected any. */
+function pathText(path: ExplainedPath): string {
+  const owner = path.owner === undefined ? NO_OWNER : oneLine(path.owner);
+  const notRunnable = isEmpty(path.notRunnable)
+    ? ""
+    : `; not runnable: ${namedText(path.notRunnable, (excluded) => `${oneLine(excluded.workspace.path)} (${cutReasonText(excluded)})`)}`;
+  return `changed path ${oneLine(path.path)}, owned by ${owner}, ${selectedText(path)}${notRunnable}`;
+}
+
+/** A path that selected none only because its workspaces cannot run gives its kind; the not-runnable list says the rest. */
+function selectedText(path: ExplainedPath): string {
+  if (isEmpty(path.selected)) {
+    const none = path.nothingSelected;
+    if (none === undefined) return "selected no workspace";
+    const detail = isEmpty(path.notRunnable)
+      ? `: ${cutReasonText(none.detail)}`
+      : "";
+    return `selected no workspace, ${none.kind}${detail}`;
+  }
+  return `selected ${namedText(
+    path.selected,
+    ({ workspace, reasons }) =>
+      `${oneLine(workspace)} (${reasons.map(reasonText).join(DETAIL_SEPARATOR)})`,
+  )}`;
+}
+
+function reasonText(reason: SelectionReason): string {
+  const from = reason.from === undefined ? "" : ` from ${oneLine(reason.from)}`;
+  const steps = reason.steps
+    .map((step) => {
+      const detail =
+        step.detail.reason === "" ? "" : ` (${cutReasonText(step.detail)})`;
+      return `${oneLine(step.workspace)} by ${step.via}${detail}`;
+    })
+    .join(" then ");
+  return `${reason.trigger}${from}${steps === "" ? "" : ` through ${steps}`}`;
+}
+
+function fallbackText(fallback: ExplainedFallback): string {
+  return `broad fallback to the ${fallback.scope} for ${oneLine(fallback.path)}, triggered by ${fallback.trigger}, from ${namedText(fallback.workspaces, oneLine)}`;
 }
 
 /** The input revision, reconciliation, watcher and pending changes an answer was given from, with their reasons. */

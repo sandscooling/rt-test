@@ -35,6 +35,9 @@ import {
   DEPENDENCY_BUILD_TIMED_OUT,
   DEPENDENCY_BUILDS_ENDED,
   daemonStatus,
+  FIRST_ROUND,
+  PROTOCOL_VERSION,
+  ROUND_SELECTION,
   servingDaemon,
   TEST_STATES,
   type DaemonIdentity,
@@ -42,7 +45,9 @@ import {
   type InputsNotNarrowed,
   type NotDiscoveredEntry,
   type StartPlan,
+  type ExplainedPath,
   type SummaryResponse,
+  type WorkspaceExecution,
 } from "@rt-test/daemon/client";
 import { daemonEntryPoint } from "../../daemon/src/daemon/entry-point.js";
 import { isRunning } from "../../daemon/src/daemon/runtime-directory.js";
@@ -928,7 +933,7 @@ describe("a trusted start", () => {
             consumerRoot: root,
             ...consumerIdentity(root),
             stateDirectory: join(root, ".rt-test"),
-            protocolVersion: 1,
+            protocolVersion: PROTOCOL_VERSION,
             workspaces: LISTED_WORKSPACES,
           },
         };
@@ -1004,7 +1009,11 @@ describe("a trusted start", () => {
           consumerIdentity(root).worktreeIdentity,
           (request) =>
             request["type"] === "hello"
-              ? { type: "hello", protocolVersion: 1, pid: STAND_IN_PID }
+              ? {
+                  type: "hello",
+                  protocolVersion: PROTOCOL_VERSION,
+                  pid: STAND_IN_PID,
+                }
               : undefined,
           async () => {
             const client = await settled(servingDaemon(root));
@@ -1368,11 +1377,14 @@ function notNarrowedLines(inputsNotNarrowed: InputsNotNarrowed): string[] {
   );
 }
 
-/** A summary answer with no test, a stale discovery and settled inputs, overridden by `more`. */
+/**
+ * A summary answer with no test, a stale discovery and settled inputs, whose first round planned at their revision
+ * with no selection, overridden by `more`.
+ */
 function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
   return {
     type: "summary",
-    protocolVersion: 1,
+    protocolVersion: PROTOCOL_VERSION,
     consumerRoot: "/consumer",
     currentAdapterVersion: 3,
     discovery: {
@@ -1385,6 +1397,19 @@ function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
     unfingerprintedWorkspaces: [],
     activity: { state: "idle" },
     unstoredJobs: [],
+    schedule: {
+      round: { state: "planned", revision: SETTLED_INPUTS.revision },
+      workspaces: [],
+    },
+    latestSelection: {
+      state: ROUND_SELECTION.notMade,
+      revision: SETTLED_INPUTS.revision,
+      kind: FIRST_ROUND,
+      reason: {
+        reason: "no previous round read the inputs to compare with",
+        omittedCharacters: 0,
+      },
+    },
     counts: {
       tests: 0,
       states: Object.fromEntries(
@@ -1397,6 +1422,138 @@ function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
     workspaces: [],
     ...more,
   };
+}
+
+const INVALIDATED_REASON = `its inputs changed while it ran: ${WORKSPACE_A}/src/a.ts`;
+
+/** The human answer's lines for an answer whose round planned at its revision left `workspaces` as they say. */
+function linesWith(...workspaces: WorkspaceExecution[]): string[] {
+  return contextLines(
+    humanAnswer({
+      schedule: {
+        round: { state: "planned", revision: SETTLED_INPUTS.revision },
+        workspaces,
+      },
+    }),
+  );
+}
+
+const MADE_SELECTION_LINES = [
+  "Latest selection, at input revision 2: selected 3 of 7 (incomplete) tests and 2 of 5 (incomplete) workspaces, 1 not runnable",
+  `  changed path lib/x.ts, owned by ${WORKSPACE_A}, selected ${WORKSPACE_A} (changed-path)`,
+  "  and 3 more changed paths",
+  `  broad fallback to the project for package.json, triggered by manifest, from ${WORKSPACE_A}`,
+  "  and 2 more broad fallbacks",
+];
+
+/**
+ * The human answer's lines from its latest selection on, for a selection made at revision 2 naming one changed path
+ * of four and one broad fallback of three, whose total test and workspace counts are incomplete.
+ */
+function madeSelectionLines(): string[] {
+  const lines = contextLines(
+    humanAnswer({
+      latestSelection: {
+        state: ROUND_SELECTION.made,
+        revision: 2,
+        paths: {
+          named: [
+            {
+              path: "lib/x.ts",
+              owner: WORKSPACE_A,
+              triggers: ["changed-path"],
+              selected: {
+                named: [
+                  {
+                    workspace: WORKSPACE_A,
+                    reasons: [
+                      {
+                        path: "lib/x.ts",
+                        trigger: "changed-path",
+                        from: undefined,
+                        steps: [],
+                      },
+                    ],
+                  },
+                ],
+                more: 0,
+              },
+              notRunnable: { named: [], more: 0 },
+              nothingSelected: undefined,
+            },
+          ],
+          more: 3,
+        },
+        fallbacks: {
+          named: [
+            {
+              path: "package.json",
+              trigger: "manifest",
+              scope: "project",
+              workspaces: { named: [WORKSPACE_A], more: 0 },
+            },
+          ],
+          more: 2,
+        },
+        counts: {
+          selectedTests: { count: 3, complete: true },
+          totalTests: { count: 7, complete: false },
+          selectedWorkspaces: 2,
+          totalWorkspaces: { count: 5, complete: false },
+          notRunnableWorkspaces: 1,
+        },
+      },
+    }),
+  );
+  return lines.slice(
+    lines.findIndex((line) => line.startsWith("Latest selection")),
+  );
+}
+
+/** Changed path `lib/x.ts`, owned by workspace A, which it selected for the path's own change. */
+const LIB_X_SELECTING_A: ExplainedPath = {
+  path: "lib/x.ts",
+  owner: WORKSPACE_A,
+  triggers: ["changed-path"],
+  selected: {
+    named: [
+      {
+        workspace: WORKSPACE_A,
+        reasons: [
+          {
+            path: "lib/x.ts",
+            trigger: "changed-path",
+            from: undefined,
+            steps: [],
+          },
+        ],
+      },
+    ],
+    more: 0,
+  },
+  notRunnable: { named: [], more: 0 },
+  nothingSelected: undefined,
+};
+
+/** The human answer's line for `path`, the one changed path of a selection made at revision 2. */
+function changedPathLine(path: ExplainedPath): string | undefined {
+  return contextLines(
+    humanAnswer({
+      latestSelection: {
+        state: ROUND_SELECTION.made,
+        revision: 2,
+        paths: { named: [path], more: 0 },
+        fallbacks: { named: [], more: 0 },
+        counts: {
+          selectedTests: { count: 1, complete: true },
+          totalTests: { count: 1, complete: true },
+          selectedWorkspaces: 1,
+          totalWorkspaces: { count: 1, complete: true },
+          notRunnableWorkspaces: 0,
+        },
+      },
+    }),
+  ).find((line) => line.startsWith("  changed path"));
 }
 
 /** A summary run's freshness counts that are not zero. */
@@ -2062,6 +2219,347 @@ describe("a query", () => {
       kind: "dependency-builds-ended",
       reason: NOT_NARROWED_REASON,
     });
+  });
+
+  it("D3021: a human answer prints the daemon's round, naming what a pending round waits for", () => {
+    const lines = contextLines(
+      humanAnswer({
+        schedule: {
+          round: { state: "pending", waitsFor: "rediscovery" },
+          workspaces: [],
+        },
+      }),
+    );
+    expect(
+      lines.includes("Round: a round is pending, waiting for a rediscovery"),
+    ).toBe(true);
+  });
+
+  it("D3022: a human answer prints a queued workspace whose latest run is invalidated as invalidated, with the verdict's reason", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_A,
+      state: "queued",
+      due: {
+        kind: "invalidated",
+        detail: { reason: INVALIDATED_REASON, omittedCharacters: 0 },
+      },
+      chosenBy: { named: [], more: 0 },
+    });
+    expect(
+      lines.includes(
+        `  ${WORKSPACE_A}: queued: its latest run is invalidated: ${INVALIDATED_REASON}`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D3023: a human answer prints the changed paths and broad fallbacks that chose a queued workspace, counting the rest", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_B,
+      state: "queued",
+      due: { kind: "inputs-changed" },
+      chosenBy: {
+        named: [
+          { path: "lib/x.ts", trigger: "changed-path" },
+          { path: "package.json", trigger: "manifest", scope: "project" },
+        ],
+        more: 2,
+      },
+    });
+    expect(
+      lines.includes(
+        `  ${WORKSPACE_B}: queued: its inputs differ from those of its latest run; chosen by lib/x.ts (changed-path), package.json (manifest, a broad fallback to the project) and 2 more`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D3024: a human answer prints why an idle workspace that is not current has no run coming", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_A,
+      state: "idle",
+      notRunning: {
+        why: "no-run-until-input-change",
+        due: { kind: "earlier-daemon-life" },
+      },
+    });
+    expect(
+      lines.includes(
+        `  ${WORKSPACE_A}: idle: no run comes until the next input change, since its latest run was stored not fingerprinted in an earlier daemon life`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D3025: a human answer prints an interrupted workspace with the paths that interrupted it, counting the rest", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_A,
+      state: "interrupted",
+      interruptedBy: { named: [`${WORKSPACE_A}/src/a.ts`], more: 3 },
+    });
+    expect(
+      lines.includes(
+        `  ${WORKSPACE_A}: interrupted by a change to ${WORKSPACE_A}/src/a.ts and 3 more`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D3026: a human answer's latest selection counts the changed paths it does not name", () => {
+    expect(madeSelectionLines()).toStrictEqual(MADE_SELECTION_LINES);
+  });
+
+  it("D3027: a human answer's latest selection says each total count that is incomplete", () => {
+    expect(madeSelectionLines()).toStrictEqual(MADE_SELECTION_LINES);
+  });
+
+  it("D3028: a human answer's latest selection says why none was made, naming a cause only a round can have", () => {
+    const lines = contextLines(
+      humanAnswer({
+        latestSelection: {
+          state: ROUND_SELECTION.notMade,
+          revision: 2,
+          kind: "input-digests-unread",
+          reason: {
+            reason: "the inputs' digests cannot be read now",
+            omittedCharacters: 0,
+          },
+        },
+      }),
+    );
+    expect(lines.at(-1)).toBe(
+      "Latest selection: none was made at input revision 2, since the inputs' digests could not be read: the inputs' digests cannot be read now",
+    );
+  });
+
+  it("D3032: a human answer's latest selection says why a changed path selected no workspace", () => {
+    expect(
+      changedPathLine({
+        path: "lib/y.ts",
+        owner: undefined,
+        triggers: ["changed-path"],
+        selected: { named: [], more: 0 },
+        notRunnable: { named: [], more: 0 },
+        nothingSelected: {
+          kind: "no-dependent-vitest-workspace",
+          detail: {
+            reason: "no Vitest workspace depends on it",
+            omittedCharacters: 0,
+          },
+        },
+      }),
+    ).toBe(
+      "  changed path lib/y.ts, owned by no package workspace, selected no workspace, no-dependent-vitest-workspace: no Vitest workspace depends on it",
+    );
+  });
+
+  it("D3033: a human answer's latest selection names each workspace a changed path reached that cannot run, with why, beside those it selected", () => {
+    expect(
+      changedPathLine({
+        ...LIB_X_SELECTING_A,
+        notRunnable: {
+          named: [
+            {
+              workspace: {
+                path: "packages/broken",
+                directory: "/consumer/packages/broken",
+              },
+              reason: "its config file could not be loaded",
+              omittedCharacters: 0,
+            },
+          ],
+          more: 0,
+        },
+      }),
+    ).toBe(
+      `  changed path lib/x.ts, owned by ${WORKSPACE_A}, selected ${WORKSPACE_A} (changed-path); not runnable: packages/broken (its config file could not be loaded)`,
+    );
+  });
+
+  it("D3034: a human answer's latest selection names the chain a selection reason passed through", () => {
+    expect(
+      changedPathLine({
+        ...LIB_X_SELECTING_A,
+        selected: {
+          named: [
+            {
+              workspace: WORKSPACE_A,
+              reasons: [
+                {
+                  path: "lib/x.ts",
+                  trigger: "changed-path",
+                  from: "packages/lib",
+                  steps: [
+                    {
+                      workspace: WORKSPACE_A,
+                      via: "unresolved-override",
+                      detail: {
+                        reason: "the override cannot be resolved",
+                        omittedCharacters: 0,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          more: 0,
+        },
+      }),
+    ).toBe(
+      `  changed path lib/x.ts, owned by ${WORKSPACE_A}, selected ${WORKSPACE_A} (changed-path from packages/lib through ${WORKSPACE_A} by unresolved-override (the override cannot be resolved))`,
+    );
+  });
+
+  it("D3086: a human answer's latest selection names the detail of each step a selection reason passed through", () => {
+    expect(
+      changedPathLine({
+        ...LIB_X_SELECTING_A,
+        selected: {
+          named: [
+            {
+              workspace: WORKSPACE_A,
+              reasons: [
+                {
+                  path: "lib/x.ts",
+                  trigger: "changed-path",
+                  from: "packages/lib",
+                  steps: [
+                    {
+                      workspace: "packages/lib",
+                      via: "unresolvable-alias",
+                      detail: {
+                        reason: "the alias ~ has no replacement",
+                        omittedCharacters: 0,
+                      },
+                    },
+                    {
+                      workspace: WORKSPACE_A,
+                      via: "unresolved-override",
+                      detail: {
+                        reason: "the override cannot be resolved",
+                        omittedCharacters: 0,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          more: 0,
+        },
+      }),
+    ).toBe(
+      `  changed path lib/x.ts, owned by ${WORKSPACE_A}, selected ${WORKSPACE_A} (changed-path from packages/lib through packages/lib by unresolvable-alias (the alias ~ has no replacement) then ${WORKSPACE_A} by unresolved-override (the override cannot be resolved))`,
+    );
+  });
+
+  it("D3088: a changed path that selected no workspace because every one it reached cannot run lists each of them with why", () => {
+    expect(
+      changedPathLine({
+        path: "lib/z.ts",
+        owner: undefined,
+        triggers: ["changed-path"],
+        selected: { named: [], more: 0 },
+        notRunnable: {
+          named: [
+            {
+              workspace: {
+                path: "packages/broken",
+                directory: "/consumer/packages/broken",
+              },
+              reason: "its config file could not be loaded",
+              omittedCharacters: 0,
+            },
+            {
+              workspace: {
+                path: "packages/other",
+                directory: "/consumer/packages/other",
+              },
+              reason: "Error: config boom\n    at load (vitest.config.ts:1:7)",
+              omittedCharacters: 0,
+            },
+          ],
+          more: 0,
+        },
+        nothingSelected: {
+          kind: "only-not-runnable",
+          detail: {
+            reason:
+              "every workspace it reached cannot run: packages/broken, packages/other",
+            omittedCharacters: 0,
+          },
+        },
+      }),
+    ).toBe(
+      "  changed path lib/z.ts, owned by no package workspace, selected no workspace, only-not-runnable; not runnable: packages/broken (its config file could not be loaded), packages/other (Error: config boom (more lines))",
+    );
+  });
+
+  it("D3103: a human answer's queued workspace says its last run was interrupted, naming the paths and counting the rest", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_A,
+      state: "queued",
+      due: { kind: "no-run" },
+      chosenBy: { named: [], more: 0 },
+      interruptedBy: { named: [`${WORKSPACE_A}/src/a.ts`], more: 1 },
+    });
+    expect(
+      lines.includes(
+        `  ${WORKSPACE_A}: queued: it has no stored run; its last run was interrupted by a change to ${WORKSPACE_A}/src/a.ts and 1 more`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D3104: a human answer's queued workspace chosen only for reasons the latest selection does not name counts them", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_B,
+      state: "queued",
+      due: { kind: "inputs-changed" },
+      chosenBy: { named: [], more: 2 },
+    });
+    expect(
+      lines.includes(
+        `  ${WORKSPACE_B}: queued: its inputs differ from those of its latest run; chosen for 2 reasons the latest selection does not name`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D3101: a human answer's latest selection counts the broad fallbacks it does not name", () => {
+    expect(madeSelectionLines()).toStrictEqual(MADE_SELECTION_LINES);
+  });
+
+  it("D3102: a human answer's latest selection says when its workspace total is incomplete", () => {
+    expect(madeSelectionLines()).toStrictEqual(MADE_SELECTION_LINES);
+  });
+
+  it("D3029: a human summary shows a workspace's invalidated latest run as invalidated, with the reason, beside its status", async () => {
+    scripted.summary = humanAnswer({
+      workspaces: [
+        {
+          workspacePath: WORKSPACE_A,
+          latestRun: {
+            runId: "run-1",
+            invalidated: { reason: INVALIDATED_REASON, omittedCharacters: 0 },
+            adapterVersion: 3,
+            adapterVersionCurrent: true,
+            status: "ran",
+            execution: "completed",
+            forceStopped: false,
+            nothingRan: null,
+            unhandledErrors: 0,
+            moduleErrors: 0,
+          },
+        },
+      ],
+    });
+    let stdout: string;
+    try {
+      stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
+    } finally {
+      scripted.summary = undefined;
+    }
+    expect(
+      stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
+    ).toBe(
+      `  ${WORKSPACE_A}: latest run loaded the workspace, completed, invalidated: ${INVALIDATED_REASON}, adapter version 3, 0 unhandled errors, 0 module errors`,
+    );
   });
 
   it(

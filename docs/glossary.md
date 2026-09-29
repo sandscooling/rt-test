@@ -75,7 +75,7 @@ What the daemon is doing with a Vitest workspace: running it, holding it queued 
 _Avoid_: status, activity
 
 **Round**:
-The daemon's decision, once the input revision has held still, its inputs have settled, its dependency build has ended and any rediscovery it needs has ended, of what to run at that revision, made with the selection over the paths changed since the previous round. A round is pending until that decision is made.
+The daemon's decision, once the input revision has held still, its inputs have settled, its dependency build has ended, any rediscovery it needs has ended and no job begun at an earlier revision is in progress, of what to run at that revision; the selection over the paths changed since the previous round orders what it runs first and explains it. A round is pending until that decision is made, and held after a scheduling step fails until the daemon tries again.
 _Avoid_: cycle, pass, tick
 
 **Force-stopped run**:
