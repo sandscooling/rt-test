@@ -472,7 +472,7 @@
     "id": "D2536",
     "defect": "A daemon's queries read every workspace over the whole project's inputs, so an edit to one workspace stales every other workspace's results.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return this.#parts.inputs.current({\n      discoveryId: results.discovery?.discoveryId,\n      state: this.#builds.narrowing().state,\n    });",
+    "old": "    return this.#parts.inputs.current({\n      ...this.#builds.narrowing(),\n      discoveryId: results.discovery?.discoveryId,\n    });",
     "new": "    return this.#parts.inputs.current();"
   },
   {
@@ -495,5 +495,33 @@
     "file": "packages/cli/src/answer-text.ts",
     "old": "  delete fields[\"protocolVersion\"];\n",
     "new": "  delete fields[\"protocolVersion\"];\n  delete fields[\"inputsNotNarrowed\"];\n"
+  },
+  {
+    "id": "D2603",
+    "defect": "A timed out dependency build is named in the human warning as a failed build, so the answer gives the wrong cause.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  [DEPENDENCY_BUILD_TIMED_OUT]: \"the last dependency build timed out\",",
+    "new": "  [DEPENDENCY_BUILD_TIMED_OUT]: \"the last dependency build failed\","
+  },
+  {
+    "id": "D2604",
+    "defect": "The ended dependency builds are named in the human warning as a failed build, so the answer gives the wrong cause.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  [DEPENDENCY_BUILDS_ENDED]:\n    \"the dependency builds stopped working for the rest of the daemon's life\",",
+    "new": "  [DEPENDENCY_BUILDS_ENDED]: \"the last dependency build failed\","
+  },
+  {
+    "id": "D2605",
+    "defect": "The kind of a timed out dependency build is spelled differently than the criterion names it, so a machine reader matching it never sees a timeout.",
+    "file": "packages/daemon/src/query/answer.ts",
+    "old": "export const DEPENDENCY_BUILD_TIMED_OUT = \"dependency-build-timed-out\";",
+    "new": "export const DEPENDENCY_BUILD_TIMED_OUT = \"dependency-build-timeout\";"
+  },
+  {
+    "id": "D2606",
+    "defect": "The kind of the ended dependency builds is spelled differently than the criterion names it, so a machine reader matching it never sees that the builds ended.",
+    "file": "packages/daemon/src/query/answer.ts",
+    "old": "export const DEPENDENCY_BUILDS_ENDED = \"dependency-builds-ended\";",
+    "new": "export const DEPENDENCY_BUILDS_ENDED = \"dependency-builds-stopped\";"
   }
 ]

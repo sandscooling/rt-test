@@ -4581,7 +4581,7 @@
     "id": "D2510",
     "defect": "A failed build's reason is dropped once the next build begins, so answers stop saying every workspace is widened before a later build succeeds.",
     "file": "packages/daemon/src/daemon/dependency-builds.ts",
-    "old": "      lastFailure: build.built ? undefined : build.reason,",
+    "old": "      lastFailure: build.built\n        ? undefined\n        : { kind: build.kind, reason: build.reason },",
     "new": "      lastFailure: undefined,"
   },
   {
@@ -4595,8 +4595,8 @@
     "id": "D2512",
     "defect": "A stop leaves the build in progress running and waits for it to end.",
     "file": "packages/daemon/src/daemon/dependency-builds.ts",
-    "old": "    this.#stopped = true;\n    this.#parts.executor.abort();\n",
-    "new": "    this.#stopped = true;\n"
+    "old": "    this.#stopped = true;\n    clearTimeout(this.#boundTimer);\n    this.#parts.executor.abort();\n",
+    "new": "    this.#stopped = true;\n    clearTimeout(this.#boundTimer);\n"
   },
   {
     "id": "D2513",
@@ -4616,15 +4616,15 @@
     "id": "D2515",
     "defect": "A throw from the executor's build call escapes the builds, ending them for the daemon's life with every workspace reading a false building reason and the job mark never closed.",
     "file": "packages/daemon/src/daemon/dependency-builds.ts",
-    "old": "      .catch((error: unknown): JobOutcome<DependencyInformation> => ({\n        ended: false,\n        reason: `${BUILD_THREW_REASON}: ${errorText(error)}`,\n      }));",
-    "new": "      ;"
+    "old": "      .catch((error: unknown): JobOutcome<DependencyInformation> => ({\n        ended: false,\n        reason: `${BUILD_THREW_REASON}: ${errorText(error)}`,\n      }))\n",
+    "new": ""
   },
   {
     "id": "D2516",
     "defect": "A discovery that yields no selection input is recorded as a failed build, so answers give the wrong reason for the widening.",
     "file": "packages/daemon/src/daemon/dependency-builds.ts",
     "old": "      this.#noSelectionInput(discovery, selection.reason);\n",
-    "new": "      this.#record(discovery, { revision, built: false, reason: selection.reason });\n"
+    "new": "      this.#record(discovery, { revision, built: false, kind: DEPENDENCY_BUILD_FAILED, reason: selection.reason });\n"
   },
   {
     "id": "D2517",
@@ -4700,14 +4700,14 @@
     "id": "D2527",
     "defect": "A failed build at the current revision reads as a build still running, so every workspace stays unknown instead of widening to the whole project.",
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
-    "old": "  return {\n    kind: NARROWING.widened,\n    notNarrowed: { kind: DEPENDENCY_BUILD_FAILED, reason: latest.reason },\n  };\n",
-    "new": "  return building(revision, failed);\n"
+    "old": "  return {\n    kind: NARROWING.widened,\n    notNarrowed: { kind: latest.kind, reason: latest.reason },\n  };\n",
+    "new": "  return building(revision, state.lastFailure);\n"
   },
   {
     "id": "D2528",
     "defect": "While the build after a failed one runs, answers drop the failure's reason before any later build has succeeded.",
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
-    "old": "    return building(revision, failed);",
+    "old": "    return building(revision, state.lastFailure);",
     "new": "    return building(revision, undefined);"
   },
   {
@@ -4777,8 +4777,8 @@
     "id": "D2558",
     "defect": "A recorded build leaves the count of discards in a row as it was, so a run proceeds after two discards a successful build separated.",
     "file": "packages/daemon/src/daemon/dependency-builds.ts",
-    "old": "  #record(discovery: StoredDiscovery, build: EndedBuild): void {\n    this.#discards = { ...this.#discards, consecutive: 0 };\n",
-    "new": "  #record(discovery: StoredDiscovery, build: EndedBuild): void {\n"
+    "old": "    discards: Discards = { ...this.#discards, consecutive: 0 },\n",
+    "new": "    discards: Discards = this.#discards,\n"
   },
   {
     "id": "D2559",
@@ -4807,5 +4807,194 @@
     "file": "packages/daemon/test/job-tree.test.ts",
     "old": "return recordsInside([root], held).map(({ pid }) => pid);",
     "new": "return held;"
+  },
+  {
+    "id": "D2579",
+    "defect": "A build that timed out is recorded as a failed build, so every answer names the wrong cause for the widening.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      kind: DEPENDENCY_BUILD_TIMED_OUT,\n",
+    "new": "      kind: DEPENDENCY_BUILD_FAILED,\n"
+  },
+  {
+    "id": "D2580",
+    "defect": "The bound of a dependency build is half the 120000 ms the build is given, so a build that needs longer is ended while it works.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "const DEPENDENCY_BUILD_BOUND_MS = 120_000;",
+    "new": "const DEPENDENCY_BUILD_BOUND_MS = 60_000;"
+  },
+  {
+    "id": "D2581",
+    "defect": "The bound records a build as timed out without ending its processes, so the build goes on running.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      timedOut = true;\n      executor.abort();\n",
+    "new": "      timedOut = true;\n"
+  },
+  {
+    "id": "D2582",
+    "defect": "A build ended at the bound is neither recorded nor discarded, so a run waiting for it waits while the build is started again and again.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      this.#recordTimedOut(discovery, revision, verdict);\n      return;\n",
+    "new": "      return;\n"
+  },
+  {
+    "id": "D2583",
+    "defect": "A build that timed out is recorded at an earlier revision than the one it began at, so the same revision is built again at once.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    const build: EndedBuild = {\n      revision,\n      built: false,\n      kind: DEPENDENCY_BUILD_TIMED_OUT,",
+    "new": "    const build: EndedBuild = {\n      revision: revision - 1,\n      built: false,\n      kind: DEPENDENCY_BUILD_TIMED_OUT,"
+  },
+  {
+    "id": "D2584",
+    "defect": "A build that timed out stays ended after the input revision moves, so no later change of the inputs starts another build.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    return state.latest?.revision === revision;\n",
+    "new": "    return (\n      state.latest?.revision === revision ||\n      (state.latest?.built === false &&\n        state.latest.kind === DEPENDENCY_BUILD_TIMED_OUT)\n    );\n"
+  },
+  {
+    "id": "D2585",
+    "defect": "A build that timed out with its inputs moving restarts the count of discards in a row instead of extending it, so a run waiting through a moving revision waits for good.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      consecutive: this.#discards.consecutive + 1,\n",
+    "new": "      consecutive: 1,\n"
+  },
+  {
+    "id": "D2586",
+    "defect": "A build that timed out while its inputs moved is recorded as if they held still, so it counts toward no discards and a run waiting through a revision that moves once per bound never proceeds.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (verdict.fingerprinted) {\n",
+    "new": "    if (true) {\n"
+  },
+  {
+    "id": "D2587",
+    "defect": "A build that timed out with its inputs held still counts as a discard, so a run proceeds without a build that only ran out of time.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (verdict.fingerprinted) {\n",
+    "new": "    if (false) {\n"
+  },
+  {
+    "id": "D2588",
+    "defect": "The reason recorded for a build that timed out does not name the bound, so an answer cannot say how long the build was given.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "the build did not end within ${this.#boundMs} ms of its start and was ended",
+    "new": "the build did not end and was ended"
+  },
+  {
+    "id": "D2589",
+    "defect": "A build ended at the bound is recorded with the abort's outcome, whose reason names a stop, so its answers read as if a stop had ended it.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (timedOut && !outcome.ended && !replaced) {\n",
+    "new": "    if (false) {\n"
+  },
+  {
+    "id": "D2590",
+    "defect": "A build that produced its dependencies just as the bound's timer fired is recorded as a timeout, so the dependency information it built is thrown away.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (timedOut && !outcome.ended && !replaced) {\n",
+    "new": "    if (timedOut && !replaced) {\n"
+  },
+  {
+    "id": "D2591",
+    "defect": "The bound's timer keeps running after its build ends, so it later aborts whatever build is running then.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      .finally(() => clearTimeout(this.#boundTimer));",
+    "new": "      ;"
+  },
+  {
+    "id": "D2592",
+    "defect": "A build that timed out over a discovery a new one replaced is recorded under the old discovery, so the new discovery's state is overwritten and its build never begins.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (timedOut && !outcome.ended && !replaced) {\n",
+    "new": "    if (timedOut && !outcome.ended) {\n"
+  },
+  {
+    "id": "D2593",
+    "defect": "A build that timed out is logged as a failed build, so the log never says the bound ended it.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "  [DEPENDENCY_BUILD_TIMED_OUT]: \"timed out\",",
+    "new": "  [DEPENDENCY_BUILD_TIMED_OUT]: \"failed\","
+  },
+  {
+    "id": "D2594",
+    "defect": "While the build after one that timed out runs, answers name the last build as failed instead of timed out.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        : { kind: build.kind, reason: build.reason },",
+    "new": "        : { kind: DEPENDENCY_BUILD_FAILED, reason: build.reason },"
+  },
+  {
+    "id": "D2595",
+    "defect": "Builds whose rounds ended by throwing record nothing, so every answer reads building for the rest of the daemon's life.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        this.#endedBy = errorText(error);\n",
+    "new": "        this.#endedBy = undefined;\n"
+  },
+  {
+    "id": "D2596",
+    "defect": "The reason recorded for builds whose rounds threw leaves out the error's text, so an answer cannot say what stopped them.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        this.#endedBy = errorText(error);\n",
+    "new": "        this.#endedBy = \"the builds ended\";\n"
+  },
+  {
+    "id": "D2597",
+    "defect": "A discovery handed to the builds after their rounds ended clears the end, so it reads as building for the rest of the daemon's life.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    this.#discards = { ...this.#discards, consecutive: 0 };\n    // Whether it yields a selection input is known once its first build begins.\n",
+    "new": "    this.#discards = { ...this.#discards, consecutive: 0 };\n    this.#endedBy = undefined;\n    // Whether it yields a selection input is known once its first build begins.\n"
+  },
+  {
+    "id": "D2598",
+    "defect": "Builds whose rounds threw leave a run already waiting for a build waiting for good.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        this.#stopped = true;\n        this.#resolveWaits();\n",
+    "new": "        this.#stopped = true;\n"
+  },
+  {
+    "id": "D2599",
+    "defect": "A stop that ends the builds' rounds is read as the builds ending, so every answer widens for a daemon that is only shutting down.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        if (this.#stopped) {\n          this.#parts.log.error(\n            \"the dependency builds failed during a stop\",\n            error,\n          );\n          return;\n        }\n",
+    "new": ""
+  },
+  {
+    "id": "D2600",
+    "defect": "The end of the builds is logged as an error entry, with no warning that every workspace covers the whole project's inputs.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        this.#parts.log.entry(\n          `warning: the dependency builds ended, ${BUILDS_ENDED_CONSEQUENCE}: ${this.#endedBy}`,\n        );\n",
+    "new": "        this.#parts.log.error(\"the dependency builds failed\", error);\n"
+  },
+  {
+    "id": "D2601",
+    "defect": "A query builds its view from the builds' state alone, so an answer read with the stored discovery never says the builds ended.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      ...this.#builds.narrowing(),\n",
+    "new": "      state: this.#builds.narrowing().state,\n"
+  },
+  {
+    "id": "D2602",
+    "defect": "A narrowing built at the current revision is still used once the builds ended, so a workspace stays narrowed by a build the daemon can no longer repeat.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "  if (buildsEnded !== undefined) {\n",
+    "new": "  if (buildsEnded !== undefined && state?.latest?.built !== true) {\n"
+  },
+  {
+    "id": "D2607",
+    "defect": "The builds do not read as stopped once their rounds ended by throwing before any build was recorded, so a run that begins waiting afterward waits for good.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      .finally(() => {\n        this.#stopped = true;\n",
+    "new": "      .finally(() => {\n"
+  },
+  {
+    "id": "D2609",
+    "defect": "An error the builds' rounds throw after a stop is dropped with no log entry, so a bug in the stop sequence leaves no trace.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "          this.#parts.log.error(\n            \"the dependency builds failed during a stop\",\n            error,\n          );\n",
+    "new": ""
+  },
+  {
+    "id": "D2610",
+    "defect": "A build that timed out while its inputs moved counts as a discard with no log entry naming it, so a run that proceeds without its build leaves the log unable to say why.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    this.#parts.log.entry(\n      `the dependency build at input revision ${revision} timed out while its inputs moved, so it counts as discarded: ${verdict.reason}`,\n    );\n",
+    "new": ""
   }
 ]

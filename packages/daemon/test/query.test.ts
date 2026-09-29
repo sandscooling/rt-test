@@ -810,9 +810,9 @@ function narrowedTo(refusal?: string): Narrowing {
   return standIn as Narrowing;
 }
 
-/** The builds' state for the discovery the query reads, `DISCOVERY_ID`. */
+/** The builds' state for the discovery the query reads, `DISCOVERY_ID`, with the builds still working. */
 function narrowingOf(state: NarrowingState): QueryNarrowing {
-  return { discoveryId: DISCOVERY_ID, state };
+  return { discoveryId: DISCOVERY_ID, state, buildsEnded: undefined };
 }
 
 function builtAt(
@@ -832,8 +832,13 @@ function failedAt(revision: number): QueryNarrowing {
   return narrowingOf({
     discoveryId: DISCOVERY_ID,
     selectionInput: true,
-    latest: { revision, built: false, reason: BUILD_FAILED },
-    lastFailure: BUILD_FAILED,
+    latest: {
+      revision,
+      built: false,
+      kind: "dependency-build-failed",
+      reason: BUILD_FAILED,
+    },
+    lastFailure: { kind: "dependency-build-failed", reason: BUILD_FAILED },
   });
 }
 
@@ -967,8 +972,13 @@ describe("each workspace's inputs as the dependency builds narrow them", () => {
     const rebuilding = narrowingOf({
       discoveryId: DISCOVERY_ID,
       selectionInput: true,
-      latest: { revision: 2, built: false, reason: BUILD_FAILED },
-      lastFailure: BUILD_FAILED,
+      latest: {
+        revision: 2,
+        built: false,
+        kind: "dependency-build-failed",
+        reason: BUILD_FAILED,
+      },
+      lastFailure: { kind: "dependency-build-failed", reason: BUILD_FAILED },
     });
     expect(
       summaryOf(TWO_WORKSPACES, [], viewOf(rebuilding)).inputsNotNarrowed,
@@ -993,6 +1003,17 @@ describe("each workspace's inputs as the dependency builds narrow them", () => {
       summaryOf(TWO_WORKSPACES, [], viewOf(builtAt(3, narrowedTo(REFUSAL))))
         .inputsNotNarrowed,
     ).toStrictEqual({ kind: "selection-refused", reason: REFUSAL });
+  });
+
+  it("D2602: once the builds ended, a narrowing built at the current revision is never used, and the builds' end is the reason no workspace's inputs are narrowed", () => {
+    const reason = "the tracker failed: EIO";
+    expect(
+      summaryOf(
+        TWO_WORKSPACES,
+        [],
+        viewOf({ ...builtAt(3), buildsEnded: reason }),
+      ).inputsNotNarrowed,
+    ).toStrictEqual({ kind: "dependency-builds-ended", reason });
   });
 
   it("D2531: once narrowed, an edit to an input outside a workspace's set leaves its result current, and one inside makes it stale", () => {

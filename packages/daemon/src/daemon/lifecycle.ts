@@ -136,8 +136,8 @@ export class DaemonLifecycle implements DaemonHandlers {
   #queryInputs(results: LatestResults): CurrentInputs {
     if (results.discovery !== undefined) this.#builds.use(results.discovery);
     return this.#parts.inputs.current({
+      ...this.#builds.narrowing(),
       discoveryId: results.discovery?.discoveryId,
-      state: this.#builds.narrowing().state,
     });
   }
 

@@ -1,5 +1,7 @@
 import {
   DEPENDENCY_BUILD_FAILED,
+  DEPENDENCY_BUILD_TIMED_OUT,
+  DEPENDENCY_BUILDS_ENDED,
   NO_SELECTION_INPUT,
   type InputsNotNarrowed,
 } from "../query/answer.js";
@@ -20,7 +22,7 @@ export const NARROWING = {
   widened: "widened",
 } as const;
 
-/** A dependency build over one discovery that ended at one input revision with no input moving while it ran. */
+/** A dependency build over one discovery that ended at one input revision: with no input moving while it ran, or at the bound. */
 export type EndedBuild =
   | {
       readonly revision: number;
@@ -30,8 +32,13 @@ export type EndedBuild =
   | {
       readonly revision: number;
       readonly built: false;
+      /** Failed or timed out, each answered as its own not-narrowed kind. */
+      readonly kind: BuildFailureKind;
       readonly reason: string;
     };
+
+export type BuildFailureKind =
+  typeof DEPENDENCY_BUILD_FAILED | typeof DEPENDENCY_BUILD_TIMED_OUT;
 
 /** What the dependency builds know of the discovery in effect. */
 export type NarrowingState =
@@ -45,8 +52,10 @@ export type NarrowingState =
       readonly selectionInput: true;
       /** The latest build that ended over the discovery; undefined before the first one ends. */
       readonly latest: EndedBuild | undefined;
-      /** Why the last ended build over the discovery failed; undefined once one succeeds. */
-      readonly lastFailure: string | undefined;
+      /** How the last ended build over the discovery failed; undefined once one succeeds. */
+      readonly lastFailure:
+        | { readonly kind: BuildFailureKind; readonly reason: string }
+        | undefined;
     };
 
 /** The dependency builds' state beside the discovery an answer or a run reads. */
@@ -55,6 +64,8 @@ export interface QueryNarrowing {
   readonly discoveryId: string | undefined;
   /** Undefined before the builds are given a discovery. */
   readonly state: NarrowingState | undefined;
+  /** Why the builds stopped working for a cause other than a stop; undefined while they work and when a stop ended them. */
+  readonly buildsEnded: string | undefined;
 }
 
 /** How a view of the inputs at one revision takes each discovered workspace's inputs. */
@@ -72,13 +83,20 @@ export type WorkspaceNarrowing =
 
 /**
  * Narrowed only from a build over the discovery the view reads, at the view's own revision; building while that
- * build has not ended; widened over a failed build or a discovery that yields no selection input.
+ * build has not ended; widened over a failed or timed-out build, a discovery that yields no selection input, or
+ * builds that ended, whatever the discovery.
  */
 export function narrowingAt(
   query: QueryNarrowing,
   revision: number,
 ): WorkspaceNarrowing {
-  const { state } = query;
+  const { state, buildsEnded } = query;
+  if (buildsEnded !== undefined) {
+    return {
+      kind: NARROWING.widened,
+      notNarrowed: { kind: DEPENDENCY_BUILDS_ENDED, reason: buildsEnded },
+    };
+  }
   if (state === undefined || state.discoveryId !== query.discoveryId) {
     return building(revision, undefined);
   }
@@ -88,20 +106,16 @@ export function narrowingAt(
       notNarrowed: { kind: NO_SELECTION_INPUT, reason: state.reason },
     };
   }
-  const failed: InputsNotNarrowed | undefined =
-    state.lastFailure === undefined
-      ? undefined
-      : { kind: DEPENDENCY_BUILD_FAILED, reason: state.lastFailure };
   const { latest } = state;
   if (latest === undefined || latest.revision !== revision) {
-    return building(revision, failed);
+    return building(revision, state.lastFailure);
   }
   if (latest.built) {
     return { kind: NARROWING.narrowed, narrowing: latest.narrowing };
   }
   return {
     kind: NARROWING.widened,
-    notNarrowed: { kind: DEPENDENCY_BUILD_FAILED, reason: latest.reason },
+    notNarrowed: { kind: latest.kind, reason: latest.reason },
   };
 }
 

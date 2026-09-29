@@ -13,8 +13,8 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: A dependency build that has not ended `DEPENDENCY_BUILD_BOUND_MS` after it began (a named bound, a target until measured) is ended, with every process it started, and recorded at the revision it began at as a failure of its own kind, `dependency-build-timed-out`, never as `dependency-build-failed`. While it is the latest build over the discovery in effect, every discovered workspace's fingerprint covers every input of the project and its own test modules, the log names the bound at warning level, and every answer carries the kind and its reason as its `inputsNotNarrowed` fact, in `--json` and in the CLI's text. A run waiting for that build proceeds once it is recorded. Only the next change of the input revision or a new discovery starts another build, never a retry of the same revision.
-- [ ] AC2: When the dependency builds stop working for any cause other than a stop (their rounds end by throwing), every discovered workspace's fingerprint covers every input of the project and its own test modules for the rest of the daemon's life, whatever discovery is in effect then, the log names the cause at warning level, and every answer carries the kind `dependency-builds-ended` and its reason as its `inputsNotNarrowed` fact, in `--json` and in the CLI's text. No answer then reads a workspace as waiting for a build, and no run waits for one.
+- [x] AC1: A dependency build that has not ended `DEPENDENCY_BUILD_BOUND_MS` after it began (a named bound, a target until measured) is ended, with every process it started, and recorded at the revision it began at as a failure of its own kind, `dependency-build-timed-out`, never as `dependency-build-failed`. While it is the latest build over the discovery in effect, every discovered workspace's fingerprint covers every input of the project and its own test modules, the log names the bound at warning level, and every answer carries the kind and its reason as its `inputsNotNarrowed` fact, in `--json` and in the CLI's text. A run waiting for that build proceeds once it is recorded. Only the next change of the input revision or a new discovery starts another build, never a retry of the same revision.
+- [x] AC2: When the dependency builds stop working for any cause other than a stop (their rounds end by throwing), every discovered workspace's fingerprint covers every input of the project and its own test modules for the rest of the daemon's life, whatever discovery is in effect then, the log names the cause at warning level, and every answer carries the kind `dependency-builds-ended` and its reason as its `inputsNotNarrowed` fact, in `--json` and in the CLI's text. No answer then reads a workspace as waiting for a build, and no run waits for one.
 
 ## Unverified Assumptions
 
@@ -37,14 +37,14 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Before the first edit, re-read `daemon/dependency-builds.ts` (`DependencyBuilds.#build`, `start`, `#record`, `#endedAt`, `pending`), `inputs/narrowed-inputs.ts` (`EndedBuild`, `NarrowingState`, `QueryNarrowing`, `narrowingAt`), `query/answer.ts` (`InputsNotNarrowed` and its three kinds) and `Executor.abort` (`daemon/executor.ts`), as 2.3g landed them at 5b0a006.
-- [ ] (AC1, AC2) In `packages/daemon/src/query/answer.ts`, add the kinds `dependency-build-timed-out` and `dependency-builds-ended` to `InputsNotNarrowed`, each an exported constant beside `DEPENDENCY_BUILD_FAILED` (C3, C131); re-export both from `packages/daemon/src/client.ts` as the other three are. In `packages/cli/src/answer-text.ts`, give each its cause text in `NOT_NARROWED_CAUSES`, whose `Record` type already requires one per kind.
-- [ ] (AC1) In `packages/daemon/src/daemon/dependency-builds.ts`, bound each build: name `DEPENDENCY_BUILD_BOUND_MS` (a target, C3), take the bound as a `DependencyBuilds` option defaulting to it so a test can set a short one, and when a build has not ended by then, end it through `Executor.abort`, await its outcome, and record it at its revision as timed out with a reason naming the bound, whatever its job verdict: a timed-out build is recorded, never discarded, so the lifecycle's `#awaitBuild` stops waiting (`pending()` turns false at that revision) and the next round begins only at a new revision or discovery (`#endedAt`). A timed-out build whose job verdict is not fingerprinted (its inputs moved while it ran) still counts as a discard toward `discards().consecutive`, rather than resetting it as `#record` does, so a run waiting while the revision keeps moving proceeds after `DISCARDS_A_RUN_WAITS_THROUGH`, as under 2.3g's 18:03 ruling. The abort's own outcome, whose reason names a stop (2.3e AC4), is never what the record carries. Clear the timer when the build ends first and on stop, so a stop's abort is never read as a timeout.
-- [ ] (AC1) In `packages/daemon/src/inputs/narrowed-inputs.ts`, let an ended build that failed carry its kind, failed or timed out, and let `narrowingAt` map it, and a `lastFailure` it keeps while `building`, to the matching `inputsNotNarrowed` kind rather than always `DEPENDENCY_BUILD_FAILED`.
-- [ ] (AC2) In `dependency-builds.ts` `start()`, when the rounds reject, record that the builds ended with the error's text, so the builds' narrowing reports it for every discovery from then on, including one `use` hands them later, and resolve every wait (it already does); in `narrowed-inputs.ts`, let `QueryNarrowing` carry that and `narrowingAt` answer `widened` with `dependency-builds-ended` ahead of every other state. A stop that ends the rounds is not this: a stop sets `#stopped` before they end.
-- [ ] (AC1, AC2) Log each at warning level once, as `#record` logs a failed build: the timed-out build with its revision and the bound, and the ended builds with the cause (C32), replacing the log `start()`'s catch already writes rather than adding a second.
-- [ ] (Support) Send the orchestrator the doc text in § Doc text, final wording to follow the build.
-- [ ] (Support) Lint and typecheck: `bun x oxlint` over the changed files, `bun run --filter @rt-test/daemon typecheck` and `bun run --filter rt-test typecheck` (P14).
+- [x] (Support) Before the first edit, re-read `daemon/dependency-builds.ts` (`DependencyBuilds.#build`, `start`, `#record`, `#endedAt`, `pending`), `inputs/narrowed-inputs.ts` (`EndedBuild`, `NarrowingState`, `QueryNarrowing`, `narrowingAt`), `query/answer.ts` (`InputsNotNarrowed` and its three kinds) and `Executor.abort` (`daemon/executor.ts`), as 2.3g landed them at 5b0a006.
+- [x] (AC1, AC2) In `packages/daemon/src/query/answer.ts`, add the kinds `dependency-build-timed-out` and `dependency-builds-ended` to `InputsNotNarrowed`, each an exported constant beside `DEPENDENCY_BUILD_FAILED` (C3, C131); re-export both from `packages/daemon/src/client.ts` as the other three are. In `packages/cli/src/answer-text.ts`, give each its cause text in `NOT_NARROWED_CAUSES`, whose `Record` type already requires one per kind.
+- [x] (AC1) In `packages/daemon/src/daemon/dependency-builds.ts`, bound each build: name `DEPENDENCY_BUILD_BOUND_MS` (a target, C3), take the bound as a `DependencyBuilds` option defaulting to it so a test can set a short one, and when a build has not ended by then, end it through `Executor.abort`, await its outcome, and record it at its revision as timed out with a reason naming the bound, whatever its job verdict: a timed-out build is recorded, never discarded, so the lifecycle's `#awaitBuild` stops waiting (`pending()` turns false at that revision) and the next round begins only at a new revision or discovery (`#endedAt`). A timed-out build whose job verdict is not fingerprinted (its inputs moved while it ran) still counts as a discard toward `discards().consecutive`, rather than resetting it as `#record` does, so a run waiting while the revision keeps moving proceeds after `DISCARDS_A_RUN_WAITS_THROUGH`, as under 2.3g's 18:03 ruling. The abort's own outcome, whose reason names a stop (2.3e AC4), is never what the record carries. Clear the timer when the build ends first and on stop, so a stop's abort is never read as a timeout.
+- [x] (AC1) In `packages/daemon/src/inputs/narrowed-inputs.ts`, let an ended build that failed carry its kind, failed or timed out, and let `narrowingAt` map it, and a `lastFailure` it keeps while `building`, to the matching `inputsNotNarrowed` kind rather than always `DEPENDENCY_BUILD_FAILED`.
+- [x] (AC2) In `dependency-builds.ts` `start()`, when the rounds reject, record that the builds ended with the error's text, so the builds' narrowing reports it for every discovery from then on, including one `use` hands them later, and resolve every wait (it already does); in `narrowed-inputs.ts`, let `QueryNarrowing` carry that and `narrowingAt` answer `widened` with `dependency-builds-ended` ahead of every other state. A stop that ends the rounds is not this: a stop sets `#stopped` before they end.
+- [x] (AC1, AC2) Log each at warning level once, as `#record` logs a failed build: the timed-out build with its revision and the bound, and the ended builds with the cause (C32), replacing the log `start()`'s catch already writes rather than adding a second.
+- [x] (Support) Send the orchestrator the doc text in § Doc text, final wording to follow the build.
+- [x] (Support) Lint and typecheck: `bun x oxlint` over the changed files, `bun run --filter @rt-test/daemon typecheck` and `bun run --filter rt-test typecheck` (P14).
 
 ## Reusable Code
 
@@ -207,41 +207,134 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 67c2e8e0-826e-4bbf-9c8a-52da2839e4fa
 
 #### Test Files This Change Broke
 
-None.
+- `packages/daemon/test/query.test.ts` (typecheck): `narrowingOf` (line 815) builds a `QueryNarrowing` with no `buildsEnded`; `failedAt` (lines 835 and 836) and the case at lines 970 and 971 build a failed `EndedBuild` with no `kind` and a `lastFailure` as a string, where it is now an `InputsNotNarrowed`.
+- `packages/daemon/test/lifecycle.test.ts`: `rg` over `lastFailure` finds no hand-built state there, and it typechecks, but 2.3g's build tests use a stand-in build executor: one whose build never settles now ends at the bound (120,000 ms unless the test passes `boundMs`).
+- `packages/daemon/test/defects.json` mentions `lastFailure` in a record anchored in `narrowed-inputs.ts` (line 4703 to 4718, the `latest.reason` line): its `old` text still matches, since only the `kind` in the object changed, so confirm it by id.
+- No test asserts the old log text `the dependency builds failed`: `rg` finds it only in the source.
 
 #### ACs Owed a Test
 
-None.
+- [x] AC1: a build that never ends is ended at `boundMs`, recorded as `dependency-build-timed-out` at its revision, releases a waiting run, and starts no second build at the same revision; a timed-out build whose inputs moved counts as a discard.
+- [x] AC2: rounds that throw give `dependency-builds-ended` for every discovery, including one `use` hands the builds later, and no wait outlasts them; a stop is not read as this.
 
 #### Tests Owed
 
-None.
+- The abort's own outcome, which names a stop, is never the record's reason (`#recordTimedOut` writes the bound's reason).
+- A build that ends with `ended: true` just as the timer fires records as an ordinary build, not a timeout (`timedOut && !outcome.ended`, review F1).
+- `lifecycle.ts` `#queryInputs` passes `buildsEnded` through with the stored discovery's id: an answer read with a stored discovery still says `dependency-builds-ended`.
+- The CLI's text for both new kinds (`NOT_NARROWED_CAUSES`) and `--json` `inputsNotNarrowed.kind` for both.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId b3763bc5-e189-4a2a-8379-5987770acd3e
 
 #### Named Defects
 
-None.
+- D2579: a build that timed out is recorded as a failed build (AC1)
+- D2580: the default bound is 120000 ms, pinned at 119999 and 120000 (AC1)
+- D2581: the bound records a timeout without ending the build's processes (AC1)
+- D2582: a run waiting for a build that never ends begins once the bound has ended it (AC1)
+- D2583: a timed-out build is recorded at another revision, so the same revision is built again (AC1)
+- D2584: a timed-out build stays ended after the revision moves, so no later change starts a build (AC1)
+- D2585: a timeout with moved inputs restarts the discards in a row instead of extending them (AC1)
+- D2586: a timeout with moved inputs counts as no discard (AC1)
+- D2587: a timeout with steady inputs counts as a discard (AC1)
+- D2588: the recorded reason does not name the bound (AC1)
+- D2589: the abort's own stop reason is what the record carries (AC1)
+- D2590: a build that produced its dependencies as the timer fired is recorded as a timeout (AC1)
+- D2591: the bound's timer is left running after its build ends (AC1)
+- D2592: a timeout over a replaced discovery is recorded under the old discovery, so the new one never builds (AC1)
+- D2593: a timeout is logged as a failed build (AC1)
+- D2594: while the build after a timeout runs, answers name the last build as failed (AC1)
+- D2595: builds whose rounds threw record nothing, so answers read building (AC2)
+- D2596: the reason recorded for the builds' end leaves out the error's text (AC2)
+- D2597: a discovery handed to the builds after their end clears it, so it reads building (AC2)
+- D2598: a run already waiting is left waiting when the rounds threw (AC2)
+- D2599: a stop that ends the rounds is read as the builds ending (AC2)
+- D2600: the builds' end is logged as an error entry, not at warning level (AC2)
+- D2601: a query drops the builds' end when it builds its view with the stored discovery's id (AC2)
+- D2602: a narrowing built at the current revision is still used once the builds ended (AC2)
+- D2603: the human warning names a timed-out build as a failed build (AC1)
+- D2604: the human warning names the ended builds as a failed build (AC2)
+- D2605: the kind of a timed-out build is spelled other than `dependency-build-timed-out` in `--json` (AC1)
+- D2606: the kind of the ended builds is spelled other than `dependency-builds-ended` in `--json` (AC2)
+- D2607: the builds do not read as stopped once their rounds threw before any build was recorded, so a run that begins waiting afterward waits for good (AC2, review G1)
+- D2609: an error the rounds throw after a stop is dropped with no log entry (AC2, review G3)
+- D2610: a timed-out build whose inputs moved counts as discarded with no log entry naming it (AC1, review G4)
+- Re-anchored to the source the bound changed and proven by id: D2510, D2512, D2515, D2516 (its mutation now records a failed build with its kind), D2527 (its mutation now returns `building(revision, state.lastFailure)`, since the local it named is gone), D2528, D2536.
+- Re-anchored after the review's fixes, keeping each defect sentence: D2580 (F6), D2583, D2585, D2586, D2587 (F3, into the rewritten `#recordTimedOut`), D2599 (F2, now removes the whole stopped branch), D2604 (F1, its expected line and `old` take the new cause text), and 2.3g's D2558 (F3 moved the reset of the discards in a row into `#record`'s default parameter).
+- `#### Tests Owed`, all covered: the abort's outcome never the record's reason (D2589), a build ending as the timer fires (D2590), `#queryInputs` passing `buildsEnded` through (D2601), the CLI text for both kinds (D2603, D2604) and `--json` for both (D2605, D2606).
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/daemon/dependency-builds.ts` `stop()`'s `clearTimeout(this.#boundTimer)`: a stop's abort settles the build, whose `.finally` clears the same timer before any timer can fire, so no test can observe its removal.
+- `packages/daemon/src/client.ts` re-exports of the two kinds: D2605 and D2606 import them from `@rt-test/daemon/client`, so a dropped export fails there.
 
 ### Review Record
 
+Review session: threadId d582f90b-6b71-4184-816d-5139d2fc3552
+
+Rulings taken in review (rt-t2-3j-review, 21:39):
+
+- CLI cause wording, asked by the tests session: `dependency-build-timed-out` keeps "the last dependency build timed out". `dependency-builds-ended` becomes "the dependency builds stopped working for the rest of the daemon's life", since "ended" reads as a build finishing normally and the state lasts until the daemon restarts.
+- AC1's "while it is the latest build over the discovery in effect" reads at the current input revision, as 2.3g AC3 has it: after a timeout at revision N, revision N+1 has no fingerprint while its build runs, carrying the timed-out fact, exactly as after a failed build (D2594). Not a defect.
+
+Fixes applied in review:
+
+- F1 `packages/cli/src/answer-text.ts`: the ended builds' cause text, per the ruling above.
+- F2 `packages/daemon/src/daemon/dependency-builds.ts` `start()`: an error the rounds throw after a stop is logged through `log.error` instead of dropped (C30); the tracker resolves `settled()` and `changed()` on stop, so such a throw is a bug.
+- F3 `dependency-builds.ts` `#recordTimedOut`, `#record`: a timed-out build's discards are passed into `#record` and set before any wait resolves, and a timed-out build whose inputs moved logs that it counts as discarded.
+- F4 `packages/daemon/src/inputs/narrowed-inputs.ts`: `lastFailure` takes only a build failure kind.
+- F5 docblocks: `DependencyBuilds` (an overtaken build is discarded unless the bound ends it first), `#endedBy` and `QueryNarrowing.buildsEnded` (undefined when a stop ended the rounds), `AnswerContext.inputsNotNarrowed` shortened.
+- F6 `DEPENDENCY_BUILD_BOUND_MS` is no longer exported; nothing imported it.
+
+Tech debt, undisposed:
+
+- T1 `packages/daemon/src/inputs/narrowed-inputs.ts` `BuildFailureKind` and `packages/daemon/src/query/answer.ts` `InputsNotNarrowed["kind"]` each list `DEPENDENCY_BUILD_FAILED` and `DEPENDENCY_BUILD_TIMED_OUT`. The typecheck ties them (a build kind missing from the answer's union fails `#record`), but the pair is spelled twice; declaring `BuildFailureKind` in `answer.ts` and using it in the union would state it once.
+- T2 `packages/cli/test/cli.test.ts` `freshnessOf` carries two stacked docblocks; only the second attaches.
+
 #### Test Coverage Gaps
 
-None.
+- G1 (AC2, MEDIUM) `packages/daemon/src/daemon/dependency-builds.ts` `start()`'s `.finally`: "After the builds' rounds end by throwing with no build recorded at the current revision, `pending()` stays true, so a run that begins waiting after the end waits for good." Mutation: drop `this.#stopped = true;` from the `.finally`. D2598 checks only a wait registered before the end. Expected test: rounds throw before any build at the current revision, then a fresh `builds.ended()` resolves at once (or a lifecycle run begins).
+- G2 (F1, fix-caused) D2604: the cause text is now "the dependency builds stopped working for the rest of the daemon's life"; update the test's expected line and the record's `old`.
+- G3 (F2, LOW): "An error the builds' rounds throw after a stop is dropped with no log entry." Mutation: remove the `log.error` call in `start()`'s stopped branch. Re-anchor D2599, whose `old` was `if (this.#stopped) return;`.
+- G4 (F3, LOW): "A timed-out build whose inputs moved counts as a discard with no log entry naming it." Mutation: remove the `timed out while its inputs moved` log entry in `#recordTimedOut`. Re-anchor D2583, D2585, D2586 and D2587 to the rewritten `#recordTimedOut`, keeping each defect sentence.
+- G5 (F6, fix-caused) D2580: re-anchor `old` to `const DEPENDENCY_BUILD_BOUND_MS = 120_000;`.
+
+Test-file clarity, optional: `packages/daemon/test/query.test.ts` `failedAt`'s and `rebuildingAfter`'s `kind` parameters are only ever given `dependency-build-failed`; D2602 repeats `builtAt`'s defaults to reach its fourth positional `buildsEnded`, where `{ ...builtAt(3), buildsEnded: reason }` would read plainer.
 
 ### Completion Notes
 
+Built 2026-09-28 by the dev session, as one typecheck-atomic group (a required field on `QueryNarrowing` and `EndedBuild` leaves the tree uncompilable until every producer is updated), no delegation.
+
+- Unverified assumptions: none listed; `Executor.abort` on a build ends its process tree at once (`packages/daemon/src/daemon/executor.ts` `abort`, the `#buildRecord` branch).
+- Ticket sanity check: no findings.
+- `DEPENDENCY_BUILD_BOUND_MS = 120_000` is exported from `dependency-builds.ts`, and `DependencyBuildParts.boundMs` is the test seam.
+- A file the ticket did not list: `packages/daemon/src/daemon/lifecycle.ts` `#queryInputs` built a `QueryNarrowing` by hand from the stored discovery, which would have dropped `buildsEnded`; it now spreads `builds.narrowing()` and overrides only `discoveryId`. Without it AC2 would fail for any answer read with a stored discovery.
+- `lastFailure` is now an `InputsNotNarrowed` (kind and reason) rather than a string, and a failed `EndedBuild` carries `kind` (`BuildFailureKind`), so both map to the matching answer kind.
+- A timed-out build whose discovery was replaced while it ran is discarded, as any build is (recording it would overwrite the new discovery's state).
+- Adversarial review: 4 findings (F1 a build that produced dependencies just as the timer fired was recorded as a timeout, now only `!outcome.ended`; F2 to F4 docblocks and a duplicated bound expression). All fixed.
+- Gates: `bun x oxlint` over the six changed files exit 0; `bun run lint` exit 0; `bun x prettier --check` exit 0; `bun run --filter rt-test typecheck` exit 0; `bun run --filter @rt-test/daemon typecheck` exit 1 with five errors, all in `test/query.test.ts` (listed under Test Files This Change Broke); `node scripts/check-line-citations.mjs` clean.
+- README: the not-narrowed sentence (line 68) needs its two new causes; text reported to the orchestrator, who owns the file.
+- Out-of-scope candidates: none.
+
 ### File List
+
+- packages/daemon/src/daemon/dependency-builds.ts (modified)
+- packages/daemon/src/inputs/narrowed-inputs.ts (modified)
+- packages/daemon/src/query/answer.ts (modified)
+- packages/daemon/src/client.ts (modified)
+- packages/daemon/src/daemon/lifecycle.ts (modified)
+- packages/cli/src/answer-text.ts (modified)
+- packages/daemon/test/lifecycle.test.ts (modified by create-tests)
+- packages/daemon/test/query.test.ts (modified by create-tests)
+- packages/daemon/test/defects.json (modified by create-tests)
+- packages/cli/test/cli.test.ts (modified by create-tests)
+- packages/cli/test/defects.json (modified by create-tests)
 
 - _agent-docs/tickets/2-3j-bound-dependency-build.md (created by create-ticket)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (§ Ticket 2.3j added, § Ticket 2.3f's order, under the orchestrator's 20:41 grant)

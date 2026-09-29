@@ -1,8 +1,13 @@
 import { realpathSync } from "node:fs";
 import type { JobVerdict } from "../inputs/input-jobs.js";
+import {
+  DEPENDENCY_BUILD_FAILED,
+  DEPENDENCY_BUILD_TIMED_OUT,
+} from "../query/answer.js";
 import type { TrackedInputs } from "../inputs/input-tracker.js";
 import {
   Narrowing,
+  type BuildFailureKind,
   type EndedBuild,
   type NarrowingState,
   type QueryNarrowing,
@@ -25,6 +30,10 @@ const DISCOVERY_REPLACED_REASON = "a new discovery took effect while it ran";
 const NO_SELECTION_INPUT_BUILT_REASON =
   "the selection input could not be built from the discovery";
 const BUILD_THREW_REASON = "the dependency build could not be run";
+const BUILDS_ENDED_CONSEQUENCE = `${WIDENED_CONSEQUENCE} for the rest of the daemon's life`;
+
+/** A target until measured: a real build parses every source file of the consumer once. */
+const DEPENDENCY_BUILD_BOUND_MS = 120_000;
 
 interface Discards {
   readonly total: number;
@@ -43,25 +52,34 @@ interface DependencyBuildParts {
   /** Holds each build's parse record. */
   readonly stateDirectory: string;
   readonly log: DaemonLog;
+  /** How long after it began a build is ended; `DEPENDENCY_BUILD_BOUND_MS` when absent. */
+  readonly boundMs?: number;
 }
 
 /**
  * Builds the dependency information over the discovery in effect at each input revision, one build at a time, once
  * the inputs have settled and while the tracker can vouch for them, and keeps the latest build that ended with no
- * input moving while it ran. A build the revision overtakes runs to its end and is discarded.
+ * input moving while it ran, or ended at the bound. A build the revision overtakes runs to its end and is discarded,
+ * unless the bound ends it first.
  */
 export class DependencyBuilds {
   readonly #parts: DependencyBuildParts;
   #discovery: StoredDiscovery | undefined;
   #state: NarrowingState | undefined;
   #stopped = false;
+  /** Why the rounds ended by throwing; undefined while they work and when a stop ended them. */
+  #endedBy: string | undefined;
+  #boundTimer: NodeJS.Timeout | undefined;
   #rounds: Promise<void> = Promise.resolve();
   #wakeRounds: (() => void) | undefined;
   #waits: (() => void)[] = [];
   #discards: Discards = { total: 0, consecutive: 0, reason: undefined };
 
+  readonly #boundMs: number;
+
   constructor(parts: DependencyBuildParts) {
     this.#parts = parts;
+    this.#boundMs = parts.boundMs ?? DEPENDENCY_BUILD_BOUND_MS;
   }
 
   /** Makes `discovery` the one in effect; undefined leaves none. */
@@ -86,7 +104,17 @@ export class DependencyBuilds {
   start(): void {
     this.#rounds = this.#run()
       .catch((error: unknown) => {
-        this.#parts.log.error("the dependency builds failed", error);
+        if (this.#stopped) {
+          this.#parts.log.error(
+            "the dependency builds failed during a stop",
+            error,
+          );
+          return;
+        }
+        this.#endedBy = errorText(error);
+        this.#parts.log.entry(
+          `warning: the dependency builds ended, ${BUILDS_ENDED_CONSEQUENCE}: ${this.#endedBy}`,
+        );
       })
       .finally(() => {
         this.#stopped = true;
@@ -96,7 +124,11 @@ export class DependencyBuilds {
 
   /** The builds' state beside the discovery they build over. */
   narrowing(): QueryNarrowing {
-    return { discoveryId: this.#discovery?.discoveryId, state: this.#state };
+    return {
+      discoveryId: this.#discovery?.discoveryId,
+      state: this.#state,
+      buildsEnded: this.#endedBy,
+    };
   }
 
   /** Whether a build is still to end at the current revision while the tracker can vouch for its inputs. */
@@ -123,6 +155,7 @@ export class DependencyBuilds {
   /** Ends the build in progress, which is never recorded, and resolves once the builds have ended. */
   stop(): Promise<void> {
     this.#stopped = true;
+    clearTimeout(this.#boundTimer);
     this.#parts.executor.abort();
     this.#wakeRounds?.();
     this.#resolveWaits();
@@ -161,11 +194,10 @@ export class DependencyBuilds {
     try {
       realRoot = realpathSync.native(consumerRoot);
     } catch (error) {
-      this.#record(discovery, {
-        revision,
-        built: false,
-        reason: `${NO_REAL_ROOT_REASON}: ${errorText(error)}`,
-      });
+      this.#record(
+        discovery,
+        failedBuild(revision, `${NO_REAL_ROOT_REASON}: ${errorText(error)}`),
+      );
       return;
     }
     let selection: SelectionInputBuild;
@@ -176,11 +208,13 @@ export class DependencyBuilds {
         inputs.nonInputsDeclaration(),
       );
     } catch (error) {
-      this.#record(discovery, {
-        revision,
-        built: false,
-        reason: `${NO_SELECTION_INPUT_BUILT_REASON}: ${errorText(error)}`,
-      });
+      this.#record(
+        discovery,
+        failedBuild(
+          revision,
+          `${NO_SELECTION_INPUT_BUILT_REASON}: ${errorText(error)}`,
+        ),
+      );
       return;
     }
     if (!selection.built) {
@@ -189,6 +223,11 @@ export class DependencyBuilds {
     }
     log.entry(`dependency build started at input revision ${revision}`);
     const mark = inputs.beginJob();
+    let timedOut = false;
+    this.#boundTimer = setTimeout(() => {
+      timedOut = true;
+      executor.abort();
+    }, this.#boundMs);
     const outcome = await executor
       .buildDependencies(
         consumerRoot,
@@ -198,10 +237,15 @@ export class DependencyBuilds {
       .catch((error: unknown): JobOutcome<DependencyInformation> => ({
         ended: false,
         reason: `${BUILD_THREW_REASON}: ${errorText(error)}`,
-      }));
+      }))
+      .finally(() => clearTimeout(this.#boundTimer));
     const verdict = await inputs.endJob(mark);
     if (this.#stopped) return;
     const replaced = this.#discovery !== discovery;
+    if (timedOut && !outcome.ended && !replaced) {
+      this.#recordTimedOut(discovery, revision, verdict);
+      return;
+    }
     const discarded = discardReason(replaced, verdict);
     if (discarded !== undefined) {
       log.entry(
@@ -227,22 +271,58 @@ export class DependencyBuilds {
               revision,
             ),
           }
-        : { revision, built: false, reason: outcome.reason },
+        : failedBuild(revision, outcome.reason),
     );
   }
 
-  #record(discovery: StoredDiscovery, build: EndedBuild): void {
-    this.#discards = { ...this.#discards, consecutive: 0 };
+  /**
+   * Records a build the bound ended at its revision, never the abort's own outcome, which names a stop. A build whose
+   * inputs moved while it ran still counts as a discard, so a run waiting through a moving revision proceeds.
+   */
+  #recordTimedOut(
+    discovery: StoredDiscovery,
+    revision: number,
+    verdict: JobVerdict,
+  ): void {
+    const build: EndedBuild = {
+      revision,
+      built: false,
+      kind: DEPENDENCY_BUILD_TIMED_OUT,
+      reason: `the build did not end within ${this.#boundMs} ms of its start and was ended`,
+    };
+    if (verdict.fingerprinted) {
+      this.#record(discovery, build);
+      return;
+    }
+    this.#parts.log.entry(
+      `the dependency build at input revision ${revision} timed out while its inputs moved, so it counts as discarded: ${verdict.reason}`,
+    );
+    this.#record(discovery, build, {
+      total: this.#discards.total + 1,
+      consecutive: this.#discards.consecutive + 1,
+      reason: verdict.reason,
+    });
+  }
+
+  /** Sets `discards` before any wait resolves, so a waiting run reads the count this build leaves. */
+  #record(
+    discovery: StoredDiscovery,
+    build: EndedBuild,
+    discards: Discards = { ...this.#discards, consecutive: 0 },
+  ): void {
+    this.#discards = discards;
     this.#state = {
       discoveryId: discovery.discoveryId,
       selectionInput: true,
       latest: build,
-      lastFailure: build.built ? undefined : build.reason,
+      lastFailure: build.built
+        ? undefined
+        : { kind: build.kind, reason: build.reason },
     };
     this.#parts.log.entry(
       build.built
         ? `dependency build ended at input revision ${build.revision}`
-        : `warning: the dependency build at input revision ${build.revision} failed, ${WIDENED_CONSEQUENCE}: ${build.reason}`,
+        : `warning: the dependency build at input revision ${build.revision} ${FAILURE_VERBS[build.kind]}, ${WIDENED_CONSEQUENCE}: ${build.reason}`,
     );
     this.#resolveWaits();
   }
@@ -288,6 +368,20 @@ export class DependencyBuilds {
     this.#waits = [];
     for (const resolve of waits) resolve();
   }
+}
+
+const FAILURE_VERBS: Readonly<Record<BuildFailureKind, string>> = {
+  [DEPENDENCY_BUILD_FAILED]: "failed",
+  [DEPENDENCY_BUILD_TIMED_OUT]: "timed out",
+};
+
+function failedBuild(revision: number, reason: string): EndedBuild {
+  return {
+    revision,
+    built: false,
+    kind: DEPENDENCY_BUILD_FAILED,
+    reason,
+  };
 }
 
 /** Why an ended build describes no revision of the discovery in effect; undefined when it describes its own. */

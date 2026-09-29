@@ -119,16 +119,20 @@ export interface UnfingerprintedWorkspace {
 }
 
 export const DEPENDENCY_BUILD_FAILED = "dependency-build-failed";
+export const DEPENDENCY_BUILD_TIMED_OUT = "dependency-build-timed-out";
+export const DEPENDENCY_BUILDS_ENDED = "dependency-builds-ended";
 export const NO_SELECTION_INPUT = "no-selection-input";
 export const SELECTION_REFUSED = "selection-refused";
 
 /**
  * Why no workspace's inputs are narrowed to those its selection includes: each is fingerprinted over the whole
- * project's inputs, or, while the build after a failed one runs, has no fingerprint.
+ * project's inputs, or, while the build after a failed or timed-out one runs, has no fingerprint.
  */
 export interface InputsNotNarrowed {
   readonly kind:
     | typeof DEPENDENCY_BUILD_FAILED
+    | typeof DEPENDENCY_BUILD_TIMED_OUT
+    | typeof DEPENDENCY_BUILDS_ENDED
     | typeof NO_SELECTION_INPUT
     | typeof SELECTION_REFUSED;
   readonly reason: string;
@@ -216,9 +220,8 @@ export interface AnswerContext {
   /** Why every file stays an input, present only while the daemon's `rt-test.json` cannot be used. */
   readonly nonInputsUnusable?: string;
   /**
-   * Why no workspace's inputs are narrowed, present only while the last dependency build over the discovery failed,
-   * until a later one succeeds, while the discovery yields no selection input, or while selection refuses an input's
-   * path, which is known only while a fingerprint can be computed.
+   * Why no workspace's inputs are narrowed, absent while they are. Selection refusing an input's path is known only
+   * while a fingerprint can be computed.
    */
   readonly inputsNotNarrowed?: InputsNotNarrowed;
   readonly activity: DaemonActivity;

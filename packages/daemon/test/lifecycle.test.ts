@@ -416,6 +416,10 @@ interface InputsScript {
    * run's), until the test resolves `settleHeld` or the inputs stop.
    */
   readonly heldSettle?: number;
+  /** Makes each wait for the inputs to settle reject with this text, once its hold, if any, is released. */
+  readonly settleFails?: string;
+  /** Makes each ask for the next change of the inputs throw this text, as only the dependency builds ask. */
+  readonly changedFails?: string;
 }
 
 const NO_DECLARATION: NonInputsDeclaration = {
@@ -439,6 +443,8 @@ class StandInInputs implements TrackedInputs {
   readonly protected: (TestDiscovery | undefined)[] = [];
   /** The job start each protection was given, in call order. */
   readonly jobStarts: (number | undefined)[] = [];
+  /** The narrowing each view of the inputs was asked for, in call order. */
+  readonly narrowings: (QueryNarrowing | undefined)[] = [];
   readonly reconciled = new Deferred<void>();
   readonly settleHeld = new Deferred<void>();
   readonly #released = new Deferred<void>();
@@ -461,6 +467,7 @@ class StandInInputs implements TrackedInputs {
   }
 
   current(narrowing?: QueryNarrowing): CurrentInputs {
+    this.narrowings.push(narrowing);
     const fingerprintOf =
       this.#script.fingerprintOf ??
       ((path: string): FingerprintResult => ({
@@ -479,6 +486,9 @@ class StandInInputs implements TrackedInputs {
   }
 
   changed(): Promise<void> {
+    if (this.#script.changedFails !== undefined) {
+      throw new Error(this.#script.changedFails);
+    }
     if (this.#stopped) return Promise.resolve();
     return new Promise((resolve) => this.#changeWaiters.push(resolve));
   }
@@ -502,9 +512,15 @@ class StandInInputs implements TrackedInputs {
   settled(): Promise<void> {
     const call = this.#settles;
     this.#settles += 1;
-    return call === this.#script.heldSettle
-      ? this.settleHeld.promise
-      : Promise.resolve();
+    const held =
+      call === this.#script.heldSettle
+        ? this.settleHeld.promise
+        : Promise.resolve();
+    const { settleFails } = this.#script;
+    if (settleFails === undefined) return held;
+    return held.then(() => {
+      throw new Error(settleFails);
+    });
   }
 
   beginJob(): JobMark {
@@ -1509,9 +1525,52 @@ function storedAs(discoveryId: string, found: TestDiscovery): StoredDiscovery {
 /** A discovery of workspace `a` that reports its selection facts, so it yields a selection input. */
 const STORED_A = storedAs("discovery-a", discovery(discovered("a")));
 
+/** The bound the tests that shorten it give the builds, a literal each expected reason and log line is written from. */
+const BOUND_MS = 5000;
+/** The default bound of a dependency build in milliseconds, as the ticket names it. */
+const DEFAULT_BOUND_MS = 120_000;
+const ENDED_CAUSE = "the tracker failed: EIO";
+
+/** A build that never ends by itself: only an abort ends it. */
+function heldForever(): Promise<BuildOutcome> {
+  return new Promise(() => undefined);
+}
+
+/** Fakes the timers a build's bound runs on, and leaves `setImmediate`, which `flush` waits on, real. */
+function fakeBoundTimers(): void {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+}
+
+/**
+ * A build executor whose build produces its dependencies as the abort reaches it, so the build ends after the bound's
+ * timer has fired.
+ */
+class FinishesOnAbort extends ScriptedBuilds {
+  readonly #finish = new Deferred<BuildOutcome>();
+
+  override buildDependencies(
+    consumerRoot: string,
+    workspaces: readonly SelectableWorkspace[],
+  ): Promise<BuildOutcome> {
+    void super.buildDependencies(consumerRoot, workspaces);
+    return this.#finish.promise;
+  }
+
+  override abort(): void {
+    super.abort();
+    this.#finish.resolve(BUILT);
+  }
+}
+
 interface BuildsCase {
   readonly script?: InputsScript;
   readonly answer?: (index: number) => BuildOutcome | Promise<BuildOutcome>;
+  /** Shortens the bound of each build; the builds' own bound when absent. */
+  readonly boundMs?: number;
+  /** Fakes the bound's timers, so the test moves the clock and no build waits in real time. */
+  readonly fakeTimers?: boolean;
+  /** Stands in for the build executor instead of one answering from `answer`. */
+  readonly executor?: ScriptedBuilds;
 }
 
 interface StartedBuilds {
@@ -1533,14 +1592,19 @@ function withBuilds<T>(
 ): Promise<T> {
   return inTempDir(async (root) => {
     const inputs = new StandInInputs(buildsCase.script);
-    const executor = new ScriptedBuilds(buildsCase.answer);
+    const executor =
+      buildsCase.executor ?? new ScriptedBuilds(buildsCase.answer);
     const log = memoryLog();
+    if (buildsCase.fakeTimers === true) fakeBoundTimers();
     const builds = new DependencyBuilds({
       inputs,
       executor: executor as unknown as Executor,
       consumerRoot: root,
       stateDirectory: join(root, ".rt-test"),
       log,
+      ...(buildsCase.boundMs === undefined
+        ? {}
+        : { boundMs: buildsCase.boundMs }),
     });
     inputs.start();
     builds.start();
@@ -1557,8 +1621,22 @@ function withBuilds<T>(
       executor.abort();
       await inputs.stop();
       await stopped;
+      vi.useRealTimers();
     }
   });
+}
+
+/** Moves the clock the bound's timers run on by `ms`, then lets every job that has settled run to its end. */
+async function advanceBound(ms: number): Promise<void> {
+  vi.advanceTimersByTime(ms);
+  await flush();
+}
+
+/** Why a view says its inputs are not narrowed; undefined when it says none. */
+function notNarrowedReason(view: WorkspaceNarrowing): string | undefined {
+  return view.kind === NARROWING.narrowed
+    ? undefined
+    : view.notNarrowed?.reason;
 }
 
 /** The kind of input fact a view carries, or the view itself when it carries none. */
@@ -1816,6 +1894,426 @@ describe("the dependency builds", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       view: { kind: NARROWING.widened, notNarrowed: "no-selection-input" },
     });
   });
+
+  it("D2607: a run that begins waiting for a build after the builds' rounds ended by throwing is released at once", async () => {
+    const released = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.settleHeld.resolve();
+        await flush();
+        let waiting = true;
+        void builds.ended().then(() => {
+          waiting = false;
+        });
+        await flush();
+        return !waiting;
+      },
+    );
+    expect(released).toBe(true);
+  });
+
+  it("D2609: an error the builds' rounds throw after a stop is logged as an error, naming the cause", async () => {
+    const levels = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs, log }) => {
+        builds.use(STORED_A);
+        await flush();
+        void builds.stop();
+        inputs.settleHeld.resolve();
+        await flush();
+        return log.entries
+          .filter((entry) => entry.includes(ENDED_CAUSE))
+          .map((entry) => entry.startsWith("error: "));
+      },
+    );
+    expect(levels).toStrictEqual([true]);
+  });
+
+  it("D2610: a build that timed out while its inputs moved is logged as counting as discarded, with the reason the inputs moved", async () => {
+    const logged = await withBuilds(
+      {
+        fakeTimers: true,
+        boundMs: BOUND_MS,
+        script: { verdicts: [EDITED] },
+        answer: heldForever,
+      },
+      async ({ builds, log }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return log.entries.filter(
+          (entry) =>
+            entry.includes("timed out") &&
+            entry.includes("discarded") &&
+            entry.includes(EDITED_REASON),
+        ).length;
+      },
+    );
+    expect(logged).toBe(1);
+  });
+
+  it("D2579: a build still running at the bound is recorded at its revision as a build that timed out, not as a failed one", async () => {
+    const view = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return notNarrowedKind(view());
+      },
+    );
+    expect(view).toStrictEqual({
+      kind: NARROWING.widened,
+      notNarrowed: "dependency-build-timed-out",
+    });
+  });
+
+  it("D2580: a build with no bound given is still running 119999 ms after it began and has timed out at 120000 ms", async () => {
+    const views = await withBuilds(
+      { fakeTimers: true, answer: heldForever },
+      async ({ builds, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(119_999);
+        const beforeBound = view().kind;
+        await advanceBound(1);
+        return { beforeBound, atBound: notNarrowedKind(view()) };
+      },
+    );
+    expect(views).toStrictEqual({
+      beforeBound: NARROWING.building,
+      atBound: {
+        kind: NARROWING.widened,
+        notNarrowed: "dependency-build-timed-out",
+      },
+    });
+  });
+
+  it("D2581: a build that has not ended at the bound is ended through the executor, once", async () => {
+    const aborts = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        const beforeBound = executor.aborts;
+        await advanceBound(BOUND_MS);
+        return { beforeBound, atBound: executor.aborts };
+      },
+    );
+    expect(aborts).toStrictEqual({ beforeBound: 0, atBound: 1 });
+  });
+
+  it("D2583: a build that timed out is never retried at the same input revision", async () => {
+    const count = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        await advanceBound(BOUND_MS);
+        return executor.builds.length;
+      },
+    );
+    expect(count).toBe(1);
+  });
+
+  it("D2584: the next change of the input revision after a build that timed out starts another build", async () => {
+    const count = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, inputs, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        inputs.moveRevision();
+        await flush();
+        return executor.builds.length;
+      },
+    );
+    expect(count).toBe(2);
+  });
+
+  it("D2585: builds discarded and then timed out with the inputs moving each count toward the discards in a row", async () => {
+    const discards = await withBuilds(
+      {
+        fakeTimers: true,
+        boundMs: BOUND_MS,
+        script: { verdicts: [EDITED, EDITED] },
+        answer: (index) => (index === 0 ? BUILT : heldForever()),
+      },
+      async ({ builds }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        const { total, consecutive } = builds.discards();
+        return { total, consecutive };
+      },
+    );
+    expect(discards).toStrictEqual({ total: 2, consecutive: 2 });
+  });
+
+  it("D2586: a build that timed out while its inputs moved counts as a discard, with the reason the inputs moved", async () => {
+    const discards = await withBuilds(
+      {
+        fakeTimers: true,
+        boundMs: BOUND_MS,
+        script: { verdicts: [EDITED] },
+        answer: heldForever,
+      },
+      async ({ builds }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return builds.discards();
+      },
+    );
+    expect(discards).toStrictEqual({
+      total: 1,
+      consecutive: 1,
+      reason: EDITED_REASON,
+    });
+  });
+
+  it("D2587: a build that timed out with its inputs unmoved is not a discard", async () => {
+    const discards = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return builds.discards();
+      },
+    );
+    expect(discards).toStrictEqual({
+      total: 0,
+      consecutive: 0,
+      reason: undefined,
+    });
+  });
+
+  it("D2588: the reason recorded for a build that timed out names the bound", async () => {
+    const reason = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return notNarrowedReason(view());
+      },
+    );
+    expect(reason).toContain("5000 ms");
+  });
+
+  it("D2589: the reason recorded for a build that timed out is not the stop's reason the abort settles it with", async () => {
+    const recorded = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        const reason = notNarrowedReason(view());
+        return {
+          recorded: reason !== undefined,
+          aborted: reason === BUILD_ABORTED,
+        };
+      },
+    );
+    expect(recorded).toStrictEqual({ recorded: true, aborted: false });
+  });
+
+  it("D2590: a build that produced its dependencies as the bound's timer fired is recorded as an ordinary build", async () => {
+    const kind = await withBuilds(
+      {
+        fakeTimers: true,
+        boundMs: BOUND_MS,
+        executor: new FinishesOnAbort(),
+      },
+      async ({ builds, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return view().kind;
+      },
+    );
+    expect(kind).toBe(NARROWING.narrowed);
+  });
+
+  it("D2591: a build that ends before the bound is never ended by the bound's timer afterward", async () => {
+    const aborts = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: () => BUILT },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return executor.aborts;
+      },
+    );
+    expect(aborts).toBe(0);
+  });
+
+  it("D2592: a build that timed out over a discovery a new one replaced is discarded, and the new discovery gets its own build", async () => {
+    const built = await withBuilds(
+      {
+        fakeTimers: true,
+        boundMs: BOUND_MS,
+        answer: (index) => (index === 0 ? heldForever() : BUILT),
+      },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        builds.use(storedAs("discovery-b", discovery(discovered("b"))));
+        await advanceBound(BOUND_MS);
+        return executor.builds;
+      },
+    );
+    expect(built).toStrictEqual([["a"], ["b"]]);
+  });
+
+  it("D2593: a build that timed out is logged once at warning level, naming its input revision and the bound", async () => {
+    const levels = await withBuilds(
+      { fakeTimers: true, boundMs: BOUND_MS, answer: heldForever },
+      async ({ builds, log }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        return log.entries
+          .filter(
+            (entry) =>
+              entry.includes("timed out") &&
+              entry.includes("input revision 1") &&
+              entry.includes("5000 ms"),
+          )
+          .map((entry) => entry.startsWith("warning: "));
+      },
+    );
+    expect(levels).toStrictEqual([true]);
+  });
+
+  it("D2594: while the build after one that timed out runs, the view still says that build timed out", async () => {
+    const view = await withBuilds(
+      {
+        fakeTimers: true,
+        boundMs: BOUND_MS,
+        answer: heldForever,
+      },
+      async ({ builds, inputs, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        await advanceBound(BOUND_MS);
+        inputs.moveRevision();
+        await flush();
+        return notNarrowedKind(view());
+      },
+    );
+    expect(view).toStrictEqual({
+      kind: NARROWING.building,
+      notNarrowed: "dependency-build-timed-out",
+    });
+  });
+
+  it("D2595: once the builds' rounds end by throwing, the discovery in effect reads widened, with the builds ended as the kind", async () => {
+    const view = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.settleHeld.resolve();
+        await flush();
+        return notNarrowedKind(view());
+      },
+    );
+    expect(view).toStrictEqual({
+      kind: NARROWING.widened,
+      notNarrowed: "dependency-builds-ended",
+    });
+  });
+
+  it("D2596: the reason the builds ended is the text of the error that ended their rounds", async () => {
+    const reason = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.settleHeld.resolve();
+        await flush();
+        return notNarrowedReason(view());
+      },
+    );
+    expect(reason).toContain(ENDED_CAUSE);
+  });
+
+  it("D2597: a discovery handed to the builds after their rounds ended reads widened too, never as building", async () => {
+    const view = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.settleHeld.resolve();
+        await flush();
+        builds.use(storedAs("discovery-b", discovery(discovered("b"))));
+        return notNarrowedKind(view());
+      },
+    );
+    expect(view).toStrictEqual({
+      kind: NARROWING.widened,
+      notNarrowed: "dependency-builds-ended",
+    });
+  });
+
+  it("D2598: a run waiting for a build is released when the builds' rounds end by throwing", async () => {
+    const released = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs }) => {
+        builds.use(STORED_A);
+        await flush();
+        let waiting = true;
+        void builds.ended().then(() => {
+          waiting = false;
+        });
+        await flush();
+        const whileRoundsRun = waiting;
+        inputs.settleHeld.resolve();
+        await flush();
+        return { whileRoundsRun, afterRoundsEnd: waiting };
+      },
+    );
+    expect(released).toStrictEqual({
+      whileRoundsRun: true,
+      afterRoundsEnd: false,
+    });
+  });
+
+  it("D2599: a stop that ends the builds' rounds is never read as the builds ending", async () => {
+    const buildsEnded = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs }) => {
+        builds.use(STORED_A);
+        await flush();
+        void builds.stop();
+        inputs.settleHeld.resolve();
+        await flush();
+        return builds.narrowing().buildsEnded;
+      },
+    );
+    expect(buildsEnded).toBeUndefined();
+  });
+
+  it("D2600: builds whose rounds ended by throwing are logged once at warning level, naming the cause", async () => {
+    const levels = await withBuilds(
+      { script: { heldSettle: 0, settleFails: ENDED_CAUSE } },
+      async ({ builds, inputs, log }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.settleHeld.resolve();
+        await flush();
+        return log.entries
+          .filter((entry) => entry.includes(ENDED_CAUSE))
+          .map((entry) => entry.startsWith("warning: "));
+      },
+    );
+    expect(levels).toStrictEqual([true]);
+  });
 });
 
 /**
@@ -2036,5 +2534,50 @@ describe(
         { kind: "digest", digest: "a-narrowed" },
       ]);
     });
+
+    it("D2582: a run waiting for a build that never ends begins once the build has been ended at the bound", async () => {
+      const runs = await inTempDir(async (root) => {
+        fakeBoundTimers();
+        try {
+          return await thenStopped(
+            await begun(
+              rootedAt(root, {}, new ScriptedBuilds(() => heldForever())),
+            ),
+            async ({ executor }) => {
+              const whileBuilding = [...executor.runs];
+              await advanceBound(DEFAULT_BOUND_MS);
+              vi.useRealTimers();
+              return { whileBuilding, after: [...executor.runs] };
+            },
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+      expect(runs).toStrictEqual({ whileBuilding: [], after: ["a"] });
+    });
   },
 );
+
+describe("an answer read after the dependency builds ended", () => {
+  it("D2601: a query hands the builds' end to the view together with the stored discovery's id", async () => {
+    const view = await inTempDir(async (root) =>
+      thenStopped(
+        await begun(
+          rootedAt(root, { changedFails: ENDED_CAUSE }, new ScriptedBuilds()),
+        ),
+        async ({ lifecycle, inputs }) => {
+          lifecycle.summary();
+          const narrowing = inputs.narrowings.at(-1);
+          return narrowing === undefined
+            ? narrowing
+            : notNarrowedKind(narrowingAt(narrowing, inputs.revision));
+        },
+      ),
+    );
+    expect(view).toStrictEqual({
+      kind: NARROWING.widened,
+      notNarrowed: "dependency-builds-ended",
+    });
+  });
+});

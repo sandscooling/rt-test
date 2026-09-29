@@ -16,6 +16,8 @@ import {
   syncChildEnd,
 } from "../../../test/scripts/child-end.js";
 import {
+  DEPENDENCY_BUILD_TIMED_OUT,
+  DEPENDENCY_BUILDS_ENDED,
   daemonStatus,
   servingDaemon,
   TEST_STATES,
@@ -1783,6 +1785,60 @@ describe("a query", () => {
     expect(
       answerFields(humanAnswer({ inputsNotNarrowed }))["inputsNotNarrowed"],
     ).toStrictEqual(inputsNotNarrowed);
+  });
+
+  it("D2603: a human answer after a dependency build timed out warns that no workspace's inputs are narrowed, naming the timed out build and why", () => {
+    expect(
+      notNarrowedLines({
+        kind: "dependency-build-timed-out",
+        reason: NOT_NARROWED_REASON,
+      }),
+    ).toStrictEqual([
+      `${NOT_NARROWED_STATEMENT} the last dependency build timed out: ${NOT_NARROWED_REASON}`,
+    ]);
+  });
+
+  it("D2604: a human answer after the dependency builds stopped working warns that no workspace's inputs are narrowed, naming that they stopped for the rest of the daemon's life and why", () => {
+    expect(
+      notNarrowedLines({
+        kind: "dependency-builds-ended",
+        reason: NOT_NARROWED_REASON,
+      }),
+    ).toStrictEqual([
+      `${NOT_NARROWED_STATEMENT} the dependency builds stopped working for the rest of the daemon's life: ${NOT_NARROWED_REASON}`,
+    ]);
+  });
+
+  it("D2605: --json fields give a timed out dependency build's kind as dependency-build-timed-out", () => {
+    expect(
+      answerFields(
+        humanAnswer({
+          inputsNotNarrowed: {
+            kind: DEPENDENCY_BUILD_TIMED_OUT,
+            reason: NOT_NARROWED_REASON,
+          },
+        }),
+      )["inputsNotNarrowed"],
+    ).toStrictEqual({
+      kind: "dependency-build-timed-out",
+      reason: NOT_NARROWED_REASON,
+    });
+  });
+
+  it("D2606: --json fields give the ended dependency builds' kind as dependency-builds-ended", () => {
+    expect(
+      answerFields(
+        humanAnswer({
+          inputsNotNarrowed: {
+            kind: DEPENDENCY_BUILDS_ENDED,
+            reason: NOT_NARROWED_REASON,
+          },
+        }),
+      )["inputsNotNarrowed"],
+    ).toStrictEqual({
+      kind: "dependency-builds-ended",
+      reason: NOT_NARROWED_REASON,
+    });
   });
 
   it(

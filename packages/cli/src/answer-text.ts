@@ -1,6 +1,8 @@
 import {
   activityText,
   DEPENDENCY_BUILD_FAILED,
+  DEPENDENCY_BUILD_TIMED_OUT,
+  DEPENDENCY_BUILDS_ENDED,
   FRESHNESS_VALUES,
   NO_SELECTION_INPUT,
   RECONCILIATION_INCOMPLETE,
@@ -34,6 +36,9 @@ const NOT_NARROWED_WARNING =
   "Warning: no workspace's inputs are narrowed to those its selection includes, since";
 const NOT_NARROWED_CAUSES: Record<InputsNotNarrowed["kind"], string> = {
   [DEPENDENCY_BUILD_FAILED]: "the last dependency build failed",
+  [DEPENDENCY_BUILD_TIMED_OUT]: "the last dependency build timed out",
+  [DEPENDENCY_BUILDS_ENDED]:
+    "the dependency builds stopped working for the rest of the daemon's life",
   [NO_SELECTION_INPUT]: "the discovery yields no selection input",
   [SELECTION_REFUSED]: "selection refused an input's path",
 };
