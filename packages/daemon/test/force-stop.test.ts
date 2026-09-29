@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { recordOf } from "../../../test/scripts/processes.js";
+import {
+  stillRunning,
+  type ProcessRecord,
+} from "../../../test/scripts/run-cleanup.mjs";
 import {
   discoverTests,
   type TestDiscovery,
@@ -35,8 +40,17 @@ const ABORT_REASON = new Error("stop requested");
 
 interface StuckRun {
   readonly run: RunResult;
-  /** On the forks pool, the stuck test's worker process; on threads, the host itself. */
-  readonly workerPid: number;
+  /**
+   * On the forks pool, the stuck test's worker process, taken while it loops; undefined on threads, where the host
+   * itself runs the test, and when the run ended before it looped.
+   */
+  readonly worker: ProcessRecord | undefined;
+}
+
+/** The process id the stuck test writes once it loops, or undefined before it has written one. */
+function loopingPid(looping: string): number | undefined {
+  const text = existsSync(looping) ? readFileSync(looping, "utf8") : "";
+  return text === "" ? undefined : Number(text);
 }
 
 /** Runs the force-stop fixture, aborting once its test is stuck in a synchronous loop. */
@@ -47,15 +61,16 @@ function stuckRun(install: VitestInstall, pool: Pool): Promise<StuckRun> {
       const looping = join(directory, "looping");
       const controller = new AbortController();
       const run = settledRun(directory, controller.signal);
-      await waitUntil(() => existsSync(looping), run);
-      controller.abort();
-      const result = await run;
-      return {
-        run: result,
-        workerPid: existsSync(looping)
-          ? Number(readFileSync(looping, "utf8"))
-          : Number.NaN,
-      };
+      await waitUntil(() => loopingPid(looping) !== undefined, run);
+      const pid = loopingPid(looping);
+      let worker: ProcessRecord | undefined;
+      try {
+        worker =
+          pool === "forks" && pid !== undefined ? recordOf(pid) : undefined;
+      } finally {
+        controller.abort();
+      }
+      return { run: await run, worker };
     }),
   );
 }
@@ -70,11 +85,11 @@ async function stuckRunRecord(
 
 /** A forks-pool run's record, and whether its stuck worker process still exists once the run has returned. */
 async function stuckForksRunRecord(install: VitestInstall): Promise<unknown> {
-  const { run, workerPid } = await stuckRun(install, "forks");
+  const { run, worker } = await stuckRun(install, "forks");
   return {
     summary: runSummary(run),
     forceStopped: ranRun(run)?.forceStopped,
-    workerAlive: isAlive(workerPid),
+    workerAlive: worker !== undefined && stillRunning([worker]).length > 0,
   };
 }
 
@@ -99,15 +114,6 @@ function stuckDiscovery(install: VitestInstall, pool: Pool): Promise<unknown> {
       };
     }),
   );
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 const FORCE_STOPPED_RUN = {

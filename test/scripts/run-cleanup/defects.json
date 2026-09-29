@@ -45,8 +45,8 @@
     "id": "D1752",
     "defect": "The sweep cleans up a run whose process still runs, ending that run's daemons and removing its directory under it.",
     "file": "test/scripts/run-cleanup.mjs",
-    "old": "if (!Number.isInteger(owner) || isRunning(owner)) continue;",
-    "new": "if (!Number.isInteger(owner)) continue;"
+    "old": "if (ownerRunning(owner)) continue;",
+    "new": ""
   },
   {
     "id": "D1753",
@@ -211,10 +211,10 @@
   },
   {
     "id": "D2447",
-    "defect": "namedAsParent counts only the children of a live parent, so the defect harness removes a scratch folder while workers of its exited Vitest still hold it.",
+    "defect": "orphansOf counts only the children of a live holder of an id, so the defect harness removes a scratch folder while workers of its exited Vitest still hold it.",
     "file": "test/scripts/run-cleanup.mjs",
-    "old": "  return [...recordsNamingParent(pid).values()].some(\n    (record) => record.parent === pid,\n  );",
-    "new": "  return childProcessesOf(pid).length > 0;"
+    "old": "return holder === undefined || !isStartedBy(record, holder);",
+    "new": "return holder !== undefined && !isStartedBy(record, holder);"
   },
   {
     "id": "D2448",
@@ -292,5 +292,96 @@
     "file": "test/scripts/run-cleanup.mjs",
     "old": "path.toLowerCase().replaceAll(\"\\\\\", \"/\")",
     "new": "path.toLowerCase()"
+  },
+  {
+    "id": "D2539",
+    "defect": "endsWithin judges a recorded process by its bare id, so a live process that took a recorded id reads as still running and the wait runs to its bound.",
+    "file": "test/scripts/processes.ts",
+    "old": "stillRunning(records).length === 0",
+    "new": "records.every(({ pid }) => !isRunning(pid))"
+  },
+  {
+    "id": "D2540",
+    "defect": "recordOf returns nothing, rather than throwing, for an id no process holds, so a caller records a process that is not there.",
+    "file": "test/scripts/processes.ts",
+    "old": "throw new Error(`no process holds id ${pid}, so it has no record`);",
+    "new": "return record as never;"
+  },
+  {
+    "id": "D2541",
+    "defect": "A run directory's name leaves out its owner's start time, so a leftover cannot be told from a later holder of the owner's id.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "return `${prefix}${process.pid}-${ownStartedAt()}-`;",
+    "new": "return `${prefix}${process.pid}-`;"
+  },
+  {
+    "id": "D2542",
+    "defect": "The daemon suite's temp parent is named by its owner's id alone, so a leftover parent cannot be told from a later holder of that id.",
+    "file": "packages/daemon/test/temp-root.ts",
+    "old": "mkdtempSync(join(tmpdir(), ownedRunName(RUN_PREFIX)))",
+    "new": "mkdtempSync(join(tmpdir(), `${RUN_PREFIX}${process.pid}-`))"
+  },
+  {
+    "id": "D2543",
+    "defect": "The sweep keeps a run while any process holds its owner's id, so a run whose owner ended and whose id another process took is never cleaned up.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (ownerRunning(owner)) continue;",
+    "new": "if (isRunning(owner.pid)) continue;"
+  },
+  {
+    "id": "D2544",
+    "defect": "A run name recording an owner's id and start time reads as ended even while that process runs, so the sweep cleans up a live run.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": ": stillRunning([owner]).length > 0;",
+    "new": ": false;"
+  },
+  {
+    "id": "D2547",
+    "defect": "A failed owner check rejects the whole sweep, so no other ended run is cleaned up and no problem line names the run.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "    try {\n      if (ownerRunning(owner)) continue;\n      const { removed } = await cleanUpRun(run);",
+    "new": "    if (ownerRunning(owner)) continue;\n    try {\n      const { removed } = await cleanUpRun(run);"
+  },
+  {
+    "id": "D2549",
+    "defect": "orphansOf counts a process that started before the run opened, so a scratch folder waits on an earlier holder of a Vitest id's children.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (!ids.includes(record.parent) || record.startedAt < since) return false;",
+    "new": "if (!ids.includes(record.parent)) return false;"
+  },
+  {
+    "id": "D2550",
+    "defect": "orphansOf counts the children of the process that now holds an exited Vitest's id, so a scratch folder waits on a stranger's children.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "return holder === undefined || !isStartedBy(record, holder);",
+    "new": "return true;"
+  },
+  {
+    "id": "D2568",
+    "defect": "orphansOf reads only the first of the ids it is given, so the orphans of every other exited Vitest run go unwaited.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "const ids = [...new Set(pids)].filter(isProcessId);",
+    "new": "const ids = [...new Set(pids)].filter(isProcessId).slice(0, 1);"
+  },
+  {
+    "id": "D2569",
+    "defect": "orphansOf queries Windows processes on every platform, so on Linux it reports processes that name an exited id as parent.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (process.platform !== WINDOWS || ids.length === 0) return [];",
+    "new": "if (ids.length === 0) return [];"
+  },
+  {
+    "id": "D2576",
+    "defect": "endedProcessId never gives up, so ids that are all taken run the search on with no error naming them.",
+    "file": "test/scripts/processes.ts",
+    "old": "while (taken.length < ENDED_ID_ATTEMPTS) {",
+    "new": "for (;;) {"
+  },
+  {
+    "id": "D2577",
+    "defect": "runOwner reads an owner from a name that does not begin with the prefix, so the sweep cleans up an unrelated temp folder whose name holds digits and a dash at the prefix's length.",
+    "file": "test/scripts/run-cleanup.mjs",
+    "old": "if (!name.startsWith(prefix)) return undefined;",
+    "new": ""
   }
 ]

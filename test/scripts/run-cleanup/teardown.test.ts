@@ -6,7 +6,7 @@ import {
   HELD_RECORD_SEPARATOR,
 } from "../../../packages/daemon/test/temp-root.js";
 import { recordStarted, removeDirectory } from "../run-cleanup.mjs";
-import { endAll, endsWithin, idleProcess } from "../processes.js";
+import { endAll, endsWithin, idleProcess, recordOf } from "../processes.js";
 import { PROCESS_SCENARIO } from "../timeouts.js";
 import { withDaemonRunSetup } from "./daemon-run.js";
 
@@ -33,6 +33,7 @@ describe("the daemon suite's teardown", PROCESS_SCENARIO, () => {
       // Windows alone can hold a directory open, so the held directory's removal is what the stub decides.
       vi.mocked(removeDirectory).mockResolvedValueOnce(false);
       const owned = idleProcess([runRoot]);
+      const identity = recordOf(owned);
       try {
         recordStarted(runRoot, { pids: [owned] });
         const outcome = await teardown().then(
@@ -41,7 +42,7 @@ describe("the daemon suite's teardown", PROCESS_SCENARIO, () => {
         );
         return [
           outcome.includes(`and was ended: ${owned}`),
-          await endsWithin(owned, STOP_WAIT_MS),
+          await endsWithin([identity], STOP_WAIT_MS),
         ];
       } finally {
         endAll([owned]);

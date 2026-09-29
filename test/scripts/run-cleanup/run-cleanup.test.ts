@@ -10,10 +10,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { onPlatform } from "../../../packages/daemon/test/harness.js";
 import { crashError, WatchedChild } from "../child-end.js";
 import { clientEndpoint } from "../../../packages/daemon/src/daemon/endpoint.js";
 import { createDaemonKey } from "../../../packages/daemon/src/daemon/endpoint-proof.js";
@@ -29,6 +30,8 @@ import {
   endOwnedProcesses,
   endRecorded,
   guardRun,
+  isRunning,
+  ownedRunName,
   processRecords,
   recordStarted,
   STARTED_FILE,
@@ -41,9 +44,19 @@ import {
   endsWithin,
   holdsWithin,
   idleProcess,
+  recordOf,
+  reusedIdentity,
 } from "../processes.js";
 import { PROCESS_SCENARIO } from "../timeouts.js";
 import { watchdogsOf, withDaemonRunSetup } from "./daemon-run.js";
+
+vi.mock("../run-cleanup.mjs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../run-cleanup.mjs")>();
+  return {
+    ...actual,
+    isRunning: vi.fn<typeof actual.isRunning>(actual.isRunning),
+  };
+});
 
 const GUARDED_RUN = fileURLToPath(
   new URL("./guarded-run.mjs", import.meta.url),
@@ -56,6 +69,8 @@ const SPARE_WAIT_MS = 2000;
 const WATCHDOG_WAIT_MS = 10_000;
 /** How the daemon project's global setup names each run's temp parent, before the owning process id. */
 const DAEMON_RUN_PREFIX = "rt-test-daemon-run-";
+/** How many exited processes `endedProcessId` tries before it gives up. */
+const ENDED_ID_ATTEMPTS = 10;
 /** The variables `os.tmpdir()` reads, on Linux and on Windows. */
 const TEMP_VARIABLES = ["TMPDIR", "TEMP", "TMP"];
 /** The key the daemon project's global setup provides the run's temp parent under. */
@@ -170,10 +185,11 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
   it("D1747: ends a recorded process still running inside the run's directory", async () => {
     const ended = await inRunRoot(async (runRoot) => {
       const owned = idleProcess([runRoot]);
+      const identity = recordOf(owned);
       return withProcesses([owned], async () => {
         recordStarted(runRoot, { pids: [owned] });
         await cleanUpRun(runRoot);
-        return endsWithin(owned, STOP_WAIT_MS);
+        return endsWithin([identity], STOP_WAIT_MS);
       });
     });
     expect(ended).toBe(true);
@@ -182,10 +198,11 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
   it("D1748: spares a recorded process whose command line lies outside the run, as a reused process id", async () => {
     const ended = await inRunRoot(async (runRoot) => {
       const stranger = idleProcess();
+      const identity = recordOf(stranger);
       return withProcesses([stranger], async () => {
         recordStarted(runRoot, { pids: [stranger] });
         await cleanUpRun(runRoot);
-        return endsWithin(stranger, SPARE_WAIT_MS);
+        return endsWithin([identity], SPARE_WAIT_MS);
       });
     });
     expect(ended).toBe(false);
@@ -293,8 +310,9 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
       let daemon: number | undefined;
       try {
         daemon = Number(await firstLine(run, "the guarded run"));
+        const identity = recordOf(daemon);
         run.kill("SIGKILL");
-        const ended = await endsWithin(daemon, WATCHDOG_WAIT_MS);
+        const ended = await endsWithin([identity], WATCHDOG_WAIT_MS);
         const removed =
           ended &&
           (await holdsWithin(() => !existsSync(runRoot), WATCHDOG_WAIT_MS));
@@ -351,12 +369,13 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
   it("D1780: ends a process named in a recorded pid file, such as a fixture's executor", async () => {
     const ended = await inRunRoot(async (runRoot, outside) => {
       const executor = idleProcess([runRoot]);
+      const identity = recordOf(executor);
       return withProcesses([executor], async () => {
         const pidFile = join(outside, "executor-pids");
         writeFileSync(pidFile, `${executor}\n`);
         recordStarted(runRoot, { pidFiles: [pidFile] });
         await cleanUpRun(runRoot);
-        return endsWithin(executor, STOP_WAIT_MS);
+        return endsWithin([identity], STOP_WAIT_MS);
       });
     });
     expect(ended).toBe(true);
@@ -365,11 +384,12 @@ describe("cleaning up a test run", PROCESS_SCENARIO, () => {
   it("D1781: ends the process holding a lock in a recorded lock directory, such as a daemon's store lock", async () => {
     const ended = await inRunRoot(async (runRoot, outside) => {
       const daemon = idleProcess([runRoot]);
+      const identity = recordOf(daemon);
       return withProcesses([daemon], async () => {
         writeFileSync(join(outside, "store.lock"), String(daemon));
         recordStarted(runRoot, { lockDirectories: [outside] });
         await cleanUpRun(runRoot);
-        return endsWithin(daemon, STOP_WAIT_MS);
+        return endsWithin([identity], STOP_WAIT_MS);
       });
     });
     expect(ended).toBe(true);
@@ -383,7 +403,7 @@ describe("ending a recorded process", PROCESS_SCENARIO, () => {
       return withProcesses([holder], async () => {
         const record = processRecords([holder]).get(holder)!;
         endRecorded([{ ...record, startedAt: record.startedAt + 1n }]);
-        return endsWithin(holder, SPARE_WAIT_MS);
+        return endsWithin([record], SPARE_WAIT_MS);
       });
     });
     expect(ended).toBe(false);
@@ -393,8 +413,9 @@ describe("ending a recorded process", PROCESS_SCENARIO, () => {
     const ended = await inRunRoot(async (runRoot) => {
       const recorded = idleProcess([runRoot]);
       return withProcesses([recorded], async () => {
-        endRecorded([processRecords([recorded]).get(recorded)!]);
-        return endsWithin(recorded, STOP_WAIT_MS);
+        const record = processRecords([recorded]).get(recorded)!;
+        endRecorded([record]);
+        return endsWithin([record], STOP_WAIT_MS);
       });
     });
     expect(ended).toBe(true);
@@ -405,8 +426,9 @@ describe("ending a recorded process", PROCESS_SCENARIO, () => {
       const starter = childStarter(runRoot);
       try {
         const executor = Number(await firstLine(starter, "the child starter"));
+        const identity = recordOf(executor);
         endOwnedProcesses([runRoot], [executor]);
-        return await endsWithin(executor, STOP_WAIT_MS);
+        return await endsWithin([identity], STOP_WAIT_MS);
       } finally {
         await endStarter(starter);
       }
@@ -419,16 +441,129 @@ describe("ending a recorded process", PROCESS_SCENARIO, () => {
       stdio: "ignore",
       windowsHide: true,
     });
+    const identity = recordOf(other.pid!);
     let ended: boolean;
     try {
       endAll([other.pid!]);
-      ended = await endsWithin(other.pid!, SPARE_WAIT_MS);
+      ended = await endsWithin([identity], SPARE_WAIT_MS);
     } finally {
       other.kill("SIGKILL");
     }
     expect(ended).toBe(false);
   });
 });
+
+/** Whether the run directory `name` under the temp directory is still there once the sweep for `prefix` has run. */
+async function survivesSweep(prefix: string, name: string): Promise<boolean> {
+  const run = join(tmpdir(), name);
+  mkdirSync(run);
+  try {
+    await sweepEndedRuns(prefix);
+    return existsSync(run);
+  } finally {
+    rmSync(run, { recursive: true, force: true });
+  }
+}
+
+describe(
+  "telling a process from a later holder of its id",
+  PROCESS_SCENARIO,
+  () => {
+    it("D2539: reads a live process whose recorded start time is another's as ended, as one whose id another process took", async () => {
+      const holder = idleProcess();
+      const ended = await withProcesses([holder], async () =>
+        endsWithin([await reusedIdentity(holder)], SPARE_WAIT_MS),
+      );
+      expect(ended).toBe(true);
+    });
+
+    it("D2540: throws, rather than returning a record, for an id no process holds", async () => {
+      const pid = await endedProcessId();
+      expect(() => recordOf(pid)).toThrow(String(pid));
+    });
+
+    it("D2541: names a run this process owns by its id and start time, ahead of a random suffix", () => {
+      expect(ownedRunName("rt-test-owned-")).toBe(
+        `rt-test-owned-${process.pid}-${recordOf(process.pid).startedAt}-`,
+      );
+    });
+
+    it("D2542: names the daemon suite's temp parent by its owner's id and start time", async () => {
+      const name = await withDaemonRunSetup(async (runRoot) =>
+        basename(runRoot),
+      );
+      expect(name).toMatch(
+        new RegExp(
+          `^${DAEMON_RUN_PREFIX}${process.pid}-${recordOf(process.pid).startedAt}-`,
+        ),
+      );
+    });
+
+    it("D2543: sweeps a run whose owner's id a process with another start time now holds", async () => {
+      const prefix = `rt-test-sweep-${randomUUID()}-`;
+      const holder = idleProcess();
+      const survived = await withProcesses([holder], async () => {
+        const { pid, startedAt } = await reusedIdentity(holder);
+        return survivesSweep(prefix, `${prefix}${pid}-${startedAt}-a`);
+      });
+      expect(survived).toBe(false);
+    });
+
+    it("D2544: leaves a run whose owner's id and start time a process still holds", async () => {
+      const prefix = `rt-test-sweep-${randomUUID()}-`;
+      const survived = await survivesSweep(prefix, `${ownedRunName(prefix)}b`);
+      expect(survived).toBe(true);
+    });
+
+    it("D2577: leaves a folder whose name does not begin with the prefix, though digits and a dash follow the prefix's length", async () => {
+      const prefix = `rt-test-sweep-${randomUUID()}-`;
+      const name = `${"x".repeat(prefix.length)}${await endedProcessId()}-a`;
+      const survived = await survivesSweep(prefix, name);
+      expect(survived).toBe(true);
+    });
+
+    it("D2547: reports a run whose owner it could not check as a problem line, without failing the sweep", async () => {
+      const prefix = `rt-test-sweep-${randomUUID()}-`;
+      const run = join(tmpdir(), `${ownedRunName(prefix)}c`);
+      mkdirSync(run);
+      vi.stubEnv("SystemRoot", undefined);
+      let problems: string[] | string;
+      try {
+        problems = await onPlatform("win32", () =>
+          sweepEndedRuns(prefix),
+        ).catch((error: Error) => error.message);
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(run, { recursive: true, force: true });
+      }
+      expect(problems).toEqual([expect.stringContaining(run)]);
+    });
+
+    it("D2576: gives up after ten exited processes whose ids were all taken, naming each id", async () => {
+      const actual =
+        await vi.importActual<typeof import("../run-cleanup.mjs")>(
+          "../run-cleanup.mjs",
+        );
+      const asked: number[] = [];
+      vi.mocked(isRunning).mockImplementation((pid) => {
+        asked.push(pid);
+        return asked.length <= ENDED_ID_ATTEMPTS;
+      });
+      let outcome: string;
+      try {
+        outcome = await endedProcessId().then(
+          String,
+          (error: Error) => error.message,
+        );
+      } finally {
+        vi.mocked(isRunning).mockImplementation(actual.isRunning);
+      }
+      expect(outcome.match(/\d+/g)?.map(Number)).toEqual(
+        asked.slice(0, ENDED_ID_ATTEMPTS),
+      );
+    });
+  },
+);
 
 describe(
   "the daemon harness's record of what a run starts",
@@ -534,11 +669,12 @@ describe(
       const ended = await inRunRoot((runRoot, consumer) =>
         providingRunRoot(runRoot, async () => {
           const stranger = idleProcess();
+          const identity = recordOf(stranger);
           return withProcesses([stranger], async () => {
             await withDaemons([consumer], async (pids) => {
               pids.add(stranger);
             });
-            return endsWithin(stranger, SPARE_WAIT_MS);
+            return endsWithin([identity], SPARE_WAIT_MS);
           });
         }),
       );

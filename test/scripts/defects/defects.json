@@ -526,9 +526,9 @@
   },
   {
     "id": "D1110",
-    "defect": "A run's directory name leaves out its owning process id, so a leftover run cannot be told apart from a live one.",
+    "defect": "A run's directory name leaves out its owning process's id and start time, so a leftover run cannot be told apart from a live one.",
     "file": "scripts/lib/defects/runs.mjs",
-    "old": "`${RUN_PREFIX}${process.pid}-`",
+    "old": "ownedRunName(RUN_PREFIX)",
     "new": "RUN_PREFIX"
   },
   {
@@ -542,15 +542,15 @@
     "id": "D1124",
     "defect": "The sweep removes every run-named entry without asking whether its process is alive, deleting a concurrent run's sandboxes.",
     "file": "scripts/lib/defects/runs.mjs",
-    "old": "if (pid !== undefined && !running(Number(pid))) {",
-    "new": "if (pid !== undefined) {"
+    "old": "if (owner !== undefined && ownerEnded(home, name, owner, running, log)) {",
+    "new": "if (owner !== undefined) {"
   },
   {
     "id": "D1125",
     "defect": "The sweep treats an entry not named like a run as a leftover of process 0 and removes it.",
     "file": "scripts/lib/defects/runs.mjs",
-    "old": "const pid = RUN_NAME.exec(name)?.[1];",
-    "new": "const pid = RUN_NAME.exec(name)?.[1] ?? \"0\";"
+    "old": "const owner = runOwner(name, RUN_PREFIX);",
+    "new": "const owner = runOwner(name, RUN_PREFIX) ?? { pid: 0 };"
   },
   {
     "id": "D1122",
@@ -1118,5 +1118,68 @@
     "file": "scripts/lib/defects/vitest.mjs",
     "old": "      if (exitedAt !== undefined) failStalled();\n",
     "new": ""
+  },
+  {
+    "id": "D2545",
+    "defect": "openRun checks a leftover run owner's id alone, so a run whose owner ended and whose id another process took stays behind.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "running = ownerRunning",
+    "new": "running = ({ pid }) => ownerRunning({ pid })"
+  },
+  {
+    "id": "D2546",
+    "defect": "openRun reads every leftover run's owner as ended, so it removes the sandboxes of a run whose process still runs.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "running = ownerRunning",
+    "new": "running = () => false"
+  },
+  {
+    "id": "D2548",
+    "defect": "openRun reads a leftover run whose owner could not be checked as ended, so it removes a run that may still be live.",
+    "file": "scripts/lib/defects/runs.mjs",
+    "old": "could not be checked: ${error.message}`,\n    );\n    return false;",
+    "new": "could not be checked: ${error.message}`,\n    );\n    return true;"
+  },
+  {
+    "id": "D2570",
+    "defect": "The scratch folder waits on the processes a run started with no bound, so a process that never ends hangs the test instead of failing it.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "const ORPHAN_WAIT_MS = 10_000;",
+    "new": "const ORPHAN_WAIT_MS = Number.POSITIVE_INFINITY;"
+  },
+  {
+    "id": "D2571",
+    "defect": "The failure for a scratch folder that stays held does not name the processes still running, so its cause is unreadable.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "${running.join(\", \") || \"none\"}",
+    "new": "none"
+  },
+  {
+    "id": "D2572",
+    "defect": "The scratch folder asks again, on every check, which processes name the exited runs as parent, so a stranger's children that take a Vitest id are waited on.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "() => stillRunning(orphans).length === 0,",
+    "new": "() => stillRunning(orphansOf(pids, openedAt)).length === 0,"
+  },
+  {
+    "id": "D2573",
+    "defect": "Once the processes ended, the scratch folder is removed with a single removal that Windows refuses while handles release.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "if (ended && (await removeDirectory(dir))) return;",
+    "new": "if (ended) {\n    rmSync(dir, { recursive: true, force: true });\n    return;\n  }"
+  },
+  {
+    "id": "D2574",
+    "defect": "A scratch folder that stays held behind a failed test body replaces the body's error with the cleanup failure.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "await removeScratch(dir, openedAt).catch((cleanup: unknown) => {\n      console.error(`after the failure below, ${String(cleanup)}`);\n    });",
+    "new": "await removeScratch(dir, openedAt);"
+  },
+  {
+    "id": "D2575",
+    "defect": "The cleanup failure behind a failed test body is dropped without a trace.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "console.error(`after the failure below, ${String(cleanup)}`);",
+    "new": "void cleanup;"
   }
 ]

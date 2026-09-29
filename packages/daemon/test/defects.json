@@ -4800,5 +4800,12 @@
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
     "old": "    if (this.#sets.refused) this.#refused(this.#sets.reason);\n",
     "new": ""
+  },
+  {
+    "id": "D2567",
+    "defect": "A heartbeat child whose announced id a process outside the fixture now holds is waited on by its bare id, so the wait runs to its bound and fails falsely.",
+    "file": "packages/daemon/test/job-tree.test.ts",
+    "old": "return recordsInside([root], held).map(({ pid }) => pid);",
+    "new": "return held;"
   }
 ]

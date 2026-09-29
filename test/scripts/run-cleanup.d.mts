@@ -19,15 +19,26 @@ export interface RunCleanup {
   readonly removed: boolean;
 }
 
-/** A running process as the OS knew it when the record was taken. */
-export interface ProcessRecord {
+/** A process as its id and start time, which together tell it from every other process that held the id. */
+export interface ProcessIdentity {
   readonly pid: number;
-  readonly parent: number;
-  /** In the OS's own units; with the id, it tells this process from every other that held the id. */
+  /** In the OS's own units. */
   readonly startedAt: bigint;
+}
+
+/** A running process as the OS knew it when the record was taken. */
+export interface ProcessRecord extends ProcessIdentity {
+  readonly parent: number;
   readonly commandLine: string;
   /** Linux only. */
   readonly workingDirectory?: string;
+}
+
+/** The process a run directory's name records as its owner. */
+export interface RunOwner {
+  readonly pid: number;
+  /** Absent from a name that records only the id. */
+  readonly startedAt?: bigint;
 }
 
 export declare const STARTED_FILE: string;
@@ -37,12 +48,19 @@ export declare function processRecords(
   pids: readonly number[],
 ): Map<number, ProcessRecord>;
 export declare function childProcessesOf(pid: number): ProcessRecord[];
-export declare function namedAsParent(pid: number): boolean;
-export declare function stillRunning(
-  records: readonly ProcessRecord[],
+export declare function orphansOf(
+  pids: readonly number[],
+  sinceMs: number,
 ): ProcessRecord[];
+export declare function stillRunning<Identity extends ProcessIdentity>(
+  records: readonly Identity[],
+): Identity[];
 export declare function endRecorded(
   records: readonly ProcessRecord[],
+): ProcessRecord[];
+export declare function recordsInside(
+  roots: readonly string[],
+  pids: readonly number[],
 ): ProcessRecord[];
 export declare function endOwnedProcesses(
   roots: readonly string[],
@@ -55,5 +73,11 @@ export declare function recordStarted(
 ): void;
 export declare function removeKeyFile(keyFile: string): void;
 export declare function cleanUpRun(runRoot: string): Promise<RunCleanup>;
+export declare function ownedRunName(prefix: string): string;
+export declare function runOwner(
+  name: string,
+  prefix: string,
+): RunOwner | undefined;
+export declare function ownerRunning(owner: RunOwner): boolean;
 export declare function sweepEndedRuns(prefix: string): Promise<string[]>;
 export declare function guardRun(runRoot: string): Promise<void>;
