@@ -295,6 +295,11 @@ async function contentDigest(
   return hash.digest(DIGEST_ENCODING);
 }
 
+/** Whether a held digest is of a file's content, read directly or through a link to it. */
+export function holdsFileContent(digest: string): boolean {
+  return digest.startsWith(`${FILE_KIND}${KIND_SEPARATOR}`);
+}
+
 export function textDigest(text: string): string {
   return createHash(DIGEST_ALGORITHM).update(text).digest(DIGEST_ENCODING);
 }

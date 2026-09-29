@@ -53,6 +53,7 @@ function discoveryIncluding(include: readonly string[]): TestDiscovery {
               globalSetupFiles: [],
               aliases: [],
               testFilePatterns,
+              envSources: [],
             },
           ],
         },

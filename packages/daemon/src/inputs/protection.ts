@@ -11,6 +11,7 @@ import type {
   ProjectSelectionFacts,
   SpelledDirectory,
 } from "../vitest/selection-facts.js";
+import { projectEnvFiles } from "./env-files.js";
 import { absoluteInputPath } from "./input-filter.js";
 import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
 import {
@@ -42,7 +43,7 @@ export type Protection =
   | { readonly applies: false; readonly reason: string }
   | {
       readonly applies: true;
-      /** Root-relative: every test module, setup file and global setup file the discovery lists. */
+      /** Root-relative: every test module, setup file, global setup file and env file the discovery lists. */
       readonly files: ReadonlySet<string>;
       /** Equal for two values whose discovered projects match the same files by pattern. */
       readonly patternKey: string;
@@ -100,19 +101,35 @@ export function protection(
   };
 }
 
-/** Root-relative: every test module the discovery lists, and every setup and global setup file its projects report. */
+/** Root-relative: every file `protectedModules` names, and every env file its projects' env sources name. */
 export function protectedFiles(discovery: TestDiscovery): ReadonlySet<string> {
-  const files = new Set(discoveredTestModules(discovery));
-  for (const entry of discovery.workspaces) {
-    if (entry.status !== "discovered" || !entry.selectionFacts.reported) {
-      continue;
-    }
-    for (const project of entry.selectionFacts.projects) {
-      for (const file of project.setupFiles) files.add(file);
-      for (const file of project.globalSetupFiles) files.add(file);
-    }
+  const files = new Set(protectedModules(discovery));
+  for (const project of reportedProjects(discovery)) {
+    for (const file of projectEnvFiles(project)) files.add(file);
   }
   return files;
+}
+
+/** Root-relative: every test module the discovery lists, and every setup and global setup file its projects report. */
+export function protectedModules(
+  discovery: TestDiscovery,
+): ReadonlySet<string> {
+  const files = new Set(discoveredTestModules(discovery));
+  for (const project of reportedProjects(discovery)) {
+    for (const file of project.setupFiles) files.add(file);
+    for (const file of project.globalSetupFiles) files.add(file);
+  }
+  return files;
+}
+
+function reportedProjects(
+  discovery: TestDiscovery,
+): readonly ProjectSelectionFacts[] {
+  return discovery.workspaces.flatMap((entry) =>
+    entry.status === "discovered" && entry.selectionFacts.reported
+      ? entry.selectionFacts.projects
+      : [],
+  );
 }
 
 /**

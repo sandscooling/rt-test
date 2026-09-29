@@ -1417,14 +1417,14 @@
     "id": "D2128",
     "defect": "A setup file the discovery reports is not protected, so a declared pattern covering it makes its edit select nothing.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "      for (const file of project.setupFiles) files.add(file);\n",
+    "old": "    for (const file of project.setupFiles) files.add(file);\n",
     "new": ""
   },
   {
     "id": "D2129",
     "defect": "A global setup file the discovery reports is not protected, so a declared pattern covering it makes its edit select nothing.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "      for (const file of project.globalSetupFiles) files.add(file);\n",
+    "old": "    for (const file of project.globalSetupFiles) files.add(file);\n",
     "new": ""
   },
   {

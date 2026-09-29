@@ -2650,6 +2650,185 @@ describe("reporting each workspace's selection facts", () => {
   );
 });
 
+/**
+ * The root config's env source as each project of the selection-facts fixture reports it: the prefixes the config
+ * sets, and Vitest's own mode rather than the one the config sets.
+ */
+const ROOT_ENV_SOURCE = {
+  envDirectory: ".",
+  envPrefixes: ["VITE_", "ROOT_"],
+  mode: "test",
+};
+
+describe("reporting each project's env sources", () => {
+  it(
+    "D3042: on Vitest 5, a project's own env directory is named relative to the consumer root",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "rooted",
+          (facts) => facts.envSources[0]?.envDirectory,
+        ),
+      ).toBe("rooted");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3043: on Vitest 4.1, a project's own env source is its own config's, an env directory outside the consumer root named climbing with ..",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "bare",
+          (facts) => facts.envSources[0]?.envDirectory,
+        ),
+      ).toBe("../outside-env");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3044: on Vitest 5, a config that turns env files off reports no env directory",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "pending",
+          (facts) => facts.envSources[0]?.envDirectory,
+        ),
+      ).toBeNull();
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3045: on Vitest 4.1, a config that sets no env prefix reports VITE_ alone",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "pending",
+          (facts) => facts.envSources[0]?.envPrefixes,
+        ),
+      ).toStrictEqual(["VITE_"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3046: on Vitest 4.1, a single env prefix written as a string is reported as a list holding it",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "rooted",
+          (facts) => facts.envSources[0]?.envPrefixes,
+        ),
+      ).toStrictEqual(["RT_"]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3047: on Vitest 4.1, an env prefix a JavaScript config writes as null or a number is reported as the string Vite tests names against",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      const ownPrefixes = (projectName: string): unknown =>
+        projectFact(
+          discovery,
+          ".",
+          projectName,
+          (facts) => facts.envSources[0]?.envPrefixes,
+        );
+      expect({
+        absolute: ownPrefixes("absolute"),
+        bare: ownPrefixes("bare"),
+      }).toStrictEqual({ absolute: ["APP_", "7"], bare: ["null"] });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3048: on Vitest 5, a project that sets its own env options still reports the root config's source, in Vitest's mode though the root config sets its own",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(discovery, ".", "rooted", (facts) => facts.envSources[1]),
+      ).toStrictEqual(ROOT_ENV_SOURCE);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3049: on Vitest 5, a project that sets its own mode reports that mode for its own source",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "rooted",
+          (facts) => facts.envSources[0]?.mode,
+        ),
+      ).toBe("custom");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3050: on Vitest 4.1, a project reports its own config's env source first and the root config's after it",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(discovery, ".", "rooted", (facts) => facts.envSources),
+      ).toStrictEqual([
+        { envDirectory: "rooted", envPrefixes: ["RT_"], mode: "custom" },
+        ROOT_ENV_SOURCE,
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3051: on Vitest 4.1, a project that does not extend the root config still reports the root config's env source",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(discovery, ".", "absolute", (facts) => facts.envSources[1]),
+      ).toStrictEqual(ROOT_ENV_SOURCE);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3085: on Vitest 4.1, a mode a JavaScript config writes as a number is reported as the string Vite names its env files by",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "absolute",
+          (facts) => facts.envSources[0]?.mode,
+        ),
+      ).toBe("2");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
 describe("a project started through another spelling of its root", () => {
   it(
     "D2811: on Vitest 5, a test file an absolute include pattern spelled from the link the project was started through finds is protected, though discovery never listed it",

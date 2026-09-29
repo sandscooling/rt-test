@@ -41,6 +41,7 @@ import {
 } from "../src/vitest/run-workspace.js";
 import type {
   CrawledLinks,
+  EnvSource,
   SpelledDirectory,
   ProjectSelectionFacts,
   ReportedAlias,
@@ -358,7 +359,7 @@ export const HAND_BUILT_ROOT = resolve(sep, "consumer");
  * One project's selection facts; a list left out is empty, the pattern directory is the consumer root, and the Vite
  * root is the pattern directory, as Vite roots a project at its config's directory. Vitest spells the pattern
  * directory as its real path under `root`, `/`-separated, as it does for a root started by its real path. Crawled
- * links left out are known, and there are none.
+ * links left out are known, and there are none. Env sources left out are none, so the project names no env file.
  */
 export interface FactsCase {
   readonly projectName?: string;
@@ -374,6 +375,7 @@ export interface FactsCase {
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly includeSource?: readonly string[];
+  readonly envSources?: readonly EnvSource[];
 }
 
 export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
@@ -395,6 +397,7 @@ export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
       exclude: facts.exclude ?? [],
       includeSource: facts.includeSource ?? [],
     },
+    envSources: facts.envSources ?? [],
   };
 }
 

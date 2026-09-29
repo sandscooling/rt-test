@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 const setupLink = join(dirname(fileURLToPath(import.meta.url)), "setup-link");
 
 export default {
+  // Vitest passes its own mode, so the root config's resolves to test whatever it sets.
+  mode: "staging",
+  envPrefix: ["VITE_", "ROOT_"],
   test: {
     globalSetup: ["./setup/global-root.mjs"],
     projects: [
@@ -37,6 +40,9 @@ export default {
           include: ["bare/*.test.mjs"],
           globalSetup: ["./setup-link/global-root.mjs"],
         },
+        // An env directory outside the consumer root, and a prefix Vite tests as the string "null".
+        envDir: "../outside-env",
+        envPrefix: null,
       },
       {
         // Absolute, so it is resolved through setup-link on every host rather than against the working directory.
@@ -46,6 +52,8 @@ export default {
           dir: join(setupLink, "later"),
           include: ["**/*.test.mjs"],
         },
+        // Turns env files off.
+        envDir: false,
       },
       {
         // Its Vite root is its own folder, where the other projects share the consumer root.
@@ -55,6 +63,9 @@ export default {
           root: "./rooted",
           include: ["*.test.mjs"],
         },
+        // Its own mode, and a single env prefix written as a string.
+        mode: "custom",
+        envPrefix: "RT_",
       },
       {
         // Vitest follows a link only in a relative setup path, so these absolute ones keep the link's spelling.
@@ -65,6 +76,9 @@ export default {
           setupFiles: [join(setupLink, "node-setup.mjs")],
           globalSetup: [join(setupLink, "global-root.mjs")],
         },
+        // A mode and a prefix written as numbers, which Vite names files and tests names by as strings.
+        mode: 2,
+        envPrefix: ["APP_", 7],
       },
     ],
   },

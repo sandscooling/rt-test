@@ -1,5 +1,6 @@
 import { resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import { declaredNonInputs } from "../src/inputs/non-inputs.js";
 import { protection, type Protection } from "../src/inputs/protection.js";
 import { patternBase } from "../src/inputs/vitest-glob.js";
 import type {
@@ -59,6 +60,30 @@ function protects(
   if (!value.applies) return value.reason;
   return Object.fromEntries(paths.map((path) => [path, value.protects(path)]));
 }
+
+describe("the env files a discovery lists", () => {
+  it("D3081: a declared pattern covering a directory removes the files in it but no env file a project's env source names there", () => {
+    const match = declaredNonInputs(
+      { file: "rt-test.json", state: "declared", patterns: ["config/**"] },
+      protectionFor({
+        envSources: [
+          { envDirectory: "config", envPrefixes: ["VITE_"], mode: "test" },
+        ],
+      }),
+    );
+    expect(
+      Object.fromEntries(
+        ["config/.env.local", "config/.env.test", "config/other.txt"].map(
+          (path) => [path, match(path) ?? "input"],
+        ),
+      ),
+    ).toStrictEqual({
+      "config/.env.local": "input",
+      "config/.env.test": "input",
+      "config/other.txt": "config/**",
+    });
+  });
+});
 
 describe("which files the test file patterns protect", () => {
   it("D2132: a test file under a directory whose name begins with a dot is protected, as Vitest's glob finds it", () => {

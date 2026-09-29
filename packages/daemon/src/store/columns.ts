@@ -8,6 +8,7 @@ import {
   STRING_FIND_FLAGS,
   type AliasFindKind,
   type CrawledLinks,
+  type EnvSource,
   type ProjectSelectionFacts,
   type ReportedAlias,
   type SpelledDirectory,
@@ -192,6 +193,18 @@ export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
     globalSetupFiles: jsonStrings(value, "globalSetupFiles"),
     aliases: jsonArray(value, "aliases", reportedAlias),
     testFilePatterns: testFilePatterns(jsonRecord(value, "testFilePatterns")),
+    envSources: jsonArray(value, "envSources", envSource),
+  };
+}
+
+function envSource(value: unknown): EnvSource {
+  return {
+    envDirectory:
+      jsonField(value, "envDirectory") === null
+        ? null
+        : jsonText(value, "envDirectory"),
+    envPrefixes: jsonStrings(value, "envPrefixes"),
+    mode: jsonText(value, "mode"),
   };
 }
 
