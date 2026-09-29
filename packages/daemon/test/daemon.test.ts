@@ -5,7 +5,13 @@ import {
   type ChildProcess,
   type StdioOptions,
 } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -49,6 +55,7 @@ import {
   eventually,
   fixtureFile,
   frozenProof,
+  declareFixtureMarkers,
   holdAt,
   logEntries,
   logged,
@@ -1015,6 +1022,7 @@ describe("two worktrees of one project", () => {
         const feature = linkedWorktree(main, "feature", (gitdir) => gitdir);
         for (const root of [main, feature]) {
           copyFixture(DAEMON_FIXTURE, root);
+          declareFixtureMarkers(root);
           linkVitest(root, "vitest");
         }
         const state = join(dir, "state");
@@ -1460,4 +1468,75 @@ describe("a stand-in on the endpoint", () => {
       thrown: "the stand-in read a line that is not a JSON object: not json",
     });
   });
+});
+
+/** How many times the log says a round left no workspace due. */
+function idleCount(logFile: string): number {
+  return logEntries(logFile).filter((entry) => entry === IDLE_ENTRY).length;
+}
+
+/** How many runs the store holds for each workspace of the worktree at `root`. */
+function runCounts(
+  stateDirectory: string,
+  root: string,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const [path] of storedRuns(stateDirectory, root)) {
+    if (path !== undefined) counts[path] = (counts[path] ?? 0) + 1;
+  }
+  return counts;
+}
+
+describe("what a daemon runs after a start and after an edit", () => {
+  it(
+    "D2691: a daemon restarted over results that read current runs no workspace",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const first = await started(root, pids, confirmEvery(root));
+        if ("thrown" in first) return first;
+        await eventually(() => idleCount(first.logFile) >= 1);
+        await settled(stopDaemon(root));
+        const before = runCounts(first.stateDirectory, root);
+        const idles = idleCount(first.logFile);
+        const second = await started(root, pids, confirmEvery(root));
+        if ("thrown" in second) return second;
+        await eventually(() => idleCount(second.logFile) > idles);
+        return { before, after: runCounts(second.stateDirectory, root) };
+      });
+      expect(outcome).toStrictEqual({
+        before: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 1 },
+        after: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 1 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2692: an edit to one workspace's own test runs that workspace again, and leaves the other's result current and unrun",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        for (const name of ["a", "b"]) {
+          writeFileSync(
+            join(root, "packages", name, "package.json"),
+            JSON.stringify({ name, private: true }),
+          );
+        }
+        const identity = await started(root, pids, confirmEvery(root));
+        if ("thrown" in identity) return identity;
+        await eventually(() => idleCount(identity.logFile) >= 1);
+        const before = runCounts(identity.stateDirectory, root);
+        appendFileSync(
+          join(root, WORKSPACE_B, "passes.test.mjs"),
+          "// an edit\n",
+        );
+        await eventually(() => idleCount(identity.logFile) >= 2);
+        return { before, after: runCounts(identity.stateDirectory, root) };
+      });
+      expect(outcome).toStrictEqual({
+        before: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 1 },
+        after: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 2 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
 });

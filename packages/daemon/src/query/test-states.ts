@@ -6,6 +6,7 @@ import {
   type TestIdentity,
   type TestOutcome,
 } from "@rt-test/core";
+import type { FingerprintResult } from "../inputs/fingerprint.js";
 import { NOT_FINGERPRINTED } from "../store/schema.js";
 import type { StoredDiscovery, StoredRun } from "../store/stored-records.js";
 import { VITEST_ADAPTER_VERSION } from "../vitest/adapter-version.js";
@@ -133,8 +134,15 @@ function positionUnvouched(
   return (test.isDuplicate || recordedPositional) && !discoveryIsCurrent;
 }
 
-/** The discovery's freshness, decided as a finished result's is. */
-export function discoveryFreshness(
+/** The digest of a computed fingerprint; undefined when none could be computed. */
+export function fingerprintDigest(
+  print: FingerprintResult | undefined,
+): string | undefined {
+  return print?.ok === true ? print.digest : undefined;
+}
+
+/** A stored run's or discovery's freshness against a current fingerprint, decided as a finished result's is. */
+export function recordFreshness(
   stored: StoredBasis,
   currentFingerprint: string | undefined,
 ): Freshness {

@@ -2469,5 +2469,12 @@
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
     "old": "    return sets.refused ? sets.reason : undefined;",
     "new": "    return undefined;"
+  },
+  {
+    "id": "D2689",
+    "defect": "A narrowing asks selection about no changed path, so a round's selection names no workspace whatever changed.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "      change: paths,\n",
+    "new": "      change: [],\n"
   }
 ]

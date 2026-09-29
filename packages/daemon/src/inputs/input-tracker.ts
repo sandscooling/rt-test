@@ -15,7 +15,7 @@ import {
   unavailableReason,
   type TrackerCondition,
 } from "./current-inputs.js";
-import type { FingerprintResult } from "./fingerprint.js";
+import type { FingerprintResult, ProjectInputs } from "./fingerprint.js";
 import { DeclaredNonInputs } from "./declared-non-inputs.js";
 import { GitFiles } from "./git-files.js";
 import {
@@ -41,7 +41,7 @@ import { NON_INPUTS_FILE, type NonInputsDeclaration } from "./non-inputs.js";
 import { protection } from "./protection.js";
 import { keepReleasedFiles } from "./protection-walk.js";
 import { QueuedReads, RENAME_EVENT } from "./queued-reads.js";
-import { ReconcileSchedule } from "./reconcile-schedule.js";
+import { PERIODIC_REASON, ReconcileSchedule } from "./reconcile-schedule.js";
 
 const IGNORE_FILE = ".gitignore";
 const CHANGE_EVENT = "change";
@@ -63,6 +63,8 @@ export interface CurrentInputs {
   readonly nonInputsUnusable?: string;
   /** Why no workspace's inputs are narrowed to those its selection includes; absent otherwise. */
   readonly inputsNotNarrowed?: InputsNotNarrowed;
+  /** The committed inputs every fingerprint here is computed from; undefined when none can be computed. */
+  readonly snapshot: ProjectInputs | undefined;
   workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
   discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
   /**
@@ -90,6 +92,8 @@ export interface TrackedInputs {
    * ending or the pending reads draining; at once when the tracker has stopped.
    */
   changed(): Promise<void>;
+  /** How many periodic reconciliations have ended in this daemon's life, whether one asked for or another absorbed it. */
+  periodicReconciliations(): number;
   /** The declaration in effect, which decides with the protection in effect which files are inputs. */
   nonInputsDeclaration(): NonInputsDeclaration;
   /**
@@ -143,6 +147,8 @@ export class InputTracker implements TrackedInputs {
   #started = false;
   #reconciling = false;
   #reconcileRequested = false;
+  #periodicRequested = false;
+  #periodicEnded = 0;
   #reconciliation: Promise<void> = Promise.resolve();
   #processing: Promise<void> | undefined;
   #inFlight = 0;
@@ -219,6 +225,10 @@ export class InputTracker implements TrackedInputs {
   changed(): Promise<void> {
     if (this.#stopped) return Promise.resolve();
     return new Promise((resolve) => this.#changeWaiters.push(resolve));
+  }
+
+  periodicReconciliations(): number {
+    return this.#periodicEnded;
   }
 
   nonInputsDeclaration(): NonInputsDeclaration {
@@ -357,6 +367,7 @@ export class InputTracker implements TrackedInputs {
   #requestReconciliation(reason: string): void {
     if (this.#stopped) return;
     this.#reconcileRequested = true;
+    if (reason === PERIODIC_REASON) this.#periodicRequested = true;
     if (this.#reconciling) return;
     this.#reconciling = true;
     this.#log.entry(`input reconciliation started: ${reason}`);
@@ -379,6 +390,10 @@ export class InputTracker implements TrackedInputs {
     }
     this.#reconciling = false;
     if (this.#stopped) return;
+    if (this.#periodicRequested) {
+      this.#periodicRequested = false;
+      this.#periodicEnded += 1;
+    }
     this.#markFirstReconciled();
     this.#schedule.periodic();
     this.#processQueue();

@@ -30,8 +30,9 @@ import {
 } from "./answer.js";
 import {
   countStandings,
-  discoveryFreshness,
+  fingerprintDigest,
   isCurrentAdapterVersion,
+  recordFreshness,
   testStandings,
   type TestStanding,
 } from "./test-states.js";
@@ -106,9 +107,9 @@ export function queryBasis(
     results.latestRuns.map((run) => [run.run.workspace.path, run]),
   );
   const fingerprints = workspaceFingerprints(discovery.discovery, inputs);
-  const freshness = discoveryFreshness(
+  const freshness = recordFreshness(
     discovery,
-    digestOf(inputs.discoveryFingerprint(discovery.discovery)),
+    fingerprintDigest(inputs.discoveryFingerprint(discovery.discovery)),
   );
   return {
     discovery,
@@ -116,7 +117,7 @@ export function queryBasis(
     standings: testStandings(
       discovery,
       latestRuns,
-      (path) => digestOf(fingerprints.get(path)),
+      (path) => fingerprintDigest(fingerprints.get(path)),
       freshness === CURRENT,
     ),
     notDiscovered: notDiscoveredEntries(discovery.discovery),
@@ -156,10 +157,6 @@ function workspaceFingerprints(
         inputs.workspaceFingerprint(entry),
       ]),
   );
-}
-
-function digestOf(print: FingerprintResult | undefined): string | undefined {
-  return print?.ok === true ? print.digest : undefined;
 }
 
 function unfingerprinted(

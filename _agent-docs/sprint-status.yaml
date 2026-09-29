@@ -21,7 +21,7 @@ sprint-2: in-progress
 2-3e-dependency-build: done
 2-3g-narrow-fingerprints: done
 2-3j-bound-dependency-build: done
-2-3f-schedule-runs: ready-for-dev
+2-3f-schedule-runs: done
 2-3h-judge-runs: backlog
 2-3i-schedule-answers: backlog
 2-4-late-answers: ready-for-dev

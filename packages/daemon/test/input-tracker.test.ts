@@ -39,6 +39,7 @@ import {
   readEntryDigest,
   type InputRead,
 } from "../src/inputs/input-inventory.js";
+import { JobWindows } from "../src/inputs/input-jobs.js";
 import { InputTracker } from "../src/inputs/input-tracker.js";
 import {
   declaredNonInputs,
@@ -171,6 +172,7 @@ const NEVER_WRITTEN = "c.ts";
 const A_MD_CHANGED = {
   fingerprinted: false,
   reason: "its inputs changed while it ran: a.md",
+  changedWhileRunning: true,
 };
 /** How long before protection a job began, so a file written as the test starts was modified during it. */
 const JOB_BEGAN_BEFORE_MS = 60_000;
@@ -3130,5 +3132,161 @@ describe("the declared patterns", () => {
       notValid: reason.includes("it is not valid JSON:"),
       unreadable: reason.includes("cannot be read"),
     }).toStrictEqual({ notValid: true, unreadable: false });
+  });
+});
+
+describe("the count of periodic reconciliations", () => {
+  it("D2680: the count is 0 once the first reconciliation has ended, and rises by one when the periodic reconciliation ends", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, { "src/a.ts": "" });
+      return withFakeTimeouts(() =>
+        tracking(root, async ({ tracker }) => {
+          const before = tracker.periodicReconciliations();
+          await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+          await settled(tracker);
+          return { before, after: tracker.periodicReconciliations() };
+        }),
+      );
+    });
+    expect(outcome).toStrictEqual({ before: 0, after: 1 });
+  });
+
+  it("D2681: a reconciliation an edit to an ignore file started does not count as a periodic one", async () => {
+    const count = await inTempDir((root) => {
+      repository(root, "*.log\n", { "src/a.ts": "" });
+      return trackingOwnGitHome(root, async ({ tracker, log }) => {
+        appendFileSync(join(root, ".gitignore"), "*.tmp\n");
+        await eventually(
+          () => log.entries.includes(IGNORE_RULES_CHANGED_STARTED),
+          SETTLE_MS,
+        );
+        await eventually(
+          () =>
+            log.entries.filter((entry) =>
+              entry.startsWith(RECONCILIATION_ENDED),
+            ).length >= 2,
+          SETTLE_MS,
+        );
+        return tracker.periodicReconciliations();
+      });
+    });
+    expect(count).toBe(0);
+  });
+
+  /** Counts each reconciliation's end from the log; the count moves before the reconciliation is settled, so a test polls it. */
+  const endsIn = (log: MemoryLog): number =>
+    log.entries.filter((entry) => entry.startsWith(RECONCILIATION_ENDED))
+      .length;
+
+  /** Resolves once the log holds `count` ends, polling on `setImmediate`, which fake `setTimeout` leaves real. */
+  async function untilEnds(log: MemoryLog, count: number): Promise<void> {
+    const deadline = Date.now() + SETTLE_MS;
+    while (endsIn(log) < count && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  it("D2737: a reconciliation an edit to the declaration started, after the periodic one, does not count as a periodic one", async () => {
+    const outcome = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      try {
+        return await withFakeTimeouts(() =>
+          tracking(root, async ({ tracker, log }) => {
+            await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+            await untilEnds(log, 2);
+            const afterPeriodic = tracker.periodicReconciliations();
+            deliver(watches, root, DECLARATION_FILE);
+            await untilEnds(log, 3);
+            return {
+              afterPeriodic,
+              afterEdit: tracker.periodicReconciliations(),
+            };
+          }),
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(outcome).toStrictEqual({ afterPeriodic: 1, afterEdit: 1 });
+  });
+
+  it("D2738: a periodic reconciliation the timer requests while another reconciliation runs is counted once they have ended", async () => {
+    const count = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      try {
+        return await withFakeTimeouts(() =>
+          tracking(root, async ({ tracker, log }) => {
+            deliver(watches, root, DECLARATION_FILE);
+            vi.advanceTimersByTime(RECONCILE_INTERVAL);
+            await untilEnds(log, 2);
+            return tracker.periodicReconciliations();
+          }),
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(count).toBe(1);
+  });
+});
+
+describe("a job's verdict", () => {
+  it("D2728: a job during which a watcher failure was recorded, and that ended with no fingerprint computable, is not judged as having had its inputs change while it ran", () => {
+    const failure = "the watcher failed: ENOSPC";
+    const windows = new JobWindows();
+    const mark = windows.open(undefined);
+    windows.record(failure);
+    const verdict = windows.close(mark, failure);
+    expect(
+      "changedWhileRunning" in verdict && verdict.changedWhileRunning,
+    ).toBe(false);
+  });
+
+  it("D2684: a job during which a change was recorded is judged as having had its inputs change while it ran", () => {
+    const windows = new JobWindows();
+    const mark = windows.open(undefined);
+    windows.record("a.md");
+    expect(windows.close(mark, undefined)).toStrictEqual(A_MD_CHANGED);
+  });
+
+  it("D2685: a job that began with its inputs unsettled is not judged as having had them change while it ran", () => {
+    const windows = new JobWindows();
+    const verdict = windows.close(
+      windows.open("a reconciliation was running"),
+      undefined,
+    );
+    expect(
+      "changedWhileRunning" in verdict && verdict.changedWhileRunning,
+    ).toBe(false);
+  });
+
+  it("D2686: a job that ended with no fingerprint computable and no change recorded is not judged as having had its inputs change while it ran", () => {
+    const windows = new JobWindows();
+    const verdict = windows.close(
+      windows.open(undefined),
+      "the watcher failed: ENOSPC",
+    );
+    expect(verdict).toStrictEqual({
+      fingerprinted: false,
+      reason: "the watcher failed: ENOSPC",
+      changedWhileRunning: false,
+    });
+  });
+
+  it("D2687: the count of changes a verdict leaves unnamed counts each distinct one once, however often it was recorded", () => {
+    const windows = new JobWindows();
+    const mark = windows.open(undefined);
+    for (let named = 0; named < 20; named += 1) {
+      windows.record(`named-${named}.ts`);
+    }
+    for (const past of ["past-1.ts", "past-1.ts", "past-2.ts"]) {
+      windows.record(past);
+    }
+    const verdict = windows.close(mark, undefined);
+    expect("reason" in verdict && verdict.reason.endsWith(" and 2 more")).toBe(
+      true,
+    );
   });
 });

@@ -34,6 +34,7 @@ import {
   manifest,
   narrowedInTree,
   rootManifest,
+  selectedByNarrowing,
   selectedPaths,
   selectFromDiscovery,
   selectInTree,
@@ -1422,6 +1423,12 @@ describe("each Vitest workspace's inputs, as Narrowing narrows them to what its 
         "packages/b/unit.test.ts",
       ],
     });
+  });
+
+  it("D2689: a narrowing selects, over its own build's dependency information, the workspaces a change reaches, and only those", async () => {
+    expect(
+      await selectedByNarrowing(TWO_APART, ["packages/b/src/b.ts"]),
+    ).toStrictEqual(["packages/b"]);
   });
 
   it("D2551: a dependency's source lies in its dependent's inputs, and a dependent's source never in its dependency's", async () => {

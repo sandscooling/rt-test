@@ -266,6 +266,34 @@ export function selectInTree(
   });
 }
 
+/** The narrowing the daemon builds from the tree's discovery and dependency information. */
+function narrowingIn(root: string, tree: TreeCase): Narrowing {
+  const build = buildSelectionInput(
+    treeDiscovery(root, tree),
+    root,
+    readNonInputs(root),
+  );
+  if (!build.built) throw new Error(build.reason);
+  return new Narrowing(
+    build.input,
+    buildDependencyInformation(
+      findPackageWorkspaces(root),
+      build.input.workspaces,
+    ),
+    () => undefined,
+  );
+}
+
+/** The Vitest workspaces the tree's narrowing selects for the root-relative `change`. */
+export function selectedByNarrowing(
+  tree: TreeCase,
+  change: readonly string[],
+): Promise<Settled<string[] | SelectionOutcome>> {
+  return inTree(tree, (root) =>
+    selectedPaths(narrowingIn(root, tree).select(change)),
+  );
+}
+
 /**
  * Each Vitest workspace's narrowed inputs, sorted, when the tracker holds `inputs` over the tree, or why selection
  * refused them: the narrowing is built from the tree's discovery and dependency information, as the daemon builds it.
@@ -275,20 +303,7 @@ export function narrowedInTree(
   inputs: readonly string[],
 ): Promise<Settled<Record<string, string[]> | { refused: string }>> {
   return inTree(tree, (root) => {
-    const build = buildSelectionInput(
-      treeDiscovery(root, tree),
-      root,
-      readNonInputs(root),
-    );
-    if (!build.built) throw new Error(build.reason);
-    const narrowing = new Narrowing(
-      build.input,
-      buildDependencyInformation(
-        findPackageWorkspaces(root),
-        build.input.workspaces,
-      ),
-      () => undefined,
-    );
+    const narrowing = narrowingIn(root, tree);
     const project = new ProjectInputs(
       root,
       new Map(inputs.map((path) => [path, `${path}-digest`])),

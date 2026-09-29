@@ -74,6 +74,7 @@ const UNSETTLED: CurrentInputs = {
     gitUnread: [],
   },
   unavailable: FIRST_RECONCILIATION,
+  snapshot: undefined,
   workspaceFingerprint: () => ({ ok: false, reason: FIRST_RECONCILIATION }),
   discoveryFingerprint: () => ({ ok: false, reason: FIRST_RECONCILIATION }),
   protectedFileChangedSince: () => FIRST_RECONCILIATION,
@@ -95,6 +96,7 @@ function settled(
 ): CurrentInputs {
   return {
     facts: SETTLED_FACTS,
+    snapshot: undefined,
     workspaceFingerprint: (entry) =>
       workspaces[entry.workspace.path] ?? {
         ok: false,
@@ -844,15 +846,17 @@ function failedAt(revision: number): QueryNarrowing {
 
 /**
  * The tracker's view over `PROJECT_INPUTS`, with `edits` applied, at revision 3 under `narrowing`; undefined for every
- * input of the project, as before any build.
+ * input of the project, as before any build. While the tracker cannot vouch for its inputs (`unavailable`), the
+ * committed inputs it holds are the last ones it read.
  */
 function viewOf(
   narrowing: QueryNarrowing | undefined,
   edits: Readonly<Record<string, string>> = {},
+  unavailable: string | undefined = undefined,
 ): CurrentInputs {
   return currentInputs({
     facts: SETTLED_FACTS,
-    unavailable: undefined,
+    unavailable,
     nonInputsUnusable: undefined,
     narrowing,
     project: () =>
@@ -1575,5 +1579,19 @@ describe("the status of a file or folder", () => {
             },
       ),
     ).toStrictEqual({ at: ["unsupported-project"], above: [] });
+  });
+});
+
+describe("the committed inputs a view carries", () => {
+  it("D2688: a view over settled inputs carries the committed inputs its fingerprints are computed from, each path with its digest", () => {
+    expect(
+      Object.fromEntries(viewOf(undefined).snapshot?.digests ?? []),
+    ).toStrictEqual(PROJECT_INPUTS);
+  });
+
+  it("D2746: a view over inputs the tracker cannot vouch for carries no committed inputs, so a round over it cannot select from them", () => {
+    expect(
+      viewOf(undefined, {}, "the watcher failed: ENOSPC").snapshot,
+    ).toBeUndefined();
   });
 });

@@ -1,0 +1,111 @@
+import type { TestOutcome } from "@rt-test/core";
+import { workspaceTestModules } from "../inputs/non-inputs.js";
+import { CURRENT } from "../query/answer.js";
+import {
+  isCurrentAdapterVersion,
+  recordFreshness,
+} from "../query/test-states.js";
+import { NOT_FINGERPRINTED } from "../store/schema.js";
+import type { StoredRun } from "../store/stored-records.js";
+import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
+
+export const DUE_REASON = {
+  noRun: "it has no stored run",
+  anotherAdapterVersion:
+    "its latest run was stored under another adapter version",
+  notFingerprinted: "its latest run was stored not fingerprinted",
+  noCurrentFingerprint: "its current input fingerprint cannot be computed",
+  inputsChanged: "its inputs differ from those of its latest run",
+  failedRun:
+    "its latest run failed with no input change to blame, so the periodic reconciliation retries it",
+} as const;
+
+export const QUEUE_GROUP = {
+  directTarget: "direct-target",
+  priorFailure: "prior-failure",
+  rest: "rest",
+} as const;
+
+export type QueueGroup = (typeof QUEUE_GROUP)[keyof typeof QUEUE_GROUP];
+
+/** The order the groups run in within a round. */
+const GROUP_ORDER: readonly QueueGroup[] = [
+  QUEUE_GROUP.directTarget,
+  QUEUE_GROUP.priorFailure,
+  QUEUE_GROUP.rest,
+];
+
+export const GROUP_REASON: Readonly<Record<QueueGroup, string>> = {
+  [QUEUE_GROUP.directTarget]:
+    "it owns a path that changed since the previous round",
+  [QUEUE_GROUP.priorFailure]: "its latest run holds a failed or errored test",
+  [QUEUE_GROUP.rest]:
+    "no changed path names it and its latest run holds no failed test",
+};
+
+const FAILING_OUTCOMES: readonly TestOutcome[] = ["failed", "error"];
+
+/** A workspace to run, with why it is due and where it falls in the round's order. */
+export interface QueuedWorkspace {
+  readonly entry: WorkspaceDiscovery;
+  readonly reason: string;
+  readonly group: QueueGroup;
+}
+
+/**
+ * Why the workspace's latest stored run is not bound to its current fingerprint, which is the rating every answer
+ * gives it; undefined when it is bound to it.
+ */
+export function staleReason(
+  latest: StoredRun | undefined,
+  currentDigest: string | undefined,
+): string | undefined {
+  if (latest === undefined) return DUE_REASON.noRun;
+  if (recordFreshness(latest, currentDigest) === CURRENT) return undefined;
+  if (!isCurrentAdapterVersion(latest.adapterVersion)) {
+    return DUE_REASON.anotherAdapterVersion;
+  }
+  if (latest.inputFingerprint.kind === NOT_FINGERPRINTED) {
+    return DUE_REASON.notFingerprinted;
+  }
+  return currentDigest === undefined
+    ? DUE_REASON.noCurrentFingerprint
+    : DUE_REASON.inputsChanged;
+}
+
+/** Whether the run recorded a test whose outcome is `failed` or `error`; a run with no test result holds none. */
+export function holdsFailingTest(latest: StoredRun | undefined): boolean {
+  if (latest === undefined || latest.run.status !== "ran") return false;
+  return latest.run.modules.some(
+    (module) =>
+      module.state === "ran" &&
+      module.tests.some(
+        (test) =>
+          test.execution === "finished" &&
+          FAILING_OUTCOMES.includes(test.outcome),
+      ),
+  );
+}
+
+export function queueGroup(
+  workspacePath: string,
+  latest: StoredRun | undefined,
+  directTargets: ReadonlySet<string>,
+): QueueGroup {
+  if (directTargets.has(workspacePath)) return QUEUE_GROUP.directTarget;
+  return holdsFailingTest(latest) ? QUEUE_GROUP.priorFailure : QUEUE_GROUP.rest;
+}
+
+/** Each group in turn, each in the order given, which is the discovery's workspace order. */
+export function orderQueue(
+  queue: readonly QueuedWorkspace[],
+): QueuedWorkspace[] {
+  return GROUP_ORDER.flatMap((group) =>
+    queue.filter((queued) => queued.group === group),
+  );
+}
+
+/** The workspace's listed test modules as one comparable value: a change of the list makes a new one. */
+export function testModulesKey(entry: WorkspaceDiscovery): string {
+  return JSON.stringify([...workspaceTestModules(entry)].sort());
+}

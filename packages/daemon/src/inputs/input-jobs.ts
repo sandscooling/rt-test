@@ -11,12 +11,18 @@ export interface JobMark {
 
 export type JobVerdict =
   | { readonly fingerprinted: true }
-  | { readonly fingerprinted: false; readonly reason: string };
+  | {
+      readonly fingerprinted: false;
+      readonly reason: string;
+      /** Whether its window named a change while it ran and a fingerprint can be computed at its end, so a rerun could be bound to one. */
+      readonly changedWhileRunning: boolean;
+    };
 
 /** What made one running job's inputs uncertain. */
 interface ChangeWindow {
   readonly named: string[];
-  omitted: number;
+  /** The distinct descriptions past the cap, so one repeated does not count twice. */
+  readonly omitted: Set<string>;
 }
 
 /** The change windows of the jobs running now; each learns every change and failure seen while it runs. */
@@ -24,7 +30,7 @@ export class JobWindows {
   readonly #open = new Set<ChangeWindow>();
 
   open(unsettled: string | undefined): JobMark {
-    const window: ChangeWindow = { named: [], omitted: 0 };
+    const window: ChangeWindow = { named: [], omitted: new Set() };
     this.#open.add(window);
     return unsettled === undefined ? { window } : { window, unsettled };
   }
@@ -36,7 +42,7 @@ export class JobWindows {
       if (window.named.length < MAX_NAMED_CHANGES) {
         window.named.push(description);
       } else {
-        window.omitted += 1;
+        window.omitted.add(description);
       }
     }
   }
@@ -48,18 +54,24 @@ export class JobWindows {
       return {
         fingerprinted: false,
         reason: `its inputs were unsettled when it started: ${mark.unsettled}`,
+        changedWhileRunning: false,
       };
     }
     const { named, omitted } = mark.window;
     if (named.length > 0) {
       return {
         fingerprinted: false,
-        reason: `its inputs changed while it ran: ${named.join(LIST_SEPARATOR)}${omitted > 0 ? ` and ${omitted} more` : ""}`,
+        reason: `its inputs changed while it ran: ${named.join(LIST_SEPARATOR)}${omitted.size > 0 ? ` and ${omitted.size} more` : ""}`,
+        changedWhileRunning: unavailable === undefined,
       };
     }
     return unavailable === undefined
       ? { fingerprinted: true }
-      : { fingerprinted: false, reason: unavailable };
+      : {
+          fingerprinted: false,
+          reason: unavailable,
+          changedWhileRunning: false,
+        };
   }
 }
 

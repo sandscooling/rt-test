@@ -21,6 +21,7 @@ import {
   type StartupReport,
   type StartupRequest,
 } from "./protocol.js";
+import { QUIET_WINDOW_MS } from "./scheduler.js";
 import { connectionServer } from "./server.js";
 
 const STOP_SIGNALS = ["SIGTERM", "SIGINT"] as const;
@@ -126,6 +127,7 @@ async function serve(
     executor: new Executor(log),
     buildExecutor: new Executor(roleLog(log, BUILD_EXECUTOR_ROLE)),
     inputs,
+    quietWindowMs: QUIET_WINDOW_MS,
     closeEndpoint: async () => {
       server.closeConnections();
       await listening.close();

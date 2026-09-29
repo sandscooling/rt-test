@@ -49,12 +49,7 @@ import {
   withStandIn,
   type Settled,
 } from "../../daemon/test/daemon-harness.js";
-import {
-  REPO,
-  confirmEvery,
-  fixtureRepository,
-  inTempDir,
-} from "../../daemon/test/harness.js";
+import { REPO, confirmEvery, inTempDir } from "../../daemon/test/harness.js";
 import type { CliIo } from "../src/command.js";
 import {
   answerFields,
@@ -1243,15 +1238,6 @@ function nonZeroStates(run: CliRun): Document {
   );
 }
 
-/**
- * Makes the fixture copy a git repository that ignores the markers the fixture writes into its own tree at every job,
- * so only the daemon's own writes, under its state directory, could still move its inputs.
- */
-function ignoreFixtureMarkers(root: string): void {
-  writeFileSync(join(root, ".gitignore"), "executor-pids\nsetups\n");
-  fixtureRepository(root);
-}
-
 const RECONCILED_AT = "2026-09-27T12:00:00.000Z";
 /** Inputs reconciled and watched, with nothing unread and no time of the last reconciliation. */
 const SETTLED_INPUTS: InputFacts = {
@@ -1384,7 +1370,6 @@ describe("a query", () => {
     "D1889: a daemon's results read current once it idles with its inputs unchanged, and stale after an input is edited",
     async () => {
       const outcome = await withDaemonConsumer(async (root, pids) => {
-        ignoreFixtureMarkers(root);
         const identity = await idleDaemon(root, pids);
         if ("thrown" in identity) return identity;
         const before = await nonZeroFreshness(root);
@@ -1411,7 +1396,6 @@ describe("a query", () => {
     "D2536: once the build at an edit's revision has ended, an edit to one workspace's own test leaves the other workspace's result current",
     async () => {
       const outcome = await withDaemonConsumer(async (root, pids) => {
-        ignoreFixtureMarkers(root);
         for (const name of ["a", "b"]) {
           writeFileSync(
             join(root, "packages", name, "package.json"),

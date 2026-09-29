@@ -7,40 +7,24 @@ import {
   type PathLike,
   type WatchListener,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DependencyBuilds } from "../src/daemon/dependency-builds.js";
 import type { Executor, JobOutcome } from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
-import type { DaemonIdentity } from "../src/daemon/protocol.js";
+import type { DaemonActivity, DaemonIdentity } from "../src/daemon/protocol.js";
 import {
   ProjectInputs,
   type FingerprintResult,
 } from "../src/inputs/fingerprint.js";
-import {
-  JobWindows,
-  type JobMark,
-  type JobVerdict,
-} from "../src/inputs/input-jobs.js";
-import {
-  InputTracker,
-  type CurrentInputs,
-  type TrackedInputs,
-} from "../src/inputs/input-tracker.js";
+import type { JobVerdict } from "../src/inputs/input-jobs.js";
+import { InputTracker } from "../src/inputs/input-tracker.js";
 import {
   NARROWING,
   narrowingAt,
   type QueryNarrowing,
   type WorkspaceNarrowing,
 } from "../src/inputs/narrowed-inputs.js";
-import {
-  NON_INPUTS_ABSENT,
-  NON_INPUTS_FILE,
-  type NonInputsDeclaration,
-} from "../src/inputs/non-inputs.js";
-import type { InputFacts } from "../src/query/answer.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
@@ -74,6 +58,23 @@ import {
   type MemoryLog,
 } from "./daemon-harness.js";
 import { inTempDir, settle } from "./harness.js";
+import {
+  DISCOVERY_DIGEST,
+  Deferred,
+  FINGERPRINTED,
+  RecordingStore,
+  SCOPE,
+  SETTLED_INPUTS,
+  StandInInputs,
+  type InputsScript,
+  confirmed,
+  discovered,
+  discoveredWithTest,
+  discovery,
+  flush,
+  interrupted,
+  workspace,
+} from "./scheduling-harness.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -83,10 +84,6 @@ vi.mock("node:fs", async (importOriginal) => {
 const { watch: realWatch } =
   await vi.importActual<typeof import("node:fs")>("node:fs");
 
-const SCOPE: StoreScope = {
-  projectIdentity: "/consumer/.git",
-  worktreeIdentity: "/consumer",
-};
 const IDENTITY: DaemonIdentity = {
   pid: 4242,
   consumerRoot: "/consumer",
@@ -95,96 +92,18 @@ const IDENTITY: DaemonIdentity = {
   logFile: "/consumer/.rt-test/daemon.log",
   protocolVersion: 1,
 };
-/** Enough event-loop turns for a sequence whose jobs have all settled to reach its end. */
-const FLUSH_TURNS = 20;
+/** No quiet window, so a job begins as soon as the inputs have settled; the window itself is pinned in the scheduler's tests. */
+const NO_QUIET_WINDOW_MS = 0;
+const FRESHNESS_SETTLE_MS = 5_000;
+/** A quiet window no test waits out: the scheduler plans nothing until the stop ends it. */
+const HELD_BY_QUIET_WINDOW_MS = 600_000;
 const CONFIG_NOT_CONFIRMED =
   "its config file is no longer the one confirmed at start";
-const DISCOVERY_DIGEST = "discovery-digest";
 /** A declared file written after an edit; once the tracker has handled its event, it has handled the edit's. */
 const SENTINEL = "z.md";
 const RECONCILIATION_ENDED = "input reconciliation ended";
-const FINGERPRINTED: JobVerdict = { fingerprinted: true };
 /** Why the tracker cannot vouch for its inputs, as it says while its watcher has failed. */
 const WATCHER_FAILED = "the watcher failed: ENOSPC";
-const SETTLED_INPUTS: InputFacts = {
-  revision: 1,
-  reconciliation: { state: "complete" },
-  lastReconciledAt: "2026-09-27T12:00:00.000Z",
-  watcher: { state: "healthy" },
-  pendingChanges: 0,
-  gitUnread: [],
-};
-
-function workspace(path: string): VitestWorkspace {
-  return { path, directory: `/consumer/${path}` };
-}
-
-/**
- * The confirmed start's root, a name under the temp directory no test creates, so each build over it fails before its
- * job begins, whatever the host holds at `/consumer`.
- */
-const ABSENT_ROOT = join(tmpdir(), `rt-test-absent-root-${randomUUID()}`);
-
-function confirmed(...paths: readonly string[]): ConfirmedStart {
-  return {
-    consumerRoot: ABSENT_ROOT,
-    workspaces: paths.map((path) => ({
-      path,
-      configFile: `${path}/vitest.config.mjs`,
-    })),
-  };
-}
-
-function discovered(
-  path: string,
-): Extract<WorkspaceDiscovery, { status: "discovered" }> {
-  return {
-    status: "discovered",
-    workspace: workspace(path),
-    vitestVersion: "5.0.1",
-    tests: [],
-    failedModules: [],
-    typecheckModules: [],
-    unsupportedProjects: [],
-    unhandledErrors: [],
-    selectionFacts: { reported: true, projects: [] },
-  };
-}
-
-/** A discovered workspace holding one test, so a query has something to count. */
-function discoveredWithTest(path: string): WorkspaceDiscovery {
-  return {
-    ...discovered(path),
-    tests: [
-      {
-        identity: {
-          workspacePath: path,
-          projectName: "unit",
-          modulePath: "a.test.ts",
-          namePath: ["counts"],
-          occurrence: 0,
-        },
-        isDuplicate: false,
-        mode: "run",
-      },
-    ],
-  };
-}
-
-function discovery(...entries: readonly WorkspaceDiscovery[]): TestDiscovery {
-  return { workspaces: entries, notRead: [] };
-}
-
-function interrupted(path: string): WorkspaceRun {
-  return { status: "interrupted-before-load", workspace: workspace(path) };
-}
-
-class Deferred<T> {
-  resolve: (value: T) => void = () => undefined;
-  readonly promise = new Promise<T>((resolve) => {
-    this.resolve = resolve;
-  });
-}
 
 type RunOutcome = JobOutcome<WorkspaceRun | NotConfirmedRun>;
 
@@ -290,90 +209,6 @@ class ScriptedBuilds implements Pick<
   }
 }
 
-/** A store that records what was written to it, and refuses a write once closed, as a closed store does. */
-class RecordingStore implements RtTestStore {
-  readonly file = "/consumer/.rt-test/store.sqlite";
-  readonly runs: WorkspaceRun[] = [];
-  readonly discoveries: TestDiscovery[] = [];
-  /** The fingerprint each run and each discovery was written under, in the order written. */
-  readonly runFingerprints: StoreBindings["inputFingerprint"][] = [];
-  readonly discoveryFingerprints: StoreBindings["inputFingerprint"][] = [];
-  closed = false;
-  readonly #failingRuns: ReadonlySet<string>;
-
-  constructor(failingRuns: readonly string[] = []) {
-    this.#failingRuns = new Set(failingRuns);
-  }
-
-  writeRun(bindings: StoreBindings, run: WorkspaceRun): StoredRun {
-    if (this.closed) throw new Error("the store is closed");
-    if (this.#failingRuns.has(run.workspace.path)) {
-      throw new Error("database is locked");
-    }
-    this.runs.push(run);
-    this.runFingerprints.push(bindings.inputFingerprint);
-    return { ...bindings, adapterVersion: 3, runId: "run", run };
-  }
-
-  writeDiscovery(
-    bindings: StoreBindings,
-    written: TestDiscovery,
-  ): StoredDiscovery {
-    if (this.closed) throw new Error("the store is closed");
-    this.discoveries.push(written);
-    this.discoveryFingerprints.push(bindings.inputFingerprint);
-    return {
-      ...bindings,
-      adapterVersion: 3,
-      discoveryId: "discovery",
-      discovery: written,
-    };
-  }
-
-  readRuns(): StoredRun[] {
-    return [];
-  }
-
-  readRun(): StoredRun | undefined {
-    return undefined;
-  }
-
-  readLatestDiscovery(): StoredDiscovery | undefined {
-    return undefined;
-  }
-
-  /** The discovery written last, and the run written last for each workspace. */
-  readLatestResults(scope: StoreScope): LatestResults {
-    const bindings: StoreBindings = {
-      ...scope,
-      inputFingerprint: { kind: "not-fingerprinted" },
-    };
-    const discovery = this.discoveries.at(-1);
-    const latest = new Map(this.runs.map((run) => [run.workspace.path, run]));
-    return {
-      discovery:
-        discovery === undefined
-          ? undefined
-          : {
-              ...bindings,
-              adapterVersion: 3,
-              discoveryId: "discovery",
-              discovery,
-            },
-      latestRuns: [...latest.values()].map((run) => ({
-        ...bindings,
-        adapterVersion: 3,
-        runId: `run-${run.workspace.path}`,
-        run,
-      })),
-    };
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-}
-
 /** A recording store whose first read of the latest results throws, as a locked database would. */
 class FirstReadFailingStore extends RecordingStore {
   #failed = false;
@@ -384,173 +219,6 @@ class FirstReadFailingStore extends RecordingStore {
       throw new Error("database is locked");
     }
     return super.readLatestResults(scope);
-  }
-}
-
-interface InputsScript {
-  /** Keeps the first reconciliation running until the test resolves `reconciled`. */
-  readonly heldReconciliation?: boolean;
-  /** Keeps every job's end waiting on the inputs until the inputs stop. */
-  readonly heldJobEnds?: boolean;
-  /**
-   * Each job's verdict, in the order the jobs end: the discovery, the guard around its protection, then each run. A
-   * job past the list is fingerprinted.
-   */
-  readonly verdicts?: readonly JobVerdict[];
-  /**
-   * A workspace's current fingerprint, asked at its run's start and again at its end, given the narrowing the view
-   * was asked for.
-   */
-  readonly fingerprintOf?: (
-    workspacePath: string,
-    narrowing: QueryNarrowing | undefined,
-  ) => FingerprintResult;
-  /** Why the tracker cannot vouch for its inputs; undefined while it can. */
-  readonly unavailable?: string;
-  /** Why a file the discovery protects by path, which no watch covers, may have changed during the discovery. */
-  readonly moduleChanged?: string | undefined;
-  /** Why a file only protection's walk found may have changed during the discovery, which protection resolves with. */
-  readonly walkChanged?: string;
-  /**
-   * Holds one wait for the inputs to settle, counted from 0 in call order (the discovery's, the guard's, then each
-   * run's), until the test resolves `settleHeld` or the inputs stop.
-   */
-  readonly heldSettle?: number;
-  /** Makes each wait for the inputs to settle reject with this text, once its hold, if any, is released. */
-  readonly settleFails?: string;
-  /** Makes each ask for the next change of the inputs throw this text, as only the dependency builds ask. */
-  readonly changedFails?: string;
-}
-
-const NO_DECLARATION: NonInputsDeclaration = {
-  file: NON_INPUTS_FILE,
-  state: NON_INPUTS_ABSENT,
-};
-
-/**
- * Inputs whose reconciliation, fingerprints and job verdicts the test scripts, recording each start and stop. The
- * revision moves only when the test moves it, and `changed()` resolves only then or at the stop.
- */
-class StandInInputs implements TrackedInputs {
-  starts = 0;
-  stops = 0;
-  jobsBegun = 0;
-  jobsEnded = 0;
-  revision = SETTLED_INPUTS.revision;
-  #changeWaiters: (() => void)[] = [];
-  #stopped = false;
-  /** The discovery each protection was given, in call order. */
-  readonly protected: (TestDiscovery | undefined)[] = [];
-  /** The job start each protection was given, in call order. */
-  readonly jobStarts: (number | undefined)[] = [];
-  /** The narrowing each view of the inputs was asked for, in call order. */
-  readonly narrowings: (QueryNarrowing | undefined)[] = [];
-  readonly reconciled = new Deferred<void>();
-  readonly settleHeld = new Deferred<void>();
-  readonly #released = new Deferred<void>();
-  readonly #script: InputsScript;
-  readonly #verdicts: JobVerdict[];
-  #settles = 0;
-
-  constructor(script: InputsScript = {}) {
-    this.#script = script;
-    this.#verdicts = [...(script.verdicts ?? [])];
-  }
-
-  start(): void {
-    this.starts += 1;
-    if (this.#script.heldReconciliation !== true) this.reconciled.resolve();
-  }
-
-  firstReconciled(): Promise<void> {
-    return this.reconciled.promise;
-  }
-
-  current(narrowing?: QueryNarrowing): CurrentInputs {
-    this.narrowings.push(narrowing);
-    const fingerprintOf =
-      this.#script.fingerprintOf ??
-      ((path: string): FingerprintResult => ({
-        ok: true,
-        digest: `${path}-digest`,
-      }));
-    const { unavailable } = this.#script;
-    return {
-      facts: { ...SETTLED_INPUTS, revision: this.revision },
-      ...(unavailable === undefined ? {} : { unavailable }),
-      workspaceFingerprint: (entry) =>
-        fingerprintOf(entry.workspace.path, narrowing),
-      discoveryFingerprint: () => ({ ok: true, digest: DISCOVERY_DIGEST }),
-      protectedFileChangedSince: () => this.#script.moduleChanged,
-    };
-  }
-
-  changed(): Promise<void> {
-    if (this.#script.changedFails !== undefined) {
-      throw new Error(this.#script.changedFails);
-    }
-    if (this.#stopped) return Promise.resolve();
-    return new Promise((resolve) => this.#changeWaiters.push(resolve));
-  }
-
-  /** Moves the revision, as a read that changed an input does, and signals the change. */
-  moveRevision(): void {
-    this.revision += 1;
-    this.#signalChange();
-  }
-
-  nonInputsDeclaration(): NonInputsDeclaration {
-    return NO_DECLARATION;
-  }
-
-  #signalChange(): void {
-    const waiting = this.#changeWaiters;
-    this.#changeWaiters = [];
-    for (const resolve of waiting) resolve();
-  }
-
-  settled(): Promise<void> {
-    const call = this.#settles;
-    this.#settles += 1;
-    const held =
-      call === this.#script.heldSettle
-        ? this.settleHeld.promise
-        : Promise.resolve();
-    const { settleFails } = this.#script;
-    if (settleFails === undefined) return held;
-    return held.then(() => {
-      throw new Error(settleFails);
-    });
-  }
-
-  beginJob(): JobMark {
-    this.jobsBegun += 1;
-    return new JobWindows().open(undefined);
-  }
-
-  async endJob(): Promise<JobVerdict> {
-    this.jobsEnded += 1;
-    if (this.#script.heldJobEnds === true) await this.#released.promise;
-    return this.#verdicts.shift() ?? FINGERPRINTED;
-  }
-
-  protectInputs(
-    discovery: TestDiscovery | undefined,
-    jobStart?: number,
-  ): Promise<string | undefined> {
-    this.protected.push(discovery);
-    this.jobStarts.push(jobStart);
-    return Promise.resolve(this.#script.walkChanged);
-  }
-
-  stop(): Promise<void> {
-    this.stops += 1;
-    this.#stopped = true;
-    this.#signalChange();
-    this.#released.resolve();
-    this.reconciled.resolve();
-    this.settleHeld.resolve();
-    return Promise.resolve();
   }
 }
 
@@ -583,6 +251,7 @@ function daemon(
   identity: DaemonIdentity = IDENTITY,
   inputs: StandInInputs = new StandInInputs(),
   builds: ScriptedBuilds = new ScriptedBuilds(),
+  quietWindowMs: number = NO_QUIET_WINDOW_MS,
 ): Daemon {
   const log = memoryLog();
   const endpointCloses = { count: 0 };
@@ -595,6 +264,7 @@ function daemon(
     executor: executor as unknown as Executor,
     buildExecutor: builds as unknown as Executor,
     inputs,
+    quietWindowMs,
     closeEndpoint: () => {
       endpointCloses.count += 1;
       return Promise.resolve();
@@ -654,11 +324,14 @@ interface DeclaredModuleStart {
   readonly held: boolean;
   readonly idle: boolean;
   readonly discoveryFreshness: unknown;
+  /** The kind of fingerprint the first discovery was stored under. */
   readonly storedFingerprint: string | undefined;
+  /** How many discoveries the start sequence stored before it ended. */
+  readonly discoveries: number;
 }
 
 /**
- * Runs the start sequence to idle with a real input tracker and store, over a consumer whose `rt-test.json` declares
+ * Runs the scheduler to idle with a real input tracker and store, over a consumer whose `rt-test.json` declares
  * `src/**` and whose one workspace, the root, lists the test module `src/a.test.ts`, last modified an hour ago.
  * Every watch the tracker opens is real; each event's name is recorded once the tracker's listener has returned. With
  * `earlierLife`, the store already holds a discovery that reports its facts and lists no test module, so the declared
@@ -720,6 +393,7 @@ async function declaredModuleStart(
       }),
     );
   }
+  const written = vi.spyOn(store, "writeDiscovery");
   const lifecycle = new DaemonLifecycle({
     identity: { ...IDENTITY, consumerRoot: root },
     scope: SCOPE,
@@ -735,19 +409,24 @@ async function declaredModuleStart(
       exclusions: [],
       log: memoryLog(),
     }),
+    quietWindowMs: NO_QUIET_WINDOW_MS,
     closeEndpoint: () => Promise.resolve(),
   });
   try {
     lifecycle.begin();
     const idle = await eventually(() => log.entries.includes(IDLE_ENTRY));
-    const answer = lifecycle.summary();
+    const freshness = (): unknown => {
+      const answer = lifecycle.summary();
+      return "discovery" in answer ? answer.discovery.freshness : answer;
+    };
+    // A watch event still in flight leaves the inputs unread, so the discovery reads unknown until the tracker settles.
+    await eventually(() => freshness() === "current", FRESHNESS_SETTLE_MS);
     return {
       held,
       idle,
-      discoveryFreshness:
-        "discovery" in answer ? answer.discovery.freshness : answer,
-      storedFingerprint:
-        store.readLatestDiscovery(SCOPE)?.inputFingerprint.kind,
+      discoveryFreshness: freshness(),
+      storedFingerprint: written.mock.calls[0]?.[0].inputFingerprint.kind,
+      discoveries: written.mock.calls.length,
     };
   } finally {
     lifecycle.stop();
@@ -812,6 +491,7 @@ async function idleStart(dir: string): Promise<IdleStart> {
       exclusions: [],
       log: trackerLog,
     }),
+    quietWindowMs: NO_QUIET_WINDOW_MS,
     closeEndpoint: () => Promise.resolve(),
   });
   try {
@@ -833,12 +513,6 @@ interface IdleStart {
   /** Whether the change was delivered through the root's watch as the first reconciliation ended. */
   readonly injected: boolean;
   readonly storedFingerprint: string | undefined;
-}
-
-async function flush(): Promise<void> {
-  for (let turn = 0; turn < FLUSH_TURNS; turn += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
 }
 
 /** Starts the sequence and lets every job that has already settled run to the sequence's end. */
@@ -863,6 +537,63 @@ function heldAt(
         : { ended: true, value: interrupted(runPath) },
   );
   return { started: daemon(confirmed(...paths), executor), held };
+}
+
+/** Runs `body` with the clocks the quiet window reads faked, and puts the real ones back. */
+async function underFakeClock<T>(body: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "Date", "performance"],
+  });
+  try {
+    return await body();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+/**
+ * Begins `started` behind a quiet window and waits the window out so its first job begins. `during` then ends or
+ * holds a job with the input revision moved, so the scheduler waits out the next window: only what the job's own end
+ * left in the activity can say what the daemon is doing. Stops `started` and returns that activity.
+ */
+async function activityWhileTheNextWindowWaits(
+  started: Daemon,
+  during: () => Promise<void>,
+): Promise<DaemonActivity> {
+  const { lifecycle } = started;
+  lifecycle.begin();
+  await flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  await flush();
+  await during();
+  const { activity } = lifecycle.status();
+  lifecycle.stop();
+  await lifecycle.stopped();
+  return activity;
+}
+
+/** A daemon whose run of `a` waits for the inputs to settle, whatever else waits before it. */
+function holdingRun(quietWindowMs = NO_QUIET_WINDOW_MS): Daemon {
+  const held: { daemon?: Daemon } = {};
+  const inputs = new StandInInputs({
+    unavailable: WATCHER_FAILED,
+    heldSettleIf: () =>
+      held.daemon?.lifecycle.status().activity.state === "running" &&
+      inputs.jobsBegun === 2,
+  });
+  held.daemon = daemon(
+    confirmed("a"),
+    new ScriptedExecutor({
+      ended: true,
+      value: discovery(discovered("a")),
+    }),
+    new RecordingStore(),
+    IDENTITY,
+    inputs,
+    new ScriptedBuilds(),
+    quietWindowMs,
+  );
+  return held.daemon;
 }
 
 describe("the start sequence", () => {
@@ -945,17 +676,20 @@ describe("the start sequence", () => {
         verdicts: [
           FINGERPRINTED,
           FINGERPRINTED,
-          { fingerprinted: false, reason },
+          { fingerprinted: false, reason, changedWhileRunning: true },
         ],
       }),
     );
     expect({
-      runs: store.runFingerprints,
+      stored: store.runFingerprints,
       logged: log.entries.filter((entry) =>
-        entry.includes("stored not fingerprinted"),
+        entry.startsWith("the run of a is stored not fingerprinted"),
       ),
     }).toStrictEqual({
-      runs: [{ kind: "not-fingerprinted" }],
+      stored: [
+        { kind: "not-fingerprinted" },
+        { kind: "digest", digest: "a-digest" },
+      ],
       logged: [`the run of a is stored not fingerprinted: ${reason}`],
     });
   });
@@ -1099,6 +833,18 @@ describe("the start sequence", () => {
         reason: "not confirmed at start",
       }),
     });
+    const { lifecycle } = await begun(daemon(confirmed("a", "b"), executor));
+    expect({
+      runs: executor.runs,
+      unstored: lifecycle.status().unstoredJobs,
+    }).toStrictEqual({ runs: ["a"], unstored: [] });
+  });
+
+  it("D2642: a workspace the discovery lists but the confirmed start does not is neither run nor listed as stored nothing", async () => {
+    const executor = new ScriptedExecutor({
+      ended: true,
+      value: discovery(discovered("a"), discovered("b")),
+    });
     const { lifecycle } = await begun(daemon(confirmed("a"), executor));
     expect({
       runs: executor.runs,
@@ -1120,10 +866,11 @@ describe(
         idle: true,
         discoveryFreshness: "current",
         storedFingerprint: "digest",
+        discoveries: 1,
       });
     });
 
-    it("D1988: a test module a declared pattern hid through the discovery's job, edited during it, leaves the discovery stored not fingerprinted", async () => {
+    it("D1988: a test module a declared pattern hid through the discovery's job, edited during it, leaves the first discovery stored not fingerprinted, and the next round's discovery reads current", async () => {
       const outcome = await inTempDir((dir) =>
         declaredModuleStart(
           dir,
@@ -1143,8 +890,9 @@ describe(
       expect(outcome).toStrictEqual({
         held: true,
         idle: true,
-        discoveryFreshness: "unknown",
+        discoveryFreshness: "current",
         storedFingerprint: "not-fingerprinted",
+        discoveries: 2,
       });
     });
 
@@ -1152,7 +900,10 @@ describe(
       const reason = "its inputs changed while it ran: packages/a/src/a.ts";
       const { store } = await begun(
         scripted({
-          verdicts: [FINGERPRINTED, { fingerprinted: false, reason }],
+          verdicts: [
+            FINGERPRINTED,
+            { fingerprinted: false, reason, changedWhileRunning: true },
+          ],
         }),
       );
       expect(store.discoveryFingerprints).toStrictEqual([
@@ -1209,9 +960,8 @@ describe(
     /** How many jobs have begun while the given wait is held, and how many once it is released. */
     async function jobsAroundHeldSettle(
       heldSettle: number,
-      script: InputsScript = {},
     ): Promise<{ held: number; released: number }> {
-      const { inputs } = await begun(scripted({ ...script, heldSettle }));
+      const { inputs } = await begun(scripted({ heldSettle }));
       const held = inputs.jobsBegun;
       inputs.settleHeld.resolve();
       await flush();
@@ -1219,14 +969,14 @@ describe(
     }
 
     it("D2080: the discovery's job begins only once the inputs have settled", async () => {
-      expect(await jobsAroundHeldSettle(0)).toStrictEqual({
+      expect(await jobsAroundHeldSettle(1)).toStrictEqual({
         held: 0,
         released: 3,
       });
     });
 
     it("D2081: the guard around protecting the discovery's test modules begins only once the inputs have settled", async () => {
-      expect(await jobsAroundHeldSettle(1)).toStrictEqual({
+      expect(await jobsAroundHeldSettle(2)).toStrictEqual({
         held: 1,
         released: 3,
       });
@@ -1235,23 +985,25 @@ describe(
     // A pending dependency build waits for the inputs itself, so the run's own wait shows only with none pending, as
     // while the tracker cannot vouch for its inputs.
     it("D2082: a run's job begins only once the inputs have settled", async () => {
-      expect(
-        await jobsAroundHeldSettle(2, { unavailable: WATCHER_FAILED }),
-      ).toStrictEqual({
+      const { inputs } = await begun(holdingRun());
+      const held = inputs.jobsBegun;
+      inputs.settleHeld.resolve();
+      await flush();
+      expect({ held, released: inputs.jobsBegun }).toStrictEqual({
         held: 2,
         released: 3,
       });
     });
 
     it("D2083: a stop while the guard waits for the inputs to settle begins no guard job", async () => {
-      const { lifecycle, inputs } = await begun(scripted({ heldSettle: 1 }));
+      const { lifecycle, inputs } = await begun(scripted({ heldSettle: 2 }));
       lifecycle.stop();
       await lifecycle.stopped();
       expect(inputs.jobsBegun).toBe(1);
     });
 
     it("D2084: a stop while a run waits for the inputs to settle starts no run", async () => {
-      const { lifecycle, executor } = await begun(scripted({ heldSettle: 2 }));
+      const { lifecycle, executor } = await begun(holdingRun());
       lifecycle.stop();
       await lifecycle.stopped();
       expect(executor.runs).toStrictEqual([]);
@@ -1261,7 +1013,7 @@ describe(
       const moduleChange = { settled: false };
       const { inputs, store } = await begun(
         scripted({
-          heldSettle: 1,
+          heldSettle: 2,
           get moduleChanged() {
             return moduleChange.settled
               ? "src/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran"
@@ -1278,14 +1030,14 @@ describe(
     });
 
     it("D2092: a stop while the discovery waits for the inputs to settle starts no discovery", async () => {
-      const { lifecycle, executor } = await begun(scripted({ heldSettle: 0 }));
+      const { lifecycle, executor } = await begun(scripted({ heldSettle: 1 }));
       lifecycle.stop();
       await lifecycle.stopped();
       expect(executor.discoveries).toBe(0);
     });
 
     it("D2088: while a run waits for the inputs to settle, the activity names its workspace", async () => {
-      const { lifecycle } = await begun(scripted({ heldSettle: 2 }));
+      const { lifecycle } = await begun(holdingRun());
       expect(lifecycle.status().activity).toStrictEqual({
         state: "running",
         workspacePath: "a",
@@ -1311,13 +1063,32 @@ describe("the activity and the jobs that stored nothing", () => {
     });
   });
 
-  it("D1455: after a discovery that ended with nothing stored, the activity is idle", async () => {
-    const executor = new ScriptedExecutor({
-      ended: false,
-      reason: "the executor process 7 exited during the job (exit code 1)",
+  it("D1455: after a discovery that ended with nothing stored, while the scheduler waits out the next quiet window, the activity is idle", async () => {
+    const activity = await underFakeClock(async () => {
+      const inputs = new StandInInputs();
+      const held = new Deferred<JobOutcome<TestDiscovery>>();
+      return activityWhileTheNextWindowWaits(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor(held.promise),
+          new RecordingStore(),
+          IDENTITY,
+          inputs,
+          new ScriptedBuilds(),
+          1000,
+        ),
+        async () => {
+          inputs.moveRevision();
+          held.resolve({
+            ended: false,
+            reason:
+              "the executor process 7 exited during the job (exit code 1)",
+          });
+          await flush();
+        },
+      );
     });
-    const { lifecycle } = await begun(daemon(confirmed("a"), executor));
-    expect(lifecycle.status().activity).toStrictEqual({ state: "idle" });
+    expect(activity).toStrictEqual({ state: "idle" });
   });
 
   it("D1456: a discovery that ended with nothing stored is listed with its reason and no workspace", async () => {
@@ -1407,16 +1178,6 @@ describe("stopping", () => {
     expect(executor.aborts).toBe(1);
   });
 
-  it("D1460: the workspaces not yet run when the stop arrives are never run", async () => {
-    const { started, held } = heldAt("a", ["a", "b"]);
-    const { lifecycle, executor } = await begun(started);
-    lifecycle.stop();
-    await flush();
-    held.resolve({ ended: true, value: interrupted("a") });
-    await lifecycle.stopped();
-    expect(executor.runs).toStrictEqual(["a"]);
-  });
-
   it("D1461: the run in progress when the stop arrives is stored once it ends", async () => {
     const { started, held } = heldAt("a", ["a", "b"]);
     const { lifecycle, store } = await begun(started);
@@ -1470,15 +1231,6 @@ describe("stopping", () => {
     expect(builds.closes).toBe(1);
   });
 
-  it("D1953: a stop during the first reconciliation of the inputs starts no discovery", async () => {
-    const { lifecycle, executor } = await begun(
-      scripted({ heldReconciliation: true }),
-    );
-    lifecycle.stop();
-    await lifecycle.stopped();
-    expect(executor.discoveries).toBe(0);
-  });
-
   it("D1465: a discovery that returns after the stop arrived is not stored, and is listed with the reason", async () => {
     const held = new Deferred<JobOutcome<TestDiscovery>>();
     const started = daemon(confirmed("a"), new ScriptedExecutor(held.promise));
@@ -1509,7 +1261,11 @@ const BUILD_FAILED: BuildOutcome = {
   reason: BUILD_FAILED_REASON,
 };
 const EDITED_REASON = "its inputs changed while it ran: packages/a/src/a.ts";
-const EDITED: JobVerdict = { fingerprinted: false, reason: EDITED_REASON };
+const EDITED: JobVerdict = {
+  fingerprinted: false,
+  reason: EDITED_REASON,
+  changedWhileRunning: true,
+};
 const PROCEEDS_WITHOUT_BUILD = "proceeds without its dependency build";
 
 function storedAs(discoveryId: string, found: TestDiscovery): StoredDiscovery {
@@ -2329,6 +2085,7 @@ function rootedAt(
     ended: true,
     value: discovery(discovered("a")),
   }),
+  quietWindowMs: number = NO_QUIET_WINDOW_MS,
 ): Daemon {
   return daemon(
     { ...confirmed("a"), consumerRoot: root },
@@ -2337,6 +2094,7 @@ function rootedAt(
     { ...IDENTITY, consumerRoot: root },
     new StandInInputs(script),
     builds,
+    quietWindowMs,
   );
 }
 
@@ -2499,6 +2257,7 @@ describe(
                 ended: false,
                 reason: BUILD_FAILED_REASON,
               }),
+              HELD_BY_QUIET_WINDOW_MS,
             ),
           ),
           async ({ lifecycle, builds }) => {
@@ -2579,5 +2338,284 @@ describe("an answer read after the dependency builds ended", () => {
       kind: NARROWING.widened,
       notNarrowed: "dependency-builds-ended",
     });
+  });
+});
+
+/** An executor whose run rejects, as one that cannot start its child process does. */
+class RunsThrow extends ScriptedExecutor {
+  override run(): Promise<RunOutcome> {
+    return Promise.reject(new Error("spawn EAGAIN"));
+  }
+}
+
+/** An executor whose discovery rejects, as one that cannot start its child process does. */
+class DiscoveryThrows extends ScriptedExecutor {
+  override discover(): Promise<JobOutcome<TestDiscovery>> {
+    return Promise.reject(new Error("spawn EAGAIN"));
+  }
+}
+
+/** An executor whose close rejects. */
+class CloseThrows extends ScriptedExecutor {
+  override close(): Promise<void> {
+    return Promise.reject(new Error("EPERM"));
+  }
+}
+
+describe("a job that cannot end normally", () => {
+  it("D2675: a run whose executor call throws ends with nothing stored, listed with the cause, and its change window is closed", async () => {
+    const { lifecycle, inputs } = await begun(
+      daemon(
+        confirmed("a"),
+        new RunsThrow({ ended: true, value: discovery(discovered("a")) }),
+      ),
+    );
+    const [job] = lifecycle.status().unstoredJobs;
+    expect({
+      workspacePath: job?.workspacePath,
+      namesCause: job?.reason.includes("spawn EAGAIN"),
+      windowsClosed: inputs.jobsEnded === inputs.jobsBegun,
+    }).toStrictEqual({
+      workspacePath: "a",
+      namesCause: true,
+      windowsClosed: true,
+    });
+  });
+
+  it("D2676: a discovery whose executor call throws ends with nothing stored, listed with the cause and no workspace, and its change window is closed", async () => {
+    const { lifecycle, inputs } = await begun(
+      daemon(
+        confirmed("a"),
+        new DiscoveryThrows({
+          ended: true,
+          value: discovery(discovered("a")),
+        }),
+      ),
+    );
+    const [job] = lifecycle.status().unstoredJobs;
+    expect({
+      listed: lifecycle.status().unstoredJobs.length,
+      workspacePath: job?.workspacePath,
+      namesCause: job?.reason.includes("spawn EAGAIN"),
+      windowsClosed: inputs.jobsEnded === inputs.jobsBegun,
+    }).toStrictEqual({
+      listed: 1,
+      workspacePath: undefined,
+      namesCause: true,
+      windowsClosed: true,
+    });
+  });
+
+  it("D2677: a stop whose executor close rejects logs the error, and still closes the store and the endpoint", async () => {
+    const { lifecycle, store, log, endpointCloses } = await begun(
+      daemon(
+        confirmed("a"),
+        new CloseThrows({ ended: true, value: discovery(discovered("a")) }),
+      ),
+    );
+    lifecycle.stop();
+    await lifecycle.stopped();
+    expect({
+      logged: log.entries.some(
+        (entry) =>
+          entry.startsWith("error: closing the executor") &&
+          entry.includes("EPERM"),
+      ),
+      storeClosed: store.closed,
+      endpointCloses: endpointCloses.count,
+    }).toStrictEqual({ logged: true, storeClosed: true, endpointCloses: 1 });
+  });
+
+  it("D2678: a run whose store write fails again on a retry is listed once, by its latest ending", async () => {
+    const executor = new ScriptedExecutor({
+      ended: true,
+      value: discovery(discovered("a")),
+    });
+    const { lifecycle, inputs } = await begun(
+      daemon(confirmed("a"), executor, new RecordingStore(["a"])),
+    );
+    inputs.endPeriodicReconciliation();
+    await flush();
+    expect({
+      runs: executor.runs,
+      unstored: lifecycle.status().unstoredJobs,
+    }).toStrictEqual({
+      runs: ["a", "a"],
+      unstored: [{ workspacePath: "a", reason: "the store write failed" }],
+    });
+  });
+});
+
+/** A store whose first write of the given kind fails, as a locked database does once. */
+class LockedOnce extends RecordingStore {
+  #runFailed: boolean;
+  #discoveryFailed: boolean;
+
+  constructor(fails: "run" | "discovery") {
+    super();
+    this.#runFailed = fails !== "run";
+    this.#discoveryFailed = fails !== "discovery";
+  }
+
+  override writeRun(bindings: StoreBindings, run: WorkspaceRun): StoredRun {
+    if (!this.#runFailed) {
+      this.#runFailed = true;
+      throw new Error("database is locked");
+    }
+    return super.writeRun(bindings, run);
+  }
+
+  override writeDiscovery(
+    bindings: StoreBindings,
+    written: TestDiscovery,
+  ): StoredDiscovery {
+    if (!this.#discoveryFailed) {
+      this.#discoveryFailed = true;
+      throw new Error("database is locked");
+    }
+    return super.writeDiscovery(bindings, written);
+  }
+}
+
+describe("what the daemon reports of a job once it has ended", () => {
+  it("D2729: after a run ends, while the scheduler waits out the next quiet window, the activity is idle, whether the run ended or did not begin", async () => {
+    const activities = await underFakeClock(async () => {
+      const inputs = new StandInInputs();
+      const ended = await activityWhileTheNextWindowWaits(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor(
+            { ended: true, value: discovery(discovered("a")) },
+            (path) => {
+              inputs.moveRevision();
+              return { ended: true, value: interrupted(path) };
+            },
+          ),
+          new RecordingStore(),
+          IDENTITY,
+          inputs,
+          new ScriptedBuilds(),
+          1000,
+        ),
+        () => Promise.resolve(),
+      );
+      const held = holdingRun(1000);
+      const unbegun = await activityWhileTheNextWindowWaits(held, async () => {
+        held.inputs.moveRevision();
+        held.inputs.settleHeld.resolve();
+        await flush();
+      });
+      return { ended, unbegun };
+    });
+    expect(activities).toStrictEqual({
+      ended: { state: "idle" },
+      unbegun: { state: "idle" },
+    });
+  });
+
+  it("D2730: a job that ended with nothing stored is no longer listed once a later attempt of it stores its record, for a run and for a discovery", async () => {
+    const listedAfterARetry = async (
+      store: LockedOnce,
+    ): Promise<readonly unknown[]> => {
+      const { lifecycle, inputs } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          store,
+        ),
+      );
+      inputs.endPeriodicReconciliation();
+      await flush();
+      return lifecycle.status().unstoredJobs;
+    };
+    const runStore = new LockedOnce("run");
+    runStore.seedDiscovery(discovery(discovered("a")), {
+      kind: "digest",
+      digest: DISCOVERY_DIGEST,
+    });
+    expect({
+      run: await listedAfterARetry(runStore),
+      discovery: await listedAfterARetry(new LockedOnce("discovery")),
+    }).toStrictEqual({ run: [], discovery: [] });
+  });
+
+  it("D2739: a run whose executor died is run again when a periodic reconciliation ends, while it is still due", async () => {
+    const executor = new ScriptedExecutor(
+      { ended: true, value: discovery(discovered("a")) },
+      () => ({ ended: false, reason: "the executor process 7 exited" }),
+    );
+    const { inputs } = await begun(daemon(confirmed("a"), executor));
+    inputs.endPeriodicReconciliation();
+    await flush();
+    expect(executor.runs).toStrictEqual(["a", "a"]);
+  });
+
+  it("D2740: a run whose inputs changed while it ran, at a revision the change did not move, is run once more", async () => {
+    const { executor } = await begun(
+      scripted({
+        verdicts: [
+          FINGERPRINTED,
+          FINGERPRINTED,
+          {
+            fingerprinted: false,
+            reason: "its inputs changed while it ran: packages/a/src/a.ts",
+            changedWhileRunning: true,
+          },
+        ],
+      }),
+    );
+    expect(executor.runs).toStrictEqual(["a", "a"]);
+  });
+
+  it("D2747: a run that began with its inputs unsettled is not run once more at the same revision", async () => {
+    const { executor } = await begun(
+      scripted({
+        verdicts: [
+          FINGERPRINTED,
+          FINGERPRINTED,
+          {
+            fingerprinted: false,
+            reason:
+              "its inputs were unsettled when it started: a reconciliation was running",
+            changedWhileRunning: false,
+          },
+        ],
+      }),
+    );
+    expect(executor.runs).toStrictEqual(["a"]);
+  });
+});
+
+describe("a job planned at a revision that then moved", () => {
+  it("D2679: a run whose start finds the input revision moved since it was planned begins nothing, and runs only once the new revision has held still", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date", "performance"],
+    });
+    try {
+      const { lifecycle, inputs, executor } = holdingRun(1000);
+      lifecycle.begin();
+      await flush();
+      await vi.advanceTimersByTimeAsync(1000);
+      await flush();
+      inputs.moveRevision();
+      inputs.settleHeld.resolve();
+      await flush();
+      await vi.advanceTimersByTimeAsync(999);
+      await flush();
+      const before = [...executor.runs];
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+      lifecycle.stop();
+      await lifecycle.stopped();
+      expect({ before, after: [...executor.runs] }).toStrictEqual({
+        before: [],
+        after: ["a"],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

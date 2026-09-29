@@ -4,7 +4,7 @@ const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 const LOST_INPUT_SET_RETRY_MS = 10 * 1000;
 const LOST_INPUT_SET_RETRY_REASON =
   "an input event arrived while the input set could not be established";
-const PERIODIC_REASON = "the periodic reconciliation";
+export const PERIODIC_REASON = "the periodic reconciliation";
 
 /** When the next reconciliation runs, each timed from the end of the last one. */
 export class ReconcileSchedule {

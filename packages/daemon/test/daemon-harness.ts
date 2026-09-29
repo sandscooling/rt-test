@@ -34,7 +34,7 @@ import {
   consumerIdentity,
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
-import { inConsumerCopy, runTempRoot } from "./harness.js";
+import { fixtureRepository, inConsumerCopy, runTempRoot } from "./harness.js";
 
 /** What `RawConnection.next` resolves with once the daemon has closed the connection. */
 export const CLOSED = "closed";
@@ -292,6 +292,41 @@ const EXECUTOR_PID_FILES = [
   "packages/b/executor-pids",
 ];
 
+/**
+ * The files the daemon fixture writes into its own tree while a job runs, and the control files a test writes to hold,
+ * release or shape one. A file that changes during a job is an input edit, which stores the job not fingerprinted and
+ * leaves its workspace due, so a daemon over the fixture never idles unless git ignores them.
+ */
+const FIXTURE_MARKERS = [
+  ...new Set([
+    ...EXECUTOR_PID_FILES.map((file) => file.slice(file.lastIndexOf("/") + 1)),
+    "setups",
+    "held-out",
+    "hold",
+    "release",
+    "hold-collect",
+    "release-collect",
+    "spawn-children",
+    "stick-at",
+    "child-endpoint",
+    "heartbeat-*",
+    "failed-heartbeat-*",
+  ]),
+];
+
+/** Ignores the fixture's own markers in the git repository at `root`, so only the daemon's own writes could move its inputs. */
+export function ignoreFixtureMarkers(root: string): void {
+  writeFileSync(join(root, ".gitignore"), `${FIXTURE_MARKERS.join("\n")}\n`);
+}
+
+/** Declares the fixture's markers non-inputs in `rt-test.json`, for a consumer that is not a real git repository. */
+export function declareFixtureMarkers(root: string): void {
+  writeFileSync(
+    join(root, "rt-test.json"),
+    JSON.stringify({ nonInputs: FIXTURE_MARKERS.map((name) => `**/${name}`) }),
+  );
+}
+
 export type Settled<T> = T | { thrown: string };
 
 export function settled<T>(work: Promise<T>): Promise<Settled<T>> {
@@ -471,8 +506,8 @@ export function logged(logFile: string, prefix: string): boolean {
   return logEntries(logFile).some((entry) => entry.startsWith(prefix));
 }
 
-/** The log entry the daemon writes once every confirmed workspace has run. */
-export const IDLE_ENTRY = "idle: every confirmed workspace has run";
+/** The log entry the daemon writes each time a round leaves no confirmed workspace due. */
+export const IDLE_ENTRY = "idle: no confirmed workspace is due";
 
 /** Each run stored for the worktree at `consumerRoot`, as its workspace and how it ended. */
 export function storedRuns(
@@ -576,11 +611,16 @@ function removeLeftovers(root: string): void {
   removeKeyFile(location.keyFile);
 }
 
-/** Copies the daemon fixture into a temp consumer with Vitest linked, and ends its daemon however `body` ends. */
+/**
+ * Copies the daemon fixture into a temp git repository that ignores its markers, with Vitest linked, and ends its
+ * daemon however `body` ends.
+ */
 export function withDaemonConsumer<T>(
   body: (root: string, pids: Set<number>) => Promise<T>,
 ): Promise<T> {
-  return inConsumerCopy(DAEMON_FIXTURE, "vitest", (root) =>
-    withDaemons([root], (pids) => body(root, pids)),
-  );
+  return inConsumerCopy(DAEMON_FIXTURE, "vitest", (root) => {
+    ignoreFixtureMarkers(root);
+    fixtureRepository(root);
+    return withDaemons([root], (pids) => body(root, pids));
+  });
 }

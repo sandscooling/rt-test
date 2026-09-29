@@ -12,6 +12,7 @@ import {
   SELECTION_STATE,
   type ChangedPathReport,
   type DependencyInformation,
+  type SelectionOutcome,
 } from "../selection/selection-types.js";
 import { ProjectInputs } from "./fingerprint.js";
 
@@ -152,6 +153,15 @@ export class Narrowing {
   refusal(project: ProjectInputs): string | undefined {
     const sets = this.#setsFor(project);
     return sets.refused ? sets.reason : undefined;
+  }
+
+  /** What selection picks for the root-relative `paths`, over this build's dependency information. */
+  select(paths: readonly string[]): SelectionOutcome {
+    return selectTests({
+      ...this.#input,
+      change: paths,
+      dependencies: this.#dependencies,
+    });
   }
 
   /**

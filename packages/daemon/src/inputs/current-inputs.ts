@@ -132,6 +132,7 @@ export function currentInputs({
       facts,
       ...declaration,
       unavailable,
+      snapshot: undefined,
       workspaceFingerprint: () => none,
       discoveryFingerprint: () => none,
       protectedFileChangedSince: () => unavailable,
@@ -144,6 +145,7 @@ export function currentInputs({
     ...notNarrowedFact(selected),
     facts,
     ...declaration,
+    snapshot: inputs,
     workspaceFingerprint: (entry) =>
       narrowedFingerprint(selected, inputs, entry, reads),
     discoveryFingerprint: (discovery) =>

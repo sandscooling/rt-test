@@ -1604,17 +1604,17 @@
   },
   {
     "id": "D1451",
-    "defect": "The start sequence runs the workspaces in an order other than the discovery's.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    for (const entry of discovery.workspaces) {",
-    "new": "    for (const entry of [...discovery.workspaces].reverse()) {"
+    "defect": "A round's queue runs the workspaces of a group in an order other than the discovery's.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "    queue.filter((queued) => queued.group === group),",
+    "new": "    queue.filter((queued) => queued.group === group).reverse(),"
   },
   {
     "id": "D1452",
     "defect": "A workspace whose discovery failed or was unsupported is skipped, so no run record says it could not run.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      if (entry.status === \"not-confirmed\") continue;",
-    "new": "      if (entry.status !== \"discovered\") continue;"
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "entry.status !== \"not-confirmed\" &&",
+    "new": "entry.status === \"discovered\" &&"
   },
   {
     "id": "D1453",
@@ -1632,10 +1632,10 @@
   },
   {
     "id": "D1455",
-    "defect": "The activity is left at the last job when the start sequence ends, so a daemon whose discovery stored nothing reads as discovering forever.",
+    "defect": "The activity is left at the last job when the job ends, so a daemon whose discovery stored nothing reads as discovering while the scheduler waits for the next round.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "        this.#activity = { state: \"idle\" };",
-    "new": "        this.#activity = { ...this.#activity };"
+    "old": "      return await job;\n    } finally {\n      this.#activity = { state: \"idle\" };\n    }",
+    "new": "      return await job;\n    } finally {\n      this.#activity = { ...this.#activity };\n    }"
   },
   {
     "id": "D1456",
@@ -1664,13 +1664,6 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    executor.abort();",
     "new": ""
-  },
-  {
-    "id": "D1460",
-    "defect": "The workspaces not yet run when the stop arrives are still run, since neither the loop over them nor each run heeds the stop.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return this.#stopping !== undefined;",
-    "new": "    return false;"
   },
   {
     "id": "D1461",
@@ -1704,7 +1697,7 @@
     "id": "D1465",
     "defect": "A discovery that returns after the stop arrived is stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return;",
+    "old": "      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n",
     "new": ""
   },
   {
@@ -1996,10 +1989,10 @@
   },
   {
     "id": "D1538",
-    "defect": "A workspace the discovery lists as not confirmed is run, or listed as unstored.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      if (entry.status === \"not-confirmed\") continue;",
-    "new": ""
+    "defect": "A workspace the discovery lists as not confirmed is run, or listed as unstored, though the start confirmed it.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "entry.status !== \"not-confirmed\" &&",
+    "new": "true &&"
   },
   {
     "id": "D1539",
@@ -2892,9 +2885,9 @@
   },
   {
     "id": "D1880",
-    "defect": "The discovery starts before the first reconciliation of the inputs has ended.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.firstReconciled();\n",
+    "defect": "The scheduler's first round starts before the first reconciliation of the inputs has ended.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    await this.#parts.inputs.firstReconciled();\n",
     "new": ""
   },
   {
@@ -2915,7 +2908,7 @@
     "id": "D1883",
     "defect": "A query never passes a workspace's current fingerprint to the comparison, so a result whose inputs are unchanged reads unknown, never current.",
     "file": "packages/daemon/src/query/summary.ts",
-    "old": "      (path) => digestOf(fingerprints.get(path)),",
+    "old": "      (path) => fingerprintDigest(fingerprints.get(path)),",
     "new": "      () => undefined,"
   },
   {
@@ -2929,7 +2922,7 @@
     "id": "D1885",
     "defect": "The discovery's freshness is decided with no current fingerprint, so a discovery whose inputs are unchanged never reads current.",
     "file": "packages/daemon/src/query/summary.ts",
-    "old": "    digestOf(inputs.discoveryFingerprint(discovery.discovery)),",
+    "old": "    fingerprintDigest(inputs.discoveryFingerprint(discovery.discovery)),",
     "new": "    undefined,"
   },
   {
@@ -3167,8 +3160,8 @@
     "id": "D1921",
     "defect": "Every reconciliation request is recorded against the running jobs, so a job during which a reconciliation found no change is stored not fingerprinted.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    this.#reconcileRequested = true;\n    if (this.#reconciling) return;",
-    "new": "    this.#reconcileRequested = true;\n    this.#jobs.record(reason);\n    if (this.#reconciling) return;"
+    "old": "    this.#reconcileRequested = true;\n    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n    if (this.#reconciling) return;",
+    "new": "    this.#reconcileRequested = true;\n    this.#jobs.record(reason);\n    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n    if (this.#reconciling) return;"
   },
   {
     "id": "D1922",
@@ -3284,10 +3277,10 @@
   },
   {
     "id": "D1953",
-    "defect": "A stop that arrives during the first reconciliation of the inputs is followed by the discovery once the reconciliation ends.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.firstReconciled();\n    await inputs.settled();\n    if (this.isStopping()) return;\n",
-    "new": "    await inputs.firstReconciled();\n    await inputs.settled();\n"
+    "defect": "A stop given to the scheduler is not remembered, so a stop that arrives during the first reconciliation of the inputs is followed by the discovery once the reconciliation ends.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    this.#stopped = true;\n",
+    "new": "    this.#stopped = false;\n"
   },
   {
     "id": "D1960",
@@ -3335,8 +3328,8 @@
     "id": "D1987",
     "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return;\n    }\n    const bindings = this.#bindings(\"the discovery\", held, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n",
-    "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return;\n    }\n"
+    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }\n    const bindings = this.#bindings(\"the discovery\", held, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );",
+    "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }"
   },
   {
     "id": "D1988",
@@ -3412,8 +3405,8 @@
     "id": "D1998",
     "defect": "The current inputs drop the reason an unusable rt-test.json declares nothing, so no answer can carry it.",
     "file": "packages/daemon/src/inputs/current-inputs.ts",
-    "old": "    facts,\n    ...declaration,\n    workspaceFingerprint: (entry) =>",
-    "new": "    facts,\n    workspaceFingerprint: (entry) =>"
+    "old": "    facts,\n    ...declaration,\n    snapshot: inputs,\n",
+    "new": "    facts,\n    snapshot: inputs,\n"
   },
   {
     "id": "D1999",
@@ -3671,36 +3664,36 @@
     "id": "D2080",
     "defect": "The discovery's job begins as soon as the first reconciliation ends, before the events it left unread are read.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.firstReconciled();\n    await inputs.settled();\n",
-    "new": "    await inputs.firstReconciled();\n"
+    "old": "    await inputs.settled();\n    if (this.#beginsNothing(plannedRevision)) return undefined;\n    log.entry(\"discovery started\");",
+    "new": "    if (this.#beginsNothing(plannedRevision)) return undefined;\n    log.entry(\"discovery started\");"
   },
   {
     "id": "D2081",
     "defect": "The guard around protecting the discovery's test modules begins without waiting for the inputs to settle.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n",
-    "new": "    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n"
+    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched = inputs",
+    "new": "    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched = inputs"
   },
   {
     "id": "D2082",
     "defect": "A run's job begins without waiting for the inputs to settle.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    await this.#awaitBuild(workspace.path);\n",
-    "new": "    await this.#awaitBuild(workspace.path);\n"
+    "old": "    await inputs.settled();\n    if (this.#beginsNothing(plannedRevision)) return undefined;\n    log.entry(`run started",
+    "new": "    if (this.#beginsNothing(plannedRevision)) return undefined;\n    log.entry(`run started"
   },
   {
     "id": "D2083",
     "defect": "A stop that arrives while the guard waits for the inputs to settle is followed by the guard's job.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n    const unwatched",
+    "old": "    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched",
     "new": "    const unwatched"
   },
   {
     "id": "D2084",
     "defect": "A stop that arrives while a run waits for the inputs to settle is followed by the run.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await this.#awaitBuild(workspace.path);\n    if (this.isStopping()) return;\n    log.entry(`run started",
-    "new": "    await this.#awaitBuild(workspace.path);\n    log.entry(`run started"
+    "old": "    await inputs.settled();\n    if (this.#beginsNothing(plannedRevision)) return undefined;\n    log.entry(`run started",
+    "new": "    await inputs.settled();\n    log.entry(`run started"
   },
   {
     "id": "D2085",
@@ -3727,8 +3720,8 @@
     "id": "D2090",
     "defect": "The check for files the discovery protects by path runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n",
-    "new": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    await inputs.settled();\n    if (this.isStopping())\n      return { fingerprinted: false, reason: DISCOVERY_STOPPED_REASON };\n"
+    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n",
+    "new": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    await inputs.settled();\n    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n"
   },
   {
     "id": "D2091",
@@ -3741,8 +3734,8 @@
     "id": "D2092",
     "defect": "The start sequence checks for a stop before waiting for the inputs to settle, so a stop arriving during that wait is followed by the discovery.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(\"discovery started\");",
-    "new": "    if (this.isStopping()) return;\n    await inputs.settled();\n    log.entry(\"discovery started\");"
+    "old": "    await inputs.settled();\n    if (this.#beginsNothing(plannedRevision)) return undefined;\n    log.entry(\"discovery started\");",
+    "new": "    if (this.#beginsNothing(plannedRevision)) return undefined;\n    await inputs.settled();\n    log.entry(\"discovery started\");"
   },
   {
     "id": "D2093",
@@ -4628,10 +4621,10 @@
   },
   {
     "id": "D2517",
-    "defect": "A run begins without waiting for the dependency build at its revision, so its fingerprint is taken from a view that has none.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    await this.#awaitBuild(workspace.path);\n",
-    "new": "    await inputs.settled();\n"
+    "defect": "A round begins without waiting for the dependency build at its revision, so a run's fingerprint is taken from a view that has none.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      await awaitBuild(\"the round\");\n",
+    "new": ""
   },
   {
     "id": "D2518",
@@ -4742,7 +4735,7 @@
     "id": "D2537",
     "defect": "A stop never closes the build executor, so its process outlives the daemon.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await buildExecutor.close();\n",
+    "old": "    await this.#closing(\"the dependency build executor\", () =>\n      buildExecutor.close(),\n    );\n",
     "new": ""
   },
   {
@@ -5003,5 +4996,502 @@
     "file": "packages/daemon/test/test-endpoint.ts",
     "old": "    TEST_SOCKET_DIRECTORY,\n    `${TEST_SOCKET_PREFIX}",
     "new": "    runTempRoot(),\n    `${TEST_SOCKET_PREFIX}"
+  },
+  {
+    "id": "D2642",
+    "defect": "A workspace the discovery lists but the confirmed start does not is queued, so each input revision runs it into nothing stored and lists it as a job that stored nothing.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "confirmedEntry(this.#parts.start, entry.workspace) !== undefined",
+    "new": "true"
+  },
+  {
+    "id": "D2643",
+    "defect": "A workspace whose latest run is bound to its current input fingerprint is due, so a restart over current results runs it again.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (reason === undefined) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D2644",
+    "defect": "A workspace whose latest run is stored under another digest than its current fingerprint is rated current, so an edit leaves its workspace unrun.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  if (recordFreshness(latest, currentDigest) === CURRENT) return undefined;",
+    "new": "  if (recordFreshness(latest, currentDigest) !== \"unknown\") return undefined;"
+  },
+  {
+    "id": "D2645",
+    "defect": "A workspace whose latest run is stored not fingerprinted is rated current, so a run a stop interrupted is never run again.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  if (recordFreshness(latest, currentDigest) === CURRENT) return undefined;",
+    "new": "  if (recordFreshness(latest, currentDigest) !== \"stale\") return undefined;"
+  },
+  {
+    "id": "D2646",
+    "defect": "A workspace whose current fingerprint cannot be computed is logged as due because its inputs differ, so the log names a change that never happened.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  return currentDigest === undefined\n    ? DUE_REASON.noCurrentFingerprint\n    : DUE_REASON.inputsChanged;",
+    "new": "  return DUE_REASON.inputsChanged;"
+  },
+  {
+    "id": "D2647",
+    "defect": "A workspace whose latest run holds a failed test is due though the run is bound to its current fingerprint, so a deterministic failure reruns without end.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  if (recordFreshness(latest, currentDigest) === CURRENT) return undefined;",
+    "new": "  if (recordFreshness(latest, currentDigest) === CURRENT && !holdsFailingTest(latest)) return undefined;"
+  },
+  {
+    "id": "D2648",
+    "defect": "A workspace whose run ended with nothing stored is run again at the same input revision, so it runs in a loop with no input change.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      attempt.revision === revision &&\n",
+    "new": "      false &&\n"
+  },
+  {
+    "id": "D2649",
+    "defect": "A workspace is not run again when a rediscovery at an unchanged revision lists new test modules for it, so a test added to it stays unrun.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      attempt.modules === testModulesKey(entry) &&\n",
+    "new": "      true &&\n"
+  },
+  {
+    "id": "D2650",
+    "defect": "A run stored not fingerprinted by a change that left the revision unmoved is not run again, so a save of identical bytes leaves the workspace unknown.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      rerunOwed: unmoved && !isRerun,",
+    "new": "      rerunOwed: false,"
+  },
+  {
+    "id": "D2651",
+    "defect": "The run repeated for an unmoved change is itself repeated when it is stored not fingerprinted again, so a test that rewrites its own input with identical bytes reruns without end.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      rerunOwed: unmoved && !isRerun,",
+    "new": "      rerunOwed: unmoved,"
+  },
+  {
+    "id": "D2652",
+    "defect": "The quiet window is 999 ms instead of the 1,000 ms the requirement names.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "export const QUIET_WINDOW_MS = 1_000;",
+    "new": "export const QUIET_WINDOW_MS = 999;"
+  },
+  {
+    "id": "D2653",
+    "defect": "A discovery starts 1 ms before the input revision has held still for the quiet window.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#windowStart + this.#parts.quietWindowMs - performance.now();",
+    "new": "        this.#windowStart + this.#parts.quietWindowMs - 1 - performance.now();"
+  },
+  {
+    "id": "D2654",
+    "defect": "The quiet window is timed from the first change of a burst, so a burst of changes each less than the window apart starts a round in the middle of the burst.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#windowStart = performance.now();",
+    "new": "        if (this.#windowStart === 0) this.#windowStart = performance.now();"
+  },
+  {
+    "id": "D2655",
+    "defect": "A round begins before the events the inputs have not yet read are read, so it plans over inputs that are about to change.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      await inputs.settled();\n      await awaitBuild(\"the round\");",
+    "new": "      await awaitBuild(\"the round\");"
+  },
+  {
+    "id": "D2656",
+    "defect": "A round whose input revision moved while its waits ran begins at once at the new revision, without the quiet window.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (revision === this.#windowRevision) return revision;\n",
+    "new": "      return revision;\n"
+  },
+  {
+    "id": "D2657",
+    "defect": "A stop that arrives while the dependency build wait is held is followed by the discovery once the wait is released.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (this.#isStopping()) return undefined;\n      const revision = this.#revision();",
+    "new": "      const revision = this.#revision();"
+  },
+  {
+    "id": "D2658",
+    "defect": "A discovery that is not current at a settled revision is not rediscovered, so the due runs are taken from a discovery of another revision.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    return recordFreshness(stored, current) !== CURRENT;",
+    "new": "    return false;"
+  },
+  {
+    "id": "D2659",
+    "defect": "A discovery whose record stays not current is attempted again at the same input revision, so it repeats in a loop with no input change.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    if (this.#discoveryTriedAt === revision) return false;\n",
+    "new": ""
+  },
+  {
+    "id": "D2660",
+    "defect": "A workspace whose latest run failed is not retried when a periodic reconciliation ends, so a cause outside the inputs leaves it failed until an unrelated edit.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (latest?.run.status === \"failed\" || nothingStored) {",
+    "new": "      if (nothingStored) {"
+  },
+  {
+    "id": "D2661",
+    "defect": "A workspace whose retry fails again stays in the retry set, so it is retried without end instead of once for each periodic reconciliation.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    this.#retryWorkspaces.delete(path);\n",
+    "new": ""
+  },
+  {
+    "id": "D2662",
+    "defect": "A discovery listing a workspace whose status is failed is not retried when a periodic reconciliation ends.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        (entry) => entry.status === \"failed\",",
+    "new": "        () => false,"
+  },
+  {
+    "id": "D2663",
+    "defect": "A discovery that ended with nothing stored is not retried when a periodic reconciliation ends.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      this.#discoveryNothingStored ||\n",
+    "new": ""
+  },
+  {
+    "id": "D2664",
+    "defect": "A path that disappeared between two rounds is left out of the paths selection is asked about, so the workspaces that depended on it are never selected.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "  const paths = new Set([...before.keys(), ...after.keys()]);",
+    "new": "  const paths = new Set([...after.keys()]);"
+  },
+  {
+    "id": "D2665",
+    "defect": "The log names no owner for a changed path.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "  const owner = report.owner ?? \"no package workspace\";",
+    "new": "  const owner = \"no package workspace\";"
+  },
+  {
+    "id": "D2690",
+    "defect": "The log says a changed path selected no workspace without saying why.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": ", ${report.nothingSelected.kind}: ${report.nothingSelected.detail}",
+    "new": ", ${report.nothingSelected.kind}"
+  },
+  {
+    "id": "D2666",
+    "defect": "The log does not say when a count of tests is incomplete, so a total that is a lower bound reads as exact.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "  return `${count.count}${count.complete ? \"\" : \" (incomplete)\"}`;",
+    "new": "  return `${count.count}`;"
+  },
+  {
+    "id": "D2667",
+    "defect": "The log names no broad fallback, so a widening to a whole workspace or project is not explained.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "  for (const fallback of selection.fallbacks) log.entry(fallbackText(fallback));\n",
+    "new": ""
+  },
+  {
+    "id": "D2668",
+    "defect": "A selected workspace that is due is logged as not run because it holds current results.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (confirmed.has(path) && !dueNow.has(path)) {",
+    "new": "      if (confirmed.has(path)) {"
+  },
+  {
+    "id": "D2669",
+    "defect": "A round with no selection is logged below warning level, so a failed dependency build passes unnoticed.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    `warning: no selection was made (${kind}), ${NO_SELECTION_CONSEQUENCE}: ${reason}`,",
+    "new": "    `no selection was made (${kind}), ${NO_SELECTION_CONSEQUENCE}: ${reason}`,"
+  },
+  {
+    "id": "D2670",
+    "defect": "The warning for a round whose build wait was released with no build ended does not say the wait was released.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "no dependency build ended at this input revision, because the wait for it was released",
+    "new": "no dependency build ended at this input revision"
+  },
+  {
+    "id": "D2671",
+    "defect": "A due workspace is logged at each plan of it instead of once for its input revision.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (this.#announced.get(path) === key) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D2672",
+    "defect": "The workspace owning a changed path runs last in its round instead of first.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  QUEUE_GROUP.directTarget,\n  QUEUE_GROUP.priorFailure,\n  QUEUE_GROUP.rest,\n];",
+    "new": "  QUEUE_GROUP.priorFailure,\n  QUEUE_GROUP.rest,\n  QUEUE_GROUP.directTarget,\n];"
+  },
+  {
+    "id": "D2673",
+    "defect": "A workspace whose latest run holds a failed test runs after the workspaces with no failure instead of before them.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  QUEUE_GROUP.directTarget,\n  QUEUE_GROUP.priorFailure,\n  QUEUE_GROUP.rest,\n];",
+    "new": "  QUEUE_GROUP.directTarget,\n  QUEUE_GROUP.rest,\n  QUEUE_GROUP.priorFailure,\n];"
+  },
+  {
+    "id": "D2674",
+    "defect": "A job that throws ends the scheduler for good, so no later change of the input revision runs anything.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#parts.log.error(\"a scheduling step failed\", error);\n        await this.#untilChangeOrStop();\n",
+    "new": "        throw error;\n"
+  },
+  {
+    "id": "D2675",
+    "defect": "A run whose executor call throws is not caught, so its change window stays open and nothing about the run is listed as a job that stored nothing.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      .run(workspace, confirmed.configFile)\n      .catch((error: unknown) => threwOutcome<WorkspaceRun>(error));",
+    "new": "      .run(workspace, confirmed.configFile);"
+  },
+  {
+    "id": "D2676",
+    "defect": "A discovery whose executor call throws is not caught, so its change window stays open and nothing about the discovery is listed as a job that stored nothing.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      .discover(start)\n      .catch((error: unknown) => threwOutcome<TestDiscovery>(error));",
+    "new": "      .discover(start);"
+  },
+  {
+    "id": "D2677",
+    "defect": "A close that rejects during a stop is swallowed without a log entry, so the error that left a process or a lock behind is never reported.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      this.#parts.log.error(`closing ${what}`, error);\n",
+    "new": ""
+  },
+  {
+    "id": "D2678",
+    "defect": "Each ending of a job that stored nothing is appended to the list, so a job retried at every periodic reconciliation grows it without end.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const kept = this.#unstored.filter(\n      (job) => job.workspacePath !== workspacePath,\n    );",
+    "new": "    const kept = [...this.#unstored];"
+  },
+  {
+    "id": "D2679",
+    "defect": "A run whose start finds the input revision moved since it was planned begins anyway, without the quiet window at the new revision.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const moved =\n      this.#parts.inputs.current().facts.revision !== plannedRevision;\n",
+    "new": "    const moved = false;\n"
+  },
+  {
+    "id": "D2680",
+    "defect": "The tracker never counts a periodic reconciliation as ended, so the scheduler is never told to retry what failed with no input change to blame.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#periodicEnded += 1;\n",
+    "new": ""
+  },
+  {
+    "id": "D2681",
+    "defect": "Every reconciliation counts as a periodic one, so an edit's or a start's reconciliation retries what failed with no input change to blame.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (reason === PERIODIC_REASON) this.#periodicRequested = true;",
+    "new": "    this.#periodicRequested = true;"
+  },
+  {
+    "id": "D2684",
+    "defect": "A job during which a change was recorded is judged as not having had its inputs change while it ran, so a run stored not fingerprinted by an edit is never run again.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "        changedWhileRunning: unavailable === undefined,\n",
+    "new": "        changedWhileRunning: false,\n"
+  },
+  {
+    "id": "D2685",
+    "defect": "A job that began with its inputs unsettled is judged as having had them change while it ran, so a start over unsettled inputs is run again once more at the same revision.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "        reason: `its inputs were unsettled when it started: ${mark.unsettled}`,\n        changedWhileRunning: false,",
+    "new": "        reason: `its inputs were unsettled when it started: ${mark.unsettled}`,\n        changedWhileRunning: true,"
+  },
+  {
+    "id": "D2686",
+    "defect": "A job that ended with no fingerprint computable is judged as having had its inputs change while it ran, so a workspace whose fingerprint cannot be computed is run again once more at the same revision.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "          reason: unavailable,\n          changedWhileRunning: false,",
+    "new": "          reason: unavailable,\n          changedWhileRunning: true,"
+  },
+  {
+    "id": "D2687",
+    "defect": "A change recorded again past the cap is counted again, so a verdict says more changes went unnamed than there were.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "        window.omitted.add(description);",
+    "new": "        window.omitted.add(`${description}${window.omitted.size}`);"
+  },
+  {
+    "id": "D2688",
+    "defect": "A view over settled inputs carries no committed inputs, so a round can never say which paths changed.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "    snapshot: inputs,\n",
+    "new": "    snapshot: undefined,\n"
+  },
+  {
+    "id": "D2691",
+    "defect": "The daemon reads no stored results when it plans, so a restart rediscovers and reruns every workspace though its results read current.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return this.#parts.store.readLatestResults(this.#parts.scope);",
+    "new": "    return { discovery: undefined, latestRuns: [] };"
+  },
+  {
+    "id": "D2692",
+    "defect": "An idle scheduler does not wake at a change of the input revision, so an edit leaves the workspaces it touched without a fresh result until a periodic reconciliation ends.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#revision() !== this.#roundRevision ||\n",
+    "new": ""
+  },
+  {
+    "id": "D2693",
+    "defect": "A workspace whose run ended with nothing stored and is still due is not retried when a periodic reconciliation ends, so it stays without a result until an input changes.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#attempts.get(path)?.nothingStored === true && stale !== undefined;",
+    "new": "        false;"
+  },
+  {
+    "id": "D2694",
+    "defect": "A stop given while the quiet window waits does not end the scheduler until the window runs out.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (this.#isStopping()) return false;\n      const revision = this.#revision();\n",
+    "new": "      const revision = this.#revision();\n"
+  },
+  {
+    "id": "D2695",
+    "defect": "A round whose inputs' digests cannot be read logs a plain entry instead of the warning naming the cause.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      log.entry(NO_SNAPSHOT_ENTRY);",
+    "new": "      log.entry(\"no selection round\");"
+  },
+  {
+    "id": "D2731",
+    "defect": "A workspace's periodic retry is dropped when its run does not begin because the revision moved, so a failed run bound to its current fingerprint waits for the next periodic reconciliation.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (retried) this.#retryWorkspaces.add(path);\n",
+    "new": ""
+  },
+  {
+    "id": "D2732",
+    "defect": "A discovery's periodic retry is dropped when the discovery does not begin because the revision moved, so a current discovery listing a failed workspace waits for the next periodic reconciliation.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    this.#retryDiscovery ||= retry;\n",
+    "new": ""
+  },
+  {
+    "id": "D2733",
+    "defect": "A run whose job throws is not counted as having stored nothing, so a periodic reconciliation does not retry it while it stays due.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      nothingStored: true,\n",
+    "new": "      nothingStored: false,\n"
+  },
+  {
+    "id": "D2734",
+    "defect": "A round whose build wait was released with no build ended at its revision, after an earlier build failed, is logged as that earlier failure, so the warning names a cause from another revision.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    NO_BUILD_ENDED_KIND,\n    noBuildEndedReason(at.notNarrowed),\n",
+    "new": "    at.notNarrowed?.kind ?? NO_BUILD_ENDED_KIND,\n    noBuildEndedReason(at.notNarrowed),\n"
+  },
+  {
+    "id": "D2735",
+    "defect": "The round's log names only the kind of each step a selection reason passed through, not its detail, so a selection widened through an uncertain dependency does not say which one.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "  const detail = step.detail === \"\" ? \"\" : ` (${step.detail})`;",
+    "new": "  const detail = \"\";"
+  },
+  {
+    "id": "D2736",
+    "defect": "A changed path that selected a runnable workspace and also reached one that cannot run logs only the runnable one, so the excluded workspace and its reason go unexplained.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "  return `; not runnable: ${excluded.join(LIST_SEPARATOR)}`;",
+    "new": "  return \"\";"
+  },
+  {
+    "id": "D2741",
+    "defect": "A round whose selection is refused is logged below warning level, so a refused change passes unnoticed.",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    return noSelection(log, SELECTION_REFUSED, outcome.reason);",
+    "new": "    log.entry(`selection refused: ${outcome.reason}`);\n    return NO_SELECTION;"
+  },
+  {
+    "id": "D2742",
+    "defect": "A workspace's due entry is keyed on the input revision alone, so a workspace run again after a rediscovery at the same revision lists new test modules is not logged as due.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      const key = `${revision}:${testModulesKey(entry)}`;",
+    "new": "      const key = `${revision}`;"
+  },
+  {
+    "id": "D2743",
+    "defect": "A run stored not fingerprinted by a change that moved the input revision is logged as running once more at its revision, though no rerun is owed.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      report.changedWhileRunning && report.revision === this.#revision();",
+    "new": "      report.changedWhileRunning;"
+  },
+  {
+    "id": "D2744",
+    "defect": "A workspace whose latest run holds only errored tests is queued with the rest instead of before them.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "const FAILING_OUTCOMES: readonly TestOutcome[] = [\"failed\", \"error\"];",
+    "new": "const FAILING_OUTCOMES: readonly TestOutcome[] = [\"failed\"];"
+  },
+  {
+    "id": "D2745",
+    "defect": "A workspace whose latest run was stored under another adapter version is logged as due because its inputs differ.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "  if (!isCurrentAdapterVersion(latest.adapterVersion)) {\n    return DUE_REASON.anotherAdapterVersion;\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2728",
+    "defect": "A job whose window recorded a watcher failure, and which ended with no fingerprint computable, is judged as having had its inputs change while it ran, so a workspace whose fingerprint cannot be computed runs once more at the same revision.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "        changedWhileRunning: unavailable === undefined,\n",
+    "new": "        changedWhileRunning: true,\n"
+  },
+  {
+    "id": "D2737",
+    "defect": "The periodic flag is not cleared once counted, so every reconciliation after the first periodic one counts as periodic and an edit's reconciliation retries what failed.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#periodicRequested = false;\n",
+    "new": ""
+  },
+  {
+    "id": "D2738",
+    "defect": "A periodic request that arrives while another reconciliation runs is not counted, so the retry waits another interval.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n    if (this.#reconciling) return;\n",
+    "new": "    if (this.#reconciling) return;\n    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n"
+  },
+  {
+    "id": "D2746",
+    "defect": "The view over unavailable inputs carries the last committed snapshot, so a round whose input set cannot be established logs a selection over inputs nobody can vouch for, with no warning.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "      snapshot: undefined,\n",
+    "new": "      snapshot: project(),\n"
+  },
+  {
+    "id": "D2729",
+    "defect": "After a run ends the activity keeps naming its workspace while the scheduler waits out the next quiet window and build wait, so status and every answer say a run is going while none is.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      run: (entry, revision) => this.#idleAfter(this.#run(entry, revision)),",
+    "new": "      run: (entry, revision) => this.#run(entry, revision),"
+  },
+  {
+    "id": "D2730",
+    "defect": "A job that ended with nothing stored stays listed after a later attempt of it stores its record, so status lists as unstored a workspace, or a discovery, whose latest record was stored.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      write();\n      this.#unlist(workspacePath);\n",
+    "new": "      write();\n"
+  },
+  {
+    "id": "D2739",
+    "defect": "A run whose executor died is reported as stored, so a periodic reconciliation never retries it.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      this.#nothingStored(workspace.path, outcome.reason);\n      return report(false);\n",
+    "new": "      this.#nothingStored(workspace.path, outcome.reason);\n      return report(true);\n"
+  },
+  {
+    "id": "D2740",
+    "defect": "The run's report never says its inputs changed while it ran, so a save of identical bytes during a run is not rerun once at the revision it left unmoved.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        !verdict.fingerprinted && verdict.changedWhileRunning,\n",
+    "new": "        false,\n"
+  },
+  {
+    "id": "D2747",
+    "defect": "The run's report says its inputs changed while it ran for any run stored not fingerprinted, so a run that began with its inputs unsettled is rerun once more at the same revision.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        !verdict.fingerprinted && verdict.changedWhileRunning,\n",
+    "new": "        !verdict.fingerprinted,\n"
   }
 ]
