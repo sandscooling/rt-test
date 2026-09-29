@@ -7,7 +7,10 @@ import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
-import type { SelectionFacts } from "../src/vitest/selection-facts.js";
+import type {
+  EnvSource,
+  SelectionFacts,
+} from "../src/vitest/selection-facts.js";
 import {
   discoveredWorkspace,
   HAND_BUILT_ROOT,
@@ -33,6 +36,12 @@ const PATTERNS_DO_NOT_APPLY =
 const OVER_PICOMATCH_LIMIT = 70_000;
 /** How much of a refused pattern a reason quotes. */
 const QUOTED_LENGTH = 200;
+/** The consumer root's own env source, in Vitest's mode with Vite's default prefix. */
+const ROOT_ENV_SOURCE: EnvSource = {
+  envDirectory: ".",
+  envPrefixes: ["VITE_"],
+  mode: "test",
+};
 
 function rootWorkspace(facts: SelectionFacts): WorkspaceDiscovery {
   return discoveredWorkspace({ path: ".", directory: ROOT }, [], facts);
@@ -81,6 +90,19 @@ describe("the env files a discovery lists", () => {
       "config/.env.local": "input",
       "config/.env.test": "input",
       "config/other.txt": "config/**",
+    });
+  });
+
+  it("D3093: with process.platform read as win32, an env file named in another case than Vite opens it, such as .ENV.local for .env.local, is protected", async () => {
+    const protectedPaths = await onPlatform("win32", async () =>
+      protects(protectionFor({ envSources: [ROOT_ENV_SOURCE] }), [
+        ".ENV.local",
+        "other.txt",
+      ]),
+    );
+    expect(protectedPaths).toStrictEqual({
+      ".ENV.local": true,
+      "other.txt": false,
     });
   });
 });

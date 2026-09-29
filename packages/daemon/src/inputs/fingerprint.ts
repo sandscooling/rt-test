@@ -21,6 +21,7 @@ import {
   DIGEST_ENCODING,
   holdsFileContent,
   MODIFIED_TIME_RESOLUTION_MS,
+  wholeDigest,
   type InputDigests,
 } from "./input-inventory.js";
 import { discoveredTestModules, workspaceTestModules } from "./non-inputs.js";
@@ -318,12 +319,7 @@ function heldDigest(
 
 function moduleDigest(path: string): FingerprintResult {
   try {
-    return {
-      ok: true,
-      digest: createHash(DIGEST_ALGORITHM)
-        .update(readFileSync(path))
-        .digest(DIGEST_ENCODING),
-    };
+    return { ok: true, digest: wholeDigest(readFileSync(path)) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {
       return { ok: true, digest: ABSENT_FILE };
@@ -407,7 +403,5 @@ function digestOfEntries(entries: ReadonlyMap<string, string>): string {
 
 /** Each part is named, so no two part lists can produce the same text by concatenation. */
 function digestOf(parts: Record<string, unknown>): string {
-  return createHash(DIGEST_ALGORITHM)
-    .update(JSON.stringify(parts))
-    .digest(DIGEST_ENCODING);
+  return wholeDigest(JSON.stringify(parts));
 }

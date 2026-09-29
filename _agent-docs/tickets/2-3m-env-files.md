@@ -324,6 +324,10 @@ Tests session: threadId aaa28f49-d1d1-4f30-a221-ffd75812ec49
   - D3091: A stored env source with no envDirectory key reads back as env files turned off, so a malformed record lists no env file instead of being refused. (AC7)
   - D3092: A stored env source whose mode is missing reads back without refusal, so a malformed record names .env.undefined files in place of its mode's. (AC7)
   - D3049 re-anchored to the review's `mode: String(mode),`, keeping its defect. D3060's test now also asserts the failed read closes its descriptor, which its defect sentence names.
+- The review's tech-debt round (18:22):
+  - D3093: On Windows a declared pattern removes an env file whose on-disk name differs in case from the name Vite opens, such as .ENV.local for .env.local, so its edits no longer raise the input revision. (AC3)
+  - D3068 re-anchored to `contentDigest`'s `wholeDigest(readFileSync(descriptor))`, and D2130 (`packages/daemon/test/selection/defects.json`) to `protects`' two-line `listed.has(caseComparable(path)) ||` expression, each keeping its defect.
+  - Gates (18:24): `protection.test.ts` and `env-files.test.ts` 52 of 52 green; `check-defects` 2377 records; oxlint, prettier and the daemon typecheck exit 0. `verify-defects --edited` against 0dddd5c through the run lease selected 88 records: every one mutating `env-files.ts`, `fingerprint.ts`, `input-inventory.ts` or `protection.ts`, and every one in `protection.test.ts`. It detected 88 of 88, baseline green before and after, exit 0, on Windows and in the WSL clone under Node 24.19.0 with `TMPDIR` set (about 18:25 to 18:32).
 
 #### Deliberately Untested
 
@@ -360,6 +364,17 @@ Review fixes (18:00): `selection-facts.ts` reports a source's mode as `String(mo
 - The "discovered and reporting" filter is spelled three times: `protection` and `reportedProjects` (`inputs/protection.ts`) and `workspaceEnvFiles` (`inputs/env-files.ts`). `reportedProjects` skips an unreported workspace silently where the other two refuse, so `protectedFileChangedSince` relies on the discovery fingerprint refusing first.
 - Every listed file the inputs leave out is read whole and synchronously at each composition (`moduleDigest`, `envFileDigest`), so a large one or a slow mount blocks every answer. It predates this ticket for test modules.
 - A protected file named from configuration rather than from disk (an env file, from Vite's lowercase names; a setup file, as its config spells it) misses an on-disk spelling in another case on a case-insensitive file system, so a declared pattern can remove `.ENV.local` from the inputs. The fingerprint still reads it afresh, so only the event path is lost.
+
+#### Tech debt dispositions
+
+Worked at 18:12 to 18:22 against 0dddd5c, as a change of its own.
+
+- Fixed: the whole-value digest is one helper, `wholeDigest` (`inputs/input-inventory.ts`, formerly `textDigest`), called by `moduleDigest` and `digestOf` (`inputs/fingerprint.ts`) and `contentDigest` (`inputs/env-files.ts`); the streamed digests stay as they are.
+- Fixed: `protection`'s `protects` compares a listed file lower-cased on Windows (`caseComparable`, read per call as `vitest-edges.ts` `comparable` is), so a declared pattern no longer removes a `.ENV.local` that Vite opens as `.env.local`. Only env file names needed it: discovery names a listed test module or setup file by its on-disk case (`realpathSync.native` in `vitest/module-tests.ts` `realPath`).
+- Owned by 2.3p: `modifiedAt`'s missed edits (a replacement keeping its modification time, a link retargeted to an older file) are edits to a listed file inside the root, and 2.3p makes an event on one fail the job. Folding in the change time now would break the premise of D1898, D2160 and `lifecycle.test.ts`'s backdated module, which set times with `utimes`.
+- Documented: a held link whose target lies outside the consumer root is the known limit "a file outside the consumer root" in `docs/architecture.md`.
+- Deliberate: the three "discovered and reporting" filters answer three questions. `protection` refuses an unreported workspace, `workspaceEnvFiles` reports its env files unknown, and `reportedProjects` serves callers that run only after one of those two has refused.
+- Discussed with the orchestrator: synchronous whole reads at each composition.
 
 #### Test Coverage Gaps
 

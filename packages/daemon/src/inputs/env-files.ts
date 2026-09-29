@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -18,7 +17,7 @@ import type {
   EnvSource,
   ProjectSelectionFacts,
 } from "../vitest/selection-facts.js";
-import { DIGEST_ALGORITHM, DIGEST_ENCODING } from "./input-inventory.js";
+import { wholeDigest } from "./input-inventory.js";
 
 const ENV_FILE = ".env";
 const LOCAL_SUFFIX = ".local";
@@ -130,12 +129,7 @@ function readableKind(stats: Stats | undefined): EnvFileDigest | undefined {
 }
 
 function contentDigest(descriptor: number): EnvFileDigest {
-  return {
-    ok: true,
-    digest: createHash(DIGEST_ALGORITHM)
-      .update(readFileSync(descriptor))
-      .digest(DIGEST_ENCODING),
-  };
+  return { ok: true, digest: wholeDigest(readFileSync(descriptor)) };
 }
 
 function refusal(error: unknown): EnvFileDigest {

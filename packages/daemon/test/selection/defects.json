@@ -1431,8 +1431,8 @@
     "id": "D2130",
     "defect": "Only listed files are protected, so a new test module a workspace's include pattern matches stays a declared non-input and its change selects nothing.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "      files.has(path) || matchers.some((matches) => matches(path)),",
-    "new": "      files.has(path),"
+    "old": "      listed.has(caseComparable(path)) ||\n      matchers.some((matches) => matches(path)),",
+    "new": "      listed.has(caseComparable(path)),"
   },
   {
     "id": "D2131",

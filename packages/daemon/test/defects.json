@@ -7619,8 +7619,8 @@
     "id": "D3068",
     "defect": "An env file's digest does not depend on its content, so an edit that keeps it in place leaves its workspace's results current.",
     "file": "packages/daemon/src/inputs/env-files.ts",
-    "old": "      .update(readFileSync(descriptor))",
-    "new": "      .update(\"\")"
+    "old": "  return { ok: true, digest: wholeDigest(readFileSync(descriptor)) };",
+    "new": "  return { ok: true, digest: wholeDigest(\"\") };"
   },
   {
     "id": "D3069",
@@ -7754,5 +7754,12 @@
     "file": "packages/daemon/src/store/columns.ts",
     "old": "    mode: jsonText(value, \"mode\"),",
     "new": "    mode: String(jsonField(value, \"mode\")),"
+  },
+  {
+    "id": "D3093",
+    "defect": "On Windows a declared pattern removes an env file whose on-disk name differs in case from the name Vite opens, such as .ENV.local for .env.local, so its edits no longer raise the input revision.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  return process.platform === WINDOWS ? path.toLowerCase() : path;",
+    "new": "  return path;"
   }
 ]
