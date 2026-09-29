@@ -38,6 +38,7 @@ import type {
   ProjectSelectionFacts,
   ReportedAlias,
   SelectionFacts,
+  TestFilePatterns,
 } from "../src/vitest/selection-facts.js";
 import { inTempDir, linkedWorktree, mainCheckout, settle } from "./harness.js";
 
@@ -79,6 +80,11 @@ const VITE_ROOT_UNAWARE_VERSION = 3;
 const CRASH_UNAWARE_VERSION = 4;
 /** The schema version before each project's selection facts carried Vitest's spellings of its pattern directories. */
 const VITEST_SPELLING_UNAWARE_VERSION = 5;
+/** The schema version before each project's selection facts carried the directory links Vitest's crawl follows. */
+const CRAWLED_LINKS_UNAWARE_VERSION = 6;
+/** What a project's test file patterns lacked before Vitest's spellings were kept, the crawled links added later included. */
+const SPELLINGS_AND_LINKS_UNAWARE_FIELDS: readonly (keyof TestFilePatterns)[] =
+  ["vitestDirectory", "patternBases", "crawledLinks"];
 
 const WORKTREE_A: StoreScope = {
   projectIdentity: "/work/shop/.git",
@@ -296,12 +302,21 @@ const CART_PROJECT_FACTS: ProjectSelectionFacts = {
         directory: "packages/cart/src",
       },
     ],
+    crawledLinks: {
+      complete: true,
+      links: [
+        {
+          spelled: "/work/shop/packages/cart/src/shared",
+          directory: "packages/shared",
+        },
+      ],
+    },
     include: ["src/**/*.test.ts"],
     exclude: ["**/node_modules/**"],
     includeSource: ["src/**/*.ts"],
   },
 };
-/** A project with no setup files, global setup files or aliases, matching from the consumer root. */
+/** A project with no setup files, global setup files or aliases, matching from the consumer root, whose crawled links are not known. */
 const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
   projectName: "empty",
   viteRoot: ".",
@@ -312,6 +327,11 @@ const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
     directory: ".",
     vitestDirectory: "/work/shop",
     patternBases: [],
+    crawledLinks: {
+      complete: false,
+      reason:
+        "the walk below /work/shop follows more than 1000 directory links",
+    },
     include: [],
     exclude: [],
     includeSource: [],
@@ -657,10 +677,11 @@ function writeViteRootUnawareStore(
   return file;
 }
 
-/** Writes `DISCOVERY` and the runs through a store, then strips each stored project's spellings and takes the header back to `userVersion`, as a store from before the spellings were kept holds them. */
-function writeSpellingUnawareStore(
+/** Writes `DISCOVERY` and the runs through a store, then strips `unaware` from each stored project's test file patterns and takes the header back to `userVersion`, as a store from before those fields were kept holds them. */
+function writeFactsUnawareStore(
   stateDirectory: string,
   userVersion: number,
+  unaware: readonly (keyof TestFilePatterns)[],
   runs: readonly WorkspaceRun[] = [],
 ): string {
   withOpenStore(stateDirectory, (store) => {
@@ -681,15 +702,14 @@ function writeSpellingUnawareStore(
       const projects = JSON.parse(
         String(row["selection_facts"]),
       ) as ProjectSelectionFacts[];
-      const unspelled = projects.map((project) => {
-        const {
-          vitestDirectory: _vitestDirectory,
-          patternBases: _patternBases,
-          ...patterns
-        } = project.testFilePatterns;
+      const stripped = projects.map((project) => {
+        const patterns: Partial<TestFilePatterns> = {
+          ...project.testFilePatterns,
+        };
+        for (const field of unaware) delete patterns[field];
         return { ...project, testFilePatterns: patterns };
       });
-      update.run(JSON.stringify(unspelled), Number(row["rowid"]));
+      update.run(JSON.stringify(stripped), Number(row["rowid"]));
     }
     database.exec(`PRAGMA user_version = ${userVersion}`);
   });
@@ -703,7 +723,11 @@ function inSpellingUnawareStore(
   return inTempDir((dir) =>
     settle(() => {
       const stateDirectory = defaultStateDirectory(dir);
-      writeSpellingUnawareStore(stateDirectory, userVersion);
+      writeFactsUnawareStore(
+        stateDirectory,
+        userVersion,
+        SPELLINGS_AND_LINKS_UNAWARE_FIELDS,
+      );
       return withOpenStore(
         stateDirectory,
         (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
@@ -1532,7 +1556,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 6 once opened", async () => {
+  it("D1280: the store is at schema version 7 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1540,7 +1564,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(6);
+    expect(version).toBe(7);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -1712,6 +1736,38 @@ describe("storing each discovered workspace's selection facts", () => {
     ]);
   });
 
+  it("D2858: each project's crawled links, known with a link or not known with a reason, read back as written after the store is reopened", async () => {
+    const crawled = await acrossReopen(
+      (store) => {
+        store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      },
+      (store) =>
+        discoveredFacts(store)?.flatMap((facts) =>
+          facts.reported
+            ? facts.projects.map(
+                ({ testFilePatterns }) => testFilePatterns.crawledLinks,
+              )
+            : [],
+        ),
+    );
+    expect(crawled).toStrictEqual([
+      {
+        complete: true,
+        links: [
+          {
+            spelled: "/work/shop/packages/cart/src/shared",
+            directory: "packages/shared",
+          },
+        ],
+      },
+      {
+        complete: false,
+        reason:
+          "the walk below /work/shop follows more than 1000 directory links",
+      },
+    ]);
+  });
+
   it("D2828: a stored project with no pattern spellings is refused as unreadable, never read with none", async () => {
     const { patternBases: _patternBases, ...withoutPatternBases } =
       CART_PROJECT_FACTS.testFilePatterns;
@@ -1720,6 +1776,17 @@ describe("storing each discovered workspace's selection facts", () => {
     ]);
     expect(reason).toContain(
       "The store holds an unreadable JSON field patternBases",
+    );
+  });
+
+  it("D2896: a stored project with no crawled links is refused as unreadable, never read as complete with none", async () => {
+    const { crawledLinks: _crawledLinks, ...withoutCrawledLinks } =
+      CART_PROJECT_FACTS.testFilePatterns;
+    const reason = await readingStoredFacts([
+      { ...CART_PROJECT_FACTS, testFilePatterns: withoutCrawledLinks },
+    ]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field crawledLinks",
     );
   });
 
@@ -1819,7 +1886,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 6 once opened", async () => {
+  it("D2097: the store is at schema version 7 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1830,7 +1897,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(6);
+    expect(version).toBe(7);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -1892,7 +1959,7 @@ describe("opening a store written before each project's Vite root", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2846: a version 3 store opens at version 6, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
+  it("D2846: a version 3 store opens at version 7, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1906,12 +1973,12 @@ describe("opening a store written before each project's Vite root", () => {
         };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 6, facts: [SELECTION_FACTS] });
+    expect(outcome).toStrictEqual({ version: 7, facts: [SELECTION_FACTS] });
   });
 });
 
 describe("opening a store written before crashed runs", () => {
-  it("D2791: a version 4 store opens at version 6, every run it held unchanged", async () => {
+  it("D2791: a version 4 store opens at version 7, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1929,7 +1996,7 @@ describe("opening a store written before crashed runs", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 6, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 7, runs: [RAN_RUN, FAILED_RUN] });
   });
 
   it("D2829: each discovered workspace of a version 4 store reads back as not reporting selection facts, and the rest of the discovery unchanged", async () => {
@@ -1937,7 +2004,7 @@ describe("opening a store written before crashed runs", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2792: a new store is created at schema version 6", async () => {
+  it("D2792: a new store is created at schema version 7", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1945,7 +2012,7 @@ describe("opening a store written before crashed runs", () => {
         return schemaVersionOf(join(stateDirectory, STORE_FILE_NAME));
       }),
     );
-    expect(version).toBe(6);
+    expect(version).toBe(7);
   });
 });
 
@@ -1957,13 +2024,14 @@ describe("opening a store written before Vitest's spellings of the pattern direc
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2831: a version 5 store opens at version 6, every run it held unchanged", async () => {
+  it("D2831: a version 5 store opens at version 7, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
-        const file = writeSpellingUnawareStore(
+        const file = writeFactsUnawareStore(
           stateDirectory,
           VITEST_SPELLING_UNAWARE_VERSION,
+          SPELLINGS_AND_LINKS_UNAWARE_FIELDS,
           [RAN_RUN, FAILED_RUN],
         );
         const runs = withOpenStore(stateDirectory, (store) =>
@@ -1972,7 +2040,31 @@ describe("opening a store written before Vitest's spellings of the pattern direc
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 6, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 7, runs: [RAN_RUN, FAILED_RUN] });
+  });
+});
+
+describe("opening a store written before the directory links Vitest's crawl follows", () => {
+  it("D2859: a version 6 store opens at version 7, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeFactsUnawareStore(
+          stateDirectory,
+          CRAWLED_LINKS_UNAWARE_VERSION,
+          ["crawledLinks"],
+        );
+        const discovery = withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+        return { version: schemaVersionOf(file), discovery };
+      }),
+    );
+    expect(outcome).toStrictEqual({
+      version: 7,
+      discovery: withoutReportedFacts(DISCOVERY),
+    });
   });
 });
 

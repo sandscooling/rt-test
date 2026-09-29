@@ -1,10 +1,7 @@
 import { resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  patternBase,
-  protection,
-  type Protection,
-} from "../src/inputs/protection.js";
+import { protection, type Protection } from "../src/inputs/protection.js";
+import { patternBase } from "../src/inputs/vitest-glob.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
@@ -359,6 +356,26 @@ describe("files Vitest's glob finds through another spelling of the pattern dire
     ).toStrictEqual({ "src/a.test.ts": true, "src/b.test.ts": false });
   });
 
+  it("D2851: a file Vitest's crawl reaches only through a directory link it follows below the crawl root is protected", () => {
+    expect(
+      protects(
+        protectionFor({
+          crawledLinks: {
+            complete: true,
+            links: [
+              {
+                spelled: `${ROOT_PATTERN_PREFIX}/src/linked`,
+                directory: "other",
+              },
+            ],
+          },
+          include: ["src/**/*.test.ts"],
+        }),
+        ["other/x.test.ts", "elsewhere/y.test.ts"],
+      ),
+    ).toStrictEqual({ "other/x.test.ts": true, "elsewhere/y.test.ts": false });
+  });
+
   it("D2807: two discoveries that differ only in Vitest's spelling of the pattern directory, or only in a pattern's own spelling, have different pattern keys", () => {
     const keyOf = (facts: FactsCase): string => {
       const value = protectionFor(facts);
@@ -456,6 +473,24 @@ describe("when no declared pattern applies", () => {
       ),
     ).toBe(
       `${PATTERNS_DO_NOT_APPLY}the discovery in effect does not report which files they may not remove for the workspace packages/b`,
+    );
+  });
+
+  it("D2855: a project whose crawled links are not known stops patterns applying, with a reason naming the project and why the links are not known", () => {
+    expect(
+      protects(
+        protectionFor({
+          crawledLinks: {
+            complete: false,
+            reason:
+              "the walk below /consumer/src follows more than 1000 directory links",
+          },
+          include: ["src/**/*.test.ts"],
+        }),
+        ["src/a.test.ts"],
+      ),
+    ).toBe(
+      `${PATTERNS_DO_NOT_APPLY}the directory links Vitest's crawl follows are not known for the project "unit": the walk below /consumer/src follows more than 1000 directory links`,
     );
   });
 

@@ -7,9 +7,10 @@ import {
   STRING_FIND,
   STRING_FIND_FLAGS,
   type AliasFindKind,
-  type PatternBase,
+  type CrawledLinks,
   type ProjectSelectionFacts,
   type ReportedAlias,
+  type SpelledDirectory,
   type TestFilePatterns,
 } from "../vitest/selection-facts.js";
 import type {
@@ -190,7 +191,7 @@ export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
     setupFiles: jsonStrings(value, "setupFiles"),
     globalSetupFiles: jsonStrings(value, "globalSetupFiles"),
     aliases: jsonArray(value, "aliases", reportedAlias),
-    testFilePatterns: testFilePatterns(jsonField(value, "testFilePatterns")),
+    testFilePatterns: testFilePatterns(jsonRecord(value, "testFilePatterns")),
   };
 }
 
@@ -222,14 +223,21 @@ function testFilePatterns(value: unknown): TestFilePatterns {
   return {
     directory: jsonText(value, "directory"),
     vitestDirectory: jsonText(value, "vitestDirectory"),
-    patternBases: jsonArray(value, "patternBases", patternBase),
+    patternBases: jsonArray(value, "patternBases", spelledDirectory),
+    crawledLinks: crawledLinks(jsonRecord(value, "crawledLinks")),
     include: jsonStrings(value, "include"),
     exclude: jsonStrings(value, "exclude"),
     includeSource: jsonStrings(value, "includeSource"),
   };
 }
 
-function patternBase(value: unknown): PatternBase {
+function crawledLinks(value: unknown): CrawledLinks {
+  return jsonBoolean(value, "complete")
+    ? { complete: true, links: jsonArray(value, "links", spelledDirectory) }
+    : { complete: false, reason: jsonText(value, "reason") };
+}
+
+function spelledDirectory(value: unknown): SpelledDirectory {
   return {
     spelled: jsonText(value, "spelled"),
     directory: jsonText(value, "directory"),
@@ -275,6 +283,12 @@ function jsonArray<T>(
 function jsonStrings(value: unknown, key: string): string[] {
   const field = jsonField(value, key);
   if (isStringArray(field)) return field;
+  throw unreadable(`JSON field ${key}`, value);
+}
+
+function jsonRecord(value: unknown, key: string): Record<string, unknown> {
+  const field = jsonField(value, key);
+  if (isRecord(field)) return field;
   throw unreadable(`JSON field ${key}`, value);
 }
 

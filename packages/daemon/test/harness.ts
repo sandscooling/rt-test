@@ -40,7 +40,8 @@ import {
   type WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
 import type {
-  PatternBase,
+  CrawledLinks,
+  SpelledDirectory,
   ProjectSelectionFacts,
   ReportedAlias,
   SelectionFacts,
@@ -356,7 +357,8 @@ export const HAND_BUILT_ROOT = resolve(sep, "consumer");
 /**
  * One project's selection facts; a list left out is empty, the pattern directory is the consumer root, and the Vite
  * root is the pattern directory, as Vite roots a project at its config's directory. Vitest spells the pattern
- * directory as its real path under `root`, `/`-separated, as it does for a root started by its real path.
+ * directory as its real path under `root`, `/`-separated, as it does for a root started by its real path. Crawled
+ * links left out are known, and there are none.
  */
 export interface FactsCase {
   readonly projectName?: string;
@@ -367,7 +369,8 @@ export interface FactsCase {
   readonly root?: string;
   readonly directory?: string;
   readonly vitestDirectory?: string;
-  readonly patternBases?: readonly PatternBase[];
+  readonly patternBases?: readonly SpelledDirectory[];
+  readonly crawledLinks?: CrawledLinks;
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly includeSource?: readonly string[];
@@ -387,6 +390,7 @@ export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
         facts.vitestDirectory ??
         slashed(resolve(facts.root ?? HAND_BUILT_ROOT, directory)),
       patternBases: facts.patternBases ?? [],
+      crawledLinks: facts.crawledLinks ?? { complete: true, links: [] },
       include: facts.include ?? [],
       exclude: facts.exclude ?? [],
       includeSource: facts.includeSource ?? [],

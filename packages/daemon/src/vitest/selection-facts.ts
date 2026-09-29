@@ -1,6 +1,7 @@
 import type { TestProject } from "vitest/node";
 import { testModuleFile } from "../inputs/non-inputs.js";
-import { globCwd, patternBase } from "../inputs/protection.js";
+import { crawledLinks } from "../inputs/crawl-links.js";
+import { globCwd, patternBase } from "../inputs/vitest-glob.js";
 import {
   SNAPSHOT_GUARD_FILE,
   usesBrowserMode,
@@ -23,10 +24,10 @@ export interface ReportedAlias {
 }
 
 /**
- * A directory as a test file pattern spells it, or the file a pattern with no glob segment names, which a link, a
- * `subst` drive or a short name can make differ.
+ * A directory as a test file pattern or Vitest's crawl spells it, or the file a pattern with no glob segment names,
+ * which a link, a `subst` drive or a short name can make differ.
  */
-export interface PatternBase {
+export interface SpelledDirectory {
   /** Absolute and `/`-separated, as Vitest's glob names the files it crawls to below it. */
   readonly spelled: string;
   /** Where that spelling resolves. */
@@ -34,9 +35,18 @@ export interface PatternBase {
 }
 
 /**
+ * Each directory link found below the project's pattern bases by a walk that follows at least every link Vitest's
+ * crawl follows, or why they are not known.
+ */
+export type CrawledLinks =
+  | { readonly complete: true; readonly links: readonly SpelledDirectory[] }
+  | { readonly complete: false; readonly reason: string };
+
+/**
  * Every path in a project's selection facts is `/`-separated and named as a test module's path is: relative to the
  * consumer root, climbing with `..` for a file outside it, and absolute for a file on another Windows drive. A
- * spelling Vitest's glob uses, `vitestDirectory` and each pattern base's `spelled`, is always absolute.
+ * spelling Vitest's glob uses, `vitestDirectory` and each pattern base's or crawled link's `spelled`, is always
+ * absolute.
  */
 export interface TestFilePatterns {
   /** Where the patterns match from, the consumer root being `.`. */
@@ -44,7 +54,8 @@ export interface TestFilePatterns {
   /** `directory` as Vitest's glob spells it, which differs when the root was started through another spelling. */
   readonly vitestDirectory: string;
   /** Each `include` and `includeSource` pattern's base, as `patternBase` finds it, other than `vitestDirectory`. */
-  readonly patternBases: readonly PatternBase[];
+  readonly patternBases: readonly SpelledDirectory[];
+  readonly crawledLinks: CrawledLinks;
   readonly include: readonly string[];
   readonly exclude: readonly string[];
   readonly includeSource: readonly string[];
@@ -74,24 +85,33 @@ export const STRING_FIND_FLAGS = "";
 
 type ViteAlias = TestProject["vite"]["config"]["resolve"]["alias"][number];
 
-/** Reads resolved config only, and carries nothing the executor's JSON channel would lose. */
-export function selectionFacts(session: WorkspaceSession): SelectionFacts {
+/**
+ * Reads resolved config, and the directories each project's crawl passes through for the links it follows. Carries
+ * nothing the executor's JSON channel would lose.
+ */
+export async function selectionFacts(
+  session: WorkspaceSession,
+  signal: AbortSignal,
+): Promise<SelectionFacts> {
   const rootGlobalSetup = asList(
     session.instance.getRootProject().config.globalSetup,
   );
-  return {
-    reported: true,
-    projects: session.instance.projects
-      .filter((project) => !usesBrowserMode(project))
-      .map((project) => projectFacts(session, project, rootGlobalSetup)),
-  };
+  const projects: ProjectSelectionFacts[] = [];
+  for (const project of session.instance.projects) {
+    if (usesBrowserMode(project)) continue;
+    projects.push(
+      await projectFacts(session, project, rootGlobalSetup, signal),
+    );
+  }
+  return { reported: true, projects };
 }
 
-function projectFacts(
+async function projectFacts(
   session: WorkspaceSession,
   project: TestProject,
   rootGlobalSetup: readonly string[],
-): ProjectSelectionFacts {
+  signal: AbortSignal,
+): Promise<ProjectSelectionFacts> {
   const { config } = project;
   const rootRelative = (path: string): string => {
     const location = session.locate(project.name, path);
@@ -118,6 +138,15 @@ function projectFacts(
         vitestDirectory,
         rootRelative,
       ),
+      crawledLinks: await crawledLinks(
+        {
+          vitestDirectory,
+          globbed: [config.include, includeSource],
+          exclude: config.exclude,
+          rootRelative,
+        },
+        signal,
+      ),
       include: [...config.include],
       exclude: [...config.exclude],
       includeSource: [...includeSource],
@@ -129,7 +158,7 @@ function patternBases(
   patterns: readonly string[],
   vitestDirectory: string,
   rootRelative: (path: string) => string,
-): PatternBase[] {
+): SpelledDirectory[] {
   const spellings = new Set<string>();
   for (const pattern of patterns) {
     const base = patternBase(pattern, vitestDirectory);
