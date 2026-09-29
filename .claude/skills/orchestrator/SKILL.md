@@ -106,7 +106,7 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 
 **Heavy runs take turns through the run lease, not through you**: `node scripts/run-lease.mjs status` shows who holds it, and every gate command below runs inside its wrapper.
 
-**Members run targeted gates**: the tests, lint, and typecheck for what they touched, and a by-id proof of their named defects (`_agent-docs/crew.md` § Gates). **`bun run check` is yours**, because it reads every lane's code at once, and it is the only run of the whole defect catalog.
+**Members run targeted gates**: the tests, lint, and typecheck for what they touched, and a by-id proof of their named defects (`_agent-docs/crew.md` § Gates). **`bun run check` is yours**, because it reads every lane's code at once. It re-proves no named defect: its `check:defects` step requires each `D###` test to have one record and each anchor to match once, without running a test, and a lane proves the defects it writes or touches, once. Run the whole catalog (`bun run test:defects`) only when the owner asks.
 
 **Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run, because the review can still change the tree. Run early only when a member is blocked on a red it cannot place. A run you already made still counts if nothing it read has changed since its start. **A review's Step 9 debt commit rides with the next lane's gate and push**, since a debt round is proven by its own targeted gates; gate it alone only when it fixes false freshness or a setup failure counted as a detection.
 
@@ -125,10 +125,10 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 **Gate on Linux before every push, under Node 24 and Node 22**: a path, link, or process behavior can pass on Windows and fail on Linux, and Node 22 is the oldest line the project supports. These local gates are the project's only pre-push validation; it runs no hosted CI. WSL Ubuntu holds a clone at `~/rt-test` whose `origin` is this checkout, so it can check out a commit not yet pushed, and Node 24 at `~/.local/node` and the latest Node 22 at `~/.local/node22`, each an official tarball. Commit the lane locally after the Windows gate passes, then run in the background:
 
 ```
-node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- wsl.exe -e bash -lc 'cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; export TMPDIR="$HOME/.rt-test-runs/wsl-$v-$$"; mkdir -p "$TMPDIR"; date; node --version; bun install --frozen-lockfile; if [ "$v" = node ]; then bun run check; else bun run format:check && bun run lint && bun run typecheck && bun run check:planning && bun run rules:check && bun run check:skills && bun run test:run && bun run build; fi; code=$?; [ "$code" -eq 0 ] && rm -rf "$TMPDIR"; echo "CHECK_EXIT_$v:$code $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
+node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- wsl.exe -e bash -lc 'cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; export TMPDIR="$HOME/.rt-test-runs/wsl-$v-$$"; mkdir -p "$TMPDIR"; date; node --version; bun install --frozen-lockfile; bun run check; code=$?; [ "$code" -eq 0 ] && rm -rf "$TMPDIR"; echo "CHECK_EXIT_$v:$code $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
 ```
 
-The Node 22 leg runs every step of `bun run check` except `test:defects`: whether a test detects its named defect is settled by the Windows and Node 24 runs, and the full catalog costs about 15 minutes per run. When the `check` script gains or reorders a step, change the Node 22 list with it.
+Both legs run the same `bun run check`.
 
 Push only when the Windows log reads `CHECK_EXIT:0` and the Linux log reads both `CHECK_EXIT_node:0 v24.…` and `CHECK_EXIT_node22:0 v22.…`; the version on each marker proves which Node ran it. A Linux-only red goes to the lane like any other red, and its fix lands as a further commit before the push.
 
