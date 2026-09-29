@@ -1,10 +1,7 @@
 import { resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  patternBase,
-  protection,
-  type Protection,
-} from "../src/inputs/protection.js";
+import { protection, type Protection } from "../src/inputs/protection.js";
+import { patternBase } from "../src/inputs/vitest-glob.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,

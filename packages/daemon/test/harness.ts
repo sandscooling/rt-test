@@ -41,7 +41,7 @@ import {
 } from "../src/vitest/run-workspace.js";
 import type {
   CrawledLinks,
-  PatternBase,
+  SpelledDirectory,
   ProjectSelectionFacts,
   ReportedAlias,
   SelectionFacts,
@@ -369,7 +369,7 @@ export interface FactsCase {
   readonly root?: string;
   readonly directory?: string;
   readonly vitestDirectory?: string;
-  readonly patternBases?: readonly PatternBase[];
+  readonly patternBases?: readonly SpelledDirectory[];
   readonly crawledLinks?: CrawledLinks;
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];

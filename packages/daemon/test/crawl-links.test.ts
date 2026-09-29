@@ -1,11 +1,17 @@
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { crawledLinks } from "../src/inputs/crawl-links.js";
 import { testModuleFile } from "../src/inputs/non-inputs.js";
-import { globCwd, protection } from "../src/inputs/protection.js";
-import { relativePosixPath, ROOT_PATH } from "../src/vitest/find-workspaces.js";
-import type { CrawledLinks } from "../src/vitest/selection-facts.js";
+import { protection } from "../src/inputs/protection.js";
+import { globCwd, patternBase } from "../src/inputs/vitest-glob.js";
+import { ROOT_PATH } from "../src/vitest/find-workspaces.js";
+import { moduleLocator } from "../src/vitest/module-tests.js";
+import type {
+  CrawledLinks,
+  SpelledDirectory,
+} from "../src/vitest/selection-facts.js";
 import {
   discoveredWorkspace,
   inTempDir,
@@ -27,6 +33,148 @@ const OVER_PICOMATCH_LIMIT = 70_000;
 const RUNAWAY_WALK_TIMEOUT_MS = 60_000;
 /** One more directory link than a crawl's walk follows before its links are not known. */
 const OVER_LINK_BOUND = 1_001;
+/** Vitest's default exclude. */
+const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/.git/**"];
+
+type Glob = (
+  patterns: readonly string[],
+  options: {
+    readonly dot: boolean;
+    readonly cwd: string;
+    readonly ignore: readonly string[];
+    readonly expandDirectories: boolean;
+  },
+) => Promise<string[]>;
+
+/** The tinyglobby Vitest globs test files with, reached through Vitest's own install, since the daemon does not depend on it. */
+const vitestGlob = (
+  createRequire(createRequire(import.meta.url).resolve("vitest/package.json"))(
+    "tinyglobby",
+  ) as { readonly glob: Glob }
+).glob;
+
+/** A layout with its patterns, and a file Vitest's glob reaches in it only through directory links. */
+interface Differential {
+  readonly layout: Layout;
+  readonly patterns: Patterns;
+  /** Relative to the consumer root, by its real path. */
+  readonly reachedThroughLinks: string;
+}
+
+const DIFFERENTIALS: Readonly<Record<string, Differential>> = {
+  "a link back to the root beside nested links": {
+    layout: {
+      directories: ["root/src/a", "root/other/deep", "root/third"],
+      files: [
+        "root/src/a/own.test.ts",
+        "root/other/x.test.ts",
+        "root/other/deep/y.test.ts",
+        "root/third/z.test.ts",
+      ],
+      links: [
+        ["root/src/linked", "root/other"],
+        ["root/other/tolink", "root/third"],
+        ["root/src/up", "root"],
+      ],
+    },
+    patterns: {
+      include: ["src/**/*.test.ts"],
+      exclude: [...DEFAULT_EXCLUDE, "**/deep/**"],
+    },
+    reachedThroughLinks: "third/z.test.ts",
+  },
+  "mutual sibling links": {
+    layout: {
+      directories: ["root/a", "root/b"],
+      files: ["root/a/a.test.ts", "root/b/b.test.ts"],
+      links: [
+        ["root/a/l1", "root/b"],
+        ["root/b/l2", "root/a"],
+      ],
+    },
+    patterns: { include: ["a/**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "b/b.test.ts",
+  },
+  "targets whose real paths share a prefix": {
+    layout: {
+      directories: ["root/src", "root/other/inner", "root/other2"],
+      files: [
+        "root/other/o.test.ts",
+        "root/other2/p.test.ts",
+        "root/other/inner/i.test.ts",
+      ],
+      links: [
+        ["root/src/l", "root/other"],
+        ["root/other/l2", "root/other2"],
+        ["root/other2/l3", "root/other/inner"],
+      ],
+    },
+    patterns: { include: ["src/**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "other/inner/i.test.ts",
+  },
+  "the default include from the root, with node_modules": {
+    layout: {
+      directories: ["root/pkg/src", "root/shared", "root/node_modules/dep"],
+      files: ["root/shared/s.test.ts", "root/node_modules/dep/n.test.ts"],
+      links: [
+        ["root/pkg/src/shared", "root/shared"],
+        ["root/pkg/src/dep", "root/node_modules/dep"],
+        ["root/shared/back", "root/pkg"],
+      ],
+    },
+    patterns: { include: ["**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "node_modules/dep/n.test.ts",
+  },
+  "a nested link as the only route, through a link that leaves the root": {
+    layout: {
+      directories: ["root/src", "other", "root/third"],
+      files: ["root/third/z.test.ts"],
+      links: [
+        ["root/src/l1", "other"],
+        ["other/l2", "root/third"],
+      ],
+    },
+    patterns: { include: ["src/**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "third/z.test.ts",
+  },
+  "a dangling link beside a live one": {
+    layout: {
+      directories: ["root/src", "root/other", "root/gone"],
+      files: ["root/other/x.test.ts"],
+      links: [
+        ["root/src/dead", "root/gone"],
+        ["root/src/live", "root/other"],
+      ],
+      removed: ["root/gone"],
+    },
+    patterns: { include: ["src/**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "other/x.test.ts",
+  },
+  "a pattern base that is itself a link, with a link below it": {
+    layout: {
+      directories: ["root/real/sub", "root/far"],
+      files: ["root/far/f.test.ts", "root/real/sub/r.test.ts"],
+      links: [
+        ["root/via", "root/real"],
+        ["root/real/sub/far", "root/far"],
+      ],
+    },
+    patterns: { include: ["via/**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "far/f.test.ts",
+  },
+  "sibling targets whose names differ only in their last character": {
+    layout: {
+      directories: ["root/src", "root/a1", "root/a2"],
+      files: ["root/a2/z.test.ts"],
+      links: [
+        ["root/src/l1", "root/a1"],
+        ["root/a1/l2", "root/a2"],
+      ],
+    },
+    patterns: { include: ["src/**/*.test.ts"], exclude: DEFAULT_EXCLUDE },
+    reachedThroughLinks: "a2/z.test.ts",
+  },
+};
 
 /** Every path is relative to the test's temp directory. */
 interface Layout {
@@ -71,6 +219,15 @@ function writeLayout(dir: string, layout: Layout, kind: LinkKind): string {
   return join(dir, CONSUMER_ROOT);
 }
 
+/** Names a path relative to the consumer root by its real path, as discovery names the root workspace's paths. */
+function rootRelativeTo(root: string): (path: string) => string {
+  const locate = moduleLocator({ path: ROOT_PATH, directory: root });
+  return (path) => {
+    const location = locate("unit", path);
+    return testModuleFile(location.workspacePath, location.modulePath);
+  };
+}
+
 /** The walk of the project's crawls, naming a real path relative to the consumer root as discovery names a module. */
 function walk(
   root: string,
@@ -79,15 +236,34 @@ function walk(
 ): Promise<CrawledLinks> {
   return crawledLinks(
     {
-      projectName: "unit",
       vitestDirectory: globCwd(root),
       globbed: [patterns.include ?? [], patterns.includeSource ?? []],
       exclude: patterns.exclude ?? [],
-      rootRelative: (path) =>
-        testModuleFile(ROOT_PATH, relativePosixPath(root, path)),
+      rootRelative: rootRelativeTo(root),
     },
     signal,
   );
+}
+
+/** Each pattern's base other than Vitest's directory, named as discovery reports it. */
+function reportedPatternBases(
+  root: string,
+  patterns: Patterns,
+): SpelledDirectory[] {
+  const cwd = globCwd(root);
+  const rootRelative = rootRelativeTo(root);
+  const bases = new Set<string>();
+  for (const pattern of [
+    ...(patterns.include ?? []),
+    ...(patterns.includeSource ?? []),
+  ]) {
+    const base = patternBase(pattern, cwd);
+    if (base !== undefined && base !== cwd) bases.add(base);
+  }
+  return [...bases].map((spelled) => ({
+    spelled,
+    directory: rootRelative(spelled),
+  }));
 }
 
 /** The walk with its links in order of their spelling, relative to the crawl's `cwd`, since a directory's entries come in no fixed order. */
@@ -122,7 +298,14 @@ async function protectedThroughWalk(
       workspaces: [
         discoveredWorkspace({ path: ROOT_PATH, directory: root }, [], {
           reported: true,
-          projects: [projectFacts({ ...patterns, root, crawledLinks: links })],
+          projects: [
+            projectFacts({
+              ...patterns,
+              root,
+              patternBases: reportedPatternBases(root, patterns),
+              crawledLinks: links,
+            }),
+          ],
         }),
       ],
       notRead: [],
@@ -132,6 +315,57 @@ async function protectedThroughWalk(
   if (!value.applies) return value.reason;
   return Object.fromEntries(paths.map((path) => [path, value.protects(path)]));
 }
+
+/**
+ * Writes the layout, globs its include patterns as Vitest does, and names each file found by its real path from the
+ * consumer root: whether the glob reached the file it reaches only through links, and which files a real walk leaves
+ * unprotected, or why no pattern applies.
+ */
+async function unprotectedVitestFinds(
+  dir: string,
+  differential: Differential,
+): Promise<{ readonly reached: boolean; readonly unprotected: unknown }> {
+  const root = writeLayout(dir, differential.layout, JUNCTION);
+  const found = await vitestGlob(differential.patterns.include ?? [], {
+    dot: true,
+    cwd: globCwd(root),
+    ignore: differential.patterns.exclude ?? [],
+    expandDirectories: false,
+  });
+  const rootRelative = rootRelativeTo(root);
+  const files = found.map((file) => rootRelative(join(root, file)));
+  const protectedPaths = await protectedThroughWalk(
+    root,
+    differential.patterns,
+    files,
+  );
+  return {
+    reached: files.includes(differential.reachedThroughLinks),
+    unprotected:
+      typeof protectedPaths === "string"
+        ? protectedPaths
+        : files.filter((file) => !protectedPaths[file]),
+  };
+}
+
+describe("against the glob Vitest uses", () => {
+  it("D2901: every file Vitest's own glob finds through directory links is protected through the walk, over layouts where fdir's cycle test decides which links it follows", async () => {
+    const outcomes: Record<string, unknown> = {};
+    for (const [name, differential] of Object.entries(DIFFERENTIALS)) {
+      outcomes[name] = await inTempDir((dir) =>
+        unprotectedVitestFinds(dir, differential),
+      );
+    }
+    expect(outcomes).toStrictEqual(
+      Object.fromEntries(
+        Object.keys(DIFFERENTIALS).map((name) => [
+          name,
+          { reached: true, unprotected: [] },
+        ]),
+      ),
+    );
+  });
+});
 
 describe("the directory links Vitest's crawl follows", () => {
   it("D2850: a test file reached only through a link inside a followed link that leaves the consumer root is protected", async () => {

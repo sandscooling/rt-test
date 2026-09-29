@@ -1,7 +1,7 @@
 import type { TestProject } from "vitest/node";
 import { testModuleFile } from "../inputs/non-inputs.js";
 import { crawledLinks } from "../inputs/crawl-links.js";
-import { globCwd, patternBase } from "../inputs/protection.js";
+import { globCwd, patternBase } from "../inputs/vitest-glob.js";
 import {
   SNAPSHOT_GUARD_FILE,
   usesBrowserMode,
@@ -27,7 +27,7 @@ export interface ReportedAlias {
  * A directory as a test file pattern or Vitest's crawl spells it, or the file a pattern with no glob segment names,
  * which a link, a `subst` drive or a short name can make differ.
  */
-export interface PatternBase {
+export interface SpelledDirectory {
   /** Absolute and `/`-separated, as Vitest's glob names the files it crawls to below it. */
   readonly spelled: string;
   /** Where that spelling resolves. */
@@ -39,7 +39,7 @@ export interface PatternBase {
  * crawl follows, or why they are not known.
  */
 export type CrawledLinks =
-  | { readonly complete: true; readonly links: readonly PatternBase[] }
+  | { readonly complete: true; readonly links: readonly SpelledDirectory[] }
   | { readonly complete: false; readonly reason: string };
 
 /**
@@ -54,7 +54,7 @@ export interface TestFilePatterns {
   /** `directory` as Vitest's glob spells it, which differs when the root was started through another spelling. */
   readonly vitestDirectory: string;
   /** Each `include` and `includeSource` pattern's base, as `patternBase` finds it, other than `vitestDirectory`. */
-  readonly patternBases: readonly PatternBase[];
+  readonly patternBases: readonly SpelledDirectory[];
   readonly crawledLinks: CrawledLinks;
   readonly include: readonly string[];
   readonly exclude: readonly string[];
@@ -140,7 +140,6 @@ async function projectFacts(
       ),
       crawledLinks: await crawledLinks(
         {
-          projectName: project.name,
           vitestDirectory,
           globbed: [config.include, includeSource],
           exclude: config.exclude,
@@ -159,7 +158,7 @@ function patternBases(
   patterns: readonly string[],
   vitestDirectory: string,
   rootRelative: (path: string) => string,
-): PatternBase[] {
+): SpelledDirectory[] {
   const spellings = new Set<string>();
   for (const pattern of patterns) {
     const base = patternBase(pattern, vitestDirectory);

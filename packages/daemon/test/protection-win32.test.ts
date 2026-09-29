@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { patternBase, protection } from "../src/inputs/protection.js";
+import { protection } from "../src/inputs/protection.js";
+import { patternBase } from "../src/inputs/vitest-glob.js";
 import type { TestDiscovery } from "../src/vitest/discover-tests.js";
 import type { TestFilePatterns } from "../src/vitest/selection-facts.js";
 import { onPlatform } from "./on-platform.js";

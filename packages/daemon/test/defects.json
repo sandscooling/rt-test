@@ -3964,56 +3964,56 @@
   {
     "id": "D2132",
     "defect": "The test file patterns are matched without dot names, so a new test module under a directory such as .storybook, which Vitest's glob finds, stays a declared non-input.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  dot: true,\n  nobrace",
     "new": "  dot: false,\n  nobrace"
   },
   {
     "id": "D2133",
     "defect": "The test file patterns are matched without regard to case, so a file Vitest's glob would not find is protected as a test module.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  nocase: false,",
     "new": "  nocase: true,"
   },
   {
     "id": "D2134",
     "defect": "A file an exclude pattern matches is protected whenever an include pattern matches it, though Vitest's glob never finds it.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "      !ignored(path) &&\n",
     "new": ""
   },
   {
     "id": "D2135",
     "defect": "A directory an exclude pattern matches is not pruned, so a file inside it that an include pattern matches is protected though Vitest's glob never crawls there.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "      !parentDirectories(path).some(",
     "new": "      !parentDirectories(\"\").some("
   },
   {
     "id": "D2136",
     "defect": "An excluded directory name also prunes the directories the glob's crawl starts from, so a test module under e2e/ is hidden by the exclude **/e2e though Vitest's glob finds it.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "          posix.join(cwd, directory).startsWith(below) && ignored(directory),",
     "new": "          ignored(directory),"
   },
   {
     "id": "D2137",
     "defect": "An absolute include pattern is matched as written against a path relative to the pattern directory, so it protects nothing.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    ? posix.relative(escapedCwd, result)",
     "new": "    ? result"
   },
   {
     "id": "D2138",
     "defect": "A leading climb that re-enters the pattern directory by name is kept, so ../a/*.test.ts from packages/a protects none of the test modules Vitest's glob finds there.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  if (parentDirectory !== undefined) {\n    result = collapseClimb(",
     "new": "  if (parentDirectory === \"\") {\n    result = collapseClimb("
   },
   {
     "id": "D2139",
     "defect": "A climbing include pattern leaves the crawl's start at the pattern directory, so an excluded directory outside it is not pruned and a file under it is protected though Vitest's glob never crawls there.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    crawl.root = nonDriveRelative(potentialRoot);\n",
     "new": ""
   },
@@ -4027,35 +4027,35 @@
   {
     "id": "D2141",
     "defect": "An include pattern beginning with ! is dropped instead of excluding what it matches, so a file Vitest's glob ignores is protected.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "      sorted.push({ written: pattern, pattern: rest, isIgnore: true });\n",
     "new": ""
   },
   {
     "id": "D2142",
     "defect": "An exclude pattern beginning with ! is compiled as a negation, so it excludes every file it does not name and protects none of them, though Vitest's glob drops it.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    if (pattern !== \"\" && !isNegated(pattern)) {",
     "new": "    if (pattern !== \"\") {"
   },
   {
     "id": "D2143",
     "defect": "An empty include pattern is not skipped but normalized to \".\", which resets the glob's crawl start to the pattern directory, so an excluded name prunes the directory the other patterns start from and hides a test module Vitest's glob finds.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    if (pattern === \"\") continue;\n",
     "new": ""
   },
   {
     "id": "D2144",
     "defect": "The pattern directory is escaped as on Windows whatever the platform, so on Linux a climb back into a directory whose name holds * is collapsed, protecting a file Vitest's glob does not find and none it does.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    process.platform === WINDOWS\n",
     "new": "    true\n"
   },
   {
     "id": "D2145",
     "defect": "A pattern picomatch refuses throws out of the producer instead of stopping patterns applying with a reason.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    } catch (error) {\n      return {\n        ok: false,",
     "new": "    } catch (error) {\n      if (error) throw error;\n      return {\n        ok: false,"
   },
@@ -4083,14 +4083,14 @@
   {
     "id": "D2158",
     "defect": "On Windows a path is matched in its on-disk case, so a new test module under Src/ stays hidden by a declared pattern though Vitest's glob of src/** opens Src and finds it.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "      const path = respell(onDisk);",
     "new": "      const path = onDisk;"
   },
   {
     "id": "D2161",
     "defect": "The crawl root's directories match in any case on every platform, so on Linux a file under Src/ is protected though Vitest's glob of src/** never opens Src.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  if (process.platform !== WINDOWS || !crawlRoot.startsWith(prefix)) {",
     "new": "  if (!crawlRoot.startsWith(prefix)) {"
   },
@@ -4195,14 +4195,14 @@
   {
     "id": "D2166",
     "defect": "An include pattern opening with the extglob !( is sorted as a negation and becomes an ignore pattern, so the test modules it finds are unprotected.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "pattern.startsWith(NEGATION) && pattern[1] !== EXTGLOB_OPEN;",
     "new": "pattern.startsWith(NEGATION);"
   },
   {
     "id": "D2167",
     "defect": "A trailing ** leaves its directory in the crawl's start, so an exclude naming that directory no longer prunes it and its files are protected though Vitest's glob finds none.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "      shared.pop();\n",
     "new": ""
   },
@@ -4216,7 +4216,7 @@
   {
     "id": "D2169",
     "defect": "A pattern directory at a Windows drive root builds its prefix as C://, so the crawl start's directories never match in another case and a test module under Src/ stays hidden.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  const prefix = directoryPrefix(cwd);",
     "new": "  const prefix = `${cwd}/`;"
   },
@@ -6030,8 +6030,8 @@
     "id": "D2805",
     "defect": "The glob by Vitest's spelling ignores the exclude patterns, so an excluded file found through that spelling is protected though Vitest never finds it.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "      exclude,\n      vitestDirectory,\n",
-    "new": "      [],\n      vitestDirectory,\n"
+    "old": "    const glob = globCall(patterns, exclude, vitestDirectory);",
+    "new": "    const glob = globCall(patterns, [], vitestDirectory);"
   },
   {
     "id": "D2806",
@@ -6050,21 +6050,21 @@
   {
     "id": "D2808",
     "defect": "A pattern base keeps a doubled separator or a /./ segment raw, where Vitest's glob normalizes the pattern, so the crawl never reaches that spelling of the directory.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  if (isAbsolute(driveRoot)) return spelledJoin(driveRoot);",
     "new": "  if (isAbsolute(driveRoot)) return driveRoot;"
   },
   {
     "id": "D2809",
     "defect": "A pattern base keeps the backslashes escaping its glob characters, so it names a directory that does not exist and a file found under it is left unprotected.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  const base = picomatch.scan(pattern).base.replace(ESCAPING_BACKSLASHES, \"\");",
     "new": "  const base = picomatch.scan(pattern).base;"
   },
   {
     "id": "D2810",
     "defect": "A file named through a spelling the glob's crawl never walks is protected whenever the patterns match that name, so a declared non-input pattern cannot remove a file Vitest does not find.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "    reaches: (spelled) => spelled.startsWith(below),",
     "new": "    reaches: () => true,"
   },
@@ -6107,8 +6107,8 @@
     "id": "D2828",
     "defect": "A stored project with no pattern spellings is read as having none, so a report stored without them narrows protection instead of being refused.",
     "file": "packages/daemon/src/store/columns.ts",
-    "old": "    patternBases: jsonArray(value, \"patternBases\", patternBase),",
-    "new": "    patternBases: jsonArray({ patternBases: [], ...(value as object) }, \"patternBases\", patternBase),"
+    "old": "    patternBases: jsonArray(value, \"patternBases\", spelledDirectory),",
+    "new": "    patternBases: jsonArray({ patternBases: [], ...(value as object) }, \"patternBases\", spelledDirectory),"
   },
   {
     "id": "D2829",
@@ -6141,7 +6141,7 @@
   {
     "id": "D2833",
     "defect": "A pattern's base at a drive's root, such as the S: of S:/**/*.test.ts, is joined under Vitest's spelling of the pattern directory instead of naming the drive's root, so a file that pattern finds through a subst drive is left unprotected.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  const driveRoot = nonDriveRelative(base);",
     "new": "  const driveRoot = base;"
   },
@@ -6253,14 +6253,14 @@
   {
     "id": "D2883",
     "defect": "A glob's walk starts only at its first pattern's base, so a link below a later pattern's base is never followed and a test file Vitest reaches through it is left unprotected.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "      bases: patterns.flatMap((pattern) => patternBase(pattern, cwd) ?? []),",
     "new": "      bases: patterns.slice(0, 1).flatMap((pattern) => patternBase(pattern, cwd) ?? []),"
   },
   {
     "id": "D2895",
     "defect": "A pattern base below a Windows UNC pattern directory loses the // that names the server, so the walk reads a path on the current drive, finds nothing, and stores the links as complete and empty while Vitest's crawl follows a link below the base, leaving a test file reached through it unprotected.",
-    "file": "packages/daemon/src/inputs/protection.ts",
+    "file": "packages/daemon/src/inputs/vitest-glob.ts",
     "old": "  return collapsedUnc ? `${POSIX_SEPARATOR}${joined}` : joined;",
     "new": "  return joined;"
   },
@@ -6298,5 +6298,12 @@
     "file": "packages/daemon/src/vitest/discover-tests.ts",
     "old": "selectionFacts(session, interruption.signal)",
     "new": "selectionFacts(session, new AbortController().signal)"
+  },
+  {
+    "id": "D2901",
+    "defect": "The walk's cycle test compares real paths one character short, sooner than fdir, so it skips a link to a sibling whose name differs only in its last character, such as a2 after a1, and a test file Vitest reaches through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "(earlier) => earlier.startsWith(resolved) || resolved.startsWith(earlier),",
+    "new": "(earlier) => earlier.startsWith(resolved.slice(0, -1)) || resolved.startsWith(earlier.slice(0, -1)),"
   }
 ]

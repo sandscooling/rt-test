@@ -1,9 +1,12 @@
 import { realpath, type Dirent } from "node:fs";
 import { readdir, stat, realpath as nativeRealpath } from "node:fs/promises";
 import { promisify } from "node:util";
-import type { CrawledLinks, PatternBase } from "../vitest/selection-facts.js";
+import type {
+  CrawledLinks,
+  SpelledDirectory,
+} from "../vitest/selection-facts.js";
 import { errorText } from "../vitest/error-text.js";
-import { directoryPrefix, projectCrawls } from "./protection.js";
+import { directoryPrefix, projectCrawls, type Crawl } from "./vitest-glob.js";
 
 /** How many directories one crawl's walk reads before it stops, since the links past that point are not known. */
 const MAX_CRAWLED_DIRECTORIES = 200_000;
@@ -15,19 +18,8 @@ const UNCOMPILED_REASON =
 /** fdir resolves a link with the callback `realpath`, whose JavaScript spelling of the result its cycle test compares. */
 const javaScriptRealpath = promisify(realpath);
 
-/**
- * One crawl of Vitest's glob: each pattern's base, below which alone it can find a file, as the glob spells it, and
- * which directories the glob prunes.
- */
-export interface Crawl {
-  readonly bases: readonly string[];
-  /** Takes a directory's absolute path as the crawl spells it. */
-  readonly prunes: (directory: string) => boolean;
-}
-
 /** A project's test file patterns as Vitest globs them, each list on its own, from its spelling of the pattern directory. */
 export interface GlobbedProject {
-  readonly projectName: string;
   readonly vitestDirectory: string;
   readonly globbed: readonly (readonly string[])[];
   readonly exclude: readonly string[];
@@ -51,6 +43,8 @@ interface Pending {
 
 interface Walk {
   readonly crawl: Crawl;
+  /** How a reason names the walk. */
+  readonly from: string;
   readonly pending: Pending[];
   readonly links: string[];
 }
@@ -68,7 +62,6 @@ export async function crawledLinks(
     project.globbed,
     project.exclude,
     project.vitestDirectory,
-    project.projectName,
   );
   if (!planned.ok) return { complete: false, reason: UNCOMPILED_REASON };
   const links = new Set<string>();
@@ -77,7 +70,7 @@ export async function crawledLinks(
     if (!walked.complete) return walked;
     for (const link of walked.links) links.add(link);
   }
-  const bases: PatternBase[] = [];
+  const bases: SpelledDirectory[] = [];
   for (const spelled of links) {
     try {
       const real = await nativeRealpath(spelled);
@@ -105,16 +98,17 @@ async function followedLinks(
   crawl: Crawl,
   signal: AbortSignal,
 ): Promise<Walked> {
+  const starts = outermost(crawl.bases);
   const walk: Walk = {
     crawl,
-    pending: outermost(crawl.bases).map((base) => ({
+    from: walkedFrom(starts),
+    pending: starts.map((base) => ({
       opened: base,
       spelled: directoryPrefix(base),
       followed: [],
     })),
     links: [],
   };
-  const from = crawl.bases.join(", ");
   let failure: string | undefined;
   let read = 0;
   for (
@@ -126,7 +120,7 @@ async function followedLinks(
     read += 1;
     failure =
       read > MAX_CRAWLED_DIRECTORIES
-        ? `the walk below ${from} reads more than ${MAX_CRAWLED_DIRECTORIES} directories`
+        ? `the walk below ${walk.from} reads more than ${MAX_CRAWLED_DIRECTORIES} directories`
         : await readDirectory(walk, next);
   }
   return failure === undefined
@@ -186,7 +180,7 @@ async function followLink(
   }
   walk.links.push(path);
   if (walk.links.length > MAX_CRAWLED_LINKS) {
-    return `the walk below ${walk.crawl.bases.join(", ")} follows more than ${MAX_CRAWLED_LINKS} directory links`;
+    return `the walk below ${walk.from} follows more than ${MAX_CRAWLED_LINKS} directory links`;
   }
   walk.pending.push({
     opened: resolved,
@@ -194,6 +188,14 @@ async function followLink(
     followed: [...followed, resolved],
   });
   return undefined;
+}
+
+/** The first base the walk starts at, with a count of the others, so a stored reason stays short however many there are. */
+function walkedFrom(starts: readonly string[]): string {
+  const [first = "", ...others] = starts;
+  if (others.length === 0) return first;
+  const noun = others.length === 1 ? "pattern base" : "pattern bases";
+  return `${first} and ${others.length} other ${noun}`;
 }
 
 /**

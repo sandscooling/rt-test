@@ -8,9 +8,9 @@ import {
   STRING_FIND_FLAGS,
   type AliasFindKind,
   type CrawledLinks,
-  type PatternBase,
   type ProjectSelectionFacts,
   type ReportedAlias,
+  type SpelledDirectory,
   type TestFilePatterns,
 } from "../vitest/selection-facts.js";
 import type {
@@ -223,7 +223,7 @@ function testFilePatterns(value: unknown): TestFilePatterns {
   return {
     directory: jsonText(value, "directory"),
     vitestDirectory: jsonText(value, "vitestDirectory"),
-    patternBases: jsonArray(value, "patternBases", patternBase),
+    patternBases: jsonArray(value, "patternBases", spelledDirectory),
     crawledLinks: crawledLinks(jsonRecord(value, "crawledLinks")),
     include: jsonStrings(value, "include"),
     exclude: jsonStrings(value, "exclude"),
@@ -233,11 +233,11 @@ function testFilePatterns(value: unknown): TestFilePatterns {
 
 function crawledLinks(value: unknown): CrawledLinks {
   return jsonBoolean(value, "complete")
-    ? { complete: true, links: jsonArray(value, "links", patternBase) }
+    ? { complete: true, links: jsonArray(value, "links", spelledDirectory) }
     : { complete: false, reason: jsonText(value, "reason") };
 }
 
-function patternBase(value: unknown): PatternBase {
+function spelledDirectory(value: unknown): SpelledDirectory {
   return {
     spelled: jsonText(value, "spelled"),
     directory: jsonText(value, "directory"),
