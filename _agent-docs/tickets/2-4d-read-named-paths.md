@@ -150,14 +150,15 @@ Commands: a scratch `.mjs` creating the file and probing each spelling, and a Po
 
 #### Sizing
 
-About 12 raw files and 16 estimated; code units 5 (4 criteria plus validation). Production: `query/caller-paths.ts` (new), `query/path-status.ts`, the tracker module 2.3g's extraction leaves (counted as `inputs/input-tracker.ts`), `daemon/lifecycle.ts`, `query-client.ts`. Tests, for create-tests: `query.test.ts` (the resolution and its refusals), `input-tracker.test.ts` (the named read), `lifecycle.test.ts` (its `StandInInputs` gains the read; path status answers late), `daemon.test.ts` (a real daemon: save, then status at once), `server.test.ts` (a path status expected at once), `packages/cli/test/cli.test.ts` (the CLI's status against a real daemon, and the bound), and `packages/daemon/test/defects.json`. Over 10 estimated, so dev delegates, in two groups on disjoint files: the resolution (`caller-paths.ts`, `path-status.ts`) and the read (the tracker module, `lifecycle.ts`, `query-client.ts`).
+About 13 raw files and 17 estimated; code units 5 (4 criteria plus validation). Production: `query/caller-paths.ts` (new), `query/path-status.ts`, `inputs/input-tracker.ts`, `inputs/queued-reads.ts` (the queue and quiet set move behind it, 4df0528), `daemon/lifecycle.ts`, `query-client.ts`. Tests, for create-tests: `query.test.ts` (the resolution and its refusals), `input-tracker.test.ts` (the named read), `lifecycle.test.ts` (its `StandInInputs` gains the read; path status answers late), `daemon.test.ts` (a real daemon: save, then status at once), `server.test.ts` (a path status expected at once), `packages/cli/test/cli.test.ts` (the CLI's status against a real daemon, and the bound), and `packages/daemon/test/defects.json`. Over 10 estimated, so dev delegates, in two groups on disjoint files: the resolution (`caller-paths.ts`, `path-status.ts`) and the read (`input-tracker.ts`, `queued-reads.ts`, `lifecycle.ts`, `query-client.ts`).
 
 #### Current structure of the modified files
 
 As of wt/1 at 47e8d89, before 2.3g to 2.4 land.
 
 - `packages/daemon/src/query/path-status.ts` (198 lines): `pathStatusAnswer(absolutePath, results, daemon, inputs)` resolves the path with the private `rootRelativePath` (the root's real path, then `canonicalPath`, refusing a path outside the root) and answers through `queryBasis`; `canonicalPath` climbs to the nearest existing ancestor's real path and joins the missing names as given.
-- `packages/daemon/src/inputs/input-tracker.ts` (582 lines, about 495 code lines): `#changed(path, kind)` drops the declaration file (asking for a reconciliation), excluded paths and declared non-inputs, queues the rest, `accept()`s it on the ledger and processes the queue; `settled()` is `this.#ledger.waitForRead()`, which resolves once the events accepted by then are read and no reconciliation runs. 2.3g extracts from this file first.
+- `packages/daemon/src/inputs/input-tracker.ts` (521 lines on main at 061bae8, after 2.3g): `#changed(path, kind)` stays here, dropping the declaration file (asking for a reconciliation), excluded paths and declared non-inputs, and queuing the rest; the queue (`#queue`, a `Map` of path to event kind) and the quiet set (`#quiet`) are still tracker fields, handed to the `QueuedReads` it constructs (`#reads`) along with its `AbortController` (`abort: this.#abort`); `settled()` is `this.#ledger.waitForRead()`, which resolves once the events accepted by then are read and no reconciliation runs. The move behind `QueuedReads` (4df0528's amendment to the AC1/AC2 task) starts from this state.
+- `packages/daemon/src/inputs/queued-reads.ts` (180 lines, extracted by 2.3g): `QueuedReads` reads the paths events named between reconciliations into the input state, marking each job a change can affect; it holds the tracker's `AbortController` and the quiet set it was handed, and computes root-relative labels itself. D1960 (`filter.check(unknown, this.#abort.signal)`) and D1961 (`this.#jobs.record(this.#label(path))`) in `packages/daemon/test/defects.json` anchor in it.
 - `packages/daemon/src/daemon/lifecycle.ts` (357 lines before 2.3g): `pathStatus(path)` answers `pathStatusAnswer(path, this.#latestResults(), this.#view(), this.#parts.inputs.current())` at once.
 - `packages/daemon/src/query-client.ts` (90 lines): `queryPathStatus(consumerRoot, path)` sends the request through `query`, which calls `connection.request(request)` with the default bound.
 
@@ -219,6 +220,7 @@ sizing_ac_count: 5
 files_to_modify:
   - packages/daemon/src/query/path-status.ts
   - packages/daemon/src/inputs/input-tracker.ts
+  - packages/daemon/src/inputs/queued-reads.ts
   - packages/daemon/src/daemon/lifecycle.ts
   - packages/daemon/src/query-client.ts
 files_to_create:
