@@ -1,6 +1,10 @@
 import { resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { protection, type Protection } from "../src/inputs/protection.js";
+import {
+  patternBase,
+  protection,
+  type Protection,
+} from "../src/inputs/protection.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
@@ -8,15 +12,21 @@ import type {
 import type { SelectionFacts } from "../src/vitest/selection-facts.js";
 import {
   discoveredWorkspace,
+  HAND_BUILT_ROOT,
   onPlatform,
   projectFacts,
   settle,
+  slashed,
   type FactsCase,
 } from "./harness.js";
 
 /** Protection relates paths without reading the file system, so the consumer root need not exist. */
-const ROOT = resolve(sep, "consumer");
+const ROOT = HAND_BUILT_ROOT;
 const ROOT_PATTERN_PREFIX = ROOT.replaceAll(sep, "/");
+/** The consumer root as a project was started through another spelling of it, such as a link or a `subst` drive. */
+const STARTED = slashed(resolve(sep, "started"));
+/** Another spelling of the consumer root, which a pattern writes for its own directories. */
+const LINKED = slashed(resolve(sep, "linked"));
 /** Vitest's default `include`, as discovery reports it for a project that sets none. */
 const VITEST_DEFAULT_INCLUDE = "**/*.{test,spec}.?(c|m)[jt]s?(x)";
 const PATTERNS_DO_NOT_APPLY =
@@ -147,12 +157,15 @@ describe("which files the test file patterns protect", () => {
     });
   });
 
-  it("D2140: a file an includeSource pattern matches is protected, whether or not it holds in-source tests", () => {
+  it("D2140: a file an includeSource pattern matches from the pattern directory's real path is protected, whether or not it holds in-source tests", () => {
     expect(
-      protects(protectionFor({ includeSource: ["src/**/*.ts"] }), [
-        "src/util.ts",
-        "other/util.ts",
-      ]),
+      protects(
+        protectionFor({
+          vitestDirectory: STARTED,
+          includeSource: [`${ROOT_PATTERN_PREFIX}/src/**/*.ts`],
+        }),
+        ["src/util.ts", "other/util.ts"],
+      ),
     ).toStrictEqual({ "src/util.ts": true, "other/util.ts": false });
   });
 
@@ -267,6 +280,127 @@ describe("the case of a path's leading directories", () => {
       "Src/y.test.ts": false,
       "src/z.test.ts": true,
     });
+  });
+});
+
+describe("files Vitest's glob finds through another spelling of the pattern directory", () => {
+  it("D2802: a file the patterns find from the pattern directory's real path stays protected when Vitest's spelling of that directory finds nothing", () => {
+    expect(
+      protects(
+        protectionFor({
+          vitestDirectory: STARTED,
+          include: [`${ROOT_PATTERN_PREFIX}/src/**/*.test.ts`],
+        }),
+        ["src/a.test.ts", "b.test.ts"],
+      ),
+    ).toStrictEqual({ "src/a.test.ts": true, "b.test.ts": false });
+  });
+
+  it("D2803: an absolute include pattern spelled from the root as the project was started protects what it finds there", () => {
+    expect(
+      protects(
+        protectionFor({
+          vitestDirectory: STARTED,
+          include: [`${STARTED}/src/**/*.test.ts`],
+        }),
+        ["src/a.test.ts", "lib/b.test.ts"],
+      ),
+    ).toStrictEqual({ "src/a.test.ts": true, "lib/b.test.ts": false });
+  });
+
+  it("D2832: an absolute includeSource pattern spelled from the root as the project was started protects what it finds there", () => {
+    expect(
+      protects(
+        protectionFor({
+          vitestDirectory: STARTED,
+          includeSource: [`${STARTED}/src/**/*.ts`],
+        }),
+        ["src/util.ts", "other/util.ts"],
+      ),
+    ).toStrictEqual({ "src/util.ts": true, "other/util.ts": false });
+  });
+
+  it("D2804: an absolute include pattern that spells its own directories through another spelling protects what it finds there", () => {
+    expect(
+      protects(
+        protectionFor({
+          patternBases: [{ spelled: `${LINKED}/src`, directory: "src" }],
+          include: [`${LINKED}/src/**/*.test.ts`],
+        }),
+        ["src/a.test.ts", "lib/b.test.ts"],
+      ),
+    ).toStrictEqual({ "src/a.test.ts": true, "lib/b.test.ts": false });
+  });
+
+  it("D2805: an exclude pattern still removes a file found through Vitest's spelling of the pattern directory", () => {
+    expect(
+      protects(
+        protectionFor({
+          vitestDirectory: STARTED,
+          include: [`${STARTED}/**/*.test.ts`],
+          exclude: ["**/fixtures/**"],
+        }),
+        ["fixtures/a.test.ts", "src/b.test.ts"],
+      ),
+    ).toStrictEqual({ "fixtures/a.test.ts": false, "src/b.test.ts": true });
+  });
+
+  it("D2806: an include pattern with no glob segment, spelled through another spelling, protects the one file it names", () => {
+    expect(
+      protects(
+        protectionFor({
+          patternBases: [
+            { spelled: `${LINKED}/src/a.test.ts`, directory: "src/a.test.ts" },
+          ],
+          include: [`${LINKED}/src/a.test.ts`],
+        }),
+        ["src/a.test.ts", "src/b.test.ts"],
+      ),
+    ).toStrictEqual({ "src/a.test.ts": true, "src/b.test.ts": false });
+  });
+
+  it("D2807: two discoveries that differ only in Vitest's spelling of the pattern directory, or only in a pattern's own spelling, have different pattern keys", () => {
+    const keyOf = (facts: FactsCase): string => {
+      const value = protectionFor(facts);
+      return value.applies ? value.patternKey : value.reason;
+    };
+    const include = ["src/**/*.test.ts"];
+    const base = keyOf({ include });
+    expect({
+      vitestDirectory: keyOf({ include, vitestDirectory: STARTED }) !== base,
+      patternBases:
+        keyOf({
+          include,
+          patternBases: [{ spelled: `${LINKED}/src`, directory: "src" }],
+        }) !== base,
+    }).toStrictEqual({ vitestDirectory: true, patternBases: true });
+  });
+});
+
+describe("the directory a test file pattern spells before its first glob segment", () => {
+  it("D2808: a doubled separator or a /./ segment in an absolute pattern is normalized away, as Vitest's glob normalizes the pattern", () => {
+    expect({
+      doubled: patternBase(
+        `${ROOT_PATTERN_PREFIX}//src/**/*.test.ts`,
+        ROOT_PATTERN_PREFIX,
+      ),
+      current: patternBase(
+        `${ROOT_PATTERN_PREFIX}/./src/**/*.test.ts`,
+        ROOT_PATTERN_PREFIX,
+      ),
+    }).toStrictEqual({
+      doubled: `${ROOT_PATTERN_PREFIX}/src`,
+      current: `${ROOT_PATTERN_PREFIX}/src`,
+    });
+  });
+
+  it("D2809: a backslash escaping a glob character in the pattern's directories is dropped, naming the directory on disk", () => {
+    expect(
+      patternBase(
+        `${ROOT_PATTERN_PREFIX}/a\\(1\\)/src/**/*.test.ts`,
+        ROOT_PATTERN_PREFIX,
+      ),
+    ).toBe(`${ROOT_PATTERN_PREFIX}/a(1)/src`);
   });
 });
 

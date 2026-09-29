@@ -352,6 +352,7 @@ function treeDiscovery(root: string, tree: TreeCase): TestDiscovery {
               reported: true,
               projects: [
                 projectFacts({
+                  root,
                   directory: entry.path,
                   ...entry.patterns,
                   setupFiles: entry.setupFiles ?? [],

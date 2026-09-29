@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, inject } from "vitest";
 import { clearGitEnvironment } from "../../../test/scripts/git-environment.js";
@@ -40,6 +40,7 @@ import {
   type WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
 import type {
+  PatternBase,
   ProjectSelectionFacts,
   ReportedAlias,
   SelectionFacts,
@@ -198,22 +199,7 @@ export async function waitUntil(
   }
 }
 
-/** Runs `body` while `process.platform` reads as `platform`, restoring it after. */
-export async function onPlatform<T>(
-  platform: NodeJS.Platform,
-  body: () => Promise<T>,
-): Promise<T> {
-  const saved = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", {
-    value: platform,
-    configurable: true,
-  });
-  try {
-    return await body();
-  } finally {
-    if (saved !== undefined) Object.defineProperty(process, "platform", saved);
-  }
-}
+export { onPlatform } from "./on-platform.js";
 
 export const WAITING = "waiting";
 
@@ -364,9 +350,13 @@ export function settle<T>(run: () => T): T | { thrown: string } {
   }
 }
 
+/** The consumer root a hand-built discovery reports for when its case names none. */
+export const HAND_BUILT_ROOT = resolve(sep, "consumer");
+
 /**
  * One project's selection facts; a list left out is empty, the pattern directory is the consumer root, and the Vite
- * root is the pattern directory, as Vite roots a project at its config's directory.
+ * root is the pattern directory, as Vite roots a project at its config's directory. Vitest spells the pattern
+ * directory as its real path under `root`, `/`-separated, as it does for a root started by its real path.
  */
 export interface FactsCase {
   readonly projectName?: string;
@@ -374,13 +364,17 @@ export interface FactsCase {
   readonly setupFiles?: readonly string[];
   readonly globalSetupFiles?: readonly string[];
   readonly aliases?: readonly ReportedAlias[];
+  readonly root?: string;
   readonly directory?: string;
+  readonly vitestDirectory?: string;
+  readonly patternBases?: readonly PatternBase[];
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly includeSource?: readonly string[];
 }
 
 export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
+  const directory = facts.directory ?? ".";
   return {
     projectName: facts.projectName ?? "unit",
     viteRoot: facts.viteRoot ?? facts.directory ?? ".",
@@ -388,12 +382,21 @@ export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
     globalSetupFiles: facts.globalSetupFiles ?? [],
     aliases: facts.aliases ?? [],
     testFilePatterns: {
-      directory: facts.directory ?? ".",
+      directory,
+      vitestDirectory:
+        facts.vitestDirectory ??
+        slashed(resolve(facts.root ?? HAND_BUILT_ROOT, directory)),
+      patternBases: facts.patternBases ?? [],
       include: facts.include ?? [],
       exclude: facts.exclude ?? [],
       includeSource: facts.includeSource ?? [],
     },
   };
+}
+
+/** An absolute path with `/` separators, as Vitest's glob spells a directory. */
+export function slashed(path: string): string {
+  return path.replaceAll(sep, "/");
 }
 
 /** The Vitest a hand-built discovery reports having loaded. */

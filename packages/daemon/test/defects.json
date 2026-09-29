@@ -4385,8 +4385,8 @@
     "id": "D2260",
     "defect": "The version 3 migration keeps each stored report without its Vite root, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${DROP_VITE_ROOTLESS_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${SET_SCHEMA_VERSION}`,"
+    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2261",
@@ -5769,17 +5769,17 @@
   },
   {
     "id": "D2791",
-    "defect": "A version 4 store has no migration to version 5, so every existing store is refused once the daemon is upgraded.",
+    "defect": "A version 4 store has no migration to version 6, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [CRASH_UNAWARE_SCHEMA_VERSION, SET_SCHEMA_VERSION],\n",
+    "old": "  [\n    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
     "id": "D2792",
-    "defect": "A store that may hold a crashed run stays at schema version 4, so a daemon from before this change opens it and fails reading that run.",
+    "defect": "A new store is created at an older schema version, so a daemon from before this change opens it and reads each discovery's selection facts without Vitest's spellings, or at version 4 fails reading a crashed run.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "export const STORE_SCHEMA_VERSION = 5;",
-    "new": "export const STORE_SCHEMA_VERSION = 4;"
+    "old": "export const STORE_SCHEMA_VERSION = 6;",
+    "new": "export const STORE_SCHEMA_VERSION = 5;"
   },
   {
     "id": "D2793",
@@ -5803,13 +5803,6 @@
     "new": "      return DUE_REASON.crashedRun;"
   },
   {
-    "id": "D2796",
-    "defect": "The version 4 migration changes a record the store held, dropping each discovery's selection facts.",
-    "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [CRASH_UNAWARE_SCHEMA_VERSION, SET_SCHEMA_VERSION],",
-    "new": "  [CRASH_UNAWARE_SCHEMA_VERSION, `${DROP_VITE_ROOTLESS_FACTS}${SET_SCHEMA_VERSION}`],"
-  },
-  {
     "id": "D2797",
     "defect": "A job whose executor exits during it never settles, so the daemon hangs and the next workspace never runs.",
     "file": "packages/daemon/src/daemon/executor.ts",
@@ -5829,5 +5822,159 @@
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      this.#log.entry(`${NOT_A_REPLY_REASON} (process ${child.pid})`);",
     "new": ""
+  },
+  {
+    "id": "D2802",
+    "defect": "Protection finds files only by Vitest's spelling of the pattern directory, so a file the patterns find from its real path is no longer protected when that spelling finds nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    matches: (path) => fromRealPath.matches(path) || bySpelling.matches(path),",
+    "new": "    matches: (path) => bySpelling.matches(path),"
+  },
+  {
+    "id": "D2803",
+    "defect": "Protection never names a file by Vitest's own spelling of the pattern directory, so an absolute pattern spelled from the root as the project was started protects nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    { spelled: vitestDirectory, directory },\n    ...patternBases,\n",
+    "new": "    ...patternBases,\n"
+  },
+  {
+    "id": "D2804",
+    "defect": "Protection never names a file by a pattern's own spelling of its directories, so an absolute pattern written through a link, a subst drive or a short name protects nothing.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    ...patternBases,\n  ].map",
+    "new": "  ].map"
+  },
+  {
+    "id": "D2805",
+    "defect": "The glob by Vitest's spelling ignores the exclude patterns, so an excluded file found through that spelling is protected though Vitest never finds it.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    const glob = globCall(patterns, exclude, vitestDirectory, project);",
+    "new": "    const glob = globCall(patterns, [], vitestDirectory, project);"
+  },
+  {
+    "id": "D2806",
+    "defect": "A spelling that names a file whole, as a pattern with no glob segment does, is taken to hold nothing, so the one file that pattern names is left unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    ? base.spelled\n",
+    "new": "    ? undefined\n"
+  },
+  {
+    "id": "D2807",
+    "defect": "The pattern key leaves out Vitest's spelling of the pattern directory and the patterns' own spellings, so a discovery that changes only them never makes the tracker re-evaluate declared non-inputs.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      projects.map((project) => project.testFilePatterns),",
+    "new": "      projects.map(({ testFilePatterns: { vitestDirectory: _spelled, patternBases: _bases, ...patterns } }) => patterns),"
+  },
+  {
+    "id": "D2808",
+    "defect": "A pattern base keeps a doubled separator or a /./ segment raw, where Vitest's glob normalizes the pattern, so the crawl never reaches that spelling of the directory.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  if (isAbsolute(driveRoot)) return posix.normalize(driveRoot);",
+    "new": "  if (isAbsolute(driveRoot)) return driveRoot;"
+  },
+  {
+    "id": "D2809",
+    "defect": "A pattern base keeps the backslashes escaping its glob characters, so it names a directory that does not exist and a file found under it is left unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  const base = picomatch.scan(pattern).base.replace(ESCAPING_BACKSLASHES, \"\");",
+    "new": "  const base = picomatch.scan(pattern).base;"
+  },
+  {
+    "id": "D2810",
+    "defect": "A file named through a spelling the glob's crawl never walks is protected whenever the patterns match that name, so a declared non-input pattern cannot remove a file Vitest does not find.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    reaches: (spelled) => spelled.startsWith(below),",
+    "new": "    reaches: () => true,"
+  },
+  {
+    "id": "D2811",
+    "defect": "Protection finds files only from the pattern directory's real path, so a test file an absolute include pattern spelled from the link the project was started through finds is left unprotected, and a declared non-input pattern removes it.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    matches: (path) => fromRealPath.matches(path) || bySpelling.matches(path),",
+    "new": "    matches: (path) => fromRealPath.matches(path),"
+  },
+  {
+    "id": "D2812",
+    "defect": "Discovery reports the directories only of include patterns, so a source file an absolute includeSource pattern spelled through a link finds is left unprotected.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "        [...config.include, ...includeSource],",
+    "new": "        [...config.include],"
+  },
+  {
+    "id": "D2813",
+    "defect": "Discovery reports Vitest's spelling of a project's dir from its real root-relative path, so a dir named through a directory link is reported in a spelling Vitest's glob never matches from.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  const vitestDirectory = globCwd(config.dir || config.root);",
+    "new": "  const vitestDirectory = globCwd(rootRelative(config.dir || config.root));"
+  },
+  {
+    "id": "D2814",
+    "defect": "Discovery reports a pattern's spelled directories as the path they resolve to, so protection resolves a link's spelling as a path of its own and finds nothing under it.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    directory: rootRelative(spelled),",
+    "new": "    directory: spelled,"
+  },
+  {
+    "id": "D2815",
+    "defect": "The store reads each pattern spelling's resolved directory where its spelling belongs, so a report read back names the files it protects by the wrong path.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    spelled: jsonText(value, \"spelled\"),",
+    "new": "    spelled: jsonText(value, \"directory\"),"
+  },
+  {
+    "id": "D2828",
+    "defect": "A stored project with no pattern spellings is read as having none, so a report stored without them narrows protection instead of being refused.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    patternBases: arrayOf(jsonField(value, \"patternBases\"), patternBase),",
+    "new": "    patternBases: arrayOf(jsonField(value, \"patternBases\") ?? [], patternBase),"
+  },
+  {
+    "id": "D2829",
+    "defect": "The version 4 migration keeps each stored report, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+  },
+  {
+    "id": "D2830",
+    "defect": "The version 5 migration keeps each stored report, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+  },
+  {
+    "id": "D2831",
+    "defect": "A version 5 store has no migration to version 6, so every existing store is refused once the daemon is upgraded.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "  [\n    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "new": ""
+  },
+  {
+    "id": "D2832",
+    "defect": "The glob by Vitest's spelling compiles only the include patterns, so a source file an absolute includeSource pattern spelled from the root as the project was started finds is left unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  const globbed = [include, includeSource];",
+    "new": "  const globbed = [include];"
+  },
+  {
+    "id": "D2833",
+    "defect": "A pattern's base at a drive's root, such as the S: of S:/**/*.test.ts, is joined under Vitest's spelling of the pattern directory instead of naming the drive's root, so a file that pattern finds through a subst drive is left unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  const driveRoot = nonDriveRelative(base);",
+    "new": "  const driveRoot = base;"
+  },
+  {
+    "id": "D2846",
+    "defect": "The version 3 migration never raises the header, so the store stays at version 3 and every open drops the selection facts stored since the last one, and no discovery's facts survive a restart.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}`,"
+  },
+  {
+    "id": "D2847",
+    "defect": "A stored project with no spelling of its pattern directory is read with its root-relative directory in that place, so a report stored without Vitest's spelling is read instead of refused.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    vitestDirectory: jsonText(value, \"vitestDirectory\"),",
+    "new": "    vitestDirectory: jsonText(value, jsonField(value, \"vitestDirectory\") === undefined ? \"directory\" : \"vitestDirectory\"),"
   }
 ]

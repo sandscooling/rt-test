@@ -1,4 +1,4 @@
-import { isAbsolute, posix } from "node:path";
+import { isAbsolute, posix, resolve } from "node:path";
 import picomatch from "picomatch";
 import { WINDOWS } from "../daemon/endpoint.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
@@ -9,7 +9,10 @@ import {
   relativePosixPath,
   ROOT_PATH,
 } from "../vitest/find-workspaces.js";
-import type { ProjectSelectionFacts } from "../vitest/selection-facts.js";
+import type {
+  PatternBase,
+  ProjectSelectionFacts,
+} from "../vitest/selection-facts.js";
 import { absoluteInputPath } from "./input-filter.js";
 import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
 
@@ -65,9 +68,19 @@ export type Protection =
 
 type PathMatcher = (path: string) => boolean;
 
-type Compiled =
-  | { readonly ok: true; readonly matches: PathMatcher }
-  | { readonly ok: false; readonly reason: string };
+type Refused = { readonly ok: false; readonly reason: string };
+
+type Compiled = { readonly ok: true; readonly matches: PathMatcher } | Refused;
+
+type CompiledGlob =
+  | {
+      readonly ok: true;
+      /** Takes a path relative to the glob's `cwd`, as the crawl names it. */
+      readonly matches: PathMatcher;
+      /** Whether an absolute path lies below the crawl's root by its spelling, so the crawl can reach it. */
+      readonly reaches: PathMatcher;
+    }
+  | Refused;
 
 /** A workspace as a reason names it: by its path, or as the one at the consumer root. */
 export function workspaceName(path: string): string {
@@ -130,11 +143,46 @@ export function protectedFiles(discovery: TestDiscovery): ReadonlySet<string> {
   return files;
 }
 
+/** The directory Vitest's glob matches from, spelled as tinyglobby resolves its `cwd`. */
+export function globCwd(directory: string): string {
+  return resolve(directory).replace(BACKSLASHES, POSIX_SEPARATOR);
+}
+
+/**
+ * The directory a test file pattern's crawl passes through by the pattern's own spelling: the directories before its
+ * first glob segment, or the file a pattern with none names, absolute from `cwd` and normalized as the glob
+ * normalizes the pattern, so `S://src` is `S:/src` and the `S:` of `S:/**` is the drive's root. Undefined for an
+ * empty or negated pattern, which finds no file.
+ */
+export function patternBase(pattern: string, cwd: string): string | undefined {
+  if (pattern === "" || isNegated(pattern)) return undefined;
+  const base = picomatch.scan(pattern).base.replace(ESCAPING_BACKSLASHES, "");
+  const driveRoot = nonDriveRelative(base);
+  if (isAbsolute(driveRoot)) return posix.normalize(driveRoot);
+  return posix.join(cwd, base);
+}
+
 /**
  * Finds what Vitest's discovery globs for the project: its `include` and its `includeSource` patterns, each globbed
- * on its own with `exclude` as the ignore list, from the project's pattern directory.
+ * on its own with `exclude` as the ignore list. A path is found from the pattern directory's real path or by a
+ * spelling Vitest's glob reaches it through, so a root started by another spelling only adds what is found.
  */
 function projectMatcher(
+  project: ProjectSelectionFacts,
+  consumerRoot: string,
+): Compiled {
+  const fromRealPath = realPathMatcher(project, consumerRoot);
+  if (!fromRealPath.ok) return fromRealPath;
+  const bySpelling = spelledMatcher(project, consumerRoot);
+  if (!bySpelling.ok) return bySpelling;
+  return {
+    ok: true,
+    matches: (path) => fromRealPath.matches(path) || bySpelling.matches(path),
+  };
+}
+
+/** Normalizes the patterns against the real path of the project's pattern directory. */
+function realPathMatcher(
   project: ProjectSelectionFacts,
   consumerRoot: string,
 ): Compiled {
@@ -163,6 +211,70 @@ function projectMatcher(
 }
 
 /**
+ * Normalizes the patterns against Vitest's own spelling of the pattern directory, and names a file by each spelling
+ * the crawl can reach it through: that directory's, or the one a pattern writes for its own directories.
+ */
+function spelledMatcher(
+  project: ProjectSelectionFacts,
+  consumerRoot: string,
+): Compiled {
+  const {
+    vitestDirectory,
+    directory,
+    patternBases,
+    include,
+    exclude,
+    includeSource,
+  } = project.testFilePatterns;
+  const spellings: readonly Spelling[] = [
+    { spelled: vitestDirectory, directory },
+    ...patternBases,
+  ].map((base: PatternBase) => ({
+    spelled: base.spelled,
+    real: absoluteInputPath(consumerRoot, base.directory),
+  }));
+  const globbed = [include, includeSource];
+  const globs: Extract<CompiledGlob, { ok: true }>[] = [];
+  for (const patterns of globbed) {
+    const glob = globCall(patterns, exclude, vitestDirectory, project);
+    if (!glob.ok) return glob;
+    globs.push(glob);
+  }
+  return {
+    ok: true,
+    matches: (path) => {
+      const file = absoluteInputPath(consumerRoot, path);
+      return spellings.some((base) => {
+        const spelled = spelledPath(base, file);
+        if (spelled === undefined) return false;
+        const fromCwd = posix.relative(vitestDirectory, spelled);
+        return globs.some(
+          (glob) => glob.reaches(spelled) && glob.matches(fromCwd),
+        );
+      });
+    },
+  };
+}
+
+/** A spelling the glob may name files by, with the absolute path it resolves to. */
+interface Spelling {
+  readonly spelled: string;
+  readonly real: string;
+}
+
+/**
+ * `file`, an absolute path, named through `base`'s spelling, or undefined when `base` neither holds it nor names it:
+ * a pattern with no glob segment names its file whole.
+ */
+function spelledPath(base: Spelling, file: string): string | undefined {
+  const below = relativePosixPath(base.real, file);
+  if (isAbsolute(below) || climbsOut(below, POSIX_SEPARATOR)) return undefined;
+  return below === ""
+    ? base.spelled
+    : `${directoryPrefix(base.spelled)}${below}`;
+}
+
+/**
  * One tinyglobby glob as Vitest calls it: patterns sorted into match and ignore lists as its `processPatterns`
  * does, and every directory below the crawl's root that the ignore list matches pruned with what it holds.
  */
@@ -171,7 +283,7 @@ function globCall(
   exclude: readonly string[],
   cwd: string,
   project: ProjectSelectionFacts,
-): Compiled {
+): CompiledGlob {
   const crawl: CrawlRoot = { root: cwd, depthOffset: 0 };
   const match: PathMatcher[] = [];
   const ignore: PathMatcher[] = [];
@@ -209,6 +321,7 @@ function globCall(
         )
       );
     },
+    reaches: (spelled) => spelled.startsWith(below),
   };
 }
 
