@@ -3,6 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { processRecords } from "../../../test/scripts/run-cleanup.mjs";
 import { toPosix } from "../paths.mjs";
 import { mainCheckoutRoot } from "./claims-cli.mjs";
 import {
@@ -12,6 +13,7 @@ import {
   joinQueue,
   LEASE_DIR,
   leaseStatus,
+  processProbe,
   readLease,
   recordChild,
   RELEASE,
@@ -283,11 +285,27 @@ function removeTemp(ctx, dir, code) {
   }
 }
 
+/** The OS start time of `pid` as decimal text, or undefined when it cannot be read, which leaves the pid alone to judge it. */
+function startTimeOf(ctx, pid) {
+  try {
+    return ctx.startedAt(pid);
+  } catch (error) {
+    ctx.err(
+      `${PROG}: process ${pid} is recorded by its pid alone, since its start time could not be read: ${error.message}`,
+    );
+    return undefined;
+  }
+}
+
+const readStartTime = (pid) =>
+  processRecords([pid]).get(pid)?.startedAt.toString();
+
 const leaseRecord = (ctx, owner, command) => ({
   ...owner,
   worktree: toPosix(ctx.root).replace(TRAILING_SLASHES, ""),
   command,
   pid: ctx.pid,
+  startedAt: startTimeOf(ctx, ctx.pid),
 });
 
 // A live manual hold by the same lane and thread lets its own runs through without queueing behind it.
@@ -302,9 +320,13 @@ function ownHold(ctx, owner) {
   return own ? current : null;
 }
 
+// The pid goes in first, since reading the start time can take seconds and a lease naming no run lapses with its wrapper.
 function recordRun(ctx, childPid) {
   try {
-    recordChild(ctx.dir, ctx.pid, childPid, ctx.now());
+    if (!recordChild(ctx.dir, ctx.pid, childPid, ctx.now())) return;
+    const childStartedAt = startTimeOf(ctx, childPid);
+    if (childStartedAt === undefined) return;
+    recordChild(ctx.dir, ctx.pid, childPid, ctx.now(), childStartedAt);
   } catch (error) {
     ctx.err(
       `${PROG}: could not record run pid ${childPid} in the lease: ${error.message}`,
@@ -332,9 +354,12 @@ async function runLeased(ctx, record, words, env) {
 }
 
 // Marks this wrapper as the hold's run, so a waiter keeps out while it runs. False once the hold is gone.
-function joinOwnHold(ctx, owner) {
-  const hold = ownHold(ctx, owner);
-  return hold !== null && recordChild(ctx.dir, hold.pid, ctx.pid, ctx.now());
+function joinOwnHold(ctx, record) {
+  const hold = ownHold(ctx, record);
+  return (
+    hold !== null &&
+    recordChild(ctx.dir, hold.pid, ctx.pid, ctx.now(), record.startedAt)
+  );
 }
 
 async function run(ctx, args) {
@@ -347,7 +372,7 @@ async function run(ctx, args) {
   const temp = runTempDir(ctx.root, ctx.pid, ctx.tempOptions);
   const env = { dir: temp.dir, vars: { ...temp.env, ...vars } };
   let code;
-  if (joinOwnHold(ctx, owner)) {
+  if (joinOwnHold(ctx, record)) {
     ctx.err(`${PROG}: RUNNING under this lane's hold; temp ${temp.dir}`);
     mkdirSync(temp.dir, { recursive: true });
     code = await runChild(ctx, words, env.vars, () => {});
@@ -376,7 +401,10 @@ async function acquire(ctx, args) {
   return EXIT.OK;
 }
 
-/** Why a heavy run started without the wrapper is denied, naming the live holder when there is one. */
+/**
+ * Why a heavy run started without the wrapper is denied, naming the live holder when there is one. Without
+ * `options.running` the holder is judged by pid alone: the run is denied either way, and a start-time query takes seconds.
+ */
 export function heavyRunDenial(dir, command, options = {}) {
   const queue = `To queue, run it as: node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- ${command}`;
   const holder = readLease(dir);
@@ -397,8 +425,10 @@ export async function runLeaseCli(argv, ctx) {
     heartbeatMs: HEARTBEAT_MS,
     platform: process.platform,
     signals: process,
+    startedAt: readStartTime,
     ...ctx,
   };
+  full.running ??= processProbe((message) => full.err(`${PROG}: ${message}`));
   try {
     if (!Object.hasOwn(COMMANDS, name ?? "")) {
       throw new UsageError(`unknown command ${JSON.stringify(name ?? "")}`);

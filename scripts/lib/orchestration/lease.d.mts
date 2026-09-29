@@ -1,9 +1,13 @@
+import type { ProcessIdentity } from "../../../test/scripts/run-cleanup.mjs";
+
 export interface LeaseOwner {
   readonly lane: string;
   readonly thread: string;
   readonly worktree: string;
   readonly command: string;
   readonly pid: number;
+  /** The OS start time of `pid` as decimal text; absent when it could not be read, which leaves the pid alone. */
+  readonly startedAt?: string;
 }
 
 export interface LeaseRecord extends Partial<LeaseOwner> {
@@ -12,6 +16,7 @@ export interface LeaseRecord extends Partial<LeaseOwner> {
   readonly command: string;
   readonly at?: number;
   readonly childPid?: number;
+  readonly childStartedAt?: string;
   readonly heartbeatAt: number;
   readonly file: string;
 }
@@ -21,9 +26,15 @@ export interface QueueEntry {
   readonly owner: LeaseOwner;
 }
 
+/** Whether a process holds `pid`, and is the one started at `startedAt` when that is given. */
+export type ProcessProbe = (
+  pid: number | undefined,
+  startedAt?: string,
+) => boolean;
+
 export interface Clock {
   readonly now?: number;
-  readonly running?: (pid: number | undefined) => boolean;
+  readonly running?: ProcessProbe;
 }
 
 export type TurnResult =
@@ -62,10 +73,17 @@ export declare const HEARTBEAT_MS: number;
 
 export declare function beat(file: string, now?: number): boolean;
 export declare function readLease(dir: string): LeaseRecord | null;
+export declare function processProbe(
+  report: (message: string) => void,
+  options?: {
+    readonly now?: () => number;
+    readonly confirm?: (owner: ProcessIdentity) => boolean;
+  },
+): ProcessProbe;
 export declare function isStale(
   record: LeaseRecord,
   now?: number,
-  running?: (pid: number | undefined) => boolean,
+  running?: ProcessProbe,
 ): boolean;
 export declare function joinQueue(
   dir: string,
@@ -82,6 +100,7 @@ export declare function recordChild(
   pid: number,
   childPid: number,
   now?: number,
+  childStartedAt?: string,
 ): boolean;
 export declare function releaseOwn(dir: string, pid: number): boolean;
 export declare function releaseLane(dir: string, lane: string): ReleaseResult;

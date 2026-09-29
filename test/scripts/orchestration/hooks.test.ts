@@ -54,6 +54,7 @@ const ENTRY_DEPENDENCIES = [
   "scripts/lib/paths.mjs",
   "scripts/lib/processes.mjs",
   "scripts/lib/orchestration",
+  "test/scripts/run-cleanup.mjs",
   "_agent-docs/_flow-config.yaml",
 ];
 

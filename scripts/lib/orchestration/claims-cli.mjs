@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   CLAIMS_DIR,
   claimFailureAdvice,
@@ -16,6 +16,11 @@ import { toRepoPath } from "./paths.mjs";
 const PROG = "file-claims";
 const EXIT = { OK: 0, REFUSED: 1, USAGE: 2 };
 const MS_PER_MINUTE = 60_000;
+const GIT_ENTRY = ".git";
+const COMMON_DIR_FILE = "commondir";
+const GITDIR_LINE = /^gitdir:\s*(.+?)\s*$/m;
+/** How long git may take to name the main checkout of an unusual layout, well inside the run-lease hook's limit. */
+const GIT_QUERY_TIMEOUT_MS = 5000;
 const VALUE_FLAGS = new Set(["--lane", "--thread"]);
 const USAGE = [
   "  claim        --lane <name> --thread <threadId> <path>...",
@@ -28,21 +33,61 @@ const USAGE = [
 
 class UsageError extends Error {}
 
-// Every worktree shares the main checkout's store, so a claim in one tree conflicts with the
-// same path claimed in another.
-export function mainCheckoutRoot(root) {
+/** The common git directory a linked worktree's `.git` file leads to, or undefined when the file names none. */
+function linkedCommonDir(root, entry) {
+  const gitDir = GITDIR_LINE.exec(readFileSync(entry, "utf8"))?.[1];
+  if (gitDir === undefined) return undefined;
+  const linked = resolve(root, gitDir);
+  return resolve(
+    linked,
+    readFileSync(join(linked, COMMON_DIR_FILE), "utf8").trim(),
+  );
+}
+
+/**
+ * The main checkout read from `root`'s `.git` entry alone: `root` for a directory, and for a linked worktree's file
+ * the folder holding the common `.git`. Undefined for any other layout, which git answers instead.
+ */
+function checkoutFromFiles(root) {
+  const entry = join(root, GIT_ENTRY);
+  try {
+    const stats = statSync(entry, { throwIfNoEntry: false });
+    if (stats?.isDirectory()) return root;
+    if (!stats?.isFile()) return undefined;
+    const commonDir = linkedCommonDir(root, entry);
+    if (commonDir === undefined || basename(commonDir) !== GIT_ENTRY) {
+      return undefined;
+    }
+    return dirname(commonDir);
+  } catch {
+    // An unreadable `.git` file, or a worktree whose common-dir file is gone, is a layout for git to answer.
+    return undefined;
+  }
+}
+
+function checkoutFromGit(root) {
   let commonDir;
   try {
     commonDir = execFileSync(
       "git",
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: GIT_QUERY_TIMEOUT_MS,
+      },
     ).trim();
   } catch {
     return root;
   }
-  return basename(commonDir) === ".git" ? dirname(commonDir) : root;
+  return basename(commonDir) === GIT_ENTRY ? dirname(commonDir) : root;
 }
+
+// Every worktree shares the main checkout's store, so a claim in one tree conflicts with the
+// same path claimed in another. The run-lease hook resolves it too, so it spawns nothing for a usual layout.
+export const mainCheckoutRoot = (root) =>
+  checkoutFromFiles(root) ?? checkoutFromGit(root);
 
 export const claimsDirFor = (root, env = process.env) =>
   env.FILE_CLAIMS_DIR ?? join(mainCheckoutRoot(root), CLAIMS_DIR);

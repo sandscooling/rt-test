@@ -7,6 +7,7 @@ import { EventEmitter, once } from "node:events";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -17,33 +18,54 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
+  heavyRunDenial,
   runLeaseCli,
   type LeaseCliContext,
 } from "../../../scripts/lib/orchestration/lease-cli.mjs";
 import {
   beat,
+  isStale,
   joinQueue,
+  leaseStatus,
+  processProbe,
   readLease,
   recordChild,
   releaseLane,
   releaseOwn,
   takeTurn,
+  type ProcessProbe,
 } from "../../../scripts/lib/orchestration/lease.mjs";
+import { ownerRunning } from "../run-cleanup.mjs";
 import { PROCESS_SCENARIO, PROCESS_SCENARIO_TIMEOUT_MS } from "../timeouts.js";
 import { REPO, withTemp, withTempAsync } from "./harness.js";
 import {
   alive,
   COMMAND,
   HOLDER_PID,
+  holds,
   LEASE_FILE,
   NOW,
   owner,
+  recordAged,
   WORKTREE,
   writeLease,
 } from "./lease-harness.js";
 
+// Passes through to the real check, so a test can make one start-time check fail.
+vi.mock("../run-cleanup.mjs", async (importActual) => {
+  const actual = await importActual<typeof import("../run-cleanup.mjs")>();
+  return {
+    ...actual,
+    ownerRunning: vi.fn<typeof actual.ownerRunning>(actual.ownerRunning),
+  };
+});
+
 const PID = 777;
 const CHILD_PID = 4242;
+const START = "1111";
+const CHILD_START = "2222";
+// The OS start time a wrapper and its run read as, without a process query.
+const startTimeOf = (pid: number) => (pid === CHILD_PID ? CHILD_START : START);
 const ROOT = "/src/wt-2/";
 const HOLD = "acquire (a manual hold)";
 const LOCK_DIR = "lease.lock";
@@ -84,6 +106,42 @@ function headTurn(
   return takeTurn(dir, entry, { now: NOW, running });
 }
 
+const WAITER_PID = 1;
+const FIRST_HOLDER = { ...owner("t-b", HOLDER_PID), startedAt: "100", at: NOW };
+
+// A queue of one waiter behind the lease `first`, which `second` replaces, stamped at `secondBeat`, while the
+// holder is being judged. `processes` are the ids the OS holds, each with its start time. Also returns each probe
+// call made while the lease lock existed.
+function takeWhileChanged(
+  dir: string,
+  change: {
+    readonly first: Record<string, unknown>;
+    readonly second: Record<string, unknown>;
+    readonly secondBeat: number;
+  },
+  processes: Readonly<Record<number, string>>,
+) {
+  writeLease(dir, change.first, NOW - 30_000);
+  const entry = joinQueue(dir, owner("t-a", WAITER_PID), NOW);
+  const held = holds({ ...processes, [WAITER_PID]: "1" });
+  let changed = false;
+  const underLock: {
+    pid: number | undefined;
+    startedAt: string | undefined;
+  }[] = [];
+  const running: ProcessProbe = (pid, startedAt) => {
+    const answer = held(pid, startedAt);
+    if (existsSync(join(dir, LOCK_DIR))) underLock.push({ pid, startedAt });
+    if (pid === HOLDER_PID && !changed) {
+      changed = true;
+      writeLease(dir, change.second, change.secondBeat);
+    }
+    return answer;
+  };
+  const turn = takeTurn(dir, entry, { now: NOW, running });
+  return { turn, underLock };
+}
+
 class FakeChild extends EventEmitter {
   readonly pid = CHILD_PID;
   readonly kills: string[] = [];
@@ -106,10 +164,13 @@ const exitWith = (code: number) => (child: FakeChild) => {
 };
 
 // A CLI over `tmp/lease` whose spawned run follows `script`, and whose wait for a turn fails the run with QUEUED.
+// Start times come from `startTimeOf` unless `realStartTimes` leaves them to the OS, and only `realProbe` leaves the
+// liveness probe to the CLI's own.
 function cli(
   tmp: string,
   script: (child: FakeChild) => void = exitWith(0),
   overrides: Partial<LeaseCliContext> = {},
+  { realStartTimes = false, realProbe = false } = {},
 ) {
   const out: string[] = [];
   const err: string[] = [];
@@ -122,7 +183,7 @@ function cli(
     out: (line) => out.push(line),
     err: (line) => err.push(line),
     now: () => NOW,
-    running: alive(PID),
+    ...(realProbe ? {} : { running: alive(PID) }),
     pid: PID,
     sleep: () => Promise.reject(new Error(QUEUED)),
     spawn: (program, args, options) => {
@@ -139,6 +200,7 @@ function cli(
       home: join(tmp, "home"),
       tmp: join(tmp, "tmp"),
     },
+    ...(realStartTimes ? {} : { startedAt: startTimeOf }),
     ...overrides,
   };
   const run = (argv: readonly string[]) =>
@@ -318,7 +380,7 @@ describe("run-lease run", () => {
     ]);
   });
 
-  it("D2281: records lane, thread, worktree without its trailing slash, command, pid and start time", async () => {
+  it("D2281: records lane, thread, worktree without its trailing slash, command, pid, start time, and the run's pid and start time", async () => {
     const lease = await withTempAsync(async (tmp) => {
       let seen: unknown;
       const c = cli(tmp, (child) => {
@@ -335,8 +397,10 @@ describe("run-lease run", () => {
       worktree: WORKTREE,
       command: COMMAND,
       pid: PID,
+      startedAt: START,
       at: NOW,
       childPid: CHILD_PID,
+      childStartedAt: CHILD_START,
     });
   });
 
@@ -946,5 +1010,486 @@ describe("run-lease acquire, after a review", () => {
     expect(out[1]).toBe(
       "LOST t-a (th-t-a): acquire (a manual hold) to t-b (th-t-b): bun run check",
     );
+  });
+});
+
+describe("lease staleness, by process id and start time", () => {
+  it("D2696: judges a holder whose heartbeat is 30 s old stale when another start time holds its id, and live for its own", () => {
+    const stale = ["200", "100"].map((held) =>
+      isStale(
+        recordAged(30_000, { startedAt: "100" }),
+        NOW,
+        holds({ [HOLDER_PID]: held }),
+      ),
+    );
+    expect(stale).toEqual([true, false]);
+  });
+
+  it("D2697: checks only the id while the heartbeat is under 20 s old, and the start time from 20 s", () => {
+    const stale = [19_999, 20_000].map((age) =>
+      isStale(
+        recordAged(age, { startedAt: "100" }),
+        NOW,
+        holds({ [HOLDER_PID]: "200" }),
+      ),
+    );
+    expect(stale).toEqual([false, true]);
+  });
+
+  it("D2698: judges a killed wrapper's lease stale when another start time holds its run's pid", () => {
+    const stale = isStale(
+      recordAged(120_000, { childPid: 10, childStartedAt: "300" }),
+      NOW,
+      holds({ 10: "400" }),
+    );
+    expect(stale).toBe(true);
+  });
+
+  it("D2699: keeps a killed wrapper's lease while its run's own start time holds the run's pid", () => {
+    const stale = isStale(
+      recordAged(120_000, {
+        startedAt: "100",
+        childPid: 10,
+        childStartedAt: "300",
+      }),
+      NOW,
+      holds({ 10: "300" }),
+    );
+    expect(stale).toBe(false);
+  });
+
+  it("D2700: judges a holder recorded without a start time by its id alone once its heartbeat is 30 s old", () => {
+    const stale = isStale(
+      recordAged(30_000),
+      NOW,
+      holds({ [HOLDER_PID]: "200" }),
+    );
+    expect(stale).toBe(false);
+  });
+
+  it("D2701: judges a run recorded without a start time by its pid alone", () => {
+    const stale = isStale(
+      recordAged(120_000, { childPid: 10 }),
+      NOW,
+      holds({ 10: "400" }),
+    );
+    expect(stale).toBe(false);
+  });
+
+  it("D2702: drops a waiter whose heartbeat is 30 s old and whose id another start time holds, so the next waiter heads the queue", () => {
+    const turn = withTemp((tmp) => {
+      const dir = join(tmp, "lease");
+      joinQueue(dir, { ...owner("t-a", 1), startedAt: "100" }, NOW - 30_000);
+      const second = joinQueue(dir, owner("t-b", 2), NOW - 29_000);
+      return takeTurn(dir, second, {
+        now: NOW,
+        running: holds({ 1: "200", 2: "2" }),
+      });
+    });
+    expect(turn.taken).toBe(true);
+  });
+
+  it("D2719: judges the owner once when it reports a lease kept only by its run", () => {
+    const calls = withTemp((tmp) => {
+      const dir = join(tmp, "lease");
+      writeLease(
+        dir,
+        { ...FIRST_HOLDER, childPid: 10, childStartedAt: "300" },
+        NOW - 30_000,
+      );
+      const held = holds({ 10: "300" });
+      const asked: [number | undefined, string | undefined][] = [];
+      leaseStatus(dir, {
+        now: NOW,
+        running: (pid, startedAt) => {
+          asked.push([pid, startedAt]);
+          return held(pid, startedAt);
+        },
+      });
+      return asked;
+    });
+    expect(calls).toEqual([
+      [HOLDER_PID, "100"],
+      [10, "300"],
+    ]);
+  });
+});
+
+// The probe's id pre-check is the real `isRunning`, so the test process's own id is the held one.
+describe("process probe", () => {
+  const OWN_PID = process.pid;
+
+  // A probe whose start-time checks are counted, each answering `answer`, at a clock the test moves.
+  function probeAt(answer: (started: bigint) => boolean | Error) {
+    const clock = { now: NOW };
+    const asked: bigint[] = [];
+    const reports: string[] = [];
+    const probe = processProbe((message) => reports.push(message), {
+      now: () => clock.now,
+      confirm: ({ startedAt }) => {
+        asked.push(startedAt);
+        const result = answer(startedAt);
+        if (result instanceof Error) throw result;
+        return result;
+      },
+    });
+    return { clock, asked, reports, probe };
+  }
+
+  it("D2703: reuses a checked start time for 20 s and checks it again at exactly 20 s", () => {
+    const { clock, asked, probe } = probeAt(() => true);
+    const answers = [0, 19_999, 20_000].map((offset) => {
+      clock.now = NOW + offset;
+      return probe(OWN_PID, "100");
+    });
+    expect({ answers, asked }).toEqual({
+      answers: [true, true, true],
+      asked: [100n, 100n],
+    });
+  });
+
+  it("D2704: checks a different start time for the same id at once, rather than reusing the first", () => {
+    const { asked, probe } = probeAt(() => true);
+    probe(OWN_PID, "100");
+    probe(OWN_PID, "200");
+    expect(asked).toEqual([100n, 200n]);
+  });
+
+  it("D2706: reuses a failed start-time check for 20 s, reporting it once per window", () => {
+    const { clock, asked, reports, probe } = probeAt(
+      () => new Error("query failed"),
+    );
+    const answers = [0, 19_999, 20_000].map((offset) => {
+      clock.now = NOW + offset;
+      return probe(OWN_PID, "100");
+    });
+    expect({ answers, asked: asked.length, reports: reports.length }).toEqual({
+      answers: [true, true, true],
+      asked: 2,
+      reports: 2,
+    });
+  });
+
+  it("D2707: judges a record with no start time by its id alone, asking the OS nothing", () => {
+    const { asked, reports, probe } = probeAt(() => false);
+    const running = probe(OWN_PID, undefined);
+    expect({ running, asked, reports }).toEqual({
+      running: true,
+      asked: [],
+      reports: [],
+    });
+  });
+
+  it("D2708: judges a record whose start time is not decimal text by its id alone, without calling it unreadable", () => {
+    const { asked, reports, probe } = probeAt(() => false);
+    const running = probe(OWN_PID, "12x");
+    expect({ running, asked, reports }).toEqual({
+      running: true,
+      asked: [],
+      reports: [],
+    });
+  });
+
+  it("D2709: checks a start time again after another start time for the same id was found dead", () => {
+    const { asked, probe } = probeAt((started) => started === 100n);
+    probe(OWN_PID, "100");
+    probe(OWN_PID, "300");
+    probe(OWN_PID, "100");
+    expect(asked).toEqual([100n, 300n, 100n]);
+  });
+
+  it("D2721: checks a start time found dead again on the next poll, rather than answering running from its cache", () => {
+    const { asked, probe } = probeAt(() => false);
+    const answers = [probe(OWN_PID, "100"), probe(OWN_PID, "100")];
+    expect({ answers, asked }).toEqual({
+      answers: [false, false],
+      asked: [100n, 100n],
+    });
+  });
+});
+
+describe("process probe, on an ended process", PROCESS_SCENARIO, () => {
+  it("D2720: answers not running for the id of an ended process recorded without a start time, asking the OS nothing", () => {
+    const ended = spawnSync(process.execPath, ["-e", ""], {
+      timeout: PROCESS_SCENARIO_TIMEOUT_MS / 2,
+      windowsHide: true,
+    });
+    let asked = 0;
+    const probe = processProbe(() => {}, {
+      confirm: () => {
+        asked += 1;
+        return true;
+      },
+    });
+    expect({ pid: typeof ended.pid, running: probe(ended.pid), asked }).toEqual(
+      { pid: "number", running: false, asked: 0 },
+    );
+  });
+});
+
+describe("run-lease hook denial, by pid alone", () => {
+  it("D2723: names the holder to a run started without the wrapper, judging it by its pid alone, when its heartbeat is 30 s old", () => {
+    const reason = withTemp((tmp) => {
+      const dir = join(tmp, "lease");
+      writeLease(
+        dir,
+        { ...owner("t-b", process.pid), startedAt: "1", at: NOW },
+        NOW - 30_000,
+      );
+      return heavyRunDenial(dir, "bun run check", { now: NOW });
+    });
+    expect(reason).toBe(
+      "held by t-b (th-t-b); wait for release or ask the orchestrator; do not retry. To queue, run it as: node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- bun run check",
+    );
+  });
+});
+
+describe("run-lease status, by start time", () => {
+  it("D2705: counts a holder as running, and says its start time could not be checked, when the check fails", async () => {
+    const seen = await withTempAsync(async (tmp) => {
+      vi.mocked(ownerRunning).mockImplementationOnce(() => {
+        throw new Error("query failed");
+      });
+      const c = cli(tmp, undefined, {}, { realProbe: true });
+      writeLease(
+        c.dir,
+        { ...owner("t-b", process.pid), startedAt: "100", at: NOW },
+        NOW - 30_000,
+      );
+      await c.run(["status"]);
+      return { out: c.out, err: c.err };
+    });
+    expect(seen).toEqual({
+      out: [
+        `BUSY t-b (th-t-b): bun run check, pid ${process.pid} in /src/wt-2, 0 min`,
+      ],
+      err: [
+        `run-lease: process ${process.pid} counts as running, since its start time could not be checked: query failed`,
+      ],
+    });
+  });
+});
+
+describe("run-lease run, recording start times", () => {
+  it("D2710: writes its start time into its queue entry beside every field the entry always held", async () => {
+    const entry = await withTempAsync(async (tmp) => {
+      const c = cli(tmp, undefined, { running: alive(PID, HOLDER_PID) });
+      writeLease(c.dir, { ...owner("t-b", HOLDER_PID), at: NOW });
+      await c.run([...RUN, "bun", "run", "check"]);
+      const folder = join(c.dir, "queue");
+      const [name = ""] = readdirSync(folder);
+      return JSON.parse(readFileSync(join(folder, name), "utf8")) as unknown;
+    });
+    expect(entry).toEqual({
+      lane: "t-a",
+      thread: "th-t-a",
+      worktree: WORKTREE,
+      command: COMMAND,
+      pid: PID,
+      startedAt: START,
+      at: NOW,
+    });
+  });
+
+  it("D2711: records the run's pid before it reads the run's start time", async () => {
+    const atRead = await withTempAsync(async (tmp) => {
+      let seen:
+        | { childPid: number | undefined; childStartedAt: string | undefined }
+        | undefined;
+      const dir = join(tmp, "lease");
+      const c = cli(tmp, undefined, {
+        startedAt: (pid) => {
+          if (pid === CHILD_PID) {
+            const lease = readLease(dir);
+            seen = {
+              childPid: lease?.childPid,
+              childStartedAt: lease?.childStartedAt,
+            };
+          }
+          return startTimeOf(pid);
+        },
+      });
+      await c.run([...RUN, "bun", "run", "check"]);
+      return seen;
+    });
+    expect(atRead).toEqual({ childPid: CHILD_PID });
+  });
+
+  it("D2712: records a process by its pid alone, saying so, and still runs when its start time cannot be read", async () => {
+    const seen = await withTempAsync(async (tmp) => {
+      const c = cli(tmp, undefined, {
+        startedAt: () => {
+          throw new Error("query failed");
+        },
+      });
+      const code = await c.run([...RUN, "bun", "run", "check"]);
+      return {
+        code,
+        said: c.err.filter((line) =>
+          line.includes("recorded by its pid alone"),
+        ),
+      };
+    });
+    expect(seen).toEqual({
+      code: 0,
+      said: [
+        "run-lease: process 777 is recorded by its pid alone, since its start time could not be read: query failed",
+        "run-lease: process 4242 is recorded by its pid alone, since its start time could not be read: query failed",
+      ],
+    });
+  });
+
+  it("D2713: records its own start time as the run of the hold it joins", async () => {
+    const during = await withTempAsync(async (tmp) => {
+      let seen: string | undefined;
+      const c = cli(
+        tmp,
+        (child) => {
+          child.emit("spawn");
+          seen = readLease(join(tmp, "lease"))?.childStartedAt;
+          child.emit("exit", 0, null);
+        },
+        { running: alive(PID, 555) },
+      );
+      writeLease(c.dir, { ...owner("t-a", 555), command: HOLD, at: NOW });
+      await c.run([...RUN, "bun", "run", "check"]);
+      return seen;
+    });
+    expect(during).toBe(START);
+  });
+});
+
+describe("run-lease start time, read from the OS", PROCESS_SCENARIO, () => {
+  it("D2714: records its start time as decimal text that identifies its own process", async () => {
+    const text = await withTempAsync(async (tmp) => {
+      let recorded: string | undefined;
+      const dir = join(tmp, "lease");
+      const c = cli(
+        tmp,
+        undefined,
+        {
+          pid: process.pid,
+          running: alive(process.pid),
+          heartbeatMs: 1,
+          out: (line) => {
+            if (!line.startsWith("ACQUIRED")) return;
+            recorded = readLease(dir)?.startedAt;
+            releaseLane(dir, "t-a");
+          },
+        },
+        { realStartTimes: true },
+      );
+      await c.run(["acquire", "--lane", "t-a", "--thread", "th-t-a"]);
+      return recorded;
+    });
+    expect(
+      text !== undefined &&
+        /^\d+$/.test(text) &&
+        ownerRunning({ pid: process.pid, startedAt: BigInt(text) }),
+    ).toBe(true);
+  });
+});
+
+describe("lease turn, judging the holder outside the lock", () => {
+  it("D2715: judges an unchanged holder by its start time before it takes the lock, and reclaims a holder that start time shows gone", () => {
+    const seen = withTemp((tmp) => {
+      const dir = join(tmp, "lease");
+      writeLease(dir, FIRST_HOLDER, NOW - 30_000);
+      const entry = joinQueue(dir, owner("t-a", WAITER_PID), NOW);
+      const held = holds({ [HOLDER_PID]: "200", [WAITER_PID]: "1" });
+      const asked: {
+        pid: number | undefined;
+        startedAt: string | undefined;
+        locked: boolean;
+      }[] = [];
+      const turn = takeTurn(dir, entry, {
+        now: NOW,
+        running: (pid, startedAt) => {
+          asked.push({
+            pid,
+            startedAt,
+            locked: existsSync(join(dir, LOCK_DIR)),
+          });
+          return held(pid, startedAt);
+        },
+      });
+      return { taken: turn.taken, asked };
+    });
+    expect(seen).toEqual({
+      taken: true,
+      asked: [
+        { pid: WAITER_PID, startedAt: undefined, locked: false },
+        { pid: HOLDER_PID, startedAt: "100", locked: false },
+      ],
+    });
+  });
+
+  it("D2716: judges a holder again under the lock when another process holds the lease by then", () => {
+    const { turn } = withTemp((tmp) =>
+      takeWhileChanged(
+        join(tmp, "lease"),
+        {
+          first: FIRST_HOLDER,
+          second: { ...owner("t-c", 20), at: NOW },
+          secondBeat: NOW - 30_000,
+        },
+        { [HOLDER_PID]: "100" },
+      ),
+    );
+    expect(turn.taken).toBe(true);
+  });
+
+  it("D2717: judges a holder again under the lock when it beat the lease meanwhile, and keeps a live holder's lease", () => {
+    const { turn } = withTemp((tmp) =>
+      takeWhileChanged(
+        join(tmp, "lease"),
+        { first: FIRST_HOLDER, second: FIRST_HOLDER, secondBeat: NOW },
+        { [HOLDER_PID]: "200" },
+      ),
+    );
+    expect(turn.taken).toBe(false);
+  });
+
+  it("D2718: judges a holder again under the lock when it recorded its run meanwhile, and keeps the lease its run holds", () => {
+    const { turn } = withTemp((tmp) =>
+      takeWhileChanged(
+        join(tmp, "lease"),
+        {
+          first: FIRST_HOLDER,
+          second: { ...FIRST_HOLDER, childPid: 10, childStartedAt: "300" },
+          secondBeat: NOW - 30_000,
+        },
+        { 10: "300" },
+      ),
+    );
+    expect(turn.taken).toBe(false);
+  });
+
+  it("D2722: judges a holder that changed meanwhile by its ids alone while it holds the lock, so its run keeps the lease for that poll", () => {
+    const seen = withTemp((tmp) => {
+      const { turn, underLock } = takeWhileChanged(
+        join(tmp, "lease"),
+        {
+          first: FIRST_HOLDER,
+          second: {
+            ...owner("t-c", 20),
+            startedAt: "5",
+            at: NOW,
+            childPid: 10,
+            childStartedAt: "300",
+          },
+          secondBeat: NOW - 30_000,
+        },
+        { 10: "400" },
+      );
+      return { taken: turn.taken, underLock };
+    });
+    expect(seen).toEqual({
+      taken: false,
+      underLock: [
+        { pid: 20, startedAt: undefined },
+        { pid: 10, startedAt: undefined },
+      ],
+    });
   });
 });

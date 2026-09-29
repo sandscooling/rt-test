@@ -1,4 +1,5 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { ProcessProbe } from "./lease.mjs";
 
 export interface TempOptions {
   readonly platform?: NodeJS.Platform;
@@ -13,7 +14,9 @@ export interface LeaseCliContext {
   readonly out: (line: string) => void;
   readonly err: (line: string) => void;
   readonly now?: () => number;
-  readonly running?: (pid: number | undefined) => boolean;
+  readonly running?: ProcessProbe;
+  /** The OS start time of `pid` as decimal text, or undefined once it has ended. Throws when it cannot be read. */
+  readonly startedAt?: (pid: number) => string | undefined;
   readonly spawn?: (
     program: string,
     args: readonly string[],
@@ -36,7 +39,7 @@ export declare function heavyRunDenial(
   command: string,
   options?: {
     readonly now?: number;
-    readonly running?: (pid: number | undefined) => boolean;
+    readonly running?: ProcessProbe;
   },
 ): string;
 export declare function runLeaseCli(
