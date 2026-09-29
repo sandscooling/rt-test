@@ -1718,7 +1718,9 @@ describe("storing each discovered workspace's selection facts", () => {
     const reason = await readingStoredFacts([
       { ...CART_PROJECT_FACTS, testFilePatterns: withoutPatternBases },
     ]);
-    expect(reason).toContain("The store holds an unreadable JSON array");
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field patternBases",
+    );
   });
 
   it("D2847: a stored project with no spelling of its pattern directory is refused as unreadable, never read with another field in its place", async () => {
@@ -1775,7 +1777,9 @@ describe("storing each discovered workspace's selection facts", () => {
     const { globalSetupFiles: _dropped, ...withoutGlobalSetup } =
       CART_PROJECT_FACTS;
     const reason = await readingStoredFacts([withoutGlobalSetup]);
-    expect(reason).toContain("The store holds an unreadable JSON string array");
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field globalSetupFiles",
+    );
   });
 
   it("D2121: a string find carrying flags is refused as unreadable, a record the writer never makes", async () => {

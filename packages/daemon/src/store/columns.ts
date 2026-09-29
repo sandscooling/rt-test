@@ -47,7 +47,7 @@ export function identifiedTest(row: Row): IdentifiedTest {
       workspacePath: text(row, "workspace_path"),
       projectName: text(row, "project_name"),
       modulePath: text(row, "module_path"),
-      namePath: stringArray(json(row, "name_path")),
+      namePath: stringArray(row, "name_path"),
       occurrence: integer(row, "occurrence"),
     },
     isDuplicate: duplicateMark(row),
@@ -121,19 +121,22 @@ export function member<T extends string>(
   throw unreadable(name, value);
 }
 
-export function arrayOf<T>(value: unknown, item: (element: unknown) => T): T[] {
-  if (!Array.isArray(value)) throw unreadable("JSON array", value);
+/** A column holding a JSON array, each element read by `item`. */
+export function arrayOf<T>(
+  row: Row,
+  name: string,
+  item: (element: unknown) => T,
+): T[] {
+  const value = json(row, name);
+  if (!Array.isArray(value)) throw unreadable(name, value);
   return value.map((element: unknown) => item(element));
 }
 
-export function stringArray(value: unknown): string[] {
-  if (
-    Array.isArray(value) &&
-    value.every((element): element is string => typeof element === "string")
-  ) {
-    return value;
-  }
-  throw unreadable("JSON string array", value);
+/** A column holding a JSON array of strings. */
+export function stringArray(row: Row, name: string): string[] {
+  const value = json(row, name);
+  if (isStringArray(value)) return value;
+  throw unreadable(name, value);
 }
 
 export function unsupportedVitest(value: unknown): UnsupportedVitest {
@@ -162,7 +165,7 @@ export function moduleReport(value: unknown): ModuleReport {
 export function failedModule(value: unknown): FailedModule {
   return {
     ...moduleReport(value),
-    errors: stringArray(jsonField(value, "errors")),
+    errors: jsonStrings(value, "errors"),
   };
 }
 
@@ -184,9 +187,9 @@ export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
   return {
     projectName: jsonText(value, "projectName"),
     viteRoot: jsonText(value, "viteRoot"),
-    setupFiles: stringArray(jsonField(value, "setupFiles")),
-    globalSetupFiles: stringArray(jsonField(value, "globalSetupFiles")),
-    aliases: arrayOf(jsonField(value, "aliases"), reportedAlias),
+    setupFiles: jsonStrings(value, "setupFiles"),
+    globalSetupFiles: jsonStrings(value, "globalSetupFiles"),
+    aliases: jsonArray(value, "aliases", reportedAlias),
     testFilePatterns: testFilePatterns(jsonField(value, "testFilePatterns")),
   };
 }
@@ -219,10 +222,10 @@ function testFilePatterns(value: unknown): TestFilePatterns {
   return {
     directory: jsonText(value, "directory"),
     vitestDirectory: jsonText(value, "vitestDirectory"),
-    patternBases: arrayOf(jsonField(value, "patternBases"), patternBase),
-    include: stringArray(jsonField(value, "include")),
-    exclude: stringArray(jsonField(value, "exclude")),
-    includeSource: stringArray(jsonField(value, "includeSource")),
+    patternBases: jsonArray(value, "patternBases", patternBase),
+    include: jsonStrings(value, "include"),
+    exclude: jsonStrings(value, "exclude"),
+    includeSource: jsonStrings(value, "includeSource"),
   };
 }
 
@@ -258,8 +261,32 @@ function jsonBoolean(value: unknown, key: string): boolean {
   throw unreadable(`JSON field ${key}`, value);
 }
 
+function jsonArray<T>(
+  value: unknown,
+  key: string,
+  item: (element: unknown) => T,
+): T[] {
+  const field = jsonField(value, key);
+  if (Array.isArray(field))
+    return field.map((element: unknown) => item(element));
+  throw unreadable(`JSON field ${key}`, value);
+}
+
+function jsonStrings(value: unknown, key: string): string[] {
+  const field = jsonField(value, key);
+  if (isStringArray(field)) return field;
+  throw unreadable(`JSON field ${key}`, value);
+}
+
 function jsonField(value: unknown, key: string): unknown {
   return isRecord(value) ? value[key] : undefined;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((element): element is string => typeof element === "string")
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
