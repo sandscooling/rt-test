@@ -308,6 +308,7 @@ const FIXTURE_MARKERS = [
     "release-collect",
     "spawn-children",
     "stick-at",
+    "host-rejection",
     "child-endpoint",
     "heartbeat-*",
     "failed-heartbeat-*",
@@ -382,6 +383,14 @@ export async function eventually(
 /** The daemon fixture's `packages/a` file `name`, which the fixture reads as a hold point or writes as a marker. */
 export function fixtureFile(root: string, name: string): string {
   return join(root, WORKSPACE_A, name);
+}
+
+/** `packages/a`'s global setup count at a confirmed start's first run, which follows its discovery's. */
+const FIRST_RUN_SETUP = "2";
+
+/** Makes `packages/a`'s global setup leak one unhandled rejection on the executor's thread at the first run alone. */
+export function leakAtFirstRun(root: string): void {
+  writeFileSync(fixtureFile(root, "host-rejection"), FIRST_RUN_SETUP);
 }
 
 /**

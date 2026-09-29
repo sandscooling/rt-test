@@ -41,6 +41,7 @@ import {
   confirmNothing,
   eventually,
   holdAt,
+  leakAtFirstRun,
   logged,
   settled,
   started,
@@ -1441,6 +1442,32 @@ describe("a query", () => {
         };
       });
       expect(outcome).toStrictEqual({ exit: 0, counted: true, verdicts: [] });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2770: a human summary counts a run's host rejection among that workspace's unhandled errors",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        leakAtFirstRun(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary"], { cwd: root });
+        const line = run.stdout
+          .split("\n")
+          .find((text) => text.startsWith(`  ${WORKSPACE_A}:`));
+        return {
+          exit: run.exit,
+          errorCounts: (line ?? "")
+            .split(", ")
+            .filter((fact) => fact.endsWith("unhandled errors")),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        errorCounts: ["1 unhandled errors"],
+      });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

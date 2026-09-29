@@ -523,5 +523,12 @@
     "file": "packages/daemon/src/query/answer.ts",
     "old": "export const DEPENDENCY_BUILDS_ENDED = \"dependency-builds-ended\";",
     "new": "export const DEPENDENCY_BUILDS_ENDED = \"dependency-builds-stopped\";"
+  },
+  {
+    "id": "D2770",
+    "defect": "The human summary drops a run's unhandled error count, so a run whose host leaked a rejection reads with no error in the text.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "    `${run.unhandledErrors} unhandled errors`,\n",
+    "new": ""
   }
 ]

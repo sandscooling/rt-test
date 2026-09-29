@@ -5493,5 +5493,166 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "        !verdict.fingerprinted && verdict.changedWhileRunning,\n",
     "new": "        !verdict.fingerprinted,\n"
+  },
+  {
+    "id": "D2748",
+    "defect": "On Vitest 5, a rejection a global setup leaks on the host thread ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2749",
+    "defect": "On Vitest 4.1, a rejection a global setup leaks on the host thread ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2750",
+    "defect": "On Vitest 5, a rejection a config leaks as it loads ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2751",
+    "defect": "On Vitest 4.1, a rejection a config leaks as it loads ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2752",
+    "defect": "On Vitest 5, a rejection a plugin leaks in a transform ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2753",
+    "defect": "On Vitest 4.1, a rejection a plugin leaks in a transform ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2754",
+    "defect": "On Vitest 5, a rejection a global setup's teardown leaks as the session closes ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2755",
+    "defect": "On Vitest 4.1, a rejection a global setup's teardown leaks as the session closes ends the run's executor, so the run stores nothing.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2756",
+    "defect": "On Vitest 5, a discovery drops a host rejection raised while its workspace's session is open, so selection never learns collection raised an unhandled error.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  const { value } = opened;\n",
+    "new": "  if (opened.status === \"loaded\") return opened;\n  const { value } = opened;\n"
+  },
+  {
+    "id": "D2757",
+    "defect": "On Vitest 4.1, a discovery drops a host rejection raised while its workspace's session is open, so selection never learns collection raised an unhandled error.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  const { value } = opened;\n",
+    "new": "  if (opened.status === \"loaded\") return opened;\n  const { value } = opened;\n"
+  },
+  {
+    "id": "D2758",
+    "defect": "A session that fails drops the host rejections raised while it was open, instead of following its error with them.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "    return { ...opened, error: [opened.error, ...rejections].join(\"\\n\") };",
+    "new": "    return opened;"
+  },
+  {
+    "id": "D2759",
+    "defect": "A strict --unhandled-rejections mode in NODE_OPTIONS ends the executor at a host rejection before its guard sees it.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "execArgv: [...entry.execArgv, UNHANDLED_REJECTIONS_THROW],",
+    "new": "execArgv: [...entry.execArgv],"
+  },
+  {
+    "id": "D2760",
+    "defect": "A host rejection raised while no session is open is passed on to Node's default, which ends the executor and every job after it.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "    if (event !== UNHANDLED_REJECTION) {",
+    "new": "    if (event !== UNHANDLED_REJECTION || recording === undefined) {"
+  },
+  {
+    "id": "D2761",
+    "defect": "A host rejection raised while no session is open is swallowed without a line in the daemon's log.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "    logRejection(`${OUTSIDE_SESSION_LABEL}${text}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D2762",
+    "defect": "Recording stops as the session's body returns, before Node reports a rejection raised in its last turn, so that rejection falls outside the session and is only logged.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "    await nextMacrotask();\n",
+    "new": ""
+  },
+  {
+    "id": "D2763",
+    "defect": "The bound is one short, so a session that meets exactly 100 rejections keeps only 99.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "if (open.rejections.length >= MAX_RECORDED_REJECTIONS) {",
+    "new": "if (open.rejections.length >= MAX_RECORDED_REJECTIONS - 1) {"
+  },
+  {
+    "id": "D2764",
+    "defect": "A session keeps every rejection it meets, so one raised again and again by a repeating timer grows its record without bound.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "  if (open.rejections.length >= MAX_RECORDED_REJECTIONS) {\n    open.unrecorded += 1;\n    return;\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2765",
+    "defect": "A session past the bound says nothing of the rejections it did not keep.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "  if (own.unrecorded === 0) return own.rejections;\n  return [...own.rejections, `${own.unrecorded}${UNRECORDED_SUFFIX}`];",
+    "new": "  return own.rejections;"
+  },
+  {
+    "id": "D2766",
+    "defect": "A rejection a session keeps is not written to the daemon's log.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "  open.rejections.push(recorded);\n  logRejection(recorded);",
+    "new": "  open.rejections.push(recorded);"
+  },
+  {
+    "id": "D2767",
+    "defect": "A daemon whose run's global setup leaks a host rejection stores nothing for that run, so its answers keep the earlier run's outcomes or read every test never run.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "\nguardHostRejections();\n",
+    "new": "\n"
+  },
+  {
+    "id": "D2768",
+    "defect": "A run whose worker reports an unhandled error and whose host thread leaks a rejection keeps only the host rejection, so the worker's error vanishes from the run.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "      unhandledErrors: [...value.unhandledErrors, ...rejections],",
+    "new": "      unhandledErrors: [...rejections],"
+  },
+  {
+    "id": "D2769",
+    "defect": "A rejection raised after a session has closed is taken by that closed session's record, labelled as raised while it was open.",
+    "file": "packages/daemon/src/vitest/host-rejections.ts",
+    "old": "    recording = outer;\n",
+    "new": ""
+  },
+  {
+    "id": "D2771",
+    "defect": "The executor's stderr is dropped, so the line its guard writes for each host rejection never reaches the daemon's log.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      stdio: [\"ignore\", \"inherit\", \"inherit\", \"ipc\"],",
+    "new": "      stdio: [\"ignore\", \"inherit\", \"ignore\", \"ipc\"],"
   }
 ]

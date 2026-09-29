@@ -57,6 +57,7 @@ import {
   frozenProof,
   declareFixtureMarkers,
   holdAt,
+  leakAtFirstRun,
   logEntries,
   logged,
   settled,
@@ -1333,6 +1334,67 @@ describe("a query to the worktree's daemon", () => {
           [WORKSPACE_B, "completed"],
         ],
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2767: a run whose global setup leaks a host rejection is stored completed, its tests passed and current and its summary counting the rejection",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        leakAtFirstRun(root);
+        const identity = await started(root, pids, confirmEvery(root));
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        const summary = await settled(querySummary(root));
+        if ("thrown" in summary) return summary;
+        const latestRun = summary.workspaces.find(
+          (workspace) => workspace.workspacePath === WORKSPACE_A,
+        )?.latestRun;
+        return {
+          idle,
+          latestRun:
+            latestRun?.status === "ran"
+              ? {
+                  execution: latestRun.execution,
+                  unhandledErrors: latestRun.unhandledErrors,
+                }
+              : latestRun,
+          passed: summary.counts.states.passed,
+          current: summary.counts.freshness.current,
+          unstoredJobs: summary.unstoredJobs,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        latestRun: { execution: "completed", unhandledErrors: 1 },
+        passed: 2,
+        current: 2,
+        unstoredJobs: [],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2771: the line the executor writes for a host rejection during a run reaches the daemon's log, labelled",
+    async () => {
+      const lines = await withDaemonConsumer(async (root, pids) => {
+        leakAtFirstRun(root);
+        const identity = await started(root, pids, confirmEvery(root));
+        if ("thrown" in identity) return identity;
+        await eventually(() => logged(identity.logFile, IDLE_ENTRY));
+        return logEntries(identity.logFile).filter((entry) =>
+          entry.includes("host rejection from packages/a's setup"),
+        );
+      });
+      expect(lines).toStrictEqual([
+        expect.stringMatching(
+          /^executor \d+: unhandled rejection on the host thread while the session was open: host rejection from packages\/a's setup$/,
+        ),
+      ]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

@@ -2,6 +2,7 @@ import type { DependencyInformation } from "../selection/selection-types.js";
 import { discoverTests } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import { findPackageWorkspaces } from "../vitest/find-workspaces.js";
+import { guardHostRejections } from "../vitest/host-rejections.js";
 import { runWorkspace } from "../vitest/run-workspace.js";
 import {
   EXECUTOR_BOUND_MS,
@@ -17,6 +18,8 @@ const DISCONNECTED_REASON = "the executor lost its channel to the daemon";
 
 let current: AbortController | undefined;
 let disconnected = false;
+
+guardHostRejections();
 
 process.on("message", (request: ExecutorRequest) => {
   if (request.type === "abort") {

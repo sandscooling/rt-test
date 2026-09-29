@@ -7,9 +7,11 @@ import type {
 } from "vitest/node";
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { WorkspaceConfig } from "./config-loader.js";
 import { confirmedConfig } from "./confirmed-start.js";
 import { errorText } from "./error-text.js";
 import type { VitestWorkspace } from "./find-workspaces.js";
+import { recordingHostRejections } from "./host-rejections.js";
 import {
   importVitestNode,
   resolveWorkspaceVitest,
@@ -28,6 +30,7 @@ export interface UnsupportedProject {
 }
 
 export type UnsupportedVitest = Extract<ResolvedVitest, { supported: false }>;
+type SupportedVitest = Extract<ResolvedVitest, { supported: true }>;
 
 /** A loaded workspace's Vitest and the specifications its step may collect or run. */
 export interface WorkspaceSession {
@@ -39,22 +42,31 @@ export interface WorkspaceSession {
   readonly unsupportedProjects: readonly UnsupportedProject[];
 }
 
+interface LoadedSession<T> {
+  readonly status: "loaded";
+  readonly vitestVersion: string;
+  readonly value: T;
+  readonly closeError?: string;
+}
+
+interface FailedSession {
+  readonly status: "failed";
+  readonly vitestVersion: string;
+  readonly error: string;
+  readonly closeError?: string;
+}
+
+/** What a session's step returns: its record, whose unhandled errors the session's host rejections join. */
+interface SessionRecord {
+  readonly unhandledErrors: readonly string[];
+}
+
 type SessionResult<T> =
-  | {
-      readonly status: "loaded";
-      readonly vitestVersion: string;
-      readonly value: T;
-      readonly closeError?: string;
-    }
+  | LoadedSession<T>
   | { readonly status: "unsupported"; readonly vitest: UnsupportedVitest }
   /** The workspace's config file is no longer the one confirmed at start, so nothing was loaded. */
   | { readonly status: "not-confirmed" }
-  | {
-      readonly status: "failed";
-      readonly vitestVersion: string;
-      readonly error: string;
-      readonly closeError?: string;
-    };
+  | FailedSession;
 
 const BROWSER_MODE_REASON = "browser mode is not supported";
 /** The Vitest CLI sets this before loading a config and `createVitest` does not, so collection would see Vite's `development`. */
@@ -85,8 +97,12 @@ export function queueSessionJob<T>(job: () => Promise<T>): Promise<T> {
   return queued;
 }
 
-/** Loads the workspace's Vitest config and imports its test files: call only for a started, trusted project. */
-export async function inWorkspaceSession<T>(
+/**
+ * Loads the workspace's Vitest config and imports its test files: call only for a started, trusted project. Each
+ * unhandled rejection the host guard takes while the session is open joins the step's unhandled errors, or, when
+ * the session failed, follows its error.
+ */
+export async function inWorkspaceSession<T extends SessionRecord>(
   workspace: VitestWorkspace,
   confirmedConfigFile: string,
   reporters: readonly Reporter[],
@@ -98,8 +114,22 @@ export async function inWorkspaceSession<T>(
   if (!vitest.supported) return { status: "unsupported", vitest };
   const restoreHost = captureHostState();
   process.env["NODE_ENV"] ??= TEST_NODE_ENV;
+  const { value: opened, rejections } = await recordingHostRejections(() =>
+    openAndClose(workspace, config, vitest, reporters, step),
+  );
+  restoreHost();
+  return withHostRejections(opened, rejections);
+}
+
+async function openAndClose<T>(
+  workspace: VitestWorkspace,
+  config: WorkspaceConfig,
+  vitest: SupportedVitest,
+  reporters: readonly Reporter[],
+  step: (session: WorkspaceSession) => Promise<T>,
+): Promise<LoadedSession<T> | FailedSession> {
   let instance: Vitest | undefined;
-  let result: SessionResult<T>;
+  let result: LoadedSession<T> | FailedSession;
   try {
     process.chdir(workspace.directory);
     const { createVitest } = await importVitestNode(vitest);
@@ -127,8 +157,25 @@ export async function inWorkspaceSession<T>(
     };
   }
   const closeError = await closeInstance(instance);
-  restoreHost();
   return closeError === undefined ? result : { ...result, closeError };
+}
+
+function withHostRejections<T extends SessionRecord>(
+  opened: LoadedSession<T> | FailedSession,
+  rejections: readonly string[],
+): LoadedSession<T> | FailedSession {
+  if (rejections.length === 0) return opened;
+  if (opened.status === "failed") {
+    return { ...opened, error: [opened.error, ...rejections].join("\n") };
+  }
+  const { value } = opened;
+  return {
+    ...opened,
+    value: {
+      ...value,
+      unhandledErrors: [...value.unhandledErrors, ...rejections],
+    },
+  };
 }
 
 function noWriteOptions(vitestMajor: number): CliOptions {

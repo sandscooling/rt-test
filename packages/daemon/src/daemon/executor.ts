@@ -31,6 +31,8 @@ import {
 } from "./process-tree.js";
 
 const EXECUTOR_ENTRY = "executor-main";
+/** Overrides a strict mode `NODE_OPTIONS` may set, in which Node ends the process before the executor's guard sees a rejection. */
+const UNHANDLED_REJECTIONS_THROW = "--unhandled-rejections=throw";
 const ABORTED_BEFORE_SEND_REASON =
   "the stop arrived before the job was sent to its executor process, so the job was not run";
 const NOT_STARTED_REASON =
@@ -251,7 +253,7 @@ export class Executor {
   #startChild(): ChildProcess {
     const entry = daemonEntryPoint(EXECUTOR_ENTRY);
     const child = fork(entry.file, [], {
-      execArgv: [...entry.execArgv],
+      execArgv: [...entry.execArgv, UNHANDLED_REJECTIONS_THROW],
       stdio: ["ignore", "inherit", "inherit", "ipc"],
       detached: ownsProcessGroup(),
       windowsHide: true,

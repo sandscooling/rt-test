@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -7,6 +7,12 @@ import {
   HOOK_EXIT_CODE,
   HOOK_VARIABLE,
 } from "../../../test/fixtures/daemon/build-hook.mjs";
+import {
+  type ChildEnd,
+  WatchedChild,
+} from "../../../test/scripts/child-end.js";
+import { recordStarted } from "../../../test/scripts/run-cleanup.mjs";
+import { daemonEntryPoint } from "../src/daemon/entry-point.js";
 import { Executor, type JobOutcome } from "../src/daemon/executor.js";
 import {
   createParseRecord,
@@ -18,7 +24,12 @@ import type {
   SelectableWorkspace,
 } from "../src/selection/selection-types.js";
 import { buildDependencyInformation } from "../src/selection/workspace-graph.js";
+import type { TestDiscovery } from "../src/vitest/discover-tests.js";
 import { findPackageWorkspaces } from "../src/vitest/find-workspaces.js";
+import type {
+  NotConfirmedRun,
+  WorkspaceRun,
+} from "../src/vitest/run-workspace.js";
 import { STRING_FIND } from "../src/vitest/selection-facts.js";
 import { EXECUTOR_BOUND_MS } from "../src/daemon/executor-jobs.js";
 import {
@@ -29,7 +40,17 @@ import {
   withEnvironment,
   withPreload,
 } from "./daemon-harness.js";
-import { inTempDir, REPO, waitUntil } from "./harness.js";
+import {
+  finished,
+  inConsumerCopy,
+  inTempDir,
+  ranRun,
+  REPO,
+  runSummary,
+  runTempRoot,
+  waitUntil,
+  type VitestInstall,
+} from "./harness.js";
 import { manifest, rootManifest, writeTree } from "./selection/harness.js";
 
 /** The containment the next `Executor` is built with, and where each message sent to a forked process is recorded. */
@@ -724,6 +745,442 @@ describe("stopping a dependency build", () => {
     async () => {
       const { stopMs } = await stoppedMidBuild((executor) => executor.abort());
       expect(stopMs).toBeLessThan(EXECUTOR_BOUND_MS);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+const HOST_REJECTION_FIXTURE = "host-rejection";
+/** Read by the host-rejection fixture's config and global setup: the one site that leaks a rejection. */
+const LEAK_SITE = "RT_HOST_REJECTION";
+const FIXTURE_CONFIG = "vitest.config.mjs";
+const RECORDED =
+  "unhandled rejection on the host thread while the session was open: ";
+const OUTSIDE =
+  "unhandled rejection on the host thread while no Vitest session was open: ";
+const STRICT_REJECTIONS = "--unhandled-rejections=strict";
+
+type LeakSite =
+  | "config"
+  | "plugin"
+  | "global-setup"
+  | "teardown"
+  | "config-then-throw"
+  | "global-setup-and-test-body";
+
+/** Runs `job` in a fresh executor over a copy of the host-rejection fixture whose `site` leaks, then closes it. */
+function inLeakingConsumer<T>(
+  install: VitestInstall,
+  site: LeakSite,
+  job: (executor: Executor, root: string) => Promise<T>,
+): Promise<T> {
+  return inConsumerCopy(HOST_REJECTION_FIXTURE, install, (root) =>
+    withEnvironment(LEAK_SITE, site, async () => {
+      next.containment = undefined;
+      const executor = new Executor(memoryLog());
+      try {
+        return await job(executor, root);
+      } finally {
+        await executor.close();
+      }
+    }),
+  );
+}
+
+function runLeaking(
+  install: VitestInstall,
+  site: LeakSite,
+): Promise<JobOutcome<WorkspaceRun | NotConfirmedRun>> {
+  return inLeakingConsumer(install, site, (executor, root) =>
+    executor.run({ path: ".", directory: root }, FIXTURE_CONFIG),
+  );
+}
+
+function discoverLeaking(
+  install: VitestInstall,
+  site: LeakSite,
+): Promise<JobOutcome<TestDiscovery>> {
+  return inLeakingConsumer(install, site, (executor, root) =>
+    executor.discover({
+      consumerRoot: root,
+      workspaces: [{ path: ".", configFile: FIXTURE_CONFIG }],
+    }),
+  );
+}
+
+/** A run's test states and unhandled errors; a job that ended unrun as its outcome, which names why. */
+function ranWithErrors(
+  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
+): unknown {
+  if (!outcome.ended) return outcome;
+  return {
+    summary: runSummary(outcome.value),
+    unhandledErrors: ranRun(outcome.value)?.unhandledErrors,
+  };
+}
+
+/** Both fixture tests passed and stored, beside the rejection from `where` as the run's only unhandled error. */
+function completedWithRejection(where: string): unknown {
+  return {
+    summary: {
+      execution: "completed",
+      modules: {
+        "a.test.mjs": {
+          first: finished("passed"),
+          second: finished("passed"),
+        },
+      },
+    },
+    unhandledErrors: [`${RECORDED}host rejection from ${where}`],
+  };
+}
+
+/** The discovered workspace's test count and unhandled errors; anything else as it came. */
+function discoveredErrors(outcome: JobOutcome<TestDiscovery>): unknown {
+  if (!outcome.ended) return outcome;
+  const [workspace] = outcome.value.workspaces;
+  if (workspace?.status !== "discovered") return workspace;
+  return {
+    status: workspace.status,
+    tests: workspace.tests.length,
+    unhandledErrors: workspace.unhandledErrors,
+  };
+}
+
+/** Whether a failed run keeps its own error and has the labelled rejection follow it; anything else as it came. */
+function failedWithRejection(
+  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
+): unknown {
+  if (!outcome.ended || outcome.value.status !== "failed") return outcome;
+  const { error } = outcome.value;
+  return {
+    status: outcome.value.status,
+    keepsItsError: error.includes("the config does not load"),
+    rejectionFollows: error.endsWith(
+      `\n${RECORDED}host rejection from the config`,
+    ),
+  };
+}
+
+describe("an unhandled rejection on the executor's host thread while a run's session is open", () => {
+  it(
+    "D2748: on Vitest 5, a run whose global setup leaks one completes, its tests passed and the rejection labelled among its unhandled errors",
+    async () => {
+      expect(
+        ranWithErrors(await runLeaking("vitest", "global-setup")),
+      ).toStrictEqual(completedWithRejection("the global setup"));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2749: on Vitest 4.1, a run whose global setup leaks one completes, its tests passed and the rejection labelled among its unhandled errors",
+    async () => {
+      expect(
+        ranWithErrors(await runLeaking("vitest-4", "global-setup")),
+      ).toStrictEqual(completedWithRejection("the global setup"));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2750: on Vitest 5, a run whose config leaks one as it loads completes, with the rejection labelled among its unhandled errors",
+    async () => {
+      expect(ranWithErrors(await runLeaking("vitest", "config"))).toStrictEqual(
+        completedWithRejection("the config"),
+      );
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2751: on Vitest 4.1, a run whose config leaks one as it loads completes, with the rejection labelled among its unhandled errors",
+    async () => {
+      expect(
+        ranWithErrors(await runLeaking("vitest-4", "config")),
+      ).toStrictEqual(completedWithRejection("the config"));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2752: on Vitest 5, a run whose plugin leaks one in a transform completes, with the rejection labelled among its unhandled errors",
+    async () => {
+      expect(ranWithErrors(await runLeaking("vitest", "plugin"))).toStrictEqual(
+        completedWithRejection("a plugin transform"),
+      );
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2753: on Vitest 4.1, a run whose plugin leaks one in a transform completes, with the rejection labelled among its unhandled errors",
+    async () => {
+      expect(
+        ranWithErrors(await runLeaking("vitest-4", "plugin")),
+      ).toStrictEqual(completedWithRejection("a plugin transform"));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2754: on Vitest 5, a run whose global setup's teardown leaks one as the session closes completes, with the rejection labelled among its unhandled errors",
+    async () => {
+      expect(
+        ranWithErrors(await runLeaking("vitest", "teardown")),
+      ).toStrictEqual(completedWithRejection("the global setup's teardown"));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2755: on Vitest 4.1, a run whose global setup's teardown leaks one as the session closes completes, with the rejection labelled among its unhandled errors",
+    async () => {
+      expect(
+        ranWithErrors(await runLeaking("vitest-4", "teardown")),
+      ).toStrictEqual(completedWithRejection("the global setup's teardown"));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2759: under a strict --unhandled-rejections mode in NODE_OPTIONS, a run whose global setup leaks one still completes with it labelled",
+    async () => {
+      const outcome = await withEnvironment(
+        "NODE_OPTIONS",
+        [process.env["NODE_OPTIONS"], STRICT_REJECTIONS]
+          .filter(Boolean)
+          .join(" "),
+        () => runLeaking("vitest", "global-setup"),
+      );
+      expect(ranWithErrors(outcome)).toStrictEqual(
+        completedWithRejection("the global setup"),
+      );
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2768: a run whose test body and global setup each leak one keeps both, the worker's unlabelled and the host's labelled",
+    async () => {
+      const outcome = await runLeaking("vitest", "global-setup-and-test-body");
+      const errors = outcome.ended
+        ? (ranRun(outcome.value)?.unhandledErrors ?? [])
+        : [outcome.reason];
+      expect({
+        worker: errors.filter((error) => !error.startsWith(RECORDED)),
+        host: errors.filter((error) => error.startsWith(RECORDED)),
+      }).toStrictEqual({
+        worker: [expect.stringMatching(/^rejection from a test body/)],
+        host: [`${RECORDED}host rejection from the global setup`],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2758: a rejection leaked by a config that then fails to load follows the failed session's own error, labelled, rather than being dropped",
+    async () => {
+      expect(
+        failedWithRejection(await runLeaking("vitest", "config-then-throw")),
+      ).toStrictEqual({
+        status: "failed",
+        keepsItsError: true,
+        rejectionFollows: true,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("an unhandled rejection on the executor's host thread while a discovery's session is open", () => {
+  it(
+    "D2756: on Vitest 5, it is recorded, labelled, among the discovered workspace's unhandled errors",
+    async () => {
+      expect(
+        discoveredErrors(await discoverLeaking("vitest", "config")),
+      ).toStrictEqual({
+        status: "discovered",
+        tests: 2,
+        unhandledErrors: [`${RECORDED}host rejection from the config`],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2757: on Vitest 4.1, it is recorded, labelled, among the discovered workspace's unhandled errors",
+    async () => {
+      expect(
+        discoveredErrors(await discoverLeaking("vitest-4", "config")),
+      ).toStrictEqual({
+        status: "discovered",
+        tests: 2,
+        unhandledErrors: [`${RECORDED}host rejection from the config`],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+const GUARD_DRIVER = join(
+  REPO,
+  "test/fixtures/daemon/host-rejection/guard-driver.mjs",
+);
+const GUARD_MODULE = new URL(
+  "../src/vitest/host-rejections.ts",
+  import.meta.url,
+).href;
+/** The mode the executor is forked in, so the driver meets a rejection as the executor does. */
+const EXECUTOR_REJECTION_MODE = "--unhandled-rejections=throw";
+const ISO_TIME = String.raw`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`;
+const LOGGED_REJECTION = "unhandled rejection on the host thread";
+const NOT_RECORDED_COUNT =
+  "1 more unhandled rejections on the host thread while the session was open are not recorded";
+
+interface DrivenGuard {
+  readonly end: ChildEnd;
+  readonly pid: number | undefined;
+}
+
+/** Runs the guard driver's `scenario` in a Node process of its own, which installs the guard as the executor does. */
+async function driveGuard(...scenario: string[]): Promise<DrivenGuard> {
+  const child = spawn(
+    process.execPath,
+    [
+      ...daemonEntryPoint("executor-main").execArgv,
+      EXECUTOR_REJECTION_MODE,
+      GUARD_DRIVER,
+      GUARD_MODULE,
+      ...scenario,
+    ],
+    { cwd: REPO, stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+  );
+  const watched = new WatchedChild(child, "the guard driver");
+  if (child.pid !== undefined) {
+    recordStarted(runTempRoot(), { pids: [child.pid] });
+  }
+  return { end: await watched.end, pid: child.pid };
+}
+
+/** The rejections a driven session recorded, or a throw naming how the driver ended when it wrote none. */
+function recordedBy({ end }: DrivenGuard): string[] {
+  if (end.code !== 0) {
+    throw new Error(
+      `the guard driver ended with ${end.code ?? end.signal}: ${end.stderr}`,
+    );
+  }
+  return JSON.parse(end.stdout) as string[];
+}
+
+/** The lines the guard logged to stderr. */
+function loggedRejections({ end }: DrivenGuard): string[] {
+  return end.stderr
+    .split(/\r?\n/)
+    .filter((line) => line.includes(LOGGED_REJECTION));
+}
+
+/** How many of a session's entries are labelled rejections, and the entries that are not. */
+function keptAndCounted(rejections: readonly string[]): {
+  kept: number;
+  counted: string[];
+} {
+  return {
+    kept: rejections.filter((entry) => entry.startsWith(RECORDED)).length,
+    counted: rejections.filter((entry) => !entry.startsWith(RECORDED)),
+  };
+}
+
+describe("the executor's guard against host unhandled rejections", () => {
+  it(
+    "D2760: a rejection raised while no session is open leaves the process running",
+    async () => {
+      const { end } = await driveGuard("outside");
+      expect({
+        code: end.code,
+        signal: end.signal,
+        stdout: end.stdout,
+      }).toStrictEqual({ code: 0, signal: null, stdout: "survived\n" });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2761: a rejection raised while no session is open is logged to stderr with an ISO time, the process id and its label",
+    async () => {
+      const driven = await driveGuard("outside");
+      expect(loggedRejections(driven)).toStrictEqual([
+        expect.stringMatching(
+          new RegExp(
+            `^${ISO_TIME} executor ${driven.pid}: ${OUTSIDE}host rejection while no session was open$`,
+          ),
+        ),
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2769: a rejection raised after a session has closed is logged as raised while no session was open, not taken by the closed one",
+    async () => {
+      const driven = await driveGuard("after-close");
+      expect(loggedRejections(driven)).toStrictEqual([
+        expect.stringMatching(
+          new RegExp(
+            `^${ISO_TIME} executor ${driven.pid}: ${OUTSIDE}host rejection after the session closed$`,
+          ),
+        ),
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2762: a rejection raised as the session's body returns is recorded on that session, not left to fall outside it",
+    async () => {
+      expect(recordedBy(await driveGuard("at-end"))).toStrictEqual([
+        `${RECORDED}host rejection as the session's body returns`,
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2763: a session that meets exactly 100 rejections keeps all 100 and counts none",
+    async () => {
+      expect(
+        keptAndCounted(recordedBy(await driveGuard("record", "100"))),
+      ).toStrictEqual({ kept: 100, counted: [] });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2764: a session that meets 101 rejections keeps no more than 100",
+    async () => {
+      expect(
+        keptAndCounted(recordedBy(await driveGuard("record", "101"))).kept,
+      ).toBe(100);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2765: a session that meets 101 rejections adds one entry counting the one it did not keep",
+    async () => {
+      expect(
+        keptAndCounted(recordedBy(await driveGuard("record", "101"))).counted,
+      ).toStrictEqual([NOT_RECORDED_COUNT]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2766: each rejection a session keeps is also logged, and one past the bound is not",
+    async () => {
+      expect(loggedRejections(await driveGuard("record", "101")).length).toBe(
+        100,
+      );
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
