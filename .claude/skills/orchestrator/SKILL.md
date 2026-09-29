@@ -119,6 +119,8 @@ node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- wsl.ex
 
 Both legs run the same `bun run check`.
 
+**One unexplained Windows flake has a rerun rule.** A Vitest worker exit 3221225477 during `packages/daemon/test/force-stop.test.ts` is the known flake `docs/testing.md` § Known flakes describes: add its row there, then rerun the gate once. Any other red, or this one twice in a row, is investigated before a rerun.
+
 Push only when the Windows log reads `CHECK_EXIT:0` and the Linux log reads both `CHECK_EXIT_node:0 v24.…` and `CHECK_EXIT_node22:0 v22.…`; the version on each marker proves which Node ran it. A Linux-only red goes to the lane like any other red, and its fix lands as a further commit before the push.
 
 **A gate result expires the moment any lane edits again.** Quote results with the window they measured ("check exit 0 at 22:51-22:53"). When a member's figure disagrees with yours, read your own log before disputing it: both are usually right about different trees, and that is what to record. **Cite a `_agent-docs/.scratch/` path only in live messages, never in a committed file**: the folder is gitignored, so the citation dangles for every later reader. For a scratch file a later lane needs, write what it did and how to rebuild it.

@@ -22,6 +22,16 @@ Keep bootstrap tests hook-free: do shared setup lazily inside the test body, so 
 
 Changing source formatting may invalidate an exact mutation anchor. Update it deliberately; do not silently skip or fuzzy-match missing anchors. A changed test or mutation requires fresh evidence.
 
+## Known flakes
+
+One Windows failure has no known cause. A Vitest forks worker exited with code 3221225477 (0xC0000005, an access violation) while running `packages/daemon/test/force-stop.test.ts` under the full suite's load, during D1322, which force-stops a Vitest 4.1 run on the threads pool. It happened once, on 2026-09-29 at 12b6595, and not in about 409 further runs of D1322, alone or beside full suites under extra load. libuv starts each child in a job that bypasses Windows Error Reporting, so no dump exists; capturing one needs a debugger attached before the fault.
+
+| Date       | Commit  | Test  | Exit code  |
+| ---------- | ------- | ----- | ---------- |
+| 2026-09-29 | 12b6595 | D1322 | 3221225477 |
+
+On a recurrence, add a row: the date, the commit, the test by its reported count, and the exit code.
+
 ## Future integration fixtures
 
 Build synthetic projects for plain TypeScript, mocked imports, shared setup, parameterized tests, dynamic imports, generated files, and framework registries. Add fixtures for setup errors, collection errors, unhandled errors, timeouts, runner crashes, and interrupted runs.
