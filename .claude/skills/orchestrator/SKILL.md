@@ -48,7 +48,7 @@ Names and groups use letters, digits, dots, underscores, and hyphens only. **You
 
 Never send a standby or roll-call message: a settled member answers it by going idle, which stalls the lane with nothing reporting why.
 
-**To PAUSE a live member, `session_wake` it** with: finish the tool call in hand, stop every background agent it started and check the files those touched, end the turn, keep the claims, and wait for your wake. It lands right after the tool call in hand. **A pause does not hold while the member has a question open in its own thread**: the owner's answer starts a new turn. Before a window where the tree must stay still, ask the owner to hold thread answers until you say it is over.
+**To PAUSE a live member, `session_wake` it** with: finish the tool call in hand, stop every background agent it started and check the files those touched, end the turn, leave its edits in place, and wait for your wake. It lands right after the tool call in hand. **A pause does not hold while the member has a question open in its own thread**: the owner's answer starts a new turn. Before a window where the tree must stay still, ask the owner to hold thread answers until you say it is over.
 
 **Pass `model` and `options` on every `session_spawn`, by role; never let a member inherit yours.** The owner sets this table:
 
@@ -65,15 +65,15 @@ Every spawn also passes `{"id":"contextWindow","value":"1m"}`, since the context
 
 Escalate a problem the table's model has already failed on by spawning a NEW session on `claude-fable-5-1`, or on another provider's model for a second view, with a written brief (the record, every measured attempt, every traced failure and what was ruled out), never by switching a live session's model, which drops its reasoning. The next round of that work goes back to the table's model.
 
-**A member at about 60% context hands off to a successor** by `_agent-docs/handoff.md` and sends you the successor's threadId. Its claims carry over, because claims belong to the lane. Settle the old member once the successor reports in, then send the new threadId to every session holding the old one as an address (tests holds dev's, the review holds the tests member's). **A second handoff within one stage means the lane is too big for one session**: before the next stage, weigh splitting its remaining work into a new lane (§ Claims and grants, on a widening).
+**A member at about 60% context hands off to a successor** by `_agent-docs/handoff.md` and sends you the successor's threadId. Its record carries over to the successor. Settle the old member once the successor reports in, then send the new threadId to every session holding the old one as an address (tests holds dev's, the review holds the tests member's). **A second handoff within one stage means the lane is too big for one session**: before the next stage, weigh splitting its remaining work into a new lane (§ Grants and widenings, on a widening).
 
 ## Lanes: which run together
 
 **Two build lanes run together only when their file sets share no file.** Disjoint regions of one file do not help: in the shared checkout the loser's edit is overwritten, and across worktrees it is a merge conflict. **Delegation is triggered by independence, not size**: a small change sharing a file waits, and a large one sharing none runs alongside.
 
-**At most ONE build lane at once**, unless the owner sets another number. **Lanes build the product**: start no lane on the repository's own process tooling (the run lease, file claims, the defect verifier, hooks) unless a tooling bug blocks work or could produce a false result; RT Test itself replaces that tooling as it matures. The cap counts lanes, not sessions, from a lane's dev dispatch (or its inline fix) until its last commit lands. **Spikes and authoring take no slot**: a spike edits no tracked file, and `create-ticket` writes only its own ticket and the planning docs you own. Keep a lane authoring ahead of the build lanes, so a ticket is ready the moment a slot clears. At the cap, dispatch nothing new: keep the next dispatches as an ordered wake list in the state doc, and send the first when a lane's last commit lands.
+**At most ONE build lane at once**, a standing owner ruling. **Lanes build the product**: start no lane on the repository's own process tooling (the run lease, file claims, the defect verifier, hooks) unless a tooling bug blocks work or could produce a false result; RT Test itself replaces that tooling as it matures. The cap counts lanes, not sessions, from a lane's dev dispatch (or its inline fix) until its last commit lands. **Spikes and authoring take no slot**: a spike edits no tracked file, and `create-ticket` writes only its own ticket and the planning docs you own. Keep a lane authoring ahead of the build lanes, so a ticket is ready the moment a slot clears. At the cap, dispatch nothing new: keep the next dispatches as an ordered wake list in the state doc, and send the first when a lane's last commit lands.
 
-**Intersect two lanes' file lists yourself before dispatching the second dev.** The scope you hand out at dispatch is a request; the authored ticket's **File List** (or an inline change record's) is the answer. Once both are written, intersect them mechanically, add every path `node scripts/file-claims.mjs list` shows the live lanes holding, and enumerate each hit. **A scope sentence holds no file; only the enumerated list does.** An empty intersection still settles order: it says which lane inherits another's landed change and must be written against the tree as it will be.
+**Intersect two lanes' file lists yourself before dispatching the second dev.** The scope you hand out at dispatch is a request; the authored ticket's **File List** (or an inline change record's) is the answer. Once both are written, intersect them mechanically, add every path the live lane's members have reported editing, and enumerate each hit. **A scope sentence holds no file; only the enumerated list does.** An empty intersection still settles order: it says which lane inherits another's landed change and must be written against the tree as it will be.
 
 **A non-empty intersection is a fork for the owner**, never something fixed by asking a lane to be careful. Put the two real options: run the lanes one after the other, or send one back to rescope. Name the files and what pulled each one in.
 
@@ -81,26 +81,15 @@ Escalate a problem the table's model has already failed on by spawning a NEW ses
 
 **A window you quote a waiting member covers its whole round**, not the expensive step you picture. Ask the member for the figure rather than deriving it, and quote it back with what it covers.
 
-## Claims and grants
+## Grants and widenings
 
-**Members claim their own files with `scripts/file-claims.mjs`, under their lane, which is their group.** `{cfg.code_change_standards}` § Orchestrated Gate Delegation owns the member half. One lane's members share one set of claims, so a later stage inherits an earlier stage's files as `HELD` with no handover from you. A clean claim is the member's permission to edit, so **a dispatch carries no edit hold**; a `CONFLICT` is its stop signal.
+**Members report the files they edit, under their lane, which is their group.** `{cfg.code_change_standards}` § Orchestrated Gate Delegation owns the member half. A member that finds a file already dirty before its first edit reports it and edits nothing in it: answer by saying which session owns the edit and whether it is landing or parked, and **never answer with permission to work around it**.
 
-**The claim store is the main checkout's**, whichever tree runs the command: `file-claims` and `stage-lane` resolve it through git's common directory, so a lane in a worktree and a lane in the main checkout conflict on the same path. `FILE_CLAIMS_DIR` overrides it.
+**A member reporting a WIDENING is asking a size question**, and the size question is the one that gets skipped: each widening arrives small, so approving them one at a time lets a lane double without anyone deciding it should. Add the widening to the lane's running file and code-unit counts against `.claude/skills/create-ticket/SKILL.md` § One-ticket size limits. Under them, clear it. Over, the widening becomes its own lane on the wake list, and the original lane lands its finished scope first. **A split that changes what gets built, or when, goes to the owner** with your recommendation.
 
-- **Release a lane when its last commit lands**: `node scripts/file-claims.mjs release --lane <group>`, and `grant-end --lane <group>` for its grants, in the same sweep that settles its crew. A claim that outlives its work blocks the next lane on a file nobody is editing.
-- **A member reporting a `CONFLICT` is reporting on your intersection, so answer it.** Run `node scripts/file-claims.mjs list`, then `session_list`. A holding lane with an open session gets a HOLD or a HANDOVER: say which lane owns the file and whether it is landing or parked, then hold the member until the holder commits, or hand the file over. **Never answer with permission to work around it.** A holding lane with no open session is stale once its files are committed or discarded: `node scripts/file-claims.mjs release --any <paths>`.
-- **Hand a file over only after its live holder confirms it has not edited it.** A clean `git diff` is a snapshot a running member overtakes within seconds. Send the hold, wait for the reply, then release, and paste the `RELEASED` lines into the message that tells the new holder, since a release announced but never run reads identically until the claim is refused.
-- **A member reporting a WIDENING is asking a size question as well as a claims one**, and the size half is the one that gets skipped: each widening arrives small, so approving them one at a time lets a lane double without anyone deciding it should. Add the widening to the lane's running file and code-unit counts against `.claude/skills/create-ticket/SKILL.md` § One-ticket size limits. Under them, clear it. Over, the widening becomes its own lane on the wake list, and the original lane lands its finished scope first. **A split that changes what gets built, or when, goes to the owner** with your recommendation.
+**Grants.** A lane that decided the content of an orchestrator-only file writes it: a doc you rewrite from its report loses what it never thought to send you. Grant the named paths in the dispatch message; a folder covers what is beneath it. A grant ends when the lane's last commit lands, and one lane holds a path at a time. A planning `change-request` lane is granted the ADRs, `{cfg.requirements}` and `{cfg.glossary}` terms it decides, and `create-ticket` the sprint file and `{cfg.sprint_status}` when authoring splits or rescopes a ticket. **The grant moves the writing, never the review**: read the lane's diff before you commit.
 
-**Grants.** A lane that decided the content of an orchestrator-only file writes it: a doc you rewrite from its report loses what it never thought to send you. Grant the named paths:
-
-```
-node scripts/file-claims.mjs grant --lane <lane> --thread <threadId> <path>...
-```
-
-A folder covers what is beneath it. One lane holds a path at a time, and several lanes may hold disjoint paths. A path any lane may claim without a grant is refused, and then the whole call grants nothing. `node scripts/file-claims.mjs grant-status` lists every grant, and `grant-end --lane <lane> [<path>...]` ends them at the lane's commit. A planning `change-request` lane is granted the ADRs, `{cfg.requirements}` and `{cfg.glossary}` terms it decides, and `create-ticket` the sprint file and `{cfg.sprint_status}` when authoring splits or rescopes a ticket. **The grant moves the writing, never the review**: read the lane's diff before you commit.
-
-**You allocate every ADR number, requirement id, rule id, sprint key, ticket key, and defect-id range**, because two lanes each taking the next free id take the same one. `node scripts/requirements-index.mjs --next` gives the next requirement id, `node scripts/adr-index.mjs` lists the ADRs, and `docs/testing.md` lists the defect ranges in use. With a worktree lane live, check each id in both trees before handing it out.
+**You allocate every ADR number, requirement id, rule id, sprint key, ticket key, and defect-id range**, because two lanes each taking the next free id take the same one. `node scripts/requirements-index.mjs --next` gives the next requirement id, `node scripts/adr-index.mjs` lists the ADRs, and `docs/testing.md` lists the product defect ranges in use; `bun run check:defects` fails on an id any `defects.json` already records. With a worktree lane live, check each id in both trees before handing it out.
 
 ## Gates you run
 
@@ -110,7 +99,7 @@ A folder covers what is beneath it. One lane holds a path at a time, and several
 
 **Run `bun run check` once per lane, against the final tree, immediately before its commit.** A member's phase report triggers no run, because the review can still change the tree. Run early only when a member is blocked on a red it cannot place. A run you already made still counts if nothing it read has changed since its start. **A review's Step 9 debt commit rides with the next lane's gate and push**, since a debt round is proven by its own targeted gates; gate it alone only when it fixes false freshness or a setup failure counted as a detection.
 
-**Route each red to the lane holding its file.** `node scripts/file-claims.mjs list` names the holder; send the red to that lane's member alone. A red in an unclaimed file belongs to a sibling or predates the lanes: read it in the log, say so, and hold.
+**Route each red to the lane that edited its file**, from the members' reported paths, and send it to that lane's member alone. A red in a file no member reported belongs to a sibling or predates the lanes: read it in the log, say so, and hold.
 
 **When a sibling lane is mid-edit, gate in isolation instead of holding.** Add a detached worktree of `HEAD` under `_agent-docs/.scratch/`, copy in exactly the committing lane's paths (its new files from `git ls-files --others` plus its modified files and your own edits), run `bun install --frozen-lockfile` and `bun run check` there through the run lease, then stage that same set in the real checkout and confirm the staged count matches. Remove the worktree after the commit. This gates exactly what the commit contains.
 
@@ -136,7 +125,7 @@ Push only when the Windows log reads `CHECK_EXIT:0` and the Linux log reads both
 
 ## Files you write
 
-**Project-wide files are yours**, because every lane would otherwise edit them at once. The set is the one `file-claims` refuses a member without a grant, and `scripts/lib/orchestration/paths.mjs` is its one home: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `docs/`, the top-level `_agent-docs/*.md`, `{cfg.rules_dir}`, `{cfg.checklist_dir}`, `{cfg.sprints_dir}`, `{cfg.sprint_status}`, `.claude/skills/`, the root `package.json`, `bun.lock`, `bunfig.toml`, `.oxlintrc.json`, `tsconfig.base.json`, the root `vitest.config.ts`, and `.github/`. **A member reports the exact text or dependency it wants, and you write it.**
+**Project-wide files are yours**, because every lane would otherwise edit them at once: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `docs/`, the top-level `_agent-docs/*.md`, `{cfg.rules_dir}`, `{cfg.checklist_dir}`, `{cfg.sprints_dir}`, `{cfg.sprint_status}`, `.claude/skills/`, the root `package.json`, `bun.lock`, `bunfig.toml`, `.oxlintrc.json`, `tsconfig.base.json`, the root `vitest.config.ts`, and `.github/`. **A member reports the exact text or dependency it wants, and you write it.**
 
 **Statuses.** A member reports the transition it would have made, and you write it to `{cfg.sprint_status}` **the moment it is reported**: `dev-ticket` sets `in-progress` early on purpose, so a run that dies resumes from the right state. Then run `node scripts/check-sprint-keys.mjs`. After a flip to `done`, run `node scripts/check-requirement-markers.mjs`: a marker stores only its sprint or ticket link and the index derives state from the status file, so a red names a link the change broke.
 
@@ -154,24 +143,16 @@ Push only when the Windows log reads `CHECK_EXIT:0` and the Linux log reads both
 
 **You commit, because you gated the tree.** Members stage nothing. Keep one lane per commit, write the message by `{cfg.rules_dir}/git-commits.md`, and include the validation with its window. **Push `main` after each landed lane.**
 
-**Stage with `stage-lane`**, dry run first:
-
-```
-node scripts/stage-lane.mjs --lane <group> --dry-run
-node scripts/stage-lane.mjs --lane <group> [--also <path>]... [--hunk <path>::<substring>]...
-```
-
-It stages every file the lane claims. Add `--also <path>` for each path in the member's report that no claim covers (a file you wrote for the lane, a granted doc), and `--hunk <path>::<substring>` for each hunk of a file that also holds another lane's or your own unrelated edits. It checks every hunk patch with `git apply --check` before it stages anything, so a refused hunk stages nothing. A substring matches changed lines only; one that matches no hunk, or names a file with no unstaged change, stops the run with nothing staged, so pick a better one from `git diff -U0 -- <file>`.
+**Stage by explicit path** from the members' created and modified lists, plus any file you wrote for the lane or granted to it: `git add -- <path>...` (`{cfg.rules_dir}/git-commits.md`). For a file that also holds another lane's or your own unrelated edit, stage only the lane's hunks.
 
 **Four checks before the commit:**
 
-- **Run `git status --short` after staging and account for every line not staged.** A file whose claim was refused by another lane's claim is not the lane's to `stage-lane`, so it leaves a reported path out of the commit silently. Add each such path with `--also`, which takes files, not directories.
+- **Run `git status --short` after staging and account for every line not staged.** A reported path left out of the commit is silent until a later lane trips on it.
+- **Compare the file total `git diff --cached --stat` prints against the members' reported path lists.** A file already in the index before you staged is the usual drift from another lane.
+- **Reconcile the staged add and delete counts against the kind of edit each contributor described**, not only the file count. **A pure append is the one shape with zero deletions**, so `+40 -0` on a file someone described as a correction is a hunk you have not staged. A path list built from "files I edited" cannot see a peer's edit to a file both touched, and neither member is wrong about its own work.
+- **Read `git diff --cached -- <file>` for every file you staged in part.** A hunk from a sibling's edit that rode along is where to look first.
 
-- **Compare the file total `stage-lane` prints against the members' reported path lists.** A file it marks as in the index before this run is the usual drift from another lane.
-- **Reconcile the dry run's add and delete counts against the kind of edit each contributor described**, not only the file count. **A pure append is the one shape with zero deletions**, so `+40 -0` on a file someone described as a correction is a hunk you have not staged. A path list built from "files I edited" cannot see a peer's edit to a file both touched, and neither member is wrong about its own work.
-- **Read `git diff --cached -- <file>` for every file staged by `--hunk`.** A substring that also appears in a sibling's hunk stages that hunk too; a match count above one is where to look first.
-
-**Send the sha to whoever waits on it before anything else.** A member waiting on a sha is invisible in `file-claims list` and `session_list`, because you hold a result rather than a claim.
+**Send the sha to whoever waits on it before anything else.** A member waiting on a sha is invisible in `session_list`, because you hold a result it needs.
 
 **`review-changes` hands you the commit mid-run.** Its Step 8 report asks for the commit, and its Step 9 triages tech debt against the sha you send back, then reports the debt change as its own path list for a second, smaller commit.
 
@@ -183,9 +164,9 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 
 - **Create** from the main checkout: `git worktree add C:\source\rt-test-wt\wt-<n> -b wt/<n> main`, then `bun install --frozen-lockfile` in the new tree. It branches from `main`'s last commit, so commit what the lane needs first. Reuse a tree for the next lane rather than removing it.
 - **Attach**: spawn the lane's first member with `worktree: { path, branch }`, and every later member with `worktree: { sameAs: <first member's threadId> }`.
-- **The cap counts lanes, not trees**, and the intersection still applies: two trees turn a shared file from a silent overwrite into a merge conflict, which is better but not free. Serialize overlapping lanes. Claims already span both trees (§ Claims and grants).
+- **The cap counts lanes, not trees**, and the intersection still applies: two trees turn a shared file from a silent overwrite into a merge conflict, which is better but not free. Serialize overlapping lanes.
 - **Project-wide files in a worktree lane are written in that tree**, by you or under a grant, and land with the lane on `wt/<n>`. **Before writing one, bring the tree current**: when `wt/<n>` has no commits of its own, `git merge --ff-only main` in the tree; otherwise any doc line both trees edit conflicts at merge, so write the line in one tree only.
-- **Land it**: in the worktree, stage with `stage-lane` and commit on `wt/<n>`. From the main checkout, commit any shared-checkout lane first (a merge refuses while the main tree holds uncommitted changes to a file it touches), then `git merge --no-ff wt/<n>`: a merge commit, never a rebase, so each lane's commits stay stable. Gate the merged `main` once, the lane's only full check, with `bun run check` through the run lease in the background, push `main` on `CHECK_EXIT:0`, then fast-forward `wt/<n>` to `main` so the next lane starts current. **Before moving any tree a member works in** (a fast-forward, a merge, a checkout), run `node scripts/run-lease.mjs status` and wait while a run from that tree holds or waits on the lease: the verifier voids a run whose working files change under it. Never push `wt/<n>`.
+- **Land it**: in the worktree, stage by explicit path and commit on `wt/<n>`. From the main checkout, commit any shared-checkout lane first (a merge refuses while the main tree holds uncommitted changes to a file it touches), then `git merge --no-ff wt/<n>`: a merge commit, never a rebase, so each lane's commits stay stable. Gate the merged `main` once, the lane's only full check, with `bun run check` through the run lease in the background, push `main` on `CHECK_EXIT:0`, then fast-forward `wt/<n>` to `main` so the next lane starts current. **Before moving any tree a member works in** (a fast-forward, a merge, a checkout), run `node scripts/run-lease.mjs status` and wait while a run from that tree holds or waits on the lease: the verifier voids a run whose working files change under it. Never push `wt/<n>`.
 - **Sweep** the worktree's own `_agent-docs/.scratch/` as well as the main checkout's. When no lane needs the tree, `git worktree remove` it and `git branch -d wt/<n>`.
 
 ## Messages you send and relay
@@ -203,7 +184,7 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 
 **Verify a member's claim before you relay it or act on it**, by running something. You are the only reader who sees every lane, so a claim that passes through you carries your authority. **This holds hardest when the member is correcting you**: a correction you verified is a rule you can write down, and one you merely accepted is re-litigated next turn.
 
-**Before you tell a member to act, check whether you are what blocks it**: a sha you have not sent, a grant you have not made, a claim you have not released. Both sides believing they wait on the other is a stall nothing reports.
+**Before you tell a member to act, check whether you are what blocks it**: a sha you have not sent, a grant you have not made, an answer you have not given. Both sides believing they wait on the other is a stall nothing reports.
 
 **Every member question comes to you, never to the owner**, and you answer it. Settle a design, technical, sizing, or mechanism question yourself from the code, the docs, and the standing rulings, and record why. **Choose the correct fix over the smaller one**: a few more files is never on its own a reason to defer or narrow a fix, and no work goes in that the correct result does not need. **Take to the owner only a decision the owner must make**: what gets built or when, behavior a user of RT Test would notice, cost or risk the owner carries, or a change to a product guarantee. The owner does not work in Vitest internals, so **put each such question in plain language**: what happens to the product either way, the options in everyday words, and your recommendation, with no Vitest or code terms left for the owner to decode. **Before you answer or recommend on a live lane's subject, read that lane's record for a ruling already made there**, so you never reverse one unnoticed. **When you pass an answer down, name its decider (you or the owner) and the time**, taken from the prompt-context hook's stamp after your latest tool call, or from `date` run then: a remembered time drifts ahead.
 
@@ -223,7 +204,7 @@ A lane can run in its own git worktree, so its edits and gates never touch a sib
 
 **A review cannot complete Step 9 before you commit**, since Step 9 triages debt against your sha. Ask the direct question before settling: is your Step 9 complete against this sha?
 
-**A review reporting Step 9 complete is the SWEEP trigger.** In one pass: run `session_list` and settle every row the table says is finished, including other lanes' members whose stage has moved on; release the lane's claims and grants; delete every `_agent-docs/.scratch/` entry the lane's sessions and your gates made for it; and cut the lane from the state doc by `HANDOFF.md`. **A `stopped` session is not a settled one**: settle it, or say why it is kept.
+**A review reporting Step 9 complete is the SWEEP trigger.** In one pass: run `session_list` and settle every row the table says is finished, including other lanes' members whose stage has moved on; end the lane's grants; delete every `_agent-docs/.scratch/` entry the lane's sessions and your gates made for it; and cut the lane from the state doc by `HANDOFF.md`. **A `stopped` session is not a settled one**: settle it, or say why it is kept.
 
 ## Steps
 

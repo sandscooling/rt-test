@@ -83,6 +83,6 @@ summary, a pointer or a partial. Send a no-findings explanation the same way. Se
 2. **Pattern conflicts**: a finding that flags an established project pattern, where the pattern itself may be wrong. Put these to the owner with your recommendation: fix the pattern across the affected files, or keep it.
 3. **Real findings**: fix every one inline. Verify a finding that asserts third-party behavior before fixing it (`_agent-docs/code-change-standards.md` § Third-Party Semantics Verification).
 
-An in-scope finding, in a file the change edited, is always fixed inline. An out-of-scope finding, pre-existing debt in a file the change only read, is fixed by default too, in `review-changes`. Only a real fork, two valid designs or a cost only the owner can accept, goes to the owner now, with your recommendation.
+An in-scope finding, in a file the change edited, is always fixed inline. An out-of-scope finding, pre-existing debt in a file the change only read, is fixed by default too, in `review-changes`. Debt in the repository's process tooling follows `_agent-docs/code-change-standards.md` § Zero Technical Debt. Only a real fork, two valid designs or a cost only the owner can accept, goes to the owner now, with your recommendation.
 
 After fixing, run `_agent-docs/code-change-standards.md` § Post-Fix Re-Validation. For this implementer's pass that is lint and typecheck; `create-tests` runs the suite afterwards.

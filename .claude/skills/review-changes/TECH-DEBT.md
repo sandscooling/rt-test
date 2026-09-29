@@ -36,7 +36,9 @@ means raise `--cap` and re-run). Match the list against the debt items and again
 
 - **Fix it**, the default for everything mechanical: a defect, a duplication, a wrong bound, a stale citation, a
   missing guard, an extraction. It has one right answer. Do not ask permission, and do not offer deferral beside
-  it. Size, "pre-existing" and "out of scope" select nothing.
+  it. Size, "pre-existing" and "out of scope" select nothing. Debt in the repository's process tooling
+  (`scripts/`, `lint/`, `.claude/hooks/`, the root `test/`) is fixed only when it blocks work or could produce a
+  false result; otherwise list it in one line for the orchestrator and leave it.
 - **Discuss it**, only when the fix needs a decision that is the owner's: a product fork, a new requirement, a
   design with more than one defensible answer. Bring the options, what each costs, and your recommendation;
   `change-request` is the route once it is settled.

@@ -21,7 +21,7 @@ Optional input: a ticket path or key (`3.2`, `3-2`, `3-2b`), which overrides sel
 
 - **Check whether you are a lane member before your first edit.** Run `session_list` and read your own row: a
   `group` other than `null` or `orchestrator` means `_agent-docs/crew.md` and `{cfg.code_change_standards}`
-  § Orchestrated Gate Delegation bind you. Claim every file before its first edit, report every status
+  § Orchestrated Gate Delegation bind you. Report every file you create or edit, report every status
   transition instead of writing `{cfg.sprint_status}`, and leave `bun run check`, staging and the commit to the
   orchestrator.
 - **Ticket-file write scope.** You write only: task checkboxes, acceptance-criterion checkboxes, the resolution
@@ -241,7 +241,8 @@ implementer's order:
 ready-to-paste description, for `review-changes`, whose default is to fix it. Leave a finding to that pass only
 when fixing it here needs a migration of stored state, touches more than 3 files outside `{{files_changed}}`,
 changes a shared symbol with more than 5 call sites (count them with `rg`), or belongs to another sprint's
-scope. Name the condition and the evidence. A small contained bug in a file you edited is fixed here.
+scope. Name the condition and the evidence. A small contained bug in a file you edited is fixed here. A finding in
+the repository's process tooling follows `{cfg.code_change_standards}` § Zero Technical Debt.
 
 ## 8. Finalize
 

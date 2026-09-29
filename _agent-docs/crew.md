@@ -14,9 +14,9 @@ Your name is `rt-<lane>-<role>`, and the skill your dispatch names owns your ste
 
 ## Your files
 
-**Claim every file before your first edit to it**, under your group, by `_agent-docs/code-change-standards.md` § Orchestrated Gate Delegation, which owns the claim procedure and what `CONFLICT` and `REFUSED` mean. Your lane's claims are its file set, and they carry over to a successor.
+**Report every file you create or edit**, by `_agent-docs/code-change-standards.md` § Orchestrated Gate Delegation, which owns your lane's file set.
 
-**Never edit an orchestrator-owned file** unless your dispatch grants it and the grant shows in `node scripts/file-claims.mjs grant-status`. Report the exact text or dependency you need, and the orchestrator writes it. Ask for every id (ADR, requirement, rule, sprint, ticket, defect range); never take the next free one.
+**Never edit an orchestrator-owned file** unless your dispatch grants it by path. Report the exact text or dependency you need, and the orchestrator writes it. Ask for every id (ADR, requirement, rule, sprint, ticket, defect range); never take the next free one.
 
 ## Tool calls
 
@@ -48,7 +48,7 @@ When you drive T3 Code's preview browser:
 
 ## Worktree lanes
 
-If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. Claim from that tree as usual. The orchestrator gates the merged tree with `bun run check`, so a worktree lane's review runs the same targeted gates as any review. Never commit, merge, or push; the orchestrator lands the branch.
+If your `self` row shows a `worktreePath`, your lane runs in its own git worktree on branch `wt/<n>`. Edit and run gates only in that tree. The orchestrator gates the merged tree with `bun run check`, so a worktree lane's review runs the same targeted gates as any review. Never commit, merge, or push; the orchestrator lands the branch.
 
 ## Gates
 
@@ -58,16 +58,18 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 - lint: `bun x oxlint <paths>`
 - format: `bun x prettier --check <paths>` over every file you changed other than through Edit or Write (a script, a generator, a shell command, a git operation), since the save hook formats only those two tools' saves and the gate's first step fails on any one
 - typecheck: `bun run --filter <workspace> typecheck`, or `bun x tsc --noEmit` for root tooling
-- named defects: a by-id proof (below) of every record you added, moved or re-anchored, each `D###` test with its record in the `defects.json` beside it; the push gate re-proves no defect, so your proof is the only one those records get
+- named defects: a by-id proof (below) of every product record you added, moved or re-anchored, each `D###` test with its record in the `defects.json` beside it; the push gate re-proves no defect, so your proof is the only one those records get
 - a heavy run (`bun run check`, `test:run`, `test:defects`, `vitest related`, or an unscoped `vitest run`) goes through `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- <command>`, which waits its turn; a bare one is denied by the lease hook. A named test file needs no lease. `node scripts/run-lease.mjs status` names the holder and the queue.
 
 **Prove named defects by id.** A first proof, and every later round that edits code a defect record anchors in or mutates (a review's fixes, a debt round, a test repair), proves through the lease every record it added, moved or re-anchored, plus every record whose mutated file or test file it edited, and reports the result. Prove with the verifier itself, never a scratch driver. In a worktree lane, `node scripts/run-lease.mjs run --lane <group> --thread <threadId> -- node scripts/verify-defects.mjs --edited` selects exactly those records by comparing with `HEAD`; in the shared main checkout it also selects every other lane's uncommitted records, so name yours there with `--ids D12,D40`, which works alone or beside `--edited`. Either baselines only the selected records' test files and ends by saying it is not the full run. `--edited` also reselects the records an earlier round edited while that round stays uncommitted, so prove a later round with `--ids` when only its own records need it. Never run `test:defects`, or a broad `test:defects:changed`, to prove a lane's records: count a `--changed` selection first, and send the orchestrator any count over a few hundred, since a whole-catalog run holds the lease for most of an hour.
+
+**Never re-anchor or re-prove a tooling record.** A tooling record is one in a `defects.json` under the root `test/` whose mutated file lies outside `packages/`. When a fix to repository tooling breaks one's anchor, so `bun run check:defects` fails on it, delete the record and the `D###` prefix of its test's title.
 
 **Keep every log of a run until the orchestrator has closed it**, a failed one above all: the log is the only evidence of a failure that does not reproduce.
 
 **Keep WSL work out of `/tmp`.** The WSL VM shuts down when idle and clears `/tmp` on its next boot, which deletes a clone or a log mid-run. Use a folder under `~/`, or the worktree's `_agent-docs/.scratch/` through `/mnt/c`, and never run an install from WSL inside a Windows checkout. Run WSL tests and proofs with `TMPDIR` set as long as the orchestrator's gate sets it (`export TMPDIR="$HOME/.rt-test-runs/wsl-node-12345"`), since a Unix socket path past 108 bytes fails only under a long temp directory.
 
-**A red in a file your lane has not claimed is not yours**: report it with the output rather than fixing it, since another lane may be mid-edit. `node scripts/file-claims.mjs list` names the lane that holds it.
+**A red in a file your lane has not edited is not yours**: report it with the output rather than fixing it, since another session may be mid-edit.
 
 Do not start watchers, daemons, or dev servers. Run anything long in the background with its output redirected to a file unpiped, and read its exit code from the file.
 
@@ -83,7 +85,7 @@ When your role's work is done, send the orchestrator one message with `session_w
 
 - every path you created and every path you modified, as separate lists
 - each targeted gate you ran, its exit code, test counts, and the time
-- the named defects you added and whether `test:defects` detected them
+- the named defects you added and the by-id proof that detected them, with its command and window
 - every status transition, id request, and exact project-wide text the orchestrator must apply
 - anything you found outside your scope, open questions, and the owner's answers to questions you asked
 - an UNVERIFIED list: every criterion or proof not yet run on both Windows and Linux, each with the exact command that would run it, or "none"

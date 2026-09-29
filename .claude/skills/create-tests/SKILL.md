@@ -5,8 +5,8 @@ description: Write Vitest tests that each name and prove the defect they catch. 
 
 # Create tests
 
-Write Vitest tests, reusing the test infrastructure that exists, each one titled with a named defect and proven
-by `bun run test:defects` to fail against it.
+Write Vitest tests, reusing the test infrastructure that exists, each one titled with a named defect and, for a
+product test, proven by the defect verifier to fail against it.
 
 Read `_agent-docs/_flow-config.yaml` first. `{cfg.KEY}` below means that key's path and `scale.KEY` its switch.
 Substitute every `{cfg.KEY}` and `{{variable}}` with its literal value before it reaches a spawned agent.
@@ -25,11 +25,12 @@ whole repository instead of the change. No argument and no ticket in `review`: a
 
 - **Check whether you are a lane member before your first edit.** Run `session_list` and read your own row: a
   `group` other than `null` or `orchestrator` means `_agent-docs/crew.md` and `{cfg.code_change_standards}`
-  § Orchestrated Gate Delegation bind you. Claim every file before its first edit; a production file you edit
+  § Orchestrated Gate Delegation bind you. Report every file you create or edit; a production file you edit
   widens your blast radius to that file's, so name it in your report.
 - **The falsification gate is the whole point of this skill.** `{cfg.code_change_standards}` § Writing Tests
   Outside create-tests is the gate: name the defect before writing, derive the expected value from the
-  requirement, record one mutation, prove it with `bun run test:defects`. **Expected values come from the
+  requirement, record one mutation, and prove it by id. A new test of the repository's tooling under the root
+  `test/` names its defect and asserts it, with no record or proof. **Expected values come from the
   criterion or the spec, never from running the code and copying its output.** A spec-derived test that fails
   is a bug finding, never a test to bend.
 - **Take defect ids only from your allocated range** (P26). The orchestrator allocates it; under a lane the
@@ -185,7 +186,7 @@ and the exact `old` and `new` text, where `old` matches once. The named defect i
 behavior with one minimal edit (invert a comparison, drop a guard, return a constant, skip a write). Write the
 file with the `Write` or `Edit` tool, since the anchors are source text.
 
-**Prove it by id**, as `_agent-docs/crew.md` § Gates sets out: the records you added, moved or re-anchored, through the run lease, never the whole catalog, which the orchestrator's gate runs. It needs a passing baseline, applies each
+**Prove it by id**, as `_agent-docs/crew.md` § Gates sets out: the records you added, moved or re-anchored, through the run lease, never the whole catalog: the push gate re-proves nothing, so this proof is the only one a record gets. It needs a passing baseline, applies each
 mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored
 baseline. It never touches the live tree, so never hand-edit a production file to watch a test fail (P25).
 Read its exit code and detected count. A setup, compile or timeout failure is not a detection.

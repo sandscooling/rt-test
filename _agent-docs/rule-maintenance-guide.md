@@ -35,7 +35,7 @@ If neither holds, it is not a rule: put a long-form behavior in the design docs 
 4. **One obligation per rule.** An edit that adds a second thing a diff must separately satisfy is an add: give it a new id. A split keeps the original id on the original obligation.
 5. **Route it** with the routing test above, and put it under the heading whose concern matches. Move a misplaced rule verbatim with its id rather than copying it.
 6. **Generalize.** Delete the specific name from the rule; if a general rule remains, state it for the whole class and keep the name as an example. Never copy a value (a limit, a version) that lives in its source. A check that fires in one specific scenario is a spec: document it and pin it with a test instead.
-7. **Settle enforcement** with the lint-hardening candidate check below.
+7. **Settle enforcement** by § Lint enforcement below.
 8. **Sweep the blast radius.** When a rule's prescription for code changes, grep for existing code it now condemns and raise a change request for it. When a decision bans or supersedes a pattern, grep every shard and project context for rules that still mandate the old pattern and retire them in the same edit.
 
 ## Applying the edit
@@ -52,19 +52,13 @@ If neither holds, it is not a rule: put a long-form behavior in the design docs 
 - Keep it lean: a bold title, then one to three sentences in the imperative. No multi-line code; at most one short example.
 - A checklist rule names what fails, so a reviewer can say pass or fail. A project-context rule names which way to go and, when it is not obvious, why.
 
-## Lint-hardening candidate check
+## Lint enforcement
 
 Run it whenever a rule is added or strengthened.
 
-1. **Classify** whether oxlint could enforce the rule:
-   - **config-expressible**: a built-in oxlint rule, a rule from an enabled plugin (`typescript`, `unicorn`, `vitest`), or an option such as `no-restricted-imports` or `no-restricted-globals`, set in `.oxlintrc.json`. oxlint has no `no-restricted-syntax`, so a syntax ban is not config-expressible.
-   - **custom-plugin**: needs AST, cross-file or absence logic, written as a rule in `lint/` with named-defect tests that run the real oxlint binary.
-   - **not lintable**: naming, clarity, design or correctness judgment. Stop here.
-2. **Route by bucket.**
-   - custom-plugin: ask the owner whether to run `lint-harden` now (recommended) or keep a manual gate. Never write a custom rule inside another workflow's steps.
-   - config-expressible: spike it. Write a violating probe, run `bun x oxlint <probe>`, and confirm the output names your rule, not just a problem count. Then enable it, run `bun run lint`, and count the backlog. A zero count has three causes: clean code, a wrong option, or a rule that never became active (for example an `overrides` block that sets the same rule for those files). Only a fired probe rules out the last two. Fix a small backlog and land the rule now; otherwise ask the owner. When the target the rule names does not exist yet (a package, a file, an API not yet built), there is nothing to probe: record it as a candidate by step 3 until the target lands.
-3. **Record a kept manual gate** by appending `→ lint-hardening candidate (<bucket>: <proposed mechanism>)` to the end of the rule, naming the mechanism. `lint-harden` finds its backlog with `rg "lint-hardening candidate" _agent-docs/code-review-checklist _agent-docs/project-context.md`.
-4. **When lint lands**, retire the rule, or cut it to the part lint does not cover.
+1. **Is it config-expressible?** A built-in oxlint rule, a rule from an enabled plugin (`typescript`, `unicorn`, `vitest`), or an option such as `no-restricted-imports` or `no-restricted-globals`, set in `.oxlintrc.json`. oxlint has no `no-restricted-syntax`, so a syntax ban is not. A check that needs AST, cross-file or absence logic stays a review check: write no custom lint rule.
+2. **When it is, spike it.** Write a violating probe, run `bun x oxlint <probe>`, and confirm the output names the rule, not only a problem count. Enable it, run `bun run lint`, and count the backlog. A zero count means clean code, a wrong option, or a rule that never became active (for example an `overrides` block that sets the same rule for those files), and only a fired probe rules out the last two. Fix a small backlog and land the rule now; otherwise ask the owner. When the target the rule names does not exist yet, leave the rule a review check.
+3. **When lint lands**, retire the rule, or cut it to the part lint does not cover.
 
 ## Scale
 

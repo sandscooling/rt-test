@@ -1,6 +1,6 @@
 # Code change standards
 
-The procedure every workflow that changes code runs around an edit: `dev-ticket`, `change-request`'s inline fix, `create-tests`, `review-changes`, `lint-harden`, and an ad-hoc change with no workflow running. The rules the code itself must meet live in `_agent-docs/project-context.md` (`P` ids) and `_agent-docs/code-review-checklist/` (`C` ids); this document cites them by id and never restates them. Expand an id with `node scripts/expand-rules.mjs --doc <project-context|checklist> <ids>`. `AGENTS.md` owns the working conventions and product guarantees.
+The procedure every workflow that changes code runs around an edit: `dev-ticket`, `change-request`'s inline fix, `create-tests`, `review-changes`, and an ad-hoc change with no workflow running. The rules the code itself must meet live in `_agent-docs/project-context.md` (`P` ids) and `_agent-docs/code-review-checklist/` (`C` ids); this document cites them by id and never restates them. Expand an id with `node scripts/expand-rules.mjs --doc <project-context|checklist> <ids>`. `AGENTS.md` owns the working conventions and product guarantees.
 
 Steps below speak of **the rule set** (the rule ids your workflow expanded) and **the files in scope** (the files the change edits). Read them as roles and substitute your workflow's own names.
 
@@ -14,7 +14,7 @@ Steps below speak of **the rule set** (the rule ids your workflow expanded) and 
   - When one edit decides another's shape (a signature, an export), apply them in order.
 - **Pick the tool by the payload.** Content you authored, landing in one place, goes through `Write` or `Edit`; a heredoc adds a way to lose it. A transform over many files (the same replacement across N paths, a computed edit) goes through a script. A script writes behind the read-before-write check, so re-read every file it touched before editing it again.
 - **A batch that partly fails leaves its successful edits applied.** Re-read the failed file and fix forward; never re-issue the whole batch.
-- **Scan each file in scope whole against the rule set** before implementing, and fix what you find. Record those fixes apart from the change's own, as pre-existing fixes.
+- **Scan each file in scope whole against the rule set** before implementing, and fix what you find, within § Zero Technical Debt's scope. Record those fixes apart from the change's own, as pre-existing fixes.
 - **Apply the rules to legacy code too.** Match a file's structure and naming, never its violations.
 
 ## Universal gates
@@ -101,8 +101,7 @@ The removal is the safe part; the sweep is the work.
 
 1. **Pure logic into a module beside its caller**, with a narrow interface (P18). Keep divergent callers thin rather than merging them behind a mode flag (P19).
 2. **Logic a second package needs into a `packages/*` library** (P20).
-3. **Script helpers into `scripts/lib/<area>/`**, each with a `.d.mts` a test can import (P11).
-4. **Types imported or derived from their source** (C14), declared beside their readers.
+3. **Types imported or derived from their source** (C14), declared beside their readers.
 
 ## Lock File Check
 
@@ -124,25 +123,23 @@ Add a dependency only as P9 directs. After any `bun install` or `bun add`, run `
 
 ### Orchestrated Gate Delegation
 
-`_agent-docs/crew.md` decides whether you are a lane member and owns your role, your report and where questions go. This section maps this document's gates onto a lane and owns the claims that make up your lane's file set, and it is inert when you are not in one.
+`_agent-docs/crew.md` decides whether you are a lane member and owns your role, your report and where questions go. This section maps this document's gates onto a lane and owns your lane's file set, and it is inert when you are not in one.
 
 A lane shares one checkout with its siblings, so a repo-wide gate reads every lane's code at once. The gates split by scope:
 
 | Gate                                                                                                                                                                                                                 | Owner            |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
 | § Targeted Typecheck, § Targeted Test Validation, targeted lint and `bun x prettier --check` over the files you touched, a by-id proof of your named defects (`_agent-docs/crew.md` § Gates), § Citation Shift Check | the member       |
-| `bun run check` (repo-wide lint, typecheck, suite, named defects, build), staging, the commit, status transitions, and every project-wide file, over the merged tree for a worktree lane                             | the orchestrator |
+| `bun run check` (repo-wide lint, typecheck, suite, the static named-defect check, build), staging, the commit, status transitions, and every project-wide file, over the merged tree for a worktree lane             | the orchestrator |
 
-`bun run test:defects` mutates only a disposable copy and never the live tree, so it may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one outside your lane's claims. Every heavy run goes through the run lease (`_agent-docs/crew.md` § Gates), so only one runs on the machine at a time.
+The defect verifier mutates only a disposable copy and never the live tree, so a proof may run while siblings edit. A suite or defect run can still read a sibling's half-finished file, so a red can belong to another lane; `_agent-docs/crew.md` says what to do with one in a file your lane has not edited. Every heavy run goes through the run lease (`_agent-docs/crew.md` § Gates), so only one runs on the machine at a time.
 
-#### Claim a file before you touch it
+#### Your lane's file set
 
-- **Claim every file before your first edit to it**: `node scripts/file-claims.mjs claim --lane <your group> --thread <your threadId> <paths>`. `CLAIMED` or `HELD` means the path is your lane's. Claim a file a tool writes for you the same way. A claim made in any worktree lands in the main checkout's store, so it conflicts across trees.
-- **`CONFLICT` means another lane holds the path: edit nothing in the set.** Send the orchestrator the `CONFLICT` lines and wait. Never merge, edit around, revert or check out the other lane's file.
-- **`REFUSED` means the path is orchestrator-owned and no grant covers it for your lane.** Report the exact text you need, and the orchestrator writes it or grants the path to your lane (`grant --lane <lane> --thread <threadId> <path>...`, one lane per path).
-- **A claim cannot see an edit nobody claimed.** Before your first edit to a `CLAIMED` path, run `git status --porcelain -- <path>`; a path already dirty is another session's unclaimed edit, so report it as a conflict.
-- **Re-claim when your file set widens**, above all after a change of approach, where the new file feels like part of a set you already claimed. A widening is also a size event: re-count your lane's files and tasks against the one-ticket size limits `create-ticket` applies, and if either is over, claim nothing new and send the orchestrator what is on disk, what the widening adds and a proposed split.
-- **Never release another lane's claim.** The orchestrator releases yours when the lane's last commit lands.
+- **Report every path you create or edit** in your report's two lists, a file a tool writes for you included; the orchestrator stages from them.
+- **Before your first edit to a file, run `git status --porcelain -- <path>`.** A path already dirty is another session's edit: report it and edit nothing in it.
+- **Never edit an orchestrator-owned file** unless your dispatch grants it by path; report the exact text instead.
+- **A widening is a size event**: re-count your lane's files and tasks against the one-ticket size limits `create-ticket` applies, and if either is over, send the orchestrator what is on disk, what the widening adds and a proposed split.
 
 **Reaching an orchestrator-owned gate is a report, not a run.** Say which gates you ran, against which tree state, and name any file outside your stage's usual scope: a tests session that edits a production file widens the blast radius to that file's, and only you can see it.
 
@@ -213,7 +210,7 @@ For each caused failure, read the test and the code it exercises before changing
 
 ### Post-Fix Re-Validation
 
-The gate after a review's findings are applied: `dev-ticket`'s adversarial pass, `review-changes`' fix pass, and their equivalents. The fixes landed after the completion gates ran, so by default all three run again: lint, `bun run typecheck`, and the suite, plus `bun run test:defects` when a fix touched a named-defect test or a line a defect record mutates.
+The gate after a review's findings are applied: `dev-ticket`'s adversarial pass, `review-changes`' fix pass, and their equivalents. The fixes landed after the completion gates ran, so by default all three run again: lint, `bun run typecheck`, and the suite, plus a by-id proof (`_agent-docs/crew.md` § Gates) of every record whose test or mutated line a fix touched.
 
 **The implementer's arm runs lint and typecheck only**: `dev-ticket`'s adversarial pass and `change-request`'s inline equivalent, because `create-tests` runs the suite after them.
 
@@ -247,7 +244,7 @@ What earns a test. `create-tests` applies this at discovery and `review-changes`
 
 **Enumerate over both the changeset and the acceptance criteria.** Walking changed files finds a defect inside a diff hunk. It cannot find one in the join between files: a value one file resolves and another consumes, where each diff is an unremarkable move. In ticket mode, state each criterion's guarantee in one sentence and name the test that goes red if it breaks. No such test is a gap, even when every file reads as covered.
 
-**"Already covered" means a test goes red, not that a test file was touched.** When a change is structural (a moved call, a deleted guard), answer the question by mutation, and still green means unprotected. The tests session records the defect in `defects.json` and runs `bun run test:defects`. A session that writes no test mutates a scratch copy. Copy the folders the question needs, without `node_modules` or `dist`, and the root `tsconfig*.json` files their configs extend, into `_agent-docs/.scratch/<task>/`, apply the mutation there, and confirm the run reports failed tests rather than a failed suite, and from the repository root run `bun x vitest run --root _agent-docs/.scratch/<task> --config <absolute path to vitest.config.ts> <test file name>`. Dependencies resolve by walking up to the root `node_modules`, so the copy needs no link to it. Never link `node_modules` into the copy: a symlink makes it partial, and any delete tool that follows a junction removes the live dependencies with the copy. A module the test imports by package name resolves through `node_modules` the copy does not have: a third-party package resolves to the live tree, and a workspace package such as `@rt-test/core`, which Bun links inside each workspace, does not resolve at all. Mutate only code the test reaches by relative path. Delete the copy once answered.
+**"Already covered" means a test goes red, not that a test file was touched.** When a change is structural (a moved call, a deleted guard), answer the question by mutation, and still green means unprotected. The tests session records the defect in `defects.json` and proves it by id (§ Writing Tests Outside create-tests). A session that writes no test mutates a scratch copy. Copy the folders the question needs, without `node_modules` or `dist`, and the root `tsconfig*.json` files their configs extend, into `_agent-docs/.scratch/<task>/`, apply the mutation there, and confirm the run reports failed tests rather than a failed suite, and from the repository root run `bun x vitest run --root _agent-docs/.scratch/<task> --config <absolute path to vitest.config.ts> <test file name>`. Dependencies resolve by walking up to the root `node_modules`, so the copy needs no link to it. Never link `node_modules` into the copy: a symlink makes it partial, and any delete tool that follows a junction removes the live dependencies with the copy. A module the test imports by package name resolves through `node_modules` the copy does not have: a third-party package resolves to the live tree, and a workspace package such as `@rt-test/core`, which Bun links inside each workspace, does not resolve at all. Mutate only code the test reaches by relative path. Delete the copy once answered.
 
 **A defect a change makes possible needs its own named test**, even when an existing test already goes red on its mutation: `bun run test:defects` credits a detection only to the `D###` test its record names. Write the new test and record, and name the existing test as one that also catches it.
 
@@ -263,7 +260,7 @@ State the verdict either way. When recommending, name each file and the defect i
 
 ### Zero Technical Debt
 
-Fix every error, pre-existing ones included, and record the pre-existing fixes apart from the change's own. Deferring a finding to an issue is the owner's call (`_agent-docs/rules/github-issues.md`).
+Fix every error, pre-existing ones included, and record the pre-existing fixes apart from the change's own. The repository's process tooling (`scripts/`, `lint/`, `.claude/hooks/`, the root `test/`) is frozen: fix a defect there only when it blocks work or could produce a false result, and otherwise name it in one line of your report. Deferring a finding to an issue is the owner's call (`_agent-docs/rules/github-issues.md`).
 
 ## Failure Investigation Protocol
 
@@ -280,12 +277,14 @@ If that finds the root cause, fix it and retry with the attempt count reset. Oth
 
 **In a workflow, `create-tests` is the only session that writes or edits a test.** This section is the falsification gate it runs, and the one an ad-hoc change runs when it writes a test. `docs/testing.md` describes the defect checker's mechanics and limits.
 
+**Scope.** Steps 2 to 5 apply to product tests: those under `packages/`, and the root `test/` records that mutate a file under `packages/` (`docs/testing.md`). A new test of the repository's tooling names its defect (step 1) and asserts it, with no `D###` title, record or proof.
+
 **The gate:**
 
 1. **Name the defect before writing** the test, in one sentence, and derive the expected values from the requirement. No nameable defect, no test.
 2. **Write it as a named-defect test**: titled `it("D<id>: <behavior>", ...)` (P22), hook-free (P23), with one assertion (P24), an id from your allocated range (P26), and inputs the defect sandbox copies (P27). `it.each` arms are invisible to the checker, so write one `it` per arm.
 3. **Record its mutation** in the `defects.json` beside the test: `id`, a `defect` sentence, the `file` it mutates, and the exact `old` and `new` text. The mutation is the named defect; do not improvise another. `old` must match exactly once in the file, and a stale anchor stops the run rather than being skipped.
-4. **Prove it** (P25): by id in an orchestrated lane (`_agent-docs/crew.md` § Gates), else with `bun run test:defects`. The checker requires a passing baseline, applies each mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored baseline. Read its exit code and the detected count; a setup or compile failure is not a detection.
+4. **Prove it** (P25) by id, `node scripts/verify-defects.mjs --ids <ids>`, through the run lease in a lane (`_agent-docs/crew.md` § Gates). The push gate re-proves nothing, so this is the only proof the record gets. The checker requires a passing baseline, applies each mutation in a disposable copy, requires the named test to fail at an assertion, and re-verifies the restored baseline. Read its exit code and the detected count; a setup or compile failure is not a detection.
 5. **Diagnose a survivor** before touching anything (C65): a vacuous test is rewritten; a mutation no test could observe is replaced by one that is observable.
 6. **A spec-derived test that fails against existing code is a bug finding.** Report it; never bend the test until it agrees.
 

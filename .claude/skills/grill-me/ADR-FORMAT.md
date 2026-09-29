@@ -39,8 +39,9 @@ Nothing reads ADRs at review time, so a constraint that lives only in an ADR is 
 in the ADR's own text, and act on it this session: **what makes this decision fail loudly if someone violates
 it later?**
 
-- **A custom lint rule in `lint/`**, when the decision bans a code shape: route it through the lint-hardening
-  candidate check in `{cfg.rule_maintenance_guide}`.
+- **An `.oxlintrc.json` rule**, when a built-in oxlint rule or option can see the banned shape: route it through
+  `{cfg.rule_maintenance_guide}` § Lint enforcement. A shape only a custom rule could see becomes a review rule
+  instead.
 - **A named-defect test**, when the decision is one specific behavior: note it as a test owed for
   `create-tests`.
 - **A rule**: a checklist rule when a reviewer can check it against a diff, a project-context rule when it is

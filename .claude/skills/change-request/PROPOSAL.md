@@ -136,5 +136,4 @@ the stage is wrong.
 
 List the files written, the ids used, and each checker's result. If ticket changes were approved, list the
 new or changed tickets and say: _Run `create-ticket` to draft them, then `dev-ticket` to build._ Otherwise say
-that every change was a document edit and no tickets are needed. When `{{lint_hardening_candidates}}` is not
-empty, present it as a table: rule id, bucket, proposed mechanism.
+that every change was a document edit and no tickets are needed.

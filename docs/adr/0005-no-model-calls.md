@@ -8,4 +8,4 @@ RT Test calls no model and sends no source, results, or environment values off t
 
 Rejected: a built-in model client, for the egress, credential, and determinism costs above. Revisit when the owner approves a built-in call, for example for use without a coding agent.
 
-Enforcement: the checklist check that no code sends data off the machine, carrying a lint-hardening candidate for a ban on outbound network APIs in product packages.
+Enforcement: the checklist check that no code sends data off the machine.

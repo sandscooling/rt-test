@@ -96,7 +96,7 @@ list.
   reversed an approach they prescribe. Amend a `backlog` or `ready-for-dev` ticket in place; surface an
   `in-progress` one to the owner; leave `review` and `done` alone. Cancelling planned work is a plan change:
   put it to the owner.
-- **Rules**: per `{cfg.rule_maintenance_guide}`, with its lint-hardening candidate check.
+- **Rules**: per `{cfg.rule_maintenance_guide}`, with its lint enforcement check.
 - **`{cfg.sprint_status}`**: an inline fix adds no ticket key.
 
 Work the walk reveals but this fix did not do goes to the owner as a decision, never into a ticket written here.
@@ -121,8 +121,8 @@ record: every durable decision already lives in the ADR, requirement, rule or de
 
 ## Decisions
 
-<one line per owner decision, lint-hardening candidate or deferred change request, each pointing at the
-file that now holds it; write None. when there are none>
+<one line per owner decision or deferred change request, each pointing at the file that now holds it; write
+None. when there are none>
 
 ## Dev Agent Record
 
@@ -168,8 +168,7 @@ REVIEW OWED after the tests: run `review-changes` on the change record in its ow
 ```
 
 Then list `{{files_changed}}`, the gates and their results, the adversarial review's outcome, and any
-`{{owner_decisions}}` still unanswered, `{{change_request_candidates}}` and `{{lint_hardening_candidates}}` as
-tables. This path does not commit.
+`{{owner_decisions}}` still unanswered and `{{change_request_candidates}}` as tables. This path does not commit.
 
 **When the tests session sends a code bug**, fix the source, never the test; re-run the Step 3 gates over what
 you changed, and `session_wake` its threadId with the paths.

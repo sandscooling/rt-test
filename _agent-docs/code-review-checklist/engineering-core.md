@@ -149,13 +149,11 @@ C59. **No unused export**: Every export has a production consumer. A reference f
 
 C60. **Give a "found nothing" gate a positive control**: A script whose pass means "I looked and found nothing" proves it looked: it asserts the target exists and was read, counts what it examined, and fails loudly when the tool did not run or produced no output.
 
-C61. **Accept every form the repository's bans force**: A gate that parses prose or comments matches the form authors are required to write (for example a comma or colon where a banned dash used to be), and a widened pattern is proved by the count of what it now sees.
-
 C62. **Sweep the parsers when adding a ban**: A new ban on a character, word or shape greps the scripts that parse the affected artifacts and confirms each still sees every entry.
 
 C63. **Write control characters as escapes**: No source file contains a raw non-printing character; write the escape (`"\u0000"`) through a named constant, since one raw NUL makes grep treat the file as binary.
 
-C64. **Prove a lint rule's scope and evasions**: A new or widened lint rule is proved to fire on the least obvious file in its intended scope, its `overrides` glob covers every file where the construct does harm, and each alternate spelling of the banned construct has a probe.
+C64. **Prove a lint rule's scope and evasions**: A new or widened `.oxlintrc.json` rule is proved to fire on the least obvious file in its intended scope, its `overrides` glob covers every file where the construct does harm, and each alternate spelling of the banned construct has a probe.
 
 C166. **Give a time-bounded context only bounded work**: Code that runs under a lock other processes break after a fixed age, or inside a hook whose timeout lets the command through, spawns no process and makes no OS or network query whose duration machine load decides, unless each such call carries its own timeout and together they stay inside the bound. FAIL on a start-time query, a child process or a network call inside such a lock or hook without that budget: under load it outlives the bound, and another process then breaks the lock or the hook's verdict is lost.
 

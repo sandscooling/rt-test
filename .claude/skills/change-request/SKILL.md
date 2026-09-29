@@ -38,8 +38,7 @@ Substitute every `{cfg.KEY}` and `{{variable}}` with its literal value before it
 - **An example the owner gives is one case until the owner calls it a pattern.** Before a criterion, sweep
   or rule treats it as a class, ask whether it stands for one, and scope the text to the answer.
 - **Reuse before creating** (`{cfg.code_change_standards}` § Universal gates).
-- **Rule edits follow `{cfg.rule_maintenance_guide}`**, including its lint-hardening candidate check. Record
-  each rule the owner keeps as a manual gate in `{{lint_hardening_candidates}}`.
+- **Rule edits follow `{cfg.rule_maintenance_guide}`**, including its lint enforcement check.
 - **Placement safety.** Never add a ticket to a `done` sprint and never amend a `done` ticket; read
   `{cfg.sprint_status}` before any placement.
 - **Point at artifacts rather than restating them.** The reasoning lives in the ADR, requirement, sprint file
@@ -54,7 +53,7 @@ The invoking message is `{{change_trigger}}`: parse it, and never ask the owner 
 only when it has no discernible subject.
 
 Initialize the shared state here and nowhere else, since both path files append to it:
-`{{grill_doc_edits}}` = [], `{{lint_hardening_candidates}}` = [], `{{prototype_candidates}}` = [].
+`{{grill_doc_edits}}` = [], `{{prototype_candidates}}` = [].
 
 Fold in what is already in this session: files the trigger names, and findings an earlier `review-changes`
 surfaced. Store `{{area}}`: the workspaces and root tooling the change touches.
@@ -78,7 +77,8 @@ Answer three questions in order, each with its evidence:
 2. **How often does it happen, measured?** A declared bound is not an answer. Measure it with the smallest
    exercise in `_agent-docs/.scratch/`; when you cannot, say the number is unknown.
 3. **Does it touch a product guarantee?** A breach of a guarantee in `AGENTS.md` (false freshness, lost
-   states, unsafe execution, data leaving the machine) outranks any internal tooling defect.
+   states, unsafe execution, data leaving the machine) outranks any internal tooling defect. A defect in the
+   repository's own process tooling is worth fixing only when it blocks work or could produce a false result.
 
 State a verdict (fix it now, fix it cheaply, or do not fix it) and confirm it with `AskUserQuestion`. Watch for
 a fix whose blast radius exceeds the defect's, and for a derived figure in the trigger that nobody divided

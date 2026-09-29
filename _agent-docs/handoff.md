@@ -16,7 +16,7 @@ A safe point has no edit half-applied, no process you started still running, and
 
 ## Steps for the old session
 
-1. **Settle the tree.** For each uncommitted file, note whether it is complete, verified, or partial. Outside a lane, commit finished, verified work under the normal commit rules. A lane member commits nothing: its claims carry over to the successor, since they belong to the lane.
+1. **Settle the tree.** For each uncommitted file, note whether it is complete, verified, or partial. Outside a lane, commit finished, verified work under the normal commit rules. A lane member commits nothing: its file set carries over to the successor through the lane's record.
 2. **Write the durable record.** A lane member writes its progress into its lane's record (the ticket's section for its role, or the change record). Anyone else updates `_agent-docs/next-session.md`: completed work, validation with actual results, open decisions, and the next concrete step, committed with the work it describes.
 3. **Collect the roster.** Call `session_list` for every project the work touches, and note each open session's name, threadId, group, status, and what it is waiting on.
 4. **Choose the successor's name and group.** A lane member names it `<your name>-<n>` with the next unused `n`, in its own group, and it keeps that name. The orchestrator follows its `HANDOFF.md`. Any other session uses group `orchestrator`, so the successor never reads itself as a lane member, and a temporary name: `<your name>-2` if your title is a valid session name (letters, digits, `.`, `_`, `-`), which the successor takes back at the end, otherwise `rt-test`, or `rt-test-<n>` if that is taken.

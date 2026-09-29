@@ -46,9 +46,9 @@ Run `session_list` at the start of a session and read your own row. If your `gro
 ## Tests and validation
 
 - Name the concrete defect before writing a test. Derive expected behavior from requirements, not observed implementation output.
-- Prove behavior tests reject their named defect: the intended assertion fails under the mutation, and the restored baseline passes.
+- Prove each product behavior test rejects its named defect: the intended assertion fails under the mutation, and the restored baseline passes. A test of the repository's own tooling names its defect and asserts it, with no mutation proof.
 - Do not count compilation failures, setup failures, unrelated failures, or timeouts as a successful defect detection.
-- Invalidate defect evidence when its test, mutation, relevant inputs, or execution configuration changes.
+- Invalidate defect evidence when its test, mutation, relevant inputs, or execution configuration changes. Until RT Test's own falsification re-proves what an edit can affect, a lane re-proves every record whose test or mutated file it edits, and the push gate re-proves none.
 - Run targeted checks while iterating. Broaden to affected dependents when a change is ready; use a full run when impact is uncertain.
 - Outside an orchestrated lane, run `bun run check` before handing off code changes; in a lane the orchestrator runs it (`_agent-docs/crew.md`). Read actual process exit codes and test counts.
 - Preserve failures and fix their causes. Update expectations only when intended behavior changed.

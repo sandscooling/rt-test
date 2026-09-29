@@ -37,11 +37,11 @@ The doc is gitignored, so it dies on a fresh clone and no other session can sear
 | A shell or tooling trap that does not lead you to the fix | `AGENTS.md`                                                                                                                  |
 | Anything else                                             | the doc the next reader of that subject opens                                                                                |
 
-**Convert an incident into a detection method, then cut the story.** The method is the durable half ("compare the file total `stage-lane` prints against the reported path lists"), not the account of the time the two disagreed.
+**Convert an incident into a detection method, then cut the story.** The method is the durable half ("compare the file total `git diff --cached --stat` prints against the reported path lists"), not the account of the time the two disagreed.
 
 ## Cutting a closed lane
 
-At a lane's sweep, update only what moved: the lane table, the landed lane, any question the owner answered. **Cut the closed lane mechanically rather than by reading**, since a stale entry carries no marker and reads exactly like a current one: search the doc for every threadId and lane name it contains and check each against `session_list`, every lane against `node scripts/file-claims.mjs list`, every sha described as pending against `git log`, and every file described as dirty against `git status`. Anything that fails its check is an instruction about something that no longer exists.
+At a lane's sweep, update only what moved: the lane table, the landed lane, any question the owner answered. **Cut the closed lane mechanically rather than by reading**, since a stale entry carries no marker and reads exactly like a current one: search the doc for every threadId and lane name it contains and check each against `session_list`, every lane against `session_list` and its record, every sha described as pending against `git log`, and every file described as dirty against `git status`. Anything that fails its check is an instruction about something that no longer exists.
 
 ## Handing off at 75% context
 

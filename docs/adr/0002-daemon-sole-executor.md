@@ -8,4 +8,4 @@ The daemon is the sole executor of tests and falsification for a started project
 
 Rejected: recording the runs agents start, which keeps every agent paying for execution, lets two sessions run the same tests on the same inputs, and keeps the lock. Rejected: an agent-facing `run` command, which reintroduces runs racing the daemon's own and makes "never run a test twice" unenforceable. Revisit only if a consumer needs a run the daemon cannot schedule, such as a live integration suite, which stays outside RT Test's results.
 
-Enforcement: the project-context direction that only the daemon executes tests, carrying a lint-hardening candidate for a ban on Vitest's node API outside the daemon package, and the duplicate-execution requirement pinned by named-defect tests.
+Enforcement: the project-context direction that only the daemon executes tests, and the duplicate-execution requirement pinned by named-defect tests.

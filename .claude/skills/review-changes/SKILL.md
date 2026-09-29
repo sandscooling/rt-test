@@ -23,7 +23,7 @@ Optional input: `{{record}}`, a ticket path or key (`3.2`, `3-2b`) or a change r
 
 - **Check whether you are a lane member before your first edit.** Run `session_list` and read your own row: a
   `group` other than `null` or `orchestrator` means `_agent-docs/crew.md` and `{cfg.code_change_standards}`
-  § Orchestrated Gate Delegation bind you. Claim every file before its first edit. Status transitions, the
+  § Orchestrated Gate Delegation bind you. Status transitions, the
   commit, and every project-wide file (rule docs, `docs/`, the status file, other tickets) are the
   orchestrator's: report the exact transition or text. The record under review is your lane's.
 - **Under a lane, never commit.** Step 8 reports the change to the orchestrator, which stages and commits it;
@@ -67,9 +67,8 @@ both come back empty. The by-file half is the one a sprint-scoped list cannot pr
 this change often sits in another sprint, and its criteria were written against the code before this diff.
 
 **Discover the changed files** from `git status --porcelain --untracked-files=all`, which lists each new file
-rather than its new folder, unioned with the record's File List. **Under a lane, keep only the paths your lane
-holds in the claims store**, `node scripts/file-claims.mjs list --lane <your group>` (a folder entry covers what
-is under it): the checkout holds other lanes' work. **The reviewed set is these changed files**, and that binds
+rather than its new folder, unioned with the record's File List. **Under a lane, keep only the paths in the record's
+File List and your lane members' reported lists**: the checkout holds other lanes' work. **The reviewed set is these changed files**, and that binds
 every later step: an agent's search can reach a gitignored file that reads like live guidance, so run
 `git ls-files --error-unmatch <path>` on any finding outside the set and drop it when that fails.
 
@@ -280,9 +279,9 @@ DEFERRED doc claim. **A deferred claim its report does not reach is yours to set
 Never default to making the sentence match the code; in the diff the second case looks exactly like the first. A
 corrected doc takes the citation sweep: search the identifier and update live docs and unbuilt tickets.
 
-**Rule gaps.** For each valid finding, ask whether a rule would have prevented it: generalizable beyond this file,
+**Rule gaps.** For each valid finding in product code (`packages/`, `apps/`), ask whether a rule would have prevented it: generalizable beyond this file,
 not already covered, statable as a check or a direction, and likely to recur. Record NEW or STRENGTHEN, the target
-doc by the guide's routing test, and whether it is a lint-hardening candidate.
+doc by the guide's routing test, and whether an `.oxlintrc.json` rule could enforce it.
 
 ## 6. Present, then fix
 
@@ -368,7 +367,7 @@ under a lane report the path for the orchestrator to delete.
 
 **Every mode:**
 
-- **Rule proposals**: apply each by `{cfg.rule_maintenance_guide}`, with its lint-hardening candidate check. Ask
+- **Rule proposals**: apply each by `{cfg.rule_maintenance_guide}`, with its lint enforcement check. Ask
   the orchestrator for each new id; under a lane, report the exact rule text.
 - **Reconcile unbuilt work** against what this change did. Re-run
   `node scripts/list-unbuilt-work.mjs <changed paths>` first (with `--except <the ticket's id>` in ticket mode), since the fix round moved files, and read each hit's
@@ -380,7 +379,7 @@ under a lane report the path for the orchestrator to delete.
 
 **Report to the orchestrator** (`_agent-docs/crew.md` § Your report): the created and modified paths as separate
 lists, covering the dev's code, the tests session's tests and your fixes; each gate with its exit code, counts and
-window; the named defects and whether `test:defects` detected them; and every transition, rule text and deletion
+window; the named defects and the by-id proof that detected them; and every transition, rule text and deletion
 it must apply. Then wait for the commit sha. Outside a lane, commit by `{cfg.rules_dir}/git-commits.md`.
 
 **A change record is deleted once its change is committed**: remove it when the sha arrives.

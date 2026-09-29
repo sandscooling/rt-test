@@ -18,7 +18,7 @@ P3. **Reserve the package name `rt-test`**: `rt-test` is the published CLI's nam
 
 P4. **Run Vitest through `bun run test:run`**: `bun test` starts Bun's own test runner, not Vitest, and `bun run test` leaves a Vitest watcher running. Target a subset with `bun x vitest run <paths>`.
 
-P5. **Lint with oxlint, never ESLint**: Lint with `bun run lint`, configure rules in `.oxlintrc.json`, and write custom rules in `lint/` as oxlint JS plugins. Do not add ESLint or typescript-eslint: they need the classic TypeScript compiler API, which TypeScript 7 does not ship. oxlint has no `no-restricted-syntax`, so a syntax ban is a custom rule.
+P5. **Lint with oxlint, never ESLint**: Lint with `bun run lint` and configure rules in `.oxlintrc.json`. Do not add ESLint or typescript-eslint: they need the classic TypeScript compiler API, which TypeScript 7 does not ship. Write no new custom lint rule; a construct oxlint's built-in rules cannot see stays a review check.
 
 P6. **Fix a lint finding at its cause**: Extract a function to reduce complexity. Never raise a threshold, disable a rule, or add an inline suppression to make lint pass.
 
@@ -30,9 +30,9 @@ P9. **Add dependencies at exact versions at least three days old**: Add with `bu
 
 P10. **Verify third-party behavior in its installed source**: Read the dependency's `.d.ts`, then its `.js`, under `node_modules/.bun/`, or its official documentation for the installed version, before relying on a behavior. Pin a behavior the product depends on in a test.
 
-P11. **Write repository scripts as dependency-free Node ESM**: Scripts under `scripts/` are plain `.mjs` run with `node`, add no dependency, and import no third-party package except a tool the root already declares that the script exists to drive, loaded by dynamic `import()` on a path that fails open, put shared helpers in `scripts/lib/`, and export their logic as a function a test can call with a root and captured output. Give a module that TypeScript tests import a `.d.mts` beside it.
+P11. **Keep repository scripts dependency-free Node ESM, and change them only to fix them**: Scripts under `scripts/` are plain `.mjs` run with `node`, add no dependency, and keep a `.d.mts` beside any module a TypeScript test imports. Change a script only to fix a defect that blocks work or could produce a false result; add no new script, check or helper.
 
-P12. **Read workflow paths through the flow config**: A script reads every workflow path (tickets, sprints, rule docs, requirements, ADRs) through `scripts/lib/flow-config.mjs`, never a hardcoded string. A new path is a new `_agent-docs/_flow-config.yaml` key.
+P12. **Read workflow paths through the flow config**: A script reads every workflow path (tickets, sprints, rule docs, requirements, ADRs) through `scripts/lib/flow-config.mjs`, never a hardcoded string.
 
 P13. **Support Windows and Linux alike**: Build paths with `node:path`, normalize separators to `/` before comparing or storing them, and never assume a POSIX shell in product code. The pre-push gate runs on Windows under Node 24 and on Linux under Node 22 and 24.
 
@@ -56,23 +56,21 @@ P21. **Follow the documented design, and fix the doc when it blocks you**: Use t
 
 ## Tests and defect evidence
 
-P22. **Title a defect-backed test with its id**: Write `it("D123: <behavior>", ...)`; `scripts/verify-defects.mjs` finds defect tests by `it(` followed by the double-quoted `D<digits>:` title, on the same line or the next, and any other form (`it.each`, `test(`, another quote) is invisible to it.
+P22. **Title a defect-backed test with its id**: Under `packages/`, write `it("D123: <behavior>", ...)`; `scripts/verify-defects.mjs` finds defect tests by `it(` followed by the double-quoted `D<digits>:` title, on the same line or the next, and any other form (`it.each`, `test(`, another quote) is invisible to it.
 
 P23. **Keep a defect-backed test hook-free**: Do setup inside the test body, with no `beforeEach`, `afterEach` or shared fixture hook, so a setup failure fails the test instead of passing as a detection.
 
-P24. **Give a defect-backed test one assertion**: One `expect` per `D###` test, so the failure `bun run test:defects` requires points at the named defect.
+P24. **Give a defect-backed test one assertion**: One `expect` per `D###` test, so the failure the defect verifier requires points at the named defect.
 
-P25. **Prove a test through `bun run test:defects`, never by editing live code**: Record the mutation in the `defects.json` beside the test (`id`, `defect`, `file`, exact `old` and `new`) and run `bun run test:defects`, which applies it in a disposable copy. Never hand-edit a production file to watch a test fail.
+P25. **Prove a test with the defect verifier, never by editing live code**: Record the mutation in the `defects.json` beside the test (`id`, `defect`, `file`, exact `old` and `new`) and prove it with `node scripts/verify-defects.mjs --ids <ids>`, or `--edited` in a worktree, which applies it in a disposable copy. Never hand-edit a production file to watch a test fail.
 
 P26. **Take defect ids from the allocated range**: The orchestrator allocates each lane a range of `D###` ids; use only ids from yours.
 
 P27. **Read only inputs the defect sandbox copies**: A `D###` test may read only what `scripts/verify-defects.mjs` copies (`packages/`, `lint/`, `scripts/`, `test/`, the root tsconfigs and `_agent-docs/_flow-config.yaml`). Put fixtures under `test/fixtures/`.
 
-P28. **Make every suite test a named-defect test**: `bun run test:defects` requires every test it runs to be a passing `D###` test with a record, so a test without a defect fails the check.
+P28. **Make every product test a named-defect test**: Every test under `packages/` is a `D###` test with one record. `bun run check:defects` fails on a `D###` test without a record, a record without a test, or an anchor that does not match exactly once, but not on an untitled test, so review catches that. A new test of the repository tooling under the root `test/` carries no `D###` title and no record.
 
 P29. **Assert before restoring a spy**: In Vitest, `mockRestore()` resets the mock, which clears its recorded calls. Assert on calls first, then restore.
-
-P30. **Keep every switched-off path tested**: A mode kept off by a `scale` switch in the flow config keeps a fixture test that exercises it, so the dormant path works when the switch turns on.
 
 P42. **Add a test to an existing test file before creating one**: Put a new test in the existing test file for the module or area it covers. Create a test file only when none covers that area, or when the tests need a different environment, config, or fixture setup than that file provides. Vitest builds each test file's module graph separately, so the number of test files, not their length, drives suite time.
 
@@ -84,7 +82,7 @@ P44. **Build fixture git repositories from the shared settings**: A root test th
 
 P31. **Keep RT Test generic**: Fleet Cooling is the proving ground, not a dependency. Nothing application- or backend-specific enters the core; Convex support lives in an adapter.
 
-P32. **Let only the daemon execute tests**: The daemon is the sole test executor. The CLI and programmatic API query results or wait for a revision scoped to given files, and never spawn Vitest; lint and typecheck stay with agents. → lint-hardening candidate (config-expressible and custom-plugin: `no-restricted-imports` on `vitest/node` outside the daemon package, and a custom rule banning a Vitest child process there, once that package exists)
+P32. **Let only the daemon execute tests**: The daemon is the sole test executor. The CLI and programmatic API query results or wait for a revision scoped to given files, and never spawn Vitest; lint and typecheck stay with agents.
 
 P33. **Give agent-facing tooling a JSON CLI, never an MCP server**: Expose the product as a CLI with `--json` output in front of the daemon, plus a small programmatic API.
 
