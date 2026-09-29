@@ -144,6 +144,7 @@ export interface InputsNotNarrowed {
 export const WORKSPACE_UNSUPPORTED_VITEST = "workspace-unsupported-vitest";
 export const WORKSPACE_DISCOVERY_FAILED = "workspace-discovery-failed";
 export const WORKSPACE_NOT_CONFIRMED = "workspace-not-confirmed";
+export const WORKSPACE_UNHANDLED_ERRORS = "workspace-unhandled-errors";
 export const FAILED_MODULE = "failed-module";
 export const TYPECHECK_MODULE = "typecheck-module";
 export const UNSUPPORTED_PROJECT = "unsupported-project";
@@ -164,6 +165,12 @@ export type NotDiscoveredEntry = CutReason &
           | typeof WORKSPACE_DISCOVERY_FAILED
           | typeof WORKSPACE_NOT_CONFIRMED;
         readonly workspacePath: string;
+      }
+    | {
+        /** A discovered workspace whose collection raised unhandled errors, so its listed tests may not be all it holds. */
+        readonly kind: typeof WORKSPACE_UNHANDLED_ERRORS;
+        readonly workspacePath: string;
+        readonly errorCount: number;
       }
     | {
         readonly kind: typeof FAILED_MODULE;

@@ -5654,5 +5654,19 @@
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      stdio: [\"ignore\", \"inherit\", \"inherit\", \"ipc\"],",
     "new": "      stdio: [\"ignore\", \"inherit\", \"ignore\", \"ipc\"],"
+  },
+  {
+    "id": "D2772",
+    "defect": "A summary never lists a discovered workspace whose collection raised an unhandled error, so it reads that workspace's listed tests as all it holds while selection treats them as not known.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    ...(unhandledErrors.length === 0",
+    "new": "    ...(unhandledErrors.length >= 0"
+  },
+  {
+    "id": "D2773",
+    "defect": "A path status inside a discovered workspace whose collection raised an unhandled error does not name that workspace's entry above the path, so the path's counts read as complete.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  return entry.kind === FAILED_MODULE || entry.kind === TYPECHECK_MODULE;",
+    "new": "  return entry.kind === FAILED_MODULE || entry.kind === TYPECHECK_MODULE || entry.kind === WORKSPACE_UNHANDLED_ERRORS;"
   }
 ]

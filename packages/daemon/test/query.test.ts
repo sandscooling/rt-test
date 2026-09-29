@@ -1130,6 +1130,41 @@ describe("what the summary lists as not discovered", () => {
     ]);
   });
 
+  it("D2772: a discovered workspace whose collection raised unhandled errors is listed first among its entries, with the errors and their count", () => {
+    const summary = summaryOf(
+      storedDiscovery([
+        discoveredWorkspace(WORKSPACE_A, [discovered("a")], {
+          unhandledErrors: ["Error: one", "Error: two"],
+          failedModules: [
+            {
+              projectName: PROJECT,
+              modulePath: "src/broken.test.ts",
+              errors: ["SyntaxError: one"],
+            },
+          ],
+        }),
+      ]),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "workspace-unhandled-errors",
+        workspacePath: WORKSPACE_A,
+        errorCount: 2,
+        reason: "Error: one\nError: two",
+        omittedCharacters: 0,
+      },
+      {
+        kind: "failed-module",
+        workspacePath: WORKSPACE_A,
+        projectName: PROJECT,
+        modulePath: "src/broken.test.ts",
+        errorCount: 1,
+        reason: "SyntaxError: one",
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
   it("D1812: a typecheck module is listed as not discovered", () => {
     const summary = summaryOf(
       storedDiscovery([
@@ -1579,6 +1614,32 @@ describe("the status of a file or folder", () => {
             },
       ),
     ).toStrictEqual({ at: ["unsupported-project"], above: [] });
+  });
+
+  it("D2773: a file inside a discovered workspace whose collection raised unhandled errors names that workspace's entry above it", async () => {
+    const file = "packages/a/src/a.test.ts";
+    const above = await inTempDir((root) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), "");
+      const answer = pathStatusAnswer(
+        join(root, file),
+        results(
+          storedDiscovery([
+            discoveredWorkspace(
+              WORKSPACE_A,
+              [discovered("one", { modulePath: "src/a.test.ts" })],
+              { unhandledErrors: ["Error: one"] },
+            ),
+          ]),
+        ),
+        { ...IDLE, consumerRoot: root },
+        UNSETTLED,
+      );
+      return "noAnswer" in answer
+        ? answer
+        : answer.enclosingNotDiscovered.map((entry) => entry.kind);
+    });
+    expect(above).toStrictEqual(["workspace-unhandled-errors"]);
   });
 });
 

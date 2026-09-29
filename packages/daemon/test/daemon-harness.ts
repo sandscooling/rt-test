@@ -385,8 +385,15 @@ export function fixtureFile(root: string, name: string): string {
   return join(root, WORKSPACE_A, name);
 }
 
+/** `packages/a`'s global setup count at a confirmed start's discovery, the first job to load it. */
+const DISCOVERY_SETUP = "1";
 /** `packages/a`'s global setup count at a confirmed start's first run, which follows its discovery's. */
 const FIRST_RUN_SETUP = "2";
+
+/** Makes `packages/a`'s global setup leak one unhandled rejection on the executor's thread at the discovery alone. */
+export function leakAtDiscovery(root: string): void {
+  writeFileSync(fixtureFile(root, "host-rejection"), DISCOVERY_SETUP);
+}
 
 /** Makes `packages/a`'s global setup leak one unhandled rejection on the executor's thread at the first run alone. */
 export function leakAtFirstRun(root: string): void {

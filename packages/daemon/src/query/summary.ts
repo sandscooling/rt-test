@@ -17,6 +17,7 @@ import {
   UNSUPPORTED_PROJECT,
   WORKSPACE_DISCOVERY_FAILED,
   WORKSPACE_NOT_CONFIRMED,
+  WORKSPACE_UNHANDLED_ERRORS,
   WORKSPACE_UNSUPPORTED_VITEST,
   type AdapterVersionFacts,
   type AnswerContext,
@@ -214,7 +215,18 @@ function discoveredWorkspaceEntries(
   entry: Extract<WorkspaceDiscovery, { status: "discovered" }>,
 ): NotDiscoveredEntry[] {
   const workspacePath = entry.workspace.path;
+  const { unhandledErrors } = entry;
   return [
+    ...(unhandledErrors.length === 0
+      ? []
+      : [
+          {
+            kind: WORKSPACE_UNHANDLED_ERRORS,
+            workspacePath,
+            errorCount: unhandledErrors.length,
+            ...cutReason(unhandledErrors.join(REASON_SEPARATOR)),
+          } satisfies NotDiscoveredEntry,
+        ]),
     ...entry.failedModules.map((module): NotDiscoveredEntry => ({
       kind: FAILED_MODULE,
       workspacePath,

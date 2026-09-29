@@ -530,5 +530,12 @@
     "file": "packages/cli/src/commands/summary.ts",
     "old": "    `${run.unhandledErrors} unhandled errors`,\n",
     "new": ""
+  },
+  {
+    "id": "D2774",
+    "defect": "The human summary never names a discovered workspace whose collection raised an unhandled error, such as a host rejection its global setup leaked.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    ...(unhandledErrors.length === 0",
+    "new": "    ...(unhandledErrors.length >= 0"
   }
 ]

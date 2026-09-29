@@ -41,6 +41,7 @@ import {
   confirmNothing,
   eventually,
   holdAt,
+  leakAtDiscovery,
   leakAtFirstRun,
   logged,
   settled,
@@ -1467,6 +1468,31 @@ describe("a query", () => {
       expect(outcome).toStrictEqual({
         exit: 0,
         errorCounts: ["1 unhandled errors"],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2774: a human summary names a discovered workspace whose collection raised a host rejection, with the rejection and its count",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        leakAtDiscovery(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary"], { cwd: root });
+        return {
+          exit: run.exit,
+          lines: run.stdout
+            .split("\n")
+            .filter((line) => line.includes("workspace-unhandled-errors")),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        lines: [
+          "  workspace-unhandled-errors packages/a: unhandled rejection on the host thread while the session was open: host rejection from packages/a's setup (1 errors)",
+        ],
       });
     },
     DAEMON_TEST_TIMEOUT_MS,
