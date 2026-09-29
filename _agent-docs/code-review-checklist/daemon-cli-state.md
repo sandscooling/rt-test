@@ -91,6 +91,8 @@ C158. **Spawn a program from outside the consumer**: A program the daemon or its
 
 C159. **Watch a path by its real path**: Every `fs.watch` opens the canonical real path (`realpathSync.native`) of what it watches, never a path as a caller or argument spelled it, because on Windows a watch opened through a short (8.3) name aborts the whole process on its first event.
 
+C167. **Clear a job's marks on every way it ends**: An activity, a one-shot retry or a failure listing set for a job is reset when the job returns, restored when the job never begins, and dropped when a later attempt succeeds. FAIL on a mark cleared only on the success path: status then names a job that already ended, or a retry is lost.
+
 ## Backend independence
 
 C143. **Keep the daemon and store backend-free**: The daemon, state store and core packages import no backend adapter or backend SDK; adapters plug in through the adapter interface.
