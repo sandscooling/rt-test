@@ -65,7 +65,7 @@ Run the targeted gates `_agent-docs/code-change-standards.md` § Orchestrated Ga
 
 **Keep every log of a run until the orchestrator has closed it**, a failed one above all: the log is the only evidence of a failure that does not reproduce.
 
-**Keep WSL work out of `/tmp`.** The WSL VM shuts down when idle and clears `/tmp` on its next boot, which deletes a clone or a log mid-run. Use a folder under `~/`, or the worktree's `_agent-docs/.scratch/` through `/mnt/c`, and never run an install from WSL inside a Windows checkout.
+**Keep WSL work out of `/tmp`.** The WSL VM shuts down when idle and clears `/tmp` on its next boot, which deletes a clone or a log mid-run. Use a folder under `~/`, or the worktree's `_agent-docs/.scratch/` through `/mnt/c`, and never run an install from WSL inside a Windows checkout. Run WSL tests and proofs with `TMPDIR` set as long as the orchestrator's gate sets it (`export TMPDIR="$HOME/.rt-test-runs/wsl-node-12345"`), since a Unix socket path past 108 bytes fails only under a long temp directory.
 
 **A red in a file your lane has not claimed is not yours**: report it with the output rather than fixing it, since another lane may be mid-edit. `node scripts/file-claims.mjs list` names the lane that holds it.
 
