@@ -157,4 +157,6 @@ C63. **Write control characters as escapes**: No source file contains a raw non-
 
 C64. **Prove a lint rule's scope and evasions**: A new or widened lint rule is proved to fire on the least obvious file in its intended scope, its `overrides` glob covers every file where the construct does harm, and each alternate spelling of the banned construct has a probe.
 
+C166. **Give a time-bounded context only bounded work**: Code that runs under a lock other processes break after a fixed age, or inside a hook whose timeout lets the command through, spawns no process and makes no OS or network query whose duration machine load decides. FAIL on a start-time query, a child process or a network call inside such a lock or hook: under load it outlives the bound, and another process then breaks the lock or the hook's verdict is lost.
+
 C164. **Stop a PowerShell script on its first error**: A multi-statement PowerShell script that Node runs through `-Command` starts with `$ErrorActionPreference = 'Stop'`, so a failing cmdlet exits non-zero. FAIL on one without it: a non-terminating cmdlet error leaves the script to run on, and its exit status follows the last statement, so a failed query prints an empty answer and exits 0.
