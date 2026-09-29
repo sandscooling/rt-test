@@ -1,9 +1,17 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { isRunning } from "./run-cleanup.mjs";
+import {
+  isRunning,
+  processRecords,
+  stillRunning,
+  type ProcessIdentity,
+  type ProcessRecord,
+} from "./run-cleanup.mjs";
 
 const IDLE_SCRIPT = "setInterval(() => {}, 1000);";
 const POLL_MS = 25;
+/** How many exited processes `endedProcessId` tries before it gives up. */
+const ENDED_ID_ATTEMPTS = 10;
 
 /** Each idle process this process started and has not ended, by id. */
 const idleProcesses = new Map<number, ChildProcess>();
@@ -33,12 +41,20 @@ function exitedProcessId(): Promise<number> {
   });
 }
 
-/** The id of a Node process that has exited, and that Windows has not already handed to another process. */
+/**
+ * The id of a Node process that has exited, and that Windows has not already handed to another process. Throws
+ * naming each id tried when every one was taken at once.
+ */
 export async function endedProcessId(): Promise<number> {
-  for (;;) {
+  const taken: number[] = [];
+  while (taken.length < ENDED_ID_ATTEMPTS) {
     const pid = await exitedProcessId();
     if (!isRunning(pid)) return pid;
+    taken.push(pid);
   }
+  throw new Error(
+    `each exited process's id was already taken by another: ${taken.join(", ")}`,
+  );
 }
 
 /**
@@ -62,6 +78,38 @@ export async function holdsWithin(
   return true;
 }
 
-/** Whether the process ends within `boundMs`; an ended child must be reaped, which needs the event loop to turn. */
-export const endsWithin = (pid: number, boundMs: number): Promise<boolean> =>
-  holdsWithin(() => !isRunning(pid), boundMs);
+/** The record of the process holding `pid` now, which the caller knows to be the one it means; throws when none does. */
+export function recordOf(pid: number): ProcessRecord {
+  const record = processRecords([pid]).get(pid);
+  if (record === undefined) {
+    throw new Error(`no process holds id ${pid}, so it has no record`);
+  }
+  return record;
+}
+
+/** Longer than a Linux clock tick (10 ms), so two processes started this far apart never share a start time. */
+const START_TIME_GAP_MS = 100;
+
+/**
+ * The id of the live process `held` with the start time of a process that started after it, which is what a process
+ * that took `held`'s id after `held` ended would carry.
+ */
+export async function reusedIdentity(held: number): Promise<ProcessIdentity> {
+  await delay(START_TIME_GAP_MS);
+  const later = idleProcess();
+  try {
+    return { pid: held, startedAt: recordOf(later).startedAt };
+  } finally {
+    endAll([later]);
+  }
+}
+
+/**
+ * Whether each recorded process has ended within `boundMs`, a later holder of its id not counting as it. An ended
+ * child must be reaped, which needs the event loop to turn.
+ */
+export const endsWithin = (
+  records: readonly ProcessIdentity[],
+  boundMs: number,
+): Promise<boolean> =>
+  holdsWithin(() => stillRunning(records).length === 0, boundMs);

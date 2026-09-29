@@ -17,7 +17,11 @@ import {
   type RunResult,
 } from "../../../scripts/lib/defects/vitest.mjs";
 import { endsWithin } from "../processes.js";
-import { endOwnedProcesses } from "../run-cleanup.mjs";
+import {
+  endOwnedProcesses,
+  recordsInside,
+  type ProcessRecord,
+} from "../run-cleanup.mjs";
 import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   CALC_TEST,
@@ -108,11 +112,12 @@ const startedAndFinished = (timeout: number) => [
 
 /**
  * Runs a stand-in that starts `script`'s children, reports one line and hangs, so the runner stops it; then hands
- * `observe` the children's ids and ends whichever still run.
+ * `observe` the record of each child still running, which lies inside the scratch folder, and ends whichever still
+ * run. A child with no record has already ended.
  */
 function afterStall<T>(
   script: StandInScript,
-  observe: (children: number[]) => Promise<T>,
+  observe: (children: ProcessRecord[]) => Promise<T>,
 ): Promise<T> {
   return withScratch(async (dir) => {
     const run = runStandIn(
@@ -126,7 +131,7 @@ function afterStall<T>(
       if (children.length !== script.children?.length) {
         throw new Error("the stand-in did not start its children");
       }
-      return await observe(children);
+      return await observe(recordsInside([dir], children));
     } finally {
       endOwnedProcesses([dir], children);
     }
@@ -673,7 +678,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
   it("D1783: ends a stopped run's worker that holds the main process's output open", async () => {
     const ended = await afterStall(
       { children: [[]], childStdio: "inherit" },
-      ([worker]) => endsWithin(worker!, STOP_WAIT_MS),
+      (workers) => endsWithin(workers, STOP_WAIT_MS),
     );
     expect(ended).toBe(true);
   });
@@ -726,8 +731,8 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
   });
 
   it("D1704: ends a stopped run's pool workers, which outlive its main process", async () => {
-    const ended = await afterStall({ children: [[]] }, ([worker]) =>
-      endsWithin(worker!, STOP_WAIT_MS),
+    const ended = await afterStall({ children: [[]] }, (workers) =>
+      endsWithin(workers, STOP_WAIT_MS),
     );
     expect(ended).toBe(true);
   });
@@ -735,7 +740,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
   it("D1705: spares a stopped run's watchdog, named by its command line, so it can clean up after the run", async () => {
     const ended = await afterStall(
       { children: [["run-watchdog.mjs"]] },
-      ([watchdog]) => endsWithin(watchdog!, SPARE_WAIT_MS),
+      (watchdogs) => endsWithin(watchdogs, SPARE_WAIT_MS),
     );
     expect(ended).toBe(false);
   });

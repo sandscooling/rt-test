@@ -32,13 +32,15 @@ import {
   type RunTests,
   EXIT_RECORD_SUFFIX,
 } from "../../../scripts/lib/defects/vitest.mjs";
-import { namedAsParent } from "../run-cleanup.mjs";
+import { holdsWithin } from "../processes.js";
+import { orphansOf, removeDirectory, stillRunning } from "../run-cleanup.mjs";
 
 export type Tree = Readonly<Record<string, string>>;
 
 // How Windows refuses to remove a folder that is still some process's working directory.
 const FOLDER_IN_USE = new Set(["EBUSY", "EPERM"]);
-const RUN_TREE_POLL_MS = 50;
+/** How long a process a run started may hold its scratch folder after the run's Vitest exits. */
+const ORPHAN_WAIT_MS = 10_000;
 
 /** How a run that ended cleanly with `status` says it ended: Vitest reported no unhandled error, and its process exited. */
 export const cleanEnd = (
@@ -205,12 +207,20 @@ export function fakeVitest(catalog: Catalog, hooks: FakeHooks = {}): RunTests {
 export async function withScratch<T>(
   run: (dir: string) => Promise<T>,
 ): Promise<T> {
+  const openedAt = Date.now();
   const dir = mkdtempSync(join(tmpdir(), "rt-test-defects-"));
+  let result: T;
   try {
-    return await run(dir);
-  } finally {
-    await removeScratch(dir);
+    result = await run(dir);
+  } catch (error) {
+    // The test's own failure is the one to report; a cleanup failure behind it is only logged.
+    await removeScratch(dir, openedAt).catch((cleanup: unknown) => {
+      console.error(`after the failure below, ${String(cleanup)}`);
+    });
+    throw error;
   }
+  await removeScratch(dir, openedAt);
+  return result;
 }
 
 /** The pid of each Vitest process a run in `dir` started, from the exit witness's records there. */
@@ -223,10 +233,11 @@ function recordedRunPids(dir: string): number[] {
 }
 
 /**
- * Removes a scratch folder. On Windows a Vitest process can exit while a process it started, such as Vite's
- * `net use` shell, still has the folder as its working directory; that holds the folder until the process ends.
+ * Removes a scratch folder opened at `openedAt`. On Windows a Vitest process can exit while a process it started,
+ * such as Vite's `net use` shell, still has the folder as its working directory; that holds the folder until the
+ * process ends. Throws naming the runs and each such process still running when the folder stays held.
  */
-async function removeScratch(dir: string): Promise<void> {
+async function removeScratch(dir: string, openedAt: number): Promise<void> {
   const pids = recordedRunPids(dir);
   try {
     rmSync(dir, { recursive: true, force: true });
@@ -235,10 +246,21 @@ async function removeScratch(dir: string): Promise<void> {
     const code = (error as NodeJS.ErrnoException).code ?? "";
     if (!FOLDER_IN_USE.has(code) || pids.length === 0) throw error;
   }
-  while (pids.some(namedAsParent)) {
-    await delay(RUN_TREE_POLL_MS);
-  }
-  rmSync(dir, { recursive: true, force: true });
+  const orphans = orphansOf(pids, openedAt);
+  const ended = await holdsWithin(
+    () => stillRunning(orphans).length === 0,
+    ORPHAN_WAIT_MS,
+  );
+  if (ended && (await removeDirectory(dir))) return;
+  const running = stillRunning(orphans).map(
+    ({ pid, commandLine }) => `${pid} (${commandLine})`,
+  );
+  const waited = ended
+    ? "after the processes they started ended"
+    : `after waiting ${ORPHAN_WAIT_MS} ms for the processes they started`;
+  throw new Error(
+    `the scratch folder ${dir} of Vitest runs ${pids.join(", ")} is still held ${waited}; processes they started that still run: ${running.join(", ") || "none"}`,
+  );
 }
 
 /** A stand-in for Vitest's entry that follows the script a test writes; see the fixture for its fields. */

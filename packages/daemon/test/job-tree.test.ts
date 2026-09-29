@@ -4,7 +4,11 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
+import { endAll, idleProcess } from "../../../test/scripts/processes.js";
+import {
+  endOwnedProcesses,
+  recordsInside,
+} from "../../../test/scripts/run-cleanup.mjs";
 import { daemonStatus, stopDaemon } from "../src/client.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import {
@@ -199,13 +203,13 @@ async function answeringHeartbeats(
   const silent = children.filter((_, index) => answers[index] === undefined);
   let running: number[] = [];
   const exited = await eventually(() => {
-    running = silentStillRunning(silent);
+    running = silentStillRunning(root, silent);
     return failedHeartbeats(root).length > 0 || running.length === 0;
   });
   requireConnectedHeartbeats(root);
   if (!exited) {
     throw new Error(
-      `a heartbeat child that did not answer still runs by its process id: ${running.join(", ")}; the heartbeat files hold ${heartbeatContents(root)}`,
+      `a heartbeat child that did not answer still runs: ${running.join(", ")}; the heartbeat files hold ${heartbeatContents(root)}`,
     );
   }
   return alive;
@@ -215,11 +219,17 @@ async function answeringHeartbeats(
  * The announced process id of each heartbeat child that did not answer and still runs, empty once every one has
  * exited. A child that lost its connection writes its reason before it exits, so once it has exited the reason is on
  * disk, however late the test saw the connection close. A child whose announcement never arrived is not waited on.
+ * A held id counts only while its process lies inside `root`, as a heartbeat child's script does, so a later holder of
+ * the id is not waited on.
  */
-function silentStillRunning(silent: readonly ChildConnection[]): number[] {
-  return silent.flatMap(({ pid }) =>
+function silentStillRunning(
+  root: string,
+  silent: readonly ChildConnection[],
+): number[] {
+  const held = silent.flatMap(({ pid }) =>
     pid !== undefined && isRunning(pid) ? [pid] : [],
   );
+  return recordsInside([root], held).map(({ pid }) => pid);
 }
 
 /** Each heartbeat file's name and content, so a failure shows every child's last beat beside the process ids. */
@@ -653,6 +663,24 @@ describe("the test's connection to a heartbeat child", () => {
       expect(outcome).toStrictEqual({
         thrown: `a heartbeat child could not connect to the test or lost its connection: ${ENDED_BY_THE_TEST}`,
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2567: a child whose announced process id a process outside the fixture now holds is not waited on",
+    async () => {
+      const outcome = await inTempDir(async (root) => {
+        copyFixture(DAEMON_FIXTURE, root);
+        const stranger = idleProcess();
+        try {
+          const connection = await closedAfterAnnouncing(stranger);
+          return await settled(answeringHeartbeats(root, [connection]));
+        } finally {
+          endAll([stranger]);
+        }
+      });
+      expect(outcome).toStrictEqual([]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

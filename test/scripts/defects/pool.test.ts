@@ -17,6 +17,9 @@ import {
 import { treeDifference } from "../../../scripts/lib/defects/pool.mjs";
 import { openRun } from "../../../scripts/lib/defects/runs.mjs";
 import type { RunTests } from "../../../scripts/lib/defects/vitest.mjs";
+import { endAll, idleProcess, recordOf, reusedIdentity } from "../processes.js";
+import { ownedRunName, type RunOwner } from "../run-cleanup.mjs";
+import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   catalogOf,
   fakeVitest,
@@ -31,7 +34,8 @@ import {
 } from "./harness.js";
 
 const PACKAGE = "node_modules/dep";
-const LEFTOVER = "rt-test-verify-defects-999999-planted";
+const RUN_PREFIX = "rt-test-verify-defects-";
+const LEFTOVER = `${RUN_PREFIX}999999-planted`;
 
 const quiet = () => {};
 
@@ -49,7 +53,7 @@ const packageCatalog = (target: string): Catalog =>
 function sweepWith(
   parent: string,
   planted: string,
-  running: (pid: number) => boolean,
+  running: (owner: RunOwner) => boolean,
 ): string[] {
   const lines: string[] = [];
   mkdirSync(join(parent, planted));
@@ -312,14 +316,56 @@ describe("the sandbox pool", () => {
   });
 });
 
-describe("a defect run's directory", () => {
-  it("D1110: names the run after its owning process", async () => {
+describe("a defect run's directory", PROCESS_SCENARIO, () => {
+  it("D1110: names the run after its owning process and that process's start time", async () => {
     const name = await withScratch(async (parent) =>
       basename(openRun(parent, quiet)),
     );
     expect(name).toMatch(
-      new RegExp(`^rt-test-verify-defects-${process.pid}-.`),
+      new RegExp(
+        `^${RUN_PREFIX}${process.pid}-${recordOf(process.pid).startedAt}-.`,
+      ),
     );
+  });
+
+  it("D2545: removes a leftover run whose owner's id a process with another start time now holds", async () => {
+    const holder = idleProcess();
+    let kept: boolean;
+    try {
+      const { pid, startedAt } = await reusedIdentity(holder);
+      const planted = `${RUN_PREFIX}${pid}-${startedAt}-planted`;
+      kept = await withScratch(async (parent) => {
+        mkdirSync(join(parent, planted));
+        openRun(parent, quiet);
+        return existsSync(join(parent, planted));
+      });
+    } finally {
+      endAll([holder]);
+    }
+    expect(kept).toBe(false);
+  });
+
+  it("D2546: keeps a leftover run whose owner's id and start time a process still holds", async () => {
+    const planted = `${ownedRunName(RUN_PREFIX)}planted`;
+    const kept = await withScratch(async (parent) => {
+      mkdirSync(join(parent, planted));
+      openRun(parent, quiet);
+      return existsSync(join(parent, planted));
+    });
+    expect(kept).toBe(true);
+  });
+
+  it("D2548: keeps a leftover run whose owner could not be checked, and logs why", async () => {
+    const result = await withScratch(async (parent) => {
+      const lines = sweepWith(parent, LEFTOVER, () => {
+        throw new Error("the process query failed");
+      });
+      return { kept: existsSync(join(parent, LEFTOVER)), lines };
+    });
+    expect(result).toEqual({
+      kept: true,
+      lines: [expect.stringContaining("the process query failed")],
+    });
   });
 
   it("D1111: creates the run under the parent's real path, never the path it was given", async () => {

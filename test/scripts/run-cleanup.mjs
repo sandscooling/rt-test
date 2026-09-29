@@ -45,6 +45,11 @@ const PROC = "/proc";
 const STAT_PARENT_FIELD = 1;
 const STAT_START_TIME_FIELD = 19;
 const DECIMAL_DIGITS = /^\d+$/;
+/** Windows file time counts 100 ns ticks from 1601, which is this many milliseconds before 1970. */
+const FILE_TIME_EPOCH_OFFSET_MS = 11_644_473_600_000n;
+const FILE_TIME_TICKS_PER_MS = 10_000n;
+/** A run directory's name after its prefix: the owner's id, then its start time, each followed by `-`. */
+const RUN_OWNER = /^(\d+)-(?:(\d+)-)?/;
 /** What may follow a path a command line names whole: its end, a separator, a closing quote or the next argument. */
 const PATH_END = /^(?:$|[/\\"'\s])/;
 const TRAILING_SEPARATORS = /[/\\]+$/;
@@ -297,14 +302,29 @@ export function childProcessesOf(pid) {
   return [...records.values()].filter((record) => isStartedBy(record, parent));
 }
 
+/** A time in milliseconds as Windows file-time ticks, the unit a Windows record's start time is in. */
+const windowsFileTime = (ms) =>
+  (BigInt(Math.floor(ms)) + FILE_TIME_EPOCH_OFFSET_MS) * FILE_TIME_TICKS_PER_MS;
+
 /**
- * Whether any process still names `pid` as its parent. On Windows that outlives the parent, so it proves no
- * parenthood; it only says whether processes that one started may still run.
+ * The records of the processes still running that `pids` started, once each of `pids` has exited, from those naming
+ * one as parent: one that started before `sinceMs` is an earlier holder's, and one started after the id's current
+ * holder is that holder's. Linux gives an orphan another parent, so there none names an exited process.
  */
-export function namedAsParent(pid) {
-  return [...recordsNamingParent(pid).values()].some(
-    (record) => record.parent === pid,
+export function orphansOf(pids, sinceMs) {
+  const ids = [...new Set(pids)].filter(isProcessId);
+  if (process.platform !== WINDOWS || ids.length === 0) return [];
+  const records = windowsRecords(
+    ids
+      .flatMap((pid) => [`ProcessId=${pid}`, `ParentProcessId=${pid}`])
+      .join(" OR "),
   );
+  const since = windowsFileTime(sinceMs);
+  return [...records.values()].filter((record) => {
+    if (!ids.includes(record.parent) || record.startedAt < since) return false;
+    const holder = records.get(record.parent);
+    return holder === undefined || !isStartedBy(record, holder);
+  });
 }
 
 /** Whether a command line is a run watchdog's, which must outlive the process it guards to clean up after it. */
@@ -408,14 +428,21 @@ export function endRecorded(records) {
 }
 
 /**
- * Ends each of `pids` still running whose process lies inside one of `roots`, or was started by one that does,
- * reading each one's identity just before the kill, and returns the records it ended. A recorded id some
- * unrelated process now holds is spared.
+ * The record of each of `pids` still running whose process lies inside one of `roots`, or was started by one that
+ * does. A recorded id some unrelated process now holds has none.
  */
-export function endOwnedProcesses(roots, pids) {
+export function recordsInside(roots, pids) {
   const running = [...new Set(pids)].filter(isRunning);
   if (running.length === 0) return [];
-  return endFreshlyRead(ownedRecords(roots, running, processRecords(running)));
+  return ownedRecords(roots, running, processRecords(running));
+}
+
+/**
+ * Ends each process `recordsInside` finds for `roots` and `pids`, reading each one's identity just before the kill,
+ * and returns the records it ended.
+ */
+export function endOwnedProcesses(roots, pids) {
+  return endFreshlyRead(recordsInside(roots, pids));
 }
 
 /** Removes a daemon's key file with the `.tmp` and `.removing` copies a killed writer leaves beside it. */
@@ -456,18 +483,57 @@ export async function cleanUpRun(runRoot) {
   return { ended, removed: await removeDirectory(runRoot) };
 }
 
+let startedAtOfThisProcess;
+
+/** This process's start time, read once, since it never changes. */
+function ownStartedAt() {
+  startedAtOfThisProcess ??= processRecords([process.pid]).get(
+    process.pid,
+  )?.startedAt;
+  if (startedAtOfThisProcess === undefined) {
+    throw new Error(`cannot read the start time of process ${process.pid}`);
+  }
+  return startedAtOfThisProcess;
+}
+
+/** How a run directory's name begins that this process owns, ahead of a random suffix. */
+export function ownedRunName(prefix) {
+  return `${prefix}${process.pid}-${ownStartedAt()}-`;
+}
+
+/** The owner a run directory's name records after `prefix`: its id, and its start time when the name holds one. */
+export function runOwner(name, prefix) {
+  if (!name.startsWith(prefix)) return undefined;
+  const [, pid, startedAt] = RUN_OWNER.exec(name.slice(prefix.length)) ?? [];
+  if (pid === undefined) return undefined;
+  const owner = { pid: Number(pid) };
+  return startedAt === undefined
+    ? owner
+    : { ...owner, startedAt: BigInt(startedAt) };
+}
+
 /**
- * Cleans up each run under the temp directory named `<prefix><pid>-` whose process has ended, since a killed run
- * never cleans up after itself. Resolves with a line for each run it could not clean up, which a later sweep retries.
+ * Whether a run directory's owner still runs: a process holds its id, and has its start time when the name records
+ * one. A name without one says only whether the id is free.
+ */
+export const ownerRunning = (owner) =>
+  owner.startedAt === undefined
+    ? isRunning(owner.pid)
+    : stillRunning([owner]).length > 0;
+
+/**
+ * Cleans up each run under the temp directory named by `ownedRunName(prefix)` whose owner has ended, since a killed
+ * run never cleans up after itself. Resolves with a line for each run it could not clean up, which a later sweep
+ * retries.
  */
 export async function sweepEndedRuns(prefix) {
   const problems = [];
   for (const name of readdirSync(tmpdir())) {
-    if (!name.startsWith(prefix)) continue;
-    const owner = Number.parseInt(name.slice(prefix.length), 10);
-    if (!Number.isInteger(owner) || isRunning(owner)) continue;
+    const owner = runOwner(name, prefix);
+    if (owner === undefined) continue;
     const run = join(tmpdir(), name);
     try {
+      if (ownerRunning(owner)) continue;
       const { removed } = await cleanUpRun(run);
       if (!removed) problems.push(`${run}: a process still holds it`);
     } catch (error) {

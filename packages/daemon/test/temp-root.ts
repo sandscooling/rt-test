@@ -5,6 +5,7 @@ import type { TestProject } from "vitest/node";
 import {
   cleanUpRun,
   guardRun,
+  ownedRunName,
   removeDirectory,
   sweepEndedRuns,
   type RunCleanup,
@@ -108,7 +109,7 @@ export default async function setup(
   for (const problem of await sweepEndedRuns(RUN_PREFIX)) {
     console.warn(`Could not clean up an ended daemon test run: ${problem}`);
   }
-  const root = mkdtempSync(join(tmpdir(), `${RUN_PREFIX}${process.pid}-`));
+  const root = mkdtempSync(join(tmpdir(), ownedRunName(RUN_PREFIX)));
   await guardRun(root);
   project.provide("rtTestDaemonTempRoot", root);
   return () => teardown(root);

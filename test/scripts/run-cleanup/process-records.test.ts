@@ -5,7 +5,7 @@ import { onPlatform } from "../../../packages/daemon/test/harness.js";
 import {
   childProcessesOf,
   endOwnedProcesses,
-  namedAsParent,
+  orphansOf,
   processRecords,
 } from "../run-cleanup.mjs";
 
@@ -25,8 +25,18 @@ vi.mock("node:fs", async (importOriginal) => {
 /** A run root no real process names, so only the answers a test scripts can lie inside it. */
 const ROOT = "/no-such-parent/rt-test-run";
 const PARENT = 200;
+const OTHER_PARENT = 201;
 const EARLIER_CHILD = 100;
 const LATER_CHILD = 101;
+/** The `sinceMs` the orphan tests pass, and the same moment as Windows file time: 100 ns ticks since 1601. */
+const SINCE_MS = 1000;
+const SINCE_TICKS = "116444736010000000";
+const ONE_TICK_BEFORE_SINCE = "116444736009999999";
+const ONE_TICK_AFTER_SINCE = "116444736010000001";
+/** Starts of the holder of `PARENT`'s id, of a child that started before it, and of one that started after it. */
+const HOLDER_START = "116444736020000000";
+const BEFORE_HOLDER = "116444736015000000";
+const AFTER_HOLDER = "116444736030000000";
 /** An id the stubbed `/proc` answers for. */
 const LINUX_PID = 4242;
 
@@ -64,8 +74,9 @@ function printedByPowerShell(script: string, json: string): string {
   return utf8 ? json : json.replace(/\P{ASCII}/gu, "\ufffd");
 }
 
-/** Runs `read` as on Windows, where the process query prints `entries` as the PowerShell above prints them. */
-async function onWindowsAnswering<T>(
+/** Runs `read` as on `platform`, with the Windows process query answering `entries` as the PowerShell above prints them. */
+async function onAnswering<T>(
+  platform: NodeJS.Platform,
   entries: readonly QueryEntry[],
   read: () => T,
 ): Promise<T> {
@@ -78,12 +89,16 @@ async function onWindowsAnswering<T>(
     )) as typeof spawnSync);
   vi.stubEnv("SystemRoot", "C:\\Windows");
   try {
-    return await onPlatform("win32", async () => read());
+    return await onPlatform(platform, async () => read());
   } finally {
     vi.unstubAllEnvs();
     vi.mocked(spawnSync).mockReset();
   }
 }
+
+/** Runs `read` as on Windows, where the process query prints `entries` as the PowerShell above prints them. */
+const onWindowsAnswering = <T>(entries: readonly QueryEntry[], read: () => T) =>
+  onAnswering("win32", entries, read);
 
 /**
  * Runs `read` as on Windows, where the query's CIM call fails. Windows PowerShell then prints an empty list and exits
@@ -230,12 +245,55 @@ describe("reading which process holds an id", () => {
     expect(children).toEqual([]);
   });
 
-  it("D2447: says a process still names a parent that has exited", async () => {
-    const named = await onWindowsAnswering(
-      [entry(EARLIER_CHILD, PARENT, "5")],
-      () => namedAsParent(PARENT),
+  it("D2447: finds a running process that names an exited parent, though no process holds the parent's id", async () => {
+    const orphans = await onWindowsAnswering(
+      [entry(EARLIER_CHILD, PARENT, ONE_TICK_AFTER_SINCE)],
+      () => orphansOf([PARENT], SINCE_MS).map(({ pid }) => pid),
     );
-    expect(named).toBe(true);
+    expect(orphans).toEqual([EARLIER_CHILD]);
+  });
+
+  it("D2549: leaves out a process that started before the run opened, and keeps one that started at that moment", async () => {
+    const orphans = await onWindowsAnswering(
+      [
+        entry(EARLIER_CHILD, PARENT, ONE_TICK_BEFORE_SINCE),
+        entry(LATER_CHILD, PARENT, SINCE_TICKS),
+      ],
+      () => orphansOf([PARENT], SINCE_MS).map(({ pid }) => pid),
+    );
+    expect(orphans).toEqual([LATER_CHILD]);
+  });
+
+  it("D2550: leaves out a child of the process that now holds the parent's id, and keeps an earlier holder's", async () => {
+    const orphans = await onWindowsAnswering(
+      [
+        entry(PARENT, 4, HOLDER_START),
+        entry(EARLIER_CHILD, PARENT, BEFORE_HOLDER),
+        entry(LATER_CHILD, PARENT, AFTER_HOLDER),
+      ],
+      () => orphansOf([PARENT], SINCE_MS).map(({ pid }) => pid),
+    );
+    expect(orphans).toEqual([EARLIER_CHILD]);
+  });
+
+  it("D2568: finds the orphans of every exited parent it is given", async () => {
+    const orphans = await onWindowsAnswering(
+      [
+        entry(EARLIER_CHILD, PARENT, ONE_TICK_AFTER_SINCE),
+        entry(LATER_CHILD, OTHER_PARENT, ONE_TICK_AFTER_SINCE),
+      ],
+      () => orphansOf([PARENT, OTHER_PARENT], SINCE_MS).map(({ pid }) => pid),
+    );
+    expect(orphans).toEqual([EARLIER_CHILD, LATER_CHILD]);
+  });
+
+  it("D2569: finds no orphan on Linux, where an orphan takes another parent", async () => {
+    const orphans = await onAnswering(
+      "linux",
+      [entry(EARLIER_CHILD, PARENT, ONE_TICK_AFTER_SINCE)],
+      () => orphansOf([PARENT], SINCE_MS).map(({ pid }) => pid),
+    );
+    expect(orphans).toEqual([]);
   });
 
   it("D2448: drops a Windows query entry missing its parent id", async () => {
