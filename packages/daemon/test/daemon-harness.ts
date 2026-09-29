@@ -1,6 +1,6 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createConnection, createServer, type Socket } from "node:net";
+import { createConnection, type Socket } from "node:net";
 import { createInterface, type Interface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,7 +34,7 @@ import {
   consumerIdentity,
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
-import { inConsumerCopy, inTempDir, runTempRoot } from "./harness.js";
+import { inConsumerCopy, runTempRoot } from "./harness.js";
 
 /** What `RawConnection.next` resolves with once the daemon has closed the connection. */
 export const CLOSED = "closed";
@@ -138,39 +138,6 @@ export async function withConnection<T>(
   } finally {
     connection.close();
   }
-}
-
-const WINDOWS = "win32";
-const TEST_PIPE_PREFIX = "\\\\.\\pipe\\rt-test-test-";
-const TEST_SOCKET_NAME = "test.sock";
-
-/** Serves `onConnection` on an endpoint of its own, a named pipe on Windows and a socket in a temp dir elsewhere. */
-export async function withTestEndpoint<T>(
-  onConnection: (socket: Socket) => void,
-  body: (path: string) => Promise<T>,
-): Promise<T> {
-  return inTempDir(async (dir) => {
-    const path =
-      process.platform === WINDOWS
-        ? `${TEST_PIPE_PREFIX}${randomUUID()}`
-        : join(dir, TEST_SOCKET_NAME);
-    const sockets = new Set<Socket>();
-    const server = createServer((socket) => {
-      sockets.add(socket);
-      socket.once("close", () => sockets.delete(socket));
-      onConnection(socket);
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(path, resolve);
-    });
-    try {
-      return await body(path);
-    } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise((resolve) => server.close(resolve));
-    }
-  });
 }
 
 /** An endpoint whose key lives in a key directory of its own under `dir`, for a test that needs a key and no daemon. */

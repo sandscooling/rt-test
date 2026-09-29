@@ -24,9 +24,9 @@ import {
   started,
   until,
   withDaemonConsumer,
-  withTestEndpoint,
 } from "./daemon-harness.js";
 import { confirmEvery, copyFixture, inTempDir } from "./harness.js";
+import { withTestEndpoint } from "./test-endpoint.js";
 
 const runningChecks = vi.hoisted(() => ({
   /** Called with each process id the test asks about, before the answer, so a test can act at that point. */
