@@ -1305,7 +1305,6 @@ function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
   };
 }
 
-/** The freshness counts of a `summary --json` that are not zero. */
 /** A summary run's freshness counts that are not zero. */
 function freshnessOf(run: CliRun): Document {
   const freshness = countsOf(run)["freshness"] as Document | undefined;

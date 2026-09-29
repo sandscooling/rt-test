@@ -124,14 +124,17 @@ export const DEPENDENCY_BUILDS_ENDED = "dependency-builds-ended";
 export const NO_SELECTION_INPUT = "no-selection-input";
 export const SELECTION_REFUSED = "selection-refused";
 
+/** How a dependency build ended with no dependency information. */
+export type BuildFailureKind =
+  typeof DEPENDENCY_BUILD_FAILED | typeof DEPENDENCY_BUILD_TIMED_OUT;
+
 /**
  * Why no workspace's inputs are narrowed to those its selection includes: each is fingerprinted over the whole
  * project's inputs, or, while the build after a failed or timed-out one runs, has no fingerprint.
  */
 export interface InputsNotNarrowed {
   readonly kind:
-    | typeof DEPENDENCY_BUILD_FAILED
-    | typeof DEPENDENCY_BUILD_TIMED_OUT
+    | BuildFailureKind
     | typeof DEPENDENCY_BUILDS_ENDED
     | typeof NO_SELECTION_INPUT
     | typeof SELECTION_REFUSED;

@@ -3,11 +3,11 @@ import type { JobVerdict } from "../inputs/input-jobs.js";
 import {
   DEPENDENCY_BUILD_FAILED,
   DEPENDENCY_BUILD_TIMED_OUT,
+  type BuildFailureKind,
 } from "../query/answer.js";
 import type { TrackedInputs } from "../inputs/input-tracker.js";
 import {
   Narrowing,
-  type BuildFailureKind,
   type EndedBuild,
   type NarrowingState,
   type QueryNarrowing,

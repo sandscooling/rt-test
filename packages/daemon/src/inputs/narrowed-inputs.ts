@@ -1,8 +1,7 @@
 import {
-  DEPENDENCY_BUILD_FAILED,
-  DEPENDENCY_BUILD_TIMED_OUT,
   DEPENDENCY_BUILDS_ENDED,
   NO_SELECTION_INPUT,
+  type BuildFailureKind,
   type InputsNotNarrowed,
 } from "../query/answer.js";
 import { normalizeRelativePath } from "../selection/graph-state.js";
@@ -36,9 +35,6 @@ export type EndedBuild =
       readonly kind: BuildFailureKind;
       readonly reason: string;
     };
-
-export type BuildFailureKind =
-  typeof DEPENDENCY_BUILD_FAILED | typeof DEPENDENCY_BUILD_TIMED_OUT;
 
 /** What the dependency builds know of the discovery in effect. */
 export type NarrowingState =

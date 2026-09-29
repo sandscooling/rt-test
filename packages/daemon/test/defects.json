@@ -4715,7 +4715,7 @@
     "defect": "A discovery that yields no selection input is reported as a failed build, so the answer names the wrong cause of the widening.",
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
     "old": "      notNarrowed: { kind: NO_SELECTION_INPUT, reason: state.reason },",
-    "new": "      notNarrowed: { kind: DEPENDENCY_BUILD_FAILED, reason: state.reason },"
+    "new": "      notNarrowed: { kind: \"dependency-build-failed\", reason: state.reason },"
   },
   {
     "id": "D2530",
