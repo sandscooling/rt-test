@@ -6,12 +6,13 @@ import { importClosures } from "./imports.mjs";
 const ROOT_INPUTS = new Set(["vitest.config.ts", "package.json", "bun.lock"]);
 const DECLARATION = /\.d\.m?ts$/;
 const RECORDS = "defects.json";
+export const CHANGED_FLAG = "--changed";
 
-export function requireChangeset(git) {
+export function requireChangeset(git, flag = CHANGED_FLAG) {
   const changeset = changedPaths(git);
   if (changeset.error !== undefined) {
     throw new Error(
-      `--changed needs git to compare with HEAD: ${changeset.error}`,
+      `${flag} needs git to compare with HEAD: ${changeset.error}`,
     );
   }
   return new Set(changeset.paths);
@@ -20,13 +21,19 @@ export function requireChangeset(git) {
 const recordText = ({ id, defect, file, old, new: replacement }) =>
   JSON.stringify({ id, defect, file, old, new: replacement });
 
+function recordsAtHead(git, source) {
+  const shown = git(["show", `HEAD:${source}`]);
+  if (!shown.ok) return new Map();
+  return new Map(
+    JSON.parse(shown.out).map((record) => [record.id, recordText(record)]),
+  );
+}
+
 export function headRecordsIn(git) {
+  const cache = new Map();
   return (source) => {
-    const shown = git(["show", `HEAD:${source}`]);
-    if (!shown.ok) return new Map();
-    return new Map(
-      JSON.parse(shown.out).map((record) => [record.id, recordText(record)]),
-    );
+    if (!cache.has(source)) cache.set(source, recordsAtHead(git, source));
+    return cache.get(source);
   };
 }
 
@@ -41,7 +48,7 @@ const needsAttribution = (path, files) =>
   !DECLARATION.test(path) &&
   posix.basename(path) !== RECORDS;
 
-function reasonsFor(defect, changed, headRecords, reach) {
+function ownReasons(defect, changed, headRecords) {
   const reasons = [];
   if (
     changed.has(defect.source) &&
@@ -51,6 +58,11 @@ function reasonsFor(defect, changed, headRecords, reach) {
   }
   if (changed.has(defect.test)) reasons.push("test file changed");
   if (changed.has(defect.file)) reasons.push("mutated file changed");
+  return reasons;
+}
+
+function reasonsFor(defect, changed, headRecords, reach) {
+  const reasons = ownReasons(defect, changed, headRecords);
   const imported = [...reach].filter(
     (path) => path !== defect.test && path !== defect.file,
   );
@@ -77,16 +89,18 @@ export function selectChanged(catalog, changed, headRecords) {
     ]),
   );
   const unattributed = unattributedPaths(catalog, changed, reaches);
-  const cache = new Map();
-  const cachedHead = (source) => {
-    if (!cache.has(source)) cache.set(source, headRecords(source));
-    return cache.get(source);
-  };
   const picks = catalog.defects.flatMap((defect) => {
     const reach = reaches.get(defect);
-    const reasons = reasonsFor(defect, changed, cachedHead, reach);
+    const reasons = reasonsFor(defect, changed, headRecords, reach);
     if (unattributed.length) reasons.push("a change no import explains");
     return reasons.length ? [{ defect, reasons }] : [];
   });
   return { picks, unattributed };
+}
+
+export function selectEdited(catalog, changed, headRecords) {
+  return catalog.defects.flatMap((defect) => {
+    const reasons = ownReasons(defect, changed, headRecords);
+    return reasons.length ? [{ defect, reasons }] : [];
+  });
 }

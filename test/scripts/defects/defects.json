@@ -248,7 +248,7 @@
     "id": "D935",
     "defect": "A full run's baseline covers only files with named tests, so a passing test file with no named test goes unseen.",
     "file": "scripts/lib/defects/verify.mjs",
-    "old": "baselineFiles: options.changed ? [...files] : undefined,",
+    "old": "baselineFiles: selectors.length ? [...files] : undefined,",
     "new": "baselineFiles: [...files],"
   },
   {
@@ -1188,5 +1188,215 @@
     "file": "test/scripts/defects/harness.ts",
     "old": "new Set([\"EBUSY\", \"EPERM\"])",
     "new": "new Set([\"EBUSY\"])"
+  },
+  {
+    "id": "D2611",
+    "defect": "--ids ignores the set of named ids and selects every record, so a run meant to prove two records verifies the whole catalog.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": ".filter((defect) => wanted.has(defect.id))",
+    "new": ".filter(() => true)"
+  },
+  {
+    "id": "D2612",
+    "defect": "--ids reads only its first occurrence, so an id named in a later --ids goes unverified.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "lists.flatMap(idsIn)",
+    "new": "lists.slice(0, 1).flatMap(idsIn)"
+  },
+  {
+    "id": "D2613",
+    "defect": "An id named twice stays in the parsed id list twice, so an unknown one is named twice in the refusal.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "[...new Set(lists.flatMap(idsIn))]",
+    "new": "lists.flatMap(idsIn)"
+  },
+  {
+    "id": "D2614",
+    "defect": "A comma does not separate ids in an --ids list, so D1,D2 is read as the one unknown id \"D1,D2\".",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "const ID_SEPARATORS = /[\\s,]+/;",
+    "new": "const ID_SEPARATORS = /\\s+/;"
+  },
+  {
+    "id": "D2615",
+    "defect": "Whitespace does not separate ids in an --ids list, so a quoted \"D1 D2\" is read as the one unknown id \"D1 D2\".",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "const ID_SEPARATORS = /[\\s,]+/;",
+    "new": "const ID_SEPARATORS = /,+/;"
+  },
+  {
+    "id": "D2616",
+    "defect": "The refusal of unknown ids names only the first, so a second mistyped id is found one rerun later.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "missing.join(\", \")",
+    "new": "missing[0]"
+  },
+  {
+    "id": "D2617",
+    "defect": "An --ids occurrence that names no id is accepted beside a valid one, so a mistyped empty list is dropped silently.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (ids.length === 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2618",
+    "defect": "A stray positional argument is ignored, so ids written space-separated outside a quoted list verify only the first.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (positionals.length > 0) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2619",
+    "defect": "An unknown id is refused only after git has listed the changeset, so a git failure hides the refusal and a run pays for git before it is refused.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "  const picks = pickByIds(catalog, options.ids);\n  const needingGit = selectors.filter((selector) => selector !== SELECTOR.IDS);\n  if (needingGit.length === 0) return picks;\n  const changeset = requireChangeset(git, needingGit.join(\" with \"));\n",
+    "new": "  const needingGit = selectors.filter((selector) => selector !== SELECTOR.IDS);\n  const changeset = requireChangeset(git, needingGit.join(\" with \"));\n  const picks = pickByIds(catalog, options.ids);\n  if (needingGit.length === 0) return picks;\n"
+  },
+  {
+    "id": "D2620",
+    "defect": "--ids combined with --changed selects only what --changed chose, dropping the named records.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "picks.push(...pickChanged(catalog, changeset, headRecords, log));",
+    "new": "return pickChanged(catalog, changeset, headRecords, log);"
+  },
+  {
+    "id": "D2621",
+    "defect": "--ids combined with --edited selects only what --edited chose, dropping the named records.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "picks.push(...selectEdited(catalog, changeset, headRecords));",
+    "new": "return selectEdited(catalog, changeset, headRecords);"
+  },
+  {
+    "id": "D2622",
+    "defect": "A record chosen by two selectors is logged with only its last selector's reason, so the log hides why the first chose it.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "reasons.set(pick.defect, new Set([...known, ...pick.reasons]));",
+    "new": "reasons.set(pick.defect, new Set(pick.reasons));"
+  },
+  {
+    "id": "D2623",
+    "defect": "The selection line reports the catalog's size as the selected count, so n of N always reads N of N.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "selected ${selected.length} of ${catalog.defects.length} defects",
+    "new": "selected ${catalog.defects.length} of ${catalog.defects.length} defects"
+  },
+  {
+    "id": "D2624",
+    "defect": "A selector run baselines the whole suite instead of only the selected records' test files, so it pays for every test file and fails on an unrelated one.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "baselineFiles: selectors.length ? [...files] : undefined,",
+    "new": "baselineFiles: undefined,"
+  },
+  {
+    "id": "D2625",
+    "defect": "A filtered run's summary calls its defects bootstrap defects, so a partial run reads as the full one.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "const scope = selectors.length ? \"selected\" : \"bootstrap\";",
+    "new": "const scope = \"bootstrap\";"
+  },
+  {
+    "id": "D2626",
+    "defect": "A filtered run does not end by saying it is not the full run, so a green partial run reads as the gate.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (selectors.length) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2627",
+    "defect": "A full run ends with the not-the-full-run line, so the gate's own last line disowns it.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (selectors.length) {",
+    "new": "if (true) {"
+  },
+  {
+    "id": "D2628",
+    "defect": "The git error names only the first git-backed selector when --changed and --edited are both given.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "needingGit.join(\" with \")",
+    "new": "needingGit[0]"
+  },
+  {
+    "id": "D2629",
+    "defect": "The git error names --changed when only --edited needed git, so it blames a flag the user never gave.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "requireChangeset(git, needingGit.join(\" with \"))",
+    "new": "requireChangeset(git)"
+  },
+  {
+    "id": "D2630",
+    "defect": "Each git-backed selector reads the records at HEAD through its own cache, so two selectors run one git show per defects.json each.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "picks.push(...selectEdited(catalog, changeset, headRecords));",
+    "new": "picks.push(...selectEdited(catalog, changeset, headRecordsIn(git)));"
+  },
+  {
+    "id": "D2631",
+    "defect": "--edited ignores a changed test file, so a record whose test was edited is not selected.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "const reasons = ownReasons(defect, changed, headRecords);\n    return reasons.length ? [{ defect, reasons }] : [];",
+    "new": "const reasons = ownReasons(\n      defect,\n      new Set([...changed].filter((path) => path !== defect.test)),\n      headRecords,\n    );\n    return reasons.length ? [{ defect, reasons }] : [];"
+  },
+  {
+    "id": "D2632",
+    "defect": "--edited follows imports like --changed does, so a record whose test only imports a changed helper is selected.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "export function selectEdited(catalog, changed, headRecords) {\n  return catalog.defects.flatMap((defect) => {",
+    "new": "export function selectEdited(catalog, changed, headRecords) {\n  return selectChanged(catalog, changed, headRecords).picks;\n  return catalog.defects.flatMap((defect) => {"
+  },
+  {
+    "id": "D2633",
+    "defect": "--edited widens to every record when a changed file no import reaches, as --changed does, so it never stays narrow.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "const reasons = ownReasons(defect, changed, headRecords);\n    return reasons.length ? [{ defect, reasons }] : [];",
+    "new": "const reasons = ownReasons(defect, changed, headRecords);\n    if (changed.size > 0) reasons.push(\"a change no import explains\");\n    return reasons.length ? [{ defect, reasons }] : [];"
+  },
+  {
+    "id": "D2634",
+    "defect": "--edited ignores a changed defects.json, so a record whose text differs from HEAD is not selected.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "const reasons = ownReasons(defect, changed, headRecords);\n    return reasons.length ? [{ defect, reasons }] : [];",
+    "new": "const reasons = ownReasons(\n      defect,\n      new Set([...changed].filter((path) => path !== defect.source)),\n      headRecords,\n    );\n    return reasons.length ? [{ defect, reasons }] : [];"
+  },
+  {
+    "id": "D2635",
+    "defect": "--edited compares each record with an empty HEAD, so every record in an edited defects.json is selected even when its own text is unchanged.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "const reasons = ownReasons(defect, changed, headRecords);\n    return reasons.length ? [{ defect, reasons }] : [];",
+    "new": "const reasons = ownReasons(defect, changed, () => new Map());\n    return reasons.length ? [{ defect, reasons }] : [];"
+  },
+  {
+    "id": "D2636",
+    "defect": "The records at HEAD are read with a new git show each time they are asked for, so many records of one defects.json run many git calls.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "if (!cache.has(source)) cache.set(source, recordsAtHead(git, source));",
+    "new": "cache.set(source, recordsAtHead(git, source));"
+  },
+  {
+    "id": "D2638",
+    "defect": "A filtered run that selects no defect ends with \"No defect was verified.\" and never says it is not the full run, so an empty selection reads as the gate.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "log(\"No defect was verified.\");\n    logFilteredScope(counts, log);",
+    "new": "log(\"No defect was verified.\");"
+  },
+  {
+    "id": "D2639",
+    "defect": "--edited alone also runs the import-following, widening --changed selection, so it follows imports and widens to every record for a changed file no import reaches.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "if (options.changed) {",
+    "new": "if (options.changed || options.edited) {"
+  },
+  {
+    "id": "D2640",
+    "defect": "A filtered run that fails omits the not-the-full-run line, so a failed partial run reads as a failed gate.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "  );\n  logFilteredScope(counts, log);",
+    "new": "  );\n  if (result.ok) logFilteredScope(counts, log);"
+  },
+  {
+    "id": "D2641",
+    "defect": "A stray positional given without --ids tells the user to write several ids as one list, as if --ids were present.",
+    "file": "scripts/lib/defects/verify.mjs",
+    "old": "const remedy = values.ids.length",
+    "new": "const remedy = true"
   }
 ]

@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   headRecordsIn,
+  type HeadRecords,
   requireChangeset,
   selectChanged,
+  selectEdited,
 } from "../../../scripts/lib/defects/changed.mjs";
 import { gitIn, type Git } from "../../../scripts/lib/git.mjs";
 import { git, initRepo } from "../orchestration/harness.js";
@@ -39,6 +41,13 @@ const idsFor = (changed: readonly string[], tree: Tree = TREE) =>
     (pick) => pick.defect.id,
   );
 
+const CALC_RECORDS = "test/calc/defects.json";
+
+const calcRecordsAtHead = () =>
+  catalogOf()
+    .defects.filter((defect) => defect.test === CALC_TEST)
+    .map(({ source: _source, test: _test, ...record }) => record);
+
 const DIFF_HEAD = "diff --name-only --no-renames -z HEAD --";
 
 // An answer keyed by the whole command wins over one keyed by its subcommand.
@@ -58,16 +67,13 @@ describe("the --changed selection", PROCESS_SCENARIO, () => {
   });
 
   it("D924: selects a record whose only change is its replacement text", () => {
-    const { defects } = catalogOf();
-    const head = defects
-      .filter((defect) => defect.test === CALC_TEST)
-      .map(({ source: _source, test: _test, ...record }) =>
-        record.id === "D2" ? { ...record, new: "two = 9" } : record,
-      );
+    const head = calcRecordsAtHead().map((record) =>
+      record.id === "D2" ? { ...record, new: "two = 9" } : record,
+    );
     const repo = fakeGit({ show: { ok: true, out: JSON.stringify(head) } });
     const { picks } = selectChanged(
       catalogOf(),
-      new Set(["test/calc/defects.json"]),
+      new Set([CALC_RECORDS]),
       headRecordsIn(repo),
     );
     expect(picks.map((pick) => pick.defect.id)).toEqual(["D2"]);
@@ -151,5 +157,58 @@ describe("the --changed selection", PROCESS_SCENARIO, () => {
 
   it("D944: attributes a change two imports deep", () => {
     expect(idsFor(["test/shared/deep.ts"], IMPORTING)).toEqual(["D1", "D2"]);
+  });
+});
+
+const editedIds = (
+  changed: readonly string[],
+  tree: Tree = TREE,
+  headRecords: HeadRecords = unchangedHead,
+) =>
+  selectEdited(catalogOf(tree), new Set(changed), headRecords).map(
+    (pick) => pick.defect.id,
+  );
+
+const headShowing = (records: readonly object[]): HeadRecords =>
+  headRecordsIn(fakeGit({ show: { ok: true, out: JSON.stringify(records) } }));
+
+describe("the --edited selection", () => {
+  it("D2631: selects every defect whose test file changed", () => {
+    expect(editedIds([OTHER_TEST])).toEqual(["D3"]);
+  });
+
+  it("D2632: does not select a defect whose test only imports a changed helper", () => {
+    expect(editedIds(["test/shared/helper.ts"], IMPORTING)).toEqual([]);
+  });
+
+  it("D2633: does not widen to every defect for a changed file no import reaches", () => {
+    expect(editedIds(["test/fixtures/calc/data.txt"])).toEqual([]);
+  });
+
+  it("D2634: selects a record whose text differs from HEAD", () => {
+    const head = calcRecordsAtHead().map((record) =>
+      record.id === "D2" ? { ...record, new: "two = 9" } : record,
+    );
+    expect(editedIds([CALC_RECORDS], TREE, headShowing(head))).toEqual(["D2"]);
+  });
+
+  it("D2635: does not select the records of a changed defects.json that match HEAD", () => {
+    expect(
+      editedIds([CALC_RECORDS], TREE, headShowing(calcRecordsAtHead())),
+    ).toEqual([]);
+  });
+});
+
+describe("the records at HEAD", () => {
+  it("D2636: reads one source's records with one git show however often it is asked", () => {
+    const commands: string[] = [];
+    const repo: Git = (args) => {
+      commands.push(args.join(" "));
+      return { ok: true, out: JSON.stringify(calcRecordsAtHead()) };
+    };
+    const headRecords = headRecordsIn(repo);
+    headRecords(CALC_RECORDS);
+    headRecords(CALC_RECORDS);
+    expect(commands).toHaveLength(1);
   });
 });

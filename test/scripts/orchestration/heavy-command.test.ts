@@ -61,6 +61,22 @@ describe("heavy package scripts", () => {
     expect(seen).toEqual([[bash], [powershell]]);
   });
 
+  it("D2637: judges the defect verifier heavy when it names --ids or --edited", () => {
+    const bash = [
+      "node scripts/verify-defects.mjs --ids D2611,D2612",
+      "node scripts/verify-defects.mjs --edited",
+    ];
+    const powershell = [
+      "node scripts\\verify-defects.mjs --ids D2611,D2612",
+      "node scripts\\verify-defects.mjs --edited",
+    ];
+    const seen = [
+      ...judged(bash),
+      ...judged(powershell, { shell: SHELL.POWERSHELL }),
+    ];
+    expect(seen).toEqual([...asWritten(bash), ...asWritten(powershell)]);
+  });
+
   it("D2319: leaves bun's own test runner alone", () => {
     expect(judged(["bun test"])).toEqual([[]]);
   });

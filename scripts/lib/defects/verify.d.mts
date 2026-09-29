@@ -3,6 +3,8 @@ import type { RunTests } from "./vitest.mjs";
 
 export interface Options {
   readonly changed: boolean;
+  readonly edited: boolean;
+  readonly ids: readonly string[];
   readonly jobs: number;
 }
 
