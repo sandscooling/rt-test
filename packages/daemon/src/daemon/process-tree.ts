@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { errorText } from "../vitest/error-text.js";
+import { hasExited } from "./child-exit.js";
 import { WINDOWS } from "./endpoint.js";
 import { isRunning } from "./runtime-directory.js";
 import { WindowsJobs } from "./windows-job.js";
@@ -38,7 +39,7 @@ export function treeContainment(): TreeContainment {
   const jobs = new WindowsJobs();
   return {
     contain: async (child) => {
-      const tree = await jobs.contain(child.pid ?? Number.NaN);
+      const tree = await jobs.contain(child);
       return { end: () => endJobTree(tree, child) };
     },
     close: () => jobs.close(),
@@ -126,8 +127,4 @@ function endWindowsTree(root: number): void {
       );
     }
   }
-}
-
-export function hasExited(child: ChildProcess): boolean {
-  return child.exitCode !== null || child.signalCode !== null;
 }

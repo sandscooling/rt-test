@@ -8,6 +8,7 @@ import { errorText, exitText } from "../vitest/error-text.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
+import { hasExited } from "./child-exit.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { daemonEntryPoint } from "./entry-point.js";
 import {
@@ -24,7 +25,6 @@ import {
 } from "./parse-record.js";
 import {
   endProcessTree,
-  hasExited,
   ownsProcessGroup,
   treeContainment,
   type ContainedTree,

@@ -2299,12 +2299,12 @@
     "id": "D1698",
     "defect": "A helper whose Add-Type is blocked is reported without PowerShell's reason, the policy or the remedy.",
     "file": "packages/daemon/src/daemon/windows-job.ts",
-    "old": "    if (!ready.startsWith(prefix)) {",
-    "new": "    if (ready !== \"never\") {"
+    "old": "  const blocked = reasonAfter(BLOCKED_BY_POLICY, line);",
+    "new": "  const blocked = reasonAfter(\"never\", line);"
   },
   {
     "id": "D1699",
-    "defect": "A helper killed at its answer timeout still reads as alive, so the next job asks the silent helper instead of starting a new one.",
+    "defect": "A helper that misses its answer bound still reads as alive, so the next job asks the silent helper instead of starting a new one.",
     "file": "packages/daemon/src/daemon/windows-job.ts",
     "old": "        this.#end(\n          new Error(\n            `the job object helper did not answer",
     "new": "        this.#waiting.shift()?.(\n          new Error(\n            `the job object helper did not answer"
@@ -5828,6 +5828,160 @@
     "defect": "A message on the executor's channel that is no job reply is dropped without a line in the daemon's log.",
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      this.#log.entry(`${NOT_A_REPLY_REASON} (process ${child.pid})`);",
+    "new": ""
+  },
+  {
+    "id": "D2816",
+    "defect": "A read error on the job object helper's output is swallowed rather than rejecting the job waiting on its answer, which waits out the answer bound instead.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "      .on(\"line\", (line) => this.#waiting.shift()?.(decodedAnswer(line)))\n      .on(\"error\", (error) => this.#end(error));",
+    "new": "      .on(\"line\", (line) => this.#waiting.shift()?.(decodedAnswer(line)))\n      .on(\"error\", () => undefined);"
+  },
+  {
+    "id": "D2817",
+    "defect": "A job object helper the daemon marks dead is left running, so the job trees it holds do not end with it.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    this.#process.kill();\n",
+    "new": ""
+  },
+  {
+    "id": "D2818",
+    "defect": "A second error event on the job object helper process has no listener, so it is thrown into the daemon.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    child.on(\"error\", (error) => this.#end(error));",
+    "new": "    child.once(\"error\", (error) => this.#end(error));"
+  },
+  {
+    "id": "D2819",
+    "defect": "A job object helper whose exit Node has recorded, before its close event, is handed the next job.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    return this.#ended === undefined && !hasExited(this.#process);",
+    "new": "    return this.#ended === undefined;"
+  },
+  {
+    "id": "D2820",
+    "defect": "An executor that exited before the helper is asked to assign it is still assigned by its process id, which may name another process.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (hasExited(executor)) throw new Error(EXITED_BEFORE_ASSIGN);\n",
+    "new": ""
+  },
+  {
+    "id": "D2821",
+    "defect": "An executor that exits while the helper assigns it has its job held with kill-on-close anyway, though the process in the job may be another that took the id.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (hasExited(executor)) {\n      throw new Error(",
+    "new": "    if (false as boolean) {\n      throw new Error("
+  },
+  {
+    "id": "D2822",
+    "defect": "A running executor's job is never held, so kill-on-close is never armed and its tree outlives the helper.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    await helper.ask(`${HOLD}${WORD_SEPARATOR}${job}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D2823",
+    "defect": "The daemon does not decode the helper's escapes, so a multi-line or non-ASCII reason arrives as escape sequences.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "  return line.replace(ESCAPED_CHARACTER, (_escape, hex: string) =>\n    String.fromCharCode(Number.parseInt(hex, HEX_RADIX)),\n  );",
+    "new": "  return line;"
+  },
+  {
+    "id": "D2824",
+    "defect": "An Add-Type failure outside any policy is reported as a policy block with the policy remedy.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "  const blocked = reasonAfter(BLOCKED_BY_POLICY, line);",
+    "new": "  const blocked = reasonAfter(CANNOT_COMPILE, line);"
+  },
+  {
+    "id": "D2825",
+    "defect": "A close issued while a helper is starting leaves that helper running once it starts, and the job that started it is held.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    await this.#starting?.catch(() => undefined);\n",
+    "new": ""
+  },
+  {
+    "id": "D2826",
+    "defect": "A job after close starts a new job object helper that nothing will close.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (this.#closed) return Promise.reject(new Error(HELPER_CLOSED));\n",
+    "new": ""
+  },
+  {
+    "id": "D2827",
+    "defect": "Ending a job tree twice sends the helper a second end, which can end a later job that reused the handle value.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "(ended ??= helper",
+    "new": "(ended = helper"
+  },
+  {
+    "id": "D2834",
+    "defect": "A job whose kill-on-close the helper refuses to arm is returned as held, so its tree outlives the daemon.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    await helper.ask(`${HOLD}${WORD_SEPARATOR}${job}`);",
+    "new": "    await helper.ask(`${HOLD}${WORD_SEPARATOR}${job}`).catch(() => \"\");"
+  },
+  {
+    "id": "D2835",
+    "defect": "A failed release replaces the reason an executor that exited during its assign was refused.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    return `; closing that job failed: ${errorText(error)}`;",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D2836",
+    "defect": "An executor that never started is sent to the helper by an undefined process id instead of being refused as never started.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (executor.pid === undefined) throw new Error(NEVER_STARTED);\n",
+    "new": ""
+  },
+  {
+    "id": "D2837",
+    "defect": "Closing the jobs leaves their running helper, and every job tree it holds, running.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "      this.#process.once(\"close\", () => resolve());\n      this.#end(new Error(HELPER_CLOSED));",
+    "new": "      this.#process.once(\"close\", () => resolve());"
+  },
+  {
+    "id": "D2838",
+    "defect": "A write error on the job object helper's input is swallowed rather than rejecting the job waiting on its answer, which waits out the answer bound instead.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    child.stdin!.on(\"error\", (error) => this.#end(error));",
+    "new": "    child.stdin!.on(\"error\", () => undefined);"
+  },
+  {
+    "id": "D2839",
+    "defect": "Closing the jobs after their helper has closed waits forever for a close event that already fired, so the executor's close, and the daemon's stop, never finish.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (!this.alive) return Promise.resolve();\n",
+    "new": ""
+  },
+  {
+    "id": "D2840",
+    "defect": "A finished helper start stays recorded as the start in progress, so once that helper dies every later job is handed the dead helper instead of a new one.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "      this.#starting = undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2841",
+    "defect": "An error event on the helper process, such as a failed start of powershell.exe, does not end the helper, so the job waiting on its first line fails with the answer bound instead of the error.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    child.on(\"error\", (error) => this.#end(error));",
+    "new": "    child.on(\"error\", () => undefined);"
+  },
+  {
+    "id": "D2842",
+    "defect": "The exited-before-assign check reads the executor before the helper has started, so an executor that exits during the start is sent to the helper by an id that may name another process.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    const helper = await this.#running();\n    if (this.#closed) throw new Error(HELPER_CLOSED);\n    if (executor.pid === undefined) throw new Error(NEVER_STARTED);\n    if (hasExited(executor)) throw new Error(EXITED_BEFORE_ASSIGN);\n",
+    "new": "    if (hasExited(executor)) throw new Error(EXITED_BEFORE_ASSIGN);\n    const helper = await this.#running();\n    if (this.#closed) throw new Error(HELPER_CLOSED);\n    if (executor.pid === undefined) throw new Error(NEVER_STARTED);\n"
+  },
+  {
+    "id": "D2843",
+    "defect": "A job whose helper start a close overtook still sends assign to the closing helper, which can put a process in a job nothing will arm or end.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    if (this.#closed) throw new Error(HELPER_CLOSED);\n",
     "new": ""
   }
 ]
