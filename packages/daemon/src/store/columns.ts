@@ -7,6 +7,7 @@ import {
   STRING_FIND,
   STRING_FIND_FLAGS,
   type AliasFindKind,
+  type PatternBase,
   type ProjectSelectionFacts,
   type ReportedAlias,
   type TestFilePatterns,
@@ -217,9 +218,18 @@ function aliasFlags(value: unknown, findKind: AliasFindKind): string {
 function testFilePatterns(value: unknown): TestFilePatterns {
   return {
     directory: jsonText(value, "directory"),
+    vitestDirectory: jsonText(value, "vitestDirectory"),
+    patternBases: arrayOf(jsonField(value, "patternBases"), patternBase),
     include: stringArray(jsonField(value, "include")),
     exclude: stringArray(jsonField(value, "exclude")),
     includeSource: stringArray(jsonField(value, "includeSource")),
+  };
+}
+
+function patternBase(value: unknown): PatternBase {
+  return {
+    spelled: jsonText(value, "spelled"),
+    directory: jsonText(value, "directory"),
   };
 }
 

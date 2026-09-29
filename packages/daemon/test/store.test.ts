@@ -75,6 +75,10 @@ const FORCE_STOP_UNAWARE_VERSION = 1;
 const SELECTION_FACTS_UNAWARE_VERSION = 2;
 /** The schema version before each project's selection facts carried its Vite root. */
 const VITE_ROOT_UNAWARE_VERSION = 3;
+/** The schema version before runs could be stored crashed. */
+const CRASH_UNAWARE_VERSION = 4;
+/** The schema version before each project's selection facts carried Vitest's spellings of its pattern directories. */
+const VITEST_SPELLING_UNAWARE_VERSION = 5;
 
 const WORKTREE_A: StoreScope = {
   projectIdentity: "/work/shop/.git",
@@ -285,6 +289,13 @@ const CART_PROJECT_FACTS: ProjectSelectionFacts = {
   ],
   testFilePatterns: {
     directory: "packages/cart",
+    vitestDirectory: "/work/shop/packages/cart",
+    patternBases: [
+      {
+        spelled: "/work/shop/packages/cart/src",
+        directory: "packages/cart/src",
+      },
+    ],
     include: ["src/**/*.test.ts"],
     exclude: ["**/node_modules/**"],
     includeSource: ["src/**/*.ts"],
@@ -299,6 +310,8 @@ const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
   aliases: [],
   testFilePatterns: {
     directory: ".",
+    vitestDirectory: "/work/shop",
+    patternBases: [],
     include: [],
     exclude: [],
     includeSource: [],
@@ -642,6 +655,61 @@ function writeViteRootUnawareStore(
     database.exec(`PRAGMA user_version = ${VITE_ROOT_UNAWARE_VERSION}`);
   });
   return file;
+}
+
+/** Writes `DISCOVERY` and the runs through a store, then strips each stored project's spellings and takes the header back to `userVersion`, as a store from before the spellings were kept holds them. */
+function writeSpellingUnawareStore(
+  stateDirectory: string,
+  userVersion: number,
+  runs: readonly WorkspaceRun[] = [],
+): string {
+  withOpenStore(stateDirectory, (store) => {
+    store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+    for (const run of runs) store.writeRun(bound(WORKTREE_A), run);
+  });
+  const file = join(stateDirectory, STORE_FILE_NAME);
+  withRawDatabase(file, (database) => {
+    const rows = database
+      .prepare(
+        "SELECT rowid, selection_facts FROM discovery_workspaces WHERE selection_facts IS NOT NULL",
+      )
+      .all();
+    const update = database.prepare(
+      "UPDATE discovery_workspaces SET selection_facts = ? WHERE rowid = ?",
+    );
+    for (const row of rows) {
+      const projects = JSON.parse(
+        String(row["selection_facts"]),
+      ) as ProjectSelectionFacts[];
+      const unspelled = projects.map((project) => {
+        const {
+          vitestDirectory: _vitestDirectory,
+          patternBases: _patternBases,
+          ...patterns
+        } = project.testFilePatterns;
+        return { ...project, testFilePatterns: patterns };
+      });
+      update.run(JSON.stringify(unspelled), Number(row["rowid"]));
+    }
+    database.exec(`PRAGMA user_version = ${userVersion}`);
+  });
+  return file;
+}
+
+/** `DISCOVERY` as it reads back from a store written without spellings at `userVersion`, once opened. */
+function inSpellingUnawareStore(
+  userVersion: number,
+): Promise<Settled<TestDiscovery | undefined>> {
+  return inTempDir((dir) =>
+    settle(() => {
+      const stateDirectory = defaultStateDirectory(dir);
+      writeSpellingUnawareStore(stateDirectory, userVersion);
+      return withOpenStore(
+        stateDirectory,
+        (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+      );
+    }),
+  );
 }
 
 /** The discovery with each discovered workspace's selection facts replaced by `facts`. */
@@ -1464,7 +1532,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 5 once opened", async () => {
+  it("D1280: the store is at schema version 6 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1472,7 +1540,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(5);
+    expect(version).toBe(6);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -1613,6 +1681,57 @@ describe("storing each discovered workspace's selection facts", () => {
     );
   });
 
+  it("D2815: each project's spelling of its pattern directory and its patterns' spellings read back as written after the store is reopened", async () => {
+    const spellings = await acrossReopen(
+      (store) => {
+        store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      },
+      (store) =>
+        discoveredFacts(store)?.flatMap((facts) =>
+          facts.reported
+            ? facts.projects.map(
+                ({ testFilePatterns: { vitestDirectory, patternBases } }) => ({
+                  vitestDirectory,
+                  patternBases,
+                }),
+              )
+            : [],
+        ),
+    );
+    expect(spellings).toStrictEqual([
+      {
+        vitestDirectory: "/work/shop/packages/cart",
+        patternBases: [
+          {
+            spelled: "/work/shop/packages/cart/src",
+            directory: "packages/cart/src",
+          },
+        ],
+      },
+      { vitestDirectory: "/work/shop", patternBases: [] },
+    ]);
+  });
+
+  it("D2828: a stored project with no pattern spellings is refused as unreadable, never read with none", async () => {
+    const { patternBases: _patternBases, ...withoutPatternBases } =
+      CART_PROJECT_FACTS.testFilePatterns;
+    const reason = await readingStoredFacts([
+      { ...CART_PROJECT_FACTS, testFilePatterns: withoutPatternBases },
+    ]);
+    expect(reason).toContain("The store holds an unreadable JSON array");
+  });
+
+  it("D2847: a stored project with no spelling of its pattern directory is refused as unreadable, never read with another field in its place", async () => {
+    const { vitestDirectory: _vitestDirectory, ...withoutVitestDirectory } =
+      CART_PROJECT_FACTS.testFilePatterns;
+    const reason = await readingStoredFacts([
+      { ...CART_PROJECT_FACTS, testFilePatterns: withoutVitestDirectory },
+    ]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field vitestDirectory",
+    );
+  });
+
   it("D2099: stored selection facts that are not JSON are refused as unreadable, naming the column", async () => {
     const reason = await readingStoredFacts("[{");
     expect(reason).toContain(
@@ -1696,7 +1815,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 5 once opened", async () => {
+  it("D2097: the store is at schema version 6 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1707,7 +1826,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(5);
+    expect(version).toBe(6);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -1768,10 +1887,27 @@ describe("opening a store written before each project's Vite root", () => {
     );
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
+
+  it("D2846: a version 3 store opens at version 6, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeViteRootUnawareStore(stateDirectory, [DISCOVERY]);
+        withOpenStore(stateDirectory, (store) => {
+          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+        });
+        return {
+          version: schemaVersionOf(file),
+          facts: withOpenStore(stateDirectory, discoveredFacts),
+        };
+      }),
+    );
+    expect(outcome).toStrictEqual({ version: 6, facts: [SELECTION_FACTS] });
+  });
 });
 
 describe("opening a store written before crashed runs", () => {
-  it("D2791: a version 4 store opens at version 5, every run it held unchanged", async () => {
+  it("D2791: a version 4 store opens at version 6, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1789,29 +1925,15 @@ describe("opening a store written before crashed runs", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 5, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 6, runs: [RAN_RUN, FAILED_RUN] });
   });
 
-  it("D2796: a version 4 store opens at version 5 with each discovery it held unchanged, selection facts included", async () => {
-    const discovery = await inTempDir((dir) =>
-      settle(() => {
-        const stateDirectory = defaultStateDirectory(dir);
-        withOpenStore(stateDirectory, (store) => {
-          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
-        });
-        withRawDatabase(join(stateDirectory, STORE_FILE_NAME), (database) => {
-          database.exec("PRAGMA user_version = 4");
-        });
-        return withOpenStore(
-          stateDirectory,
-          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
-        );
-      }),
-    );
-    expect(discovery).toStrictEqual(DISCOVERY);
+  it("D2829: each discovered workspace of a version 4 store reads back as not reporting selection facts, and the rest of the discovery unchanged", async () => {
+    const discovery = await inSpellingUnawareStore(CRASH_UNAWARE_VERSION);
+    expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2792: a new store is created at schema version 5", async () => {
+  it("D2792: a new store is created at schema version 6", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1819,7 +1941,34 @@ describe("opening a store written before crashed runs", () => {
         return schemaVersionOf(join(stateDirectory, STORE_FILE_NAME));
       }),
     );
-    expect(version).toBe(5);
+    expect(version).toBe(6);
+  });
+});
+
+describe("opening a store written before Vitest's spellings of the pattern directories", () => {
+  it("D2830: each discovered workspace reads back as not reporting selection facts, rather than its report without spellings being read", async () => {
+    const discovery = await inSpellingUnawareStore(
+      VITEST_SPELLING_UNAWARE_VERSION,
+    );
+    expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
+  });
+
+  it("D2831: a version 5 store opens at version 6, every run it held unchanged", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeSpellingUnawareStore(
+          stateDirectory,
+          VITEST_SPELLING_UNAWARE_VERSION,
+          [RAN_RUN, FAILED_RUN],
+        );
+        const runs = withOpenStore(stateDirectory, (store) =>
+          runsOf(store, WORKTREE_A),
+        );
+        return { version: schemaVersionOf(file), runs };
+      }),
+    );
+    expect(outcome).toStrictEqual({ version: 6, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 

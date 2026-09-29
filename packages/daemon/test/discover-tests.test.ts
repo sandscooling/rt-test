@@ -5,11 +5,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { protection } from "../src/inputs/protection.js";
 import {
   discoverTests,
   type DiscoveredTest,
@@ -39,6 +41,7 @@ import {
   runState,
   runSummary,
   settledRun,
+  slashed,
   waitUntil,
   withPool,
   type Pool,
@@ -2159,6 +2162,8 @@ describe("the working directory of a workspace's discovery and run", () => {
 
 /** The selection-facts fixture's `packages/solo` names this file one directory above the consumer root. */
 const OUTSIDE_SETUP_FILE = "outside-setup.mjs";
+/** Where the `root-spelling` fixture's config reads the spelling of the root discovery was started from. */
+const STARTED_ROOT_KEY = "RT_STARTED_ROOT";
 /** The node project's own aliases, in its config's order, as Vite's resolved config holds them. */
 const NODE_ALIASES: readonly ReportedAlias[] = [
   {
@@ -2236,6 +2241,64 @@ function projectFact(
     (entry) => entry.projectName === projectName,
   );
   return project === undefined ? `no project ${projectName}` : fact(project);
+}
+
+/** The root a workspace was discovered from, as Vitest's glob spells a directory, or what stood in its way. */
+function spelledRoot(
+  discovery: ConsumerRun["discovery"],
+  path: string,
+): string | undefined {
+  const entry = workspace(discovery, path);
+  return entry !== undefined && "workspace" in entry
+    ? slashed(entry.workspace.directory)
+    : undefined;
+}
+
+interface SpelledRootRun {
+  readonly discovery: TestDiscovery | { thrown: string };
+  /** The root as discovery was started from it, through a directory link, `/`-separated. */
+  readonly started: string;
+  /** The root's real path, as the daemon hands it to protection. */
+  readonly realRoot: string;
+}
+
+const spelledRootRuns = new Map<VitestInstall, Promise<SpelledRootRun>>();
+
+/**
+ * Discovers the `root-spelling` fixture once per Vitest install, started through a directory link, with its config's
+ * absolute patterns spelled from that link.
+ */
+function discoverThroughLink(install: VitestInstall): Promise<SpelledRootRun> {
+  const cached = spelledRootRuns.get(install);
+  if (cached !== undefined) return cached;
+  const run = inConsumerCopy(
+    "root-spelling",
+    install,
+    async (root) => {
+      const started = slashed(root);
+      process.env[STARTED_ROOT_KEY] = started;
+      try {
+        const discovery = await settledDiscovery(root);
+        return { discovery, started, realRoot: realpathSync.native(root) };
+      } finally {
+        delete process.env[STARTED_ROOT_KEY];
+      }
+    },
+    true,
+  );
+  spelledRootRuns.set(install, run);
+  return run;
+}
+
+/** Whether each root-relative path, none of them a module the discovery lists, is protected, or why none is. */
+function protectedAfter(
+  run: SpelledRootRun,
+  paths: readonly string[],
+): Record<string, boolean> | string {
+  if (!("workspaces" in run.discovery)) return run.discovery.thrown;
+  const value = protection(run.discovery, run.realRoot);
+  if (!value.applies) return value.reason;
+  return Object.fromEntries(paths.map((path) => [path, value.protects(path)]));
 }
 
 function isReported(
@@ -2430,10 +2493,13 @@ describe("reporting each workspace's selection facts", () => {
     "D2115: on Vitest 5, a project's test file patterns match from its dir, root-relative",
     async () => {
       const discovery = await discoverSelectionFacts("vitest");
+      const root = spelledRoot(discovery, ".");
       expect(
         projectFact(discovery, ".", "node", (facts) => facts.testFilePatterns),
       ).toStrictEqual({
         directory: "unit",
+        vitestDirectory: `${root}/unit`,
+        patternBases: [{ spelled: `${root}/unit/src`, directory: "unit/src" }],
         include: ["**/*.test.mjs"],
         exclude: ["**/skipped/**"],
         includeSource: ["src/**/*.mjs"],
@@ -2462,10 +2528,13 @@ describe("reporting each workspace's selection facts", () => {
     "D2117: on Vitest 4.1, a project that sets no includeSource reports none, matching from the consumer root as .",
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
+      const root = spelledRoot(discovery, ".");
       expect(
         projectFact(discovery, ".", "bare", (facts) => facts.testFilePatterns),
       ).toStrictEqual({
         directory: ".",
+        vitestDirectory: root,
+        patternBases: [{ spelled: `${root}/bare`, directory: "bare" }],
         include: ["bare/*.test.mjs"],
         exclude: ["**/node_modules/**", "**/.git/**"],
         includeSource: [],
@@ -2492,6 +2561,69 @@ describe("reporting each workspace's selection facts", () => {
       expect(
         projectFact(discovery, ".", "rooted", (facts) => facts.viteRoot),
       ).toBe("rooted");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2813: a project dir named through a directory link is reported in the link's spelling as Vitest's glob matches from it, beside its real root-relative path",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest");
+      const root = spelledRoot(discovery, ".");
+      expect(
+        projectFact(discovery, ".", "pending", (facts) => ({
+          directory: facts.testFilePatterns.directory,
+          vitestDirectory: facts.testFilePatterns.vitestDirectory,
+        })),
+      ).toStrictEqual({
+        directory: "setup/later",
+        vitestDirectory: `${root}/setup-link/later`,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+describe("a project started through another spelling of its root", () => {
+  it(
+    "D2811: on Vitest 5, a test file an absolute include pattern spelled from the link the project was started through finds is protected, though discovery never listed it",
+    async () => {
+      const run = await discoverThroughLink("vitest");
+      expect(
+        protectedAfter(run, ["spelled/b.test.mjs", "elsewhere/b.test.mjs"]),
+      ).toStrictEqual({
+        "spelled/b.test.mjs": true,
+        "elsewhere/b.test.mjs": false,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2812: on Vitest 4.1, a source file an absolute includeSource pattern spelled from the link the project was started through finds is protected",
+    async () => {
+      const run = await discoverThroughLink("vitest-4");
+      expect(
+        protectedAfter(run, ["source/b.mjs", "elsewhere/b.mjs"]),
+      ).toStrictEqual({ "source/b.mjs": true, "elsewhere/b.mjs": false });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2814: on Vitest 5, an absolute include pattern's directories are reported as it spells them, beside the root-relative path they resolve to",
+    async () => {
+      const run = await discoverThroughLink("vitest");
+      expect(
+        projectFact(
+          run.discovery,
+          ".",
+          "spelled",
+          (facts) => facts.testFilePatterns.patternBases,
+        ),
+      ).toStrictEqual([
+        { spelled: `${run.started}/spelled`, directory: "spelled" },
+      ]);
     },
     DISCOVERY_TIMEOUT_MS,
   );
