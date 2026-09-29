@@ -7761,5 +7761,40 @@
     "file": "packages/daemon/src/inputs/protection.ts",
     "old": "  return process.platform === WINDOWS ? path.toLowerCase() : path;",
     "new": "  return path;"
+  },
+  {
+    "id": "D3107",
+    "defect": "A round's selection is marked done before it can throw, so after a selection that throws the round planned again at that revision records no explanation for it.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      const selection = this.#selectRound(revision, view, eligible, due);\n      this.#selectionOwed = false;",
+    "new": "      this.#selectionOwed = false;\n      const selection = this.#selectRound(revision, view, eligible, due);"
+  },
+  {
+    "id": "D3108",
+    "defect": "The inputs' snapshot advances before the round's selection can throw, so the round planned again at that revision compares the inputs with themselves and its changed paths are never explained.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    const selection = explainRound(\n      log,\n      narrowing(),\n      revision,\n      changedPaths(before, now),\n    );\n    this.#snapshot = now;",
+    "new": "    this.#snapshot = now;\n    const selection = explainRound(\n      log,\n      narrowing(),\n      revision,\n      changedPaths(before, now),\n    );"
+  },
+  {
+    "id": "D3109",
+    "defect": "An answer carries each unstored job's reason whole, so one long reason grows every summary and path-status answer toward the protocol's line limit.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      unstoredJobs: daemon.unstoredJobs.map(answeredJob),",
+    "new": "      unstoredJobs: daemon.unstoredJobs,"
+  },
+  {
+    "id": "D3110",
+    "defect": "A request stamped with another protocol version after a matched hello is answered, so a client reads an answer whose shape it does not know.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (message[\"protocolVersion\"] !== PROTOCOL_VERSION) {",
+    "new": "  if (message[\"protocolVersion\"] === undefined) {"
+  },
+  {
+    "id": "D3111",
+    "defect": "A daemon accepts the hello of an older client, which then reads answers carrying fields it does not know.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (clientVersion === PROTOCOL_VERSION) {",
+    "new": "  if (typeof clientVersion === \"number\" && clientVersion <= PROTOCOL_VERSION) {"
   }
 ]

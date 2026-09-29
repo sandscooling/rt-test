@@ -404,6 +404,34 @@ describe("a client of another protocol version", () => {
     });
   });
 
+  it("D3110: a request after the hello that carries another protocol version gets an invalid-request error", async () => {
+    const kinds = await onServer((connection) => {
+      connection.sendLine(HELLO);
+      connection.sendLine({
+        type: "status",
+        protocolVersion: OTHER_PROTOCOL_VERSION,
+      });
+      return answerKinds(connection, 2);
+    });
+    expect(kinds).toStrictEqual([
+      { type: "hello" },
+      { type: "error", code: "invalid-request" },
+    ]);
+  });
+
+  it("D3111: a hello of an older protocol version is refused with a version-mismatch error", async () => {
+    const kinds = await onServer((connection) => {
+      connection.sendLine({
+        type: "hello",
+        protocolVersion: PROTOCOL_VERSION - 1,
+      });
+      return answerKinds(connection, 1);
+    });
+    expect(kinds).toStrictEqual([
+      { type: "error", code: "protocol-version-mismatch" },
+    ]);
+  });
+
   it("D1539: a request after the hello that carries no protocol version gets an invalid-request error", async () => {
     const kinds = await onServer((connection) => {
       connection.sendLine(HELLO);

@@ -1480,6 +1480,34 @@ describe("each workspace's latest run", () => {
     });
   });
 
+  it("D3109: an answer cuts each job that ended with nothing stored to 1,000 characters of reason, saying where the rest is, and keeps one of exactly 1,000 whole", () => {
+    const kept = "r".repeat(1000);
+    const jobsOf = (reason: string): unknown =>
+      answered(
+        summaryAnswer(
+          results(
+            storedDiscovery([
+              discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+            ]),
+          ),
+          { ...IDLE, unstoredJobs: [{ workspacePath: WORKSPACE_A, reason }] },
+          UNSETTLED,
+        ),
+      ).unstoredJobs;
+    expect({
+      over: jobsOf(`${kept}#####`),
+      atLimit: jobsOf(kept),
+    }).toStrictEqual({
+      over: [
+        {
+          workspacePath: WORKSPACE_A,
+          reason: `${kept} (5 more characters are in the daemon log)`,
+        },
+      ],
+      atLimit: [{ workspacePath: WORKSPACE_A, reason: kept }],
+    });
+  });
+
   it("D3013: a workspace's latest run, stored in this daemon life not fingerprinted because a path inside its inputs changed while it ran, reads invalidated with the verdict's reason", () => {
     const reason = "its inputs changed while it ran: packages/a/src/a.ts";
     const run = storedRun(

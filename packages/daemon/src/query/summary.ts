@@ -162,7 +162,7 @@ export function queryBasis(
         ? {}
         : { inputsNotNarrowed: inputs.inputsNotNarrowed }),
       activity: daemon.activity,
-      unstoredJobs: daemon.unstoredJobs,
+      unstoredJobs: daemon.unstoredJobs.map(answeredJob),
       schedule,
       latestSelection,
     },
@@ -289,6 +289,11 @@ function refusedDiscoveryReason(
 function daemonClause(daemon: DaemonView, revision: number): string {
   const round = roundText(daemon.schedule.round(revision));
   return `it is ${activityText(daemon.activity)}; ${round}${unstoredClause(daemon.unstoredJobs)}`;
+}
+
+function answeredJob(job: UnstoredJob): UnstoredJob {
+  const { reason, omittedCharacters } = cutReason(job.reason);
+  return { ...job, reason: `${reason}${omittedText(omittedCharacters)}` };
 }
 
 function unstoredClause(jobs: readonly UnstoredJob[]): string {

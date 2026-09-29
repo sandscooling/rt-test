@@ -420,8 +420,8 @@ export class Scheduler {
     due: readonly DueWorkspace[],
   ): void {
     if (this.#selectionOwed) {
-      this.#selectionOwed = false;
       const selection = this.#selectRound(revision, view, eligible, due);
+      this.#selectionOwed = false;
       this.#directTargets = selection.directTargets;
       this.#schedule.selected(selection.explanation);
     }
@@ -451,8 +451,8 @@ export class Scheduler {
         NO_SNAPSHOT_REASON,
       );
     }
-    this.#snapshot = now;
     if (before === undefined) {
+      this.#snapshot = now;
       log.entry(FIRST_ROUND_ENTRY);
       return unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON);
     }
@@ -462,6 +462,7 @@ export class Scheduler {
       revision,
       changedPaths(before, now),
     );
+    this.#snapshot = now;
     const dueNow = new Set(due.map(({ entry }) => entry.workspace.path));
     const confirmed = new Set(
       eligible.map(({ entry }) => entry.workspace.path),

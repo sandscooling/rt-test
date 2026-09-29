@@ -1294,7 +1294,68 @@ describe("a round's selection over the paths that changed", () => {
     );
     expect(logged).toBe(1);
   });
+
+  /**
+   * Runs a scheduler whose selection at the second revision throws once, then signals a periodic reconciliation,
+   * which plans that revision again with the revision unmoved, and returns what `read` gives of it.
+   */
+  async function afterASelectionThrew<T>(
+    read: (started: Rig, selection: StandInNarrowing) => T,
+  ): Promise<T> {
+    const selection = new OnceThrowingNarrowing(
+      selectionOf([pathReport("lib/x.ts", "a", ["a"])], ["a"]),
+    );
+    const change = afterAChange(builtAt(2, selection), {
+      seed: beforeTheChange("a"),
+    });
+    return running(change.options, async (started) => {
+      await change.nextRound(started);
+      started.inputs.endPeriodicReconciliation();
+      await flush();
+      return read(started, selection);
+    });
+  }
+
+  it("D3107: after a round's selection throws, the round planned again at that revision explains its selection", async () => {
+    const selection = await afterASelectionThrew((started) => {
+      const latest = scheduleOf(started).latestSelection;
+      return latest.state === ROUND_SELECTION.made
+        ? {
+            state: latest.state,
+            revision: latest.revision,
+            paths: latest.paths.named.map(({ path }) => path),
+          }
+        : latest;
+    });
+    expect(selection).toStrictEqual({
+      state: "made",
+      revision: 2,
+      paths: ["lib/x.ts"],
+    });
+  });
+
+  it("D3108: after a round's selection throws, the round planned again at that revision asks selection about the same changed paths", async () => {
+    const asked = await afterASelectionThrew(
+      (_started, selection) => selection.asked,
+    );
+    const changed = ["src/gone.ts", "src/new.ts", "src/x.ts"];
+    expect(asked).toStrictEqual([changed, changed]);
+  });
 });
+
+/** A dependency build's narrowing whose first selection throws, as a selection over an unreadable input would. */
+class OnceThrowingNarrowing extends StandInNarrowing {
+  #thrown = false;
+
+  override select(
+    paths: readonly string[],
+  ): ReturnType<StandInNarrowing["select"]> {
+    if (this.#thrown) return super.select(paths);
+    this.#thrown = true;
+    this.asked.push(paths);
+    throw new Error("the selection failed");
+  }
+}
 
 describe("the order of a round's runs", () => {
   it("D2672: a workspace owning a path that changed runs first, then one whose latest run holds a failed test, then the rest, each group in the discovery's order", async () => {
