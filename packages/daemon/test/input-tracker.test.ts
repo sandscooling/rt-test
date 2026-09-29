@@ -30,6 +30,10 @@ import {
 import { recordStarted } from "../../../test/scripts/run-cleanup.mjs";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
 import {
+  countEnvironment,
+  SESSION_VARIABLES,
+} from "../src/inputs/environment-digest.js";
+import {
   ProjectInputs,
   SnapshotReads,
   workspaceFingerprint,
@@ -58,6 +62,7 @@ import {
   DAEMON_TEST_TIMEOUT_MS,
   eventually,
   memoryLog,
+  withEnvironment,
   type MemoryLog,
 } from "./daemon-harness.js";
 import {
@@ -149,8 +154,9 @@ const AN_HOUR_MS = 3_600_000;
 const MS_PER_SECOND = 1000;
 const DECLARATION_CHANGED_STARTED =
   "input reconciliation started: rt-test.json, which declares the non-inputs, changed";
-const UNUSABLE_JSON_REASON =
-  "rt-test.json declares no non-inputs, so every file stays an input: it is not valid JSON: ";
+const UNUSABLE_REASON_PREFIX =
+  "rt-test.json declares no non-inputs, so every file stays an input: ";
+const UNUSABLE_JSON_REASON = `${UNUSABLE_REASON_PREFIX}it is not valid JSON: `;
 const NO_DISCOVERY_REASON =
   "rt-test.json's patterns do not apply, so every file stays an input: no discovery in effect reports which files they may not remove";
 const NOT_REPORTED_AT_ROOT_REASON =
@@ -2081,6 +2087,366 @@ describe("the fingerprint's parts", () => {
   });
 });
 
+/** A variable no shell, terminal or agent sets, planted so its value is the test's alone. */
+const PLANTED_VARIABLE = "RT_TEST_PLANTED_BY_VALUE";
+const DECLARED_VARIABLE = "RT_TEST_DECLARED_VARIABLE";
+/** Variables that can change a result, which the session list leaves counted by value. */
+const RESULT_VARIABLES = ["PATH", "HOME", "TERM", "SSH_AUTH_SOCK", "DISPLAY"];
+const PREFIX_MARK = "*";
+const SEARCH_PATH = "/usr/bin";
+const ENVIRONMENT_LINE = "environment:";
+
+/** The digest of `environment` counted with the session list and no declared entry. */
+function environmentDigest(environment: NodeJS.ProcessEnv): string {
+  return countEnvironment(environment, []).digest;
+}
+
+/** A variable the session-list `entry` names: the entry itself, or for a prefix, a name beginning with it. */
+function namedBy(entry: string): string {
+  return entry.endsWith(PREFIX_MARK)
+    ? `${entry.slice(0, -PREFIX_MARK.length)}1`
+    : entry;
+}
+
+/** A variable for every session-list entry, each holding `value`, beside a planted variable counted by value. */
+function sessionEnvironment(value: string): NodeJS.ProcessEnv {
+  return {
+    [PLANTED_VARIABLE]: "held",
+    ...Object.fromEntries(
+      SESSION_VARIABLES.map((entry) => [namedBy(entry), value]),
+    ),
+  };
+}
+
+/** `countEnvironment` from a fresh import, whose case rule follows the platform `onPlatform` sets. */
+async function freshEnvironmentCount(): Promise<typeof countEnvironment> {
+  vi.resetModules();
+  const fresh = await import("../src/inputs/environment-digest.js");
+  return fresh.countEnvironment;
+}
+
+/** The text of an `rt-test.json` declaring the variable entries `entries`, and no pattern. */
+function declaringVariables(...entries: unknown[]): string {
+  return JSON.stringify({ nonInputVariables: entries });
+}
+
+/** The same declaration as `declaringVariables()`, spelled differently, so writing it starts a reconciliation. */
+const NO_VARIABLES_RESPELLED = JSON.stringify(
+  { nonInputVariables: [] },
+  null,
+  2,
+);
+
+/** Runs `body` with each variable of `values` set, then restores what each held before. */
+function withVariables<T>(
+  values: Readonly<Record<string, string>>,
+  body: () => Promise<T>,
+): Promise<T> {
+  const nested = Object.entries(values).reduce<() => Promise<T>>(
+    (inner, [name, value]) =>
+      () =>
+        withEnvironment(name, value, inner),
+    body,
+  );
+  return nested();
+}
+
+describe("the environment's count", () => {
+  it("D2935: a change in the value of each variable the session list names leaves the environment's digest as it was", () => {
+    const before = sessionEnvironment("first");
+    const moved = SESSION_VARIABLES.filter(
+      (entry) =>
+        environmentDigest({ ...before, [namedBy(entry)]: "second" }) !==
+        environmentDigest(before),
+    );
+    expect(moved).toStrictEqual([]);
+  });
+
+  it("D2936: a variable the session list names becoming set changes the environment's digest", () => {
+    const unset = { [PLANTED_VARIABLE]: "held" };
+    const unmoved = SESSION_VARIABLES.filter(
+      (entry) =>
+        environmentDigest({ ...unset, [namedBy(entry)]: "set" }) ===
+        environmentDigest(unset),
+    );
+    expect(unmoved).toStrictEqual([]);
+  });
+
+  it("D2937: a change in the value of PATH, HOME, TERM, SSH_AUTH_SOCK, DISPLAY or any other variable changes the environment's digest", () => {
+    const unmoved = [...RESULT_VARIABLES, PLANTED_VARIABLE].filter(
+      (name) =>
+        environmentDigest({ [name]: "first" }) ===
+        environmentDigest({ [name]: "second" }),
+    );
+    expect(unmoved).toStrictEqual([]);
+  });
+
+  it("D2938: EFC_* counts once as set, whichever variables beginning with EFC_ are set", () => {
+    const one = environmentDigest({
+      [PLANTED_VARIABLE]: "held",
+      EFC_1234_1: "a",
+    });
+    const two = environmentDigest({
+      [PLANTED_VARIABLE]: "held",
+      EFC_5678_1: "b",
+      EFC_5678_2: "c",
+    });
+    expect(two).toBe(one);
+  });
+
+  it("D2939: on Windows, Path and PATH count as one variable", async () => {
+    const same = await onPlatform("win32", async () => {
+      const count = await freshEnvironmentCount();
+      return (
+        count({ Path: SEARCH_PATH }, []).digest ===
+        count({ PATH: SEARCH_PATH }, []).digest
+      );
+    });
+    expect(same).toBe(true);
+  });
+
+  it("D2940: on Linux, Path and PATH count as two variables", async () => {
+    const distinct = await onPlatform("linux", async () => {
+      const count = await freshEnvironmentCount();
+      return (
+        count({ Path: SEARCH_PATH }, []).digest !==
+        count({ PATH: SEARCH_PATH }, []).digest
+      );
+    });
+    expect(distinct).toBe(true);
+  });
+
+  it("D2964: a variable the session list names going from empty to non-empty changes the environment's digest", () => {
+    const base = { [PLANTED_VARIABLE]: "held" };
+    const unmoved = SESSION_VARIABLES.filter(
+      (entry) =>
+        environmentDigest({ ...base, [namedBy(entry)]: "" }) ===
+        environmentDigest({ ...base, [namedBy(entry)]: "non-empty" }),
+    );
+    expect(unmoved).toStrictEqual([]);
+  });
+
+  it("D2965: on Windows, a change in the value of one of two names that fold to one key, such as Aß beside ASS, changes the environment's digest", async () => {
+    const moved = await onPlatform("win32", async () => {
+      const count = await freshEnvironmentCount();
+      return (
+        count({ Aß: "first", ASS: "held" }, []).digest !==
+        count({ Aß: "second", ASS: "held" }, []).digest
+      );
+    });
+    expect(moved).toBe(true);
+  });
+
+  it("D2966: a variable whose name begins with an exact session-list entry, such as PWD_RT_TEST_SUFFIX under PWD, still counts by value", () => {
+    const exact = SESSION_VARIABLES.filter(
+      (entry) => !entry.endsWith(PREFIX_MARK),
+    );
+    const unmoved = exact.filter((entry) => {
+      const name = `${entry}_RT_TEST_SUFFIX`;
+      return (
+        environmentDigest({ [name]: "first" }) ===
+        environmentDigest({ [name]: "second" })
+      );
+    });
+    expect(unmoved).toStrictEqual([]);
+  });
+
+  it("D2967: on Windows, a declared entry matches a variable whatever its case, so the value of RT_TEST_DECLARED under a declared rt_test_declared leaves the digest as it was", async () => {
+    const held = await onPlatform("win32", async () => {
+      const count = await freshEnvironmentCount();
+      const declared = ["rt_test_declared"];
+      return (
+        count({ RT_TEST_DECLARED: "first" }, declared).digest ===
+        count({ RT_TEST_DECLARED: "second" }, declared).digest
+      );
+    });
+    expect(held).toBe(true);
+  });
+
+  it("D2968: the environment's digest does not depend on the order the environment lists its variables in", () => {
+    const listed = environmentDigest({
+      [PLANTED_VARIABLE]: "a",
+      [DECLARED_VARIABLE]: "b",
+    });
+    const reversed = environmentDigest({
+      [DECLARED_VARIABLE]: "b",
+      [PLANTED_VARIABLE]: "a",
+    });
+    expect(reversed).toBe(listed);
+  });
+});
+
+describe(
+  "the environment under the declaration",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D2941: a declared variable's value leaves the workspace's and the discovery's fingerprints as they were", async () => {
+      const prints = await inTempDir(async (root) => {
+        writeTree(root, {
+          [DECLARATION_FILE]: declaringVariables(DECLARED_VARIABLE),
+          "src/a.ts": "",
+        });
+        const under = (value: string) =>
+          withEnvironment(DECLARED_VARIABLE, value, () =>
+            tracking(root, async ({ tracker, fingerprint }) => {
+              const discovery = tracker
+                .current()
+                .discoveryFingerprint(discoveryListing(root, []));
+              return {
+                workspace: fingerprint(),
+                discovery: discovery.ok ? discovery.digest : undefined,
+              };
+            }),
+          );
+        return { first: await under("first"), second: await under("second") };
+      });
+      const { first, second } = prints;
+      expect({
+        computed:
+          first.workspace !== undefined && first.discovery !== undefined,
+        workspaceHeld: second.workspace === first.workspace,
+        discoveryHeld: second.discovery === first.discovery,
+      }).toStrictEqual({
+        computed: true,
+        workspaceHeld: true,
+        discoveryHeld: true,
+      });
+    });
+
+    it("D2942: a variable rt-test.json comes to declare counts only as set from the reconciliation that reads the declaration", async () => {
+      const outcome = await withEnvironment(DECLARED_VARIABLE, "held", () =>
+        inTempDir((root) => {
+          writeTree(root, {
+            [DECLARATION_FILE]: declaringVariables(),
+            "src/a.ts": "",
+          });
+          return tracking(root, async (tracked) => {
+            const before = tracked.fingerprint();
+            const reconciled = await reconciledAfter(tracked.tracker, () =>
+              writeFileSync(
+                join(root, DECLARATION_FILE),
+                declaringVariables(DECLARED_VARIABLE),
+              ),
+            );
+            const after = tracked.fingerprint();
+            return {
+              reconciled,
+              moved:
+                before !== undefined && after !== undefined && after !== before,
+            };
+          });
+        }),
+      );
+      expect(outcome).toStrictEqual({ reconciled: true, moved: true });
+    });
+
+    it("D2943: a write to the daemon's process.env after its start leaves the fingerprint as it was", async () => {
+      const outcome = await withEnvironment(PLANTED_VARIABLE, "at start", () =>
+        inTempDir((root) => {
+          writeTree(root, {
+            [DECLARATION_FILE]: declaringVariables(),
+            "src/a.ts": "",
+          });
+          return tracking(root, async (tracked) => {
+            const before = tracked.fingerprint();
+            process.env[PLANTED_VARIABLE] = "written later";
+            const reconciled = await reconciledAfter(tracked.tracker, () =>
+              writeFileSync(
+                join(root, DECLARATION_FILE),
+                NO_VARIABLES_RESPELLED,
+              ),
+            );
+            return {
+              reconciled,
+              held: before !== undefined && tracked.fingerprint() === before,
+            };
+          });
+        }),
+      );
+      expect(outcome).toStrictEqual({ reconciled: true, held: true });
+    });
+
+    it("D2944: one environment line names the variables counted by value, the listed entries set and the declared entries, and no value", async () => {
+      const values = {
+        [PLANTED_VARIABLE]: "planted-value-1",
+        CLAUDE_CODE_SESSION_ID: "session-value-2",
+        [DECLARED_VARIABLE]: "declared-value-3",
+      };
+      const logged = await withVariables(values, () =>
+        inTempDir((root) => {
+          writeTree(root, {
+            [DECLARATION_FILE]: declaringVariables(DECLARED_VARIABLE),
+            "src/a.ts": "",
+          });
+          const log = memoryLog();
+          return tracking(root, async () => [...log.entries], { log });
+        }),
+      );
+      const lines = logged.filter((entry) =>
+        entry.startsWith(ENVIRONMENT_LINE),
+      );
+      expect({
+        lines: lines.length,
+        named: Object.keys(values).map(
+          (name) => lines[0]?.includes(JSON.stringify(name)) === true,
+        ),
+        valueShown: logged.some((entry) =>
+          Object.values(values).some((value) => entry.includes(value)),
+        ),
+      }).toStrictEqual({
+        lines: 1,
+        named: [true, true, true],
+        valueShown: false,
+      });
+    });
+
+    it("D2945: the environment line is logged after the first reconciliation and after one that changes the count, and not after one that leaves it", async () => {
+      const outcome = await withEnvironment(DECLARED_VARIABLE, "held", () =>
+        inTempDir((root) => {
+          writeTree(root, {
+            [DECLARATION_FILE]: declaringVariables(),
+            "src/a.ts": "",
+          });
+          const log = memoryLog();
+          return tracking(
+            root,
+            async ({ tracker }) => {
+              const unchanged = await reconciledAfter(tracker, () =>
+                writeFileSync(
+                  join(root, DECLARATION_FILE),
+                  NO_VARIABLES_RESPELLED,
+                ),
+              );
+              const changed = await reconciledAfter(tracker, () =>
+                writeFileSync(
+                  join(root, DECLARATION_FILE),
+                  declaringVariables(DECLARED_VARIABLE),
+                ),
+              );
+              const lines = log.entries.filter((entry) =>
+                entry.startsWith(ENVIRONMENT_LINE),
+              );
+              return {
+                reconciled: unchanged && changed,
+                lines: lines.length,
+                lastDeclares:
+                  lines.at(-1)?.includes(JSON.stringify(DECLARED_VARIABLE)) ===
+                  true,
+              };
+            },
+            { log },
+          );
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        reconciled: true,
+        lines: 2,
+        lastDeclares: true,
+      });
+    });
+  },
+);
+
 /** Event-loop turns in which a tracker with nothing to read must leave its change signal pending. */
 const QUIET_TURNS = 20;
 const UNCHANGED_TEXT = "export {};\n";
@@ -3293,6 +3659,87 @@ describe("the declared patterns", () => {
       notValid: reason.includes("it is not valid JSON:"),
       unreadable: reason.includes("cannot be read"),
     }).toStrictEqual({ notValid: true, unreadable: false });
+  });
+
+  it("D2946: an empty nonInputVariables entry makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaringVariables(""))).toBe("unusable");
+  });
+
+  it("D2947: a nonInputVariables entry beginning or ending with whitespace makes the declaration unusable", async () => {
+    const states = {
+      leading: await declarationStateIn(declaringVariables(" CI")),
+      trailing: await declarationStateIn(declaringVariables("CI ")),
+    };
+    expect(states).toStrictEqual({ leading: "unusable", trailing: "unusable" });
+  });
+
+  it("D2948: a nonInputVariables entry holding = makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaringVariables("CI=true"))).toBe(
+      "unusable",
+    );
+  });
+
+  it("D2949: a nonInputVariables entry holding a NUL character makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaringVariables("CI\u0000"))).toBe(
+      "unusable",
+    );
+  });
+
+  it("D2950: a nonInputVariables entry holding * other than last makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaringVariables("EFC_*_1"))).toBe(
+      "unusable",
+    );
+  });
+
+  it("D2951: a nonInputVariables entry of * alone makes the declaration unusable, with the reason a malformed nonInputs gives", async () => {
+    const declaration = await declarationIn(declaringVariables("*"));
+    const reason = "reason" in declaration ? declaration.reason : "";
+    expect({
+      state: "state" in declaration ? declaration.state : declaration.thrown,
+      samePrefix: reason.startsWith(UNUSABLE_REASON_PREFIX),
+    }).toStrictEqual({ state: "unusable", samePrefix: true });
+  });
+
+  it("D2952: a nonInputVariables array holding a number makes the declaration unusable", async () => {
+    expect(await declarationStateIn(declaringVariables("CI", 3))).toBe(
+      "unusable",
+    );
+  });
+
+  it("D2953: rt-test.json may declare 256 variable entries, and one declaring 257 declares nothing", async () => {
+    const entries = (count: number): string[] =>
+      Array.from({ length: count }, (_, index) => `RT_TEST_${index}`);
+    const states = {
+      atBound: await declarationStateIn(declaringVariables(...entries(256))),
+      overBound: await declarationStateIn(declaringVariables(...entries(257))),
+    };
+    expect(states).toStrictEqual({
+      atBound: "declared",
+      overBound: "unusable",
+    });
+  });
+
+  it("D2957: a nonInputs or nonInputVariables member that is a string or an object makes the declaration unusable, and reading it never throws", async () => {
+    const states = {
+      patternsString: await declarationStateIn(
+        JSON.stringify({ nonInputs: "docs/**" }),
+      ),
+      patternsObject: await declarationStateIn(
+        JSON.stringify({ nonInputs: { docs: "**" } }),
+      ),
+      variablesString: await declarationStateIn(
+        JSON.stringify({ nonInputVariables: "CI" }),
+      ),
+      variablesObject: await declarationStateIn(
+        JSON.stringify({ nonInputVariables: { CI: true } }),
+      ),
+    };
+    expect(states).toStrictEqual({
+      patternsString: "unusable",
+      patternsObject: "unusable",
+      variablesString: "unusable",
+      variablesObject: "unusable",
+    });
   });
 });
 

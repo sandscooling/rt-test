@@ -565,5 +565,33 @@
     "file": "packages/cli/src/output.ts",
     "old": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]/gu;",
     "new": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}]/gu;"
+  },
+  {
+    "id": "D2954",
+    "defect": "The start listing leaves out the declared nonInputVariables entries, so the consumer trusts a start without seeing which variables' values it declares change no result.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "    ...nonInputVariableLines(plan.nonInputs),\n",
+    "new": ""
+  },
+  {
+    "id": "D2955",
+    "defect": "The declaration drops its nonInputVariables entries, so start --json carries no nonInputs.variables.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    ...(variables === undefined ? {} : { variables: variables as string[] }),\n",
+    "new": ""
+  },
+  {
+    "id": "D2956",
+    "defect": "An empty nonInputVariables prints a heading for declared variables with none under it.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "  if (variables.length === 0) return [];\n",
+    "new": ""
+  },
+  {
+    "id": "D2969",
+    "defect": "The start listing prints the declared variable entries with no heading of their own, so with patterns declared too they sit under the non-inputs heading and read as file patterns.",
+    "file": "packages/cli/src/trust-prompt.ts",
+    "old": "    `Environment variables declared in ${declaration.file}, whose values change no result (each counts only as set or not):`,\n",
+    "new": ""
   }
 ]

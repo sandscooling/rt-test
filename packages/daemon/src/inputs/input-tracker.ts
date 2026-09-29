@@ -224,6 +224,7 @@ export class InputTracker implements TrackedInputs {
       unavailable: this.#unavailableReason(),
       facts: this.facts(),
       nonInputsUnusable: this.#declared.unusable,
+      environment: this.#declared.environment,
       narrowing,
       project: () => this.#state.project(),
     });

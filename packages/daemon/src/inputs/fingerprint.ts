@@ -8,6 +8,7 @@ import type {
 } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import { resolveWorkspaceVitest } from "../vitest/load-vitest.js";
+import { countEnvironment } from "./environment-digest.js";
 import { absoluteInputPath } from "./input-filter.js";
 import {
   DIGEST_ALGORITHM,
@@ -22,6 +23,7 @@ const ENTRY_SEPARATOR = "\n";
 const MISSING_CODE = "ENOENT";
 /** Stands for a listed test module that no longer exists, so its deletion changes the digest. */
 const ABSENT_MODULE = "absent";
+const NO_DECLARED_VARIABLES: readonly string[] = [];
 
 export type FingerprintResult =
   | { readonly ok: true; readonly digest: string }
@@ -74,13 +76,19 @@ function workspaceInputs(
  */
 export class SnapshotReads {
   readonly #root: string;
+  /** The environment's digest, as `countEnvironment` gives it; by default with no declared variable entry. */
+  readonly environment: string;
   /** By test module path, as `testModuleFile` names it. */
   readonly #modules = new Map<string, FingerprintResult>();
   /** By workspace directory. */
   readonly #versions = new Map<string, string | null>();
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    environment = countEnvironment(process.env, NO_DECLARED_VARIABLES).digest,
+  ) {
     this.#root = root;
+    this.environment = environment;
   }
 
   /** The digest of the test module at `path`, as `testModuleFile` names it. */
@@ -126,7 +134,7 @@ export function workspaceFingerprint(
   return {
     ok: true,
     digest: digestOf({
-      ...sharedParts(),
+      ...sharedParts(reads.environment),
       inputs: inputs.selected.digest(),
       testModules: modules.digests,
       vitestVersion: vitestVersion(entry.workspace.directory),
@@ -151,7 +159,7 @@ export function discoveryFingerprint(
   return {
     ok: true,
     digest: digestOf({
-      ...sharedParts(),
+      ...sharedParts(reads.environment),
       inputs: inputs.selected.digest(),
       testModules: modules.digests,
       vitestVersions: discovery.workspaces.map((entry) => [
@@ -246,15 +254,8 @@ function modifiedAt(path: string): number | undefined {
   }
 }
 
-let environmentDigest: string | undefined;
-
 /** The parts every fingerprint shares; the environment enters as a digest, never as values. */
-function sharedParts(): Record<string, unknown> {
-  environmentDigest ??= digestOfEntries(
-    new Map(
-      Object.entries(process.env).map(([name, value]) => [name, value ?? ""]),
-    ),
-  );
+function sharedParts(environmentDigest: string): Record<string, unknown> {
   return {
     environment: environmentDigest,
     node: process.version,

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { currentInputs } from "../src/inputs/current-inputs.js";
+import { countEnvironment } from "../src/inputs/environment-digest.js";
 import {
   ProjectInputs,
   type FingerprintResult,
@@ -927,6 +928,7 @@ function viewOf(
     facts: SETTLED_FACTS,
     unavailable,
     nonInputsUnusable: undefined,
+    environment: countEnvironment(process.env, []).digest,
     narrowing,
     project: () =>
       new ProjectInputs(

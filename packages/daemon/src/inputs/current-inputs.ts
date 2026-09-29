@@ -101,6 +101,8 @@ export interface InputsMoment {
   readonly unavailable: string | undefined;
   /** Why `rt-test.json` cannot be used or its patterns do not apply; undefined otherwise. */
   readonly nonInputsUnusable: string | undefined;
+  /** The environment's digest under the declaration in effect, which every fingerprint of the moment takes. */
+  readonly environment: string;
   /** The dependency builds' state for the discovery the query reads; undefined for every input of the project. */
   readonly narrowing: QueryNarrowing | undefined;
   /** Read only when a fingerprint can be computed. */
@@ -115,6 +117,7 @@ export function currentInputs({
   facts,
   unavailable,
   nonInputsUnusable,
+  environment,
   narrowing,
   project,
 }: InputsMoment): CurrentInputs {
@@ -139,7 +142,7 @@ export function currentInputs({
     };
   }
   const inputs = project();
-  const reads = new SnapshotReads(inputs.root);
+  const reads = new SnapshotReads(inputs.root, environment);
   const selected = unlessRefused(workspaces, inputs);
   return {
     ...notNarrowedFact(selected),

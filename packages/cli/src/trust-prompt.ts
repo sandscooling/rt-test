@@ -35,6 +35,7 @@ export function listing(plan: StartPlan): string[] {
         `${INDENT}${(paths[index] ?? "").padEnd(width)}${oneLine(workspace.configFile)}`,
     ),
     ...nonInputLines(plan.nonInputs),
+    ...nonInputVariableLines(plan.nonInputs),
     EXECUTES_SENTENCE,
     ...unreadWarnings(plan),
   ];
@@ -57,6 +58,17 @@ function nonInputLines(declaration: NonInputsDeclaration): string[] {
             ),
           ];
   }
+}
+
+/** The environment variables the consumer declares no test reads the value of, shown since a wrong one hides an edit. */
+function nonInputVariableLines(declaration: NonInputsDeclaration): string[] {
+  const variables =
+    "variables" in declaration ? (declaration.variables ?? []) : [];
+  if (variables.length === 0) return [];
+  return [
+    `Environment variables declared in ${declaration.file}, whose values change no result (each counts only as set or not):`,
+    ...variables.map((entry) => `${INDENT}${JSON.stringify(entry)}`),
+  ];
 }
 
 export function unreadWarnings(plan: StartPlan): string[] {

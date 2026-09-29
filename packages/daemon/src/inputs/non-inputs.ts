@@ -16,14 +16,19 @@ import {
   VITE_CONFIG_FILES,
   VITEST_CONFIG_FILES,
 } from "../vitest/find-workspaces.js";
+import { variableEntryProblem } from "./environment-digest.js";
 import { liesInsideOnHost } from "./input-filter.js";
 import type { Protection } from "./protection.js";
 
 /** The consumer's RT Test settings file, at the consumer root and committed with the project. */
 export const NON_INPUTS_FILE = "rt-test.json";
 const NON_INPUTS_MEMBER = "nonInputs";
+const NON_INPUT_VARIABLES_MEMBER = "nonInputVariables";
 /** Every file of a full reconciliation is tested against every pattern, so this bounds that work. */
 const MAX_NON_INPUT_PATTERNS = 256;
+/** Every environment variable is tested against every entry at each reconciliation, so this bounds that work. */
+const MAX_NON_INPUT_VARIABLES = 256;
+const NO_VARIABLES: readonly string[] = [];
 const GLOBSTAR = "**";
 const ANY_RUN = "*";
 const ANY_CHARACTER = "?";
@@ -38,7 +43,10 @@ export const NON_INPUTS_ABSENT = "absent";
 export const NON_INPUTS_DECLARED = "declared";
 export const NON_INPUTS_UNUSABLE = "unusable";
 
-/** What `rt-test.json` at the consumer root declares: nothing when it is absent, its patterns, or why it declares nothing. */
+/**
+ * What `rt-test.json` at the consumer root declares: nothing when it is absent, its patterns and variable entries, or
+ * why it declares nothing.
+ */
 export type NonInputsDeclaration =
   | {
       readonly file: typeof NON_INPUTS_FILE;
@@ -48,6 +56,8 @@ export type NonInputsDeclaration =
       readonly file: typeof NON_INPUTS_FILE;
       readonly state: typeof NON_INPUTS_DECLARED;
       readonly patterns: readonly string[];
+      /** Present only when the file has the member: names, or prefixes ending in `*`, counted only as set. */
+      readonly variables?: readonly string[];
     }
   | {
       readonly file: typeof NON_INPUTS_FILE;
@@ -80,11 +90,22 @@ export function readNonInputs(consumerRoot: string): NonInputsDeclaration {
   const problem = declarationProblem(read.value);
   if (problem !== undefined) return unusable(problem);
   const patterns = objectField(read.value, NON_INPUTS_MEMBER);
+  const variables = objectField(read.value, NON_INPUT_VARIABLES_MEMBER);
   return {
     file: NON_INPUTS_FILE,
     state: NON_INPUTS_DECLARED,
     patterns: patterns === undefined ? [] : (patterns as string[]),
+    ...(variables === undefined ? {} : { variables: variables as string[] }),
   };
+}
+
+/** The variable entries the declaration adds to the session list; none while it is absent or cannot be used. */
+export function declaredVariables(
+  declaration: NonInputsDeclaration,
+): readonly string[] {
+  return declaration.state === NON_INPUTS_DECLARED
+    ? (declaration.variables ?? NO_VARIABLES)
+    : NO_VARIABLES;
 }
 
 /** The reason every file stays an input, while the declaration cannot be used; undefined otherwise. */
@@ -204,25 +225,55 @@ function unusable(why: string): NonInputsDeclaration {
   };
 }
 
+/** How one list member of `rt-test.json` is checked, and the words its refusal uses. */
+interface ListMember {
+  readonly member: string;
+  readonly max: number;
+  /** The plural and singular nouns for an item. */
+  readonly items: string;
+  readonly item: string;
+  readonly problem: (item: string) => string | undefined;
+}
+
+const PATTERNS_MEMBER: ListMember = {
+  member: NON_INPUTS_MEMBER,
+  max: MAX_NON_INPUT_PATTERNS,
+  items: "patterns",
+  item: "pattern",
+  problem: patternProblem,
+};
+
+const VARIABLES_MEMBER: ListMember = {
+  member: NON_INPUT_VARIABLES_MEMBER,
+  max: MAX_NON_INPUT_VARIABLES,
+  items: "entries",
+  item: "variable entry",
+  problem: variableEntryProblem,
+};
+
 function declarationProblem(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return "its top level is not a JSON object";
   }
-  const patterns = objectField(value, NON_INPUTS_MEMBER);
-  if (patterns === undefined) return undefined;
-  if (
-    !Array.isArray(patterns) ||
-    !patterns.every((pattern) => typeof pattern === "string")
-  ) {
-    return `its ${NON_INPUTS_MEMBER} member is not an array of strings`;
+  return (
+    listProblem(value, PATTERNS_MEMBER) ?? listProblem(value, VARIABLES_MEMBER)
+  );
+}
+
+/** A member the file does not have is no problem; one it has must be an array of strings, each usable. */
+function listProblem(value: object, rule: ListMember): string | undefined {
+  const list = objectField(value, rule.member);
+  if (list === undefined) return undefined;
+  if (!Array.isArray(list) || !list.every((item) => typeof item === "string")) {
+    return `its ${rule.member} member is not an array of strings`;
   }
-  if (patterns.length > MAX_NON_INPUT_PATTERNS) {
-    return `its ${NON_INPUTS_MEMBER} member holds ${patterns.length} patterns, more than the ${MAX_NON_INPUT_PATTERNS} allowed`;
+  if (list.length > rule.max) {
+    return `its ${rule.member} member holds ${list.length} ${rule.items}, more than the ${rule.max} allowed`;
   }
-  for (const pattern of patterns as string[]) {
-    const problem = patternProblem(pattern);
+  for (const item of list as string[]) {
+    const problem = rule.problem(item);
     if (problem !== undefined) {
-      return `the pattern ${JSON.stringify(pattern)} ${problem}`;
+      return `the ${rule.item} ${JSON.stringify(item)} ${problem}`;
     }
   }
   return undefined;

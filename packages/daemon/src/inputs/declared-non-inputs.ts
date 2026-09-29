@@ -1,7 +1,12 @@
 import { lstatSync } from "node:fs";
 import type { DaemonLog } from "../daemon/daemon-log.js";
 import {
+  countEnvironment,
+  type EnvironmentCount,
+} from "./environment-digest.js";
+import {
   declaredNonInputs,
+  declaredVariables,
   NON_INPUTS_ABSENT,
   NON_INPUTS_DECLARED,
   NON_INPUTS_FILE,
@@ -14,6 +19,8 @@ import {
 import { liesUnderRoot, protection, type Protection } from "./protection.js";
 
 const LIST_SEPARATOR = ", ";
+const PART_SEPARATOR = "; ";
+const EMPTY_LIST = "none";
 const NO_DECLARATION: NonInputsDeclaration = {
   file: NON_INPUTS_FILE,
   state: NON_INPUTS_ABSENT,
@@ -36,8 +43,15 @@ export class DeclaredNonInputs {
   readonly #log: DaemonLog;
   #declaration: NonInputsDeclaration | undefined;
   #logged: string | undefined;
+  #loggedEnvironment: string | undefined;
   #protection: Protection;
   #match: NonInputMatch = () => undefined;
+  /** The daemon's environment as it started, which every executor process inherits. */
+  readonly #startEnvironment: NodeJS.ProcessEnv = { ...process.env };
+  #environment: EnvironmentCount = countEnvironment(
+    this.#startEnvironment,
+    declaredVariables(NO_DECLARATION),
+  );
 
   /** `root` is the consumer root's real path. */
   constructor(root: string, log: DaemonLog) {
@@ -88,20 +102,30 @@ export class DeclaredNonInputs {
     return this.#declaration ?? NO_DECLARATION;
   }
 
+  /** The environment's digest under the variable entries the declaration in effect adds to the session list. */
+  get environment(): string {
+    return this.#environment.digest;
+  }
+
   /** Reads `rt-test.json` again, which takes effect at once. */
   read(): void {
     this.#declaration = readNonInputs(this.#root);
+    this.#environment = countEnvironment(
+      this.#startEnvironment,
+      declaredVariables(this.#declaration),
+    );
     this.#rebuild();
   }
 
-  /** Logs the declaration in effect, and whether its patterns apply, when either differs from the one last logged. */
+  /**
+   * Logs the declaration in effect, whether its patterns apply, and how the environment is counted under it, each when
+   * it differs from the one last logged.
+   */
   report(): void {
     const declaration = this.#declaration;
     if (declaration === undefined) return;
-    const text = declarationText(declaration, this.#protection);
-    if (text === this.#logged) return;
-    this.#logged = text;
-    this.#log.entry(text);
+    this.#reportDeclaration(declaration);
+    this.#reportEnvironment(declaration);
   }
 
   /**
@@ -130,6 +154,23 @@ export class DeclaredNonInputs {
     };
   }
 
+  #reportDeclaration(declaration: NonInputsDeclaration): void {
+    const text = declarationText(declaration, this.#protection);
+    if (text === this.#logged) return;
+    this.#logged = text;
+    this.#log.entry(text);
+  }
+
+  #reportEnvironment(declaration: NonInputsDeclaration): void {
+    const text = environmentText(
+      this.#environment,
+      declaredVariables(declaration),
+    );
+    if (text === this.#loggedEnvironment) return;
+    this.#loggedEnvironment = text;
+    this.#log.entry(text);
+  }
+
   #declaresPatterns(): boolean {
     return (
       this.#declaration?.state === NON_INPUTS_DECLARED &&
@@ -156,6 +197,24 @@ function namedFiles(value: Protection): ReadonlySet<string> {
 function patternsReleaseFiles(previous: Protection, next: Protection): boolean {
   if (!previous.applies) return false;
   return !next.applies || previous.patternKey !== next.patternKey;
+}
+
+/** Names only, never a value, so the log shows which variables a restart compares without showing what they hold. */
+function environmentText(
+  count: EnvironmentCount,
+  declared: readonly string[],
+): string {
+  return [
+    `environment: counted by value: ${quotedList(count.byValue)}`,
+    `counted only as set, from RT Test's session list: ${quotedList(count.sessionEntriesSet)}`,
+    `declared in ${NON_INPUTS_FILE}: ${quotedList(declared)}`,
+  ].join(PART_SEPARATOR);
+}
+
+function quotedList(names: readonly string[]): string {
+  return names.length === 0
+    ? EMPTY_LIST
+    : names.map((name) => JSON.stringify(name)).join(LIST_SEPARATOR);
 }
 
 function declarationText(

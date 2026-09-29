@@ -611,6 +611,93 @@ describe("the listing a start shows before anything executes", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D2954: the listing quotes each nonInputVariables entry rt-test.json declares before the sentence saying what starting executes",
+    async () => {
+      const entries = ["RT_TEST_SESSION", "EFC_*"];
+      const outcome = await withDaemonConsumer(async (root) => {
+        writeFileSync(
+          join(root, NON_INPUTS_FILE),
+          JSON.stringify({ nonInputVariables: entries }),
+        );
+        const run = await runCli(["start"], { cwd: root });
+        const listedFirst = beforeExecutes(run.stderr.split("\n"));
+        return entries.map((entry) =>
+          listedFirst((line) => line.trim() === JSON.stringify(entry)),
+        );
+      });
+      expect(outcome).toStrictEqual([true, true]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2955: start --json carries the declared nonInputVariables entries as nonInputs.variables",
+    async () => {
+      const entries = ["RT_TEST_SESSION", "EFC_*"];
+      const variables = await withDaemonConsumer(async (root) => {
+        writeFileSync(
+          join(root, NON_INPUTS_FILE),
+          JSON.stringify({ nonInputVariables: entries }),
+        );
+        const document = documentOf(
+          await runCli(["start", "--json"], { cwd: root }),
+        );
+        const nonInputs = document["nonInputs"];
+        return typeof nonInputs === "object" && nonInputs !== null
+          ? (nonInputs as Record<string, unknown>)["variables"]
+          : nonInputs;
+      });
+      expect(variables).toStrictEqual(entries);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2956: an empty nonInputVariables adds nothing to the listing, so the sentence saying what starting executes follows the non-inputs line",
+    async () => {
+      const next = await withDaemonConsumer(async (root) => {
+        writeFileSync(
+          join(root, NON_INPUTS_FILE),
+          JSON.stringify({ nonInputVariables: [] }),
+        );
+        const run = await runCli(["start"], { cwd: root });
+        const lines = run.stderr.split("\n");
+        const named = lines.findIndex((line) => line.includes(NON_INPUTS_FILE));
+        return named === -1 ? undefined : lines[named + 1];
+      });
+      expect(next?.startsWith(EXECUTES_OPENING)).toBe(true);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2969: with patterns declared too, the declared variable entries sit under a heading of their own, never under the patterns",
+    async () => {
+      const previous = await withDaemonConsumer(async (root) => {
+        writeFileSync(
+          join(root, NON_INPUTS_FILE),
+          JSON.stringify({
+            nonInputs: ["docs/**"],
+            nonInputVariables: ["RT_TEST_SESSION"],
+          }),
+        );
+        const run = await runCli(["start"], { cwd: root });
+        const lines = run.stderr.split("\n");
+        const entry = lines.findIndex(
+          (line) => line.trim() === JSON.stringify("RT_TEST_SESSION"),
+        );
+        return entry < 1 ? undefined : lines[entry - 1];
+      });
+      expect(
+        previous?.startsWith(
+          `Environment variables declared in ${NON_INPUTS_FILE}`,
+        ),
+      ).toBe(true);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("the question on a terminal", () => {

@@ -46,6 +46,10 @@ _Avoid_: source, dependency
 A file the consumer lists in `rt-test.json` as read by no test, so its edit changes no input fingerprint and selects nothing.
 _Avoid_: ignored file, excluded file
 
+**Non-input variable**:
+An environment variable whose value the input fingerprint leaves out, counting only whether it is set and whether it is empty: a session or process identifier on RT Test's fixed list, or one `rt-test.json` declares in `nonInputVariables`.
+_Avoid_: ignored variable, session variable
+
 **Input revision**:
 The number naming a worktree's inputs as the daemon last observed them in its current life, raised once for each batch of changes it observes.
 _Avoid_: version, generation
