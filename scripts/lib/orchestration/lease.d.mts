@@ -73,6 +73,7 @@ export declare const HEARTBEAT_MS: number;
 
 export declare function beat(file: string, now?: number): boolean;
 export declare function readLease(dir: string): LeaseRecord | null;
+export declare function readLeaseLocked(dir: string): LeaseRecord | null;
 export declare function processProbe(
   report: (message: string) => void,
   options?: {

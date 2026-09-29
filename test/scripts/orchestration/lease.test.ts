@@ -51,6 +51,43 @@ import {
   writeLease,
 } from "./lease-harness.js";
 
+// Passes through to the real reads. While `torn` is set, a read of the lease made without the lock returns only the
+// head of its text, as a reader overlapping a writer's in-place rewrite would see, since every writer holds the lock.
+// `onLockedRead` runs after each read made under the lock, once `lockedReads` counts it.
+const seam = vi.hoisted(() => ({
+  torn: false,
+  lockedReads: 0,
+  onLockedRead: undefined as ((file: string) => void) | undefined,
+}));
+
+vi.mock("node:fs", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs")>();
+  const readFileSync = ((...args: Parameters<typeof actual.readFileSync>) => {
+    const text = actual.readFileSync(...args);
+    const file = String(args[0]);
+    if (
+      !seam.torn ||
+      typeof text !== "string" ||
+      !file.endsWith("lease.json")
+    ) {
+      return text;
+    }
+    if (!actual.existsSync(file.replace(/lease\.json$/, "lease.lock"))) {
+      return text.slice(0, 10);
+    }
+    seam.lockedReads += 1;
+    seam.onLockedRead?.(file);
+    return text;
+  }) as typeof actual.readFileSync;
+  return { ...actual, readFileSync };
+});
+
+const endTornReads = () => {
+  seam.torn = false;
+  seam.lockedReads = 0;
+  seam.onLockedRead = undefined;
+};
+
 // Passes through to the real check, so a test can make one start-time check fail.
 vi.mock("../run-cleanup.mjs", async (importActual) => {
   const actual = await importActual<typeof import("../run-cleanup.mjs")>();
@@ -1491,5 +1528,76 @@ describe("lease turn, judging the holder outside the lock", () => {
         { pid: 10, startedAt: undefined },
       ],
     });
+  });
+});
+
+describe("run-lease reads, while a rewrite of the lease is in flight", () => {
+  const ACQUIRED =
+    "ACQUIRED t-a (th-t-a): acquire (a manual hold); holding until release";
+  const ACQUIRE = ["acquire", "--lane", "t-a", "--thread", "th-t-a"];
+
+  // An acquire whose beats each read the lease under the lock; `atRead` runs after the third and ends the hold.
+  async function holdThroughReads(
+    atRead: (file: string) => void,
+  ): Promise<string[]> {
+    return withTempAsync(async (tmp) => {
+      const lines: string[] = [];
+      const c = cli(tmp, undefined, {
+        heartbeatMs: 1,
+        running: alive(PID),
+        out: (line) => {
+          lines.push(line);
+          if (!line.startsWith("ACQUIRED")) return;
+          seam.torn = true;
+          seam.onLockedRead = (file) => {
+            if (seam.lockedReads === 3) atRead(file);
+          };
+        },
+      });
+      try {
+        await c.run(ACQUIRE);
+      } finally {
+        endTornReads();
+      }
+      return lines;
+    });
+  }
+
+  it("D2725: reads its lane's hold under the lock, so a run joins it rather than seeing a half-written lease", async () => {
+    const seen = await withTempAsync(async (tmp) => {
+      const c = cli(tmp, undefined, { running: alive(PID, 555) });
+      writeLease(c.dir, { ...owner("t-a", 555), command: HOLD, at: NOW });
+      seam.torn = true;
+      try {
+        const code = await c.run([...RUN, "bun", "run", "check"]);
+        return {
+          code,
+          joined: c.err.some((line) =>
+            line.startsWith("run-lease: RUNNING under this lane's hold"),
+          ),
+        };
+      } finally {
+        endTornReads();
+      }
+    });
+    expect(seen).toEqual({ code: 0, joined: true });
+  });
+
+  it("D2726: keeps beating a live hold while a rewrite of its lease is in flight, rather than ending it as LOST", async () => {
+    const lines = await holdThroughReads((file) => rmSync(file));
+    expect(lines).toEqual([
+      ACQUIRED,
+      "RELEASED t-a (th-t-a): acquire (a manual hold)",
+    ]);
+  });
+
+  it("D2727: reads the lease that took its hold under the lock, so LOST names that holder rather than a half-written lease", async () => {
+    const lines = await holdThroughReads((file) =>
+      writeLease(join(file, ".."), { ...owner("t-b", 20), at: NOW }),
+    );
+    expect(lines).toEqual([
+      ACQUIRED,
+      "LOST t-a (th-t-a): acquire (a manual hold) to t-b (th-t-b): bun run check",
+    ]);
   });
 });
