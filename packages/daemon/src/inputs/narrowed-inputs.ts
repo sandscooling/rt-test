@@ -178,7 +178,9 @@ export class Narrowing {
 
   #setsFor(project: ProjectInputs): NarrowedSets {
     if (this.#sets !== undefined) return this.#sets;
-    this.#sets = narrowedSets(project, this.#input, this.#dependencies);
+    this.#sets = narrowedSets(project, this.#input, (paths) =>
+      this.select(paths),
+    );
     if (this.#sets.refused) this.#refused(this.#sets.reason);
     return this.#sets;
   }
@@ -191,13 +193,14 @@ type NarrowedSets =
     }
   | { readonly refused: true; readonly reason: string };
 
+/** `select` is the narrowing's own, so a workspace's inputs and a round's selection ask selection alike. */
 function narrowedSets(
   project: ProjectInputs,
   input: DiscoveredSelectionInput,
-  dependencies: DependencyInformation,
+  select: (paths: readonly string[]) => SelectionOutcome,
 ): NarrowedSets {
   const paths = [...project.digests.keys()];
-  const outcome = selectTests({ ...input, change: paths, dependencies });
+  const outcome = select(paths);
   if (outcome.state === SELECTION_STATE.refused) {
     return { refused: true, reason: outcome.reason };
   }

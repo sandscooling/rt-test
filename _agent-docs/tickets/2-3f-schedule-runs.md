@@ -401,7 +401,13 @@ Repairs the review's fixes forced: the fake clocks in scheduler.test.ts and life
 
 Review session: threadId 93a47335-8e3a-4e57-b211-1c4d2d371a26 (rt-t2-3f-review)
 
-Tech debt, undisposed until the commit exists:
+Tech debt, disposed against 8809af5 (review, 2026-09-29 04:19):
+
+- `begin()`'s stop guard: no change. Its one caller, `daemon-main.ts`, guards it, and D1489 pins that guard. A second copy in `begin()` would leave D1489 unable to detect its mutation, and moving it would buy nothing a test can observe.
+- The periodic timer: brought to the orchestrator as a decision, since each fix changes what AC5's "periodic reconciliation" means.
+- `select` and `narrowedSets`: fixed, `narrowedSets` asks selection through `Narrowing.select`.
+
+The items as collected:
 
 - `packages/daemon/src/daemon/lifecycle.ts` `begin()` has no stop guard of its own: a `begin()` after `stop()` would start the tracker, the builds and the scheduler again. Only `daemon-main.ts`'s call order prevents it. Pre-existing.
 - `packages/daemon/src/inputs/input-tracker.ts` `#reconcileWhileRequested` ends every reconciliation with `#schedule.periodic()`, which clears and re-arms the periodic timer (`reconcile-schedule.ts`, `RECONCILE_INTERVAL_MS`), and the lost-input-set retry replaces that timer too. A project that reconciles more often than every `RECONCILE_INTERVAL_MS` for another cause (an ignore-file edit, a git HEAD or index move, a watcher recovery) never reaches a periodic reconciliation, so AC5's retry of a `failed` run bound to its current fingerprint, or of a discovery listing a `failed` workspace, never comes while the revision stays put. Pre-existing, load-bearing since this ticket.
