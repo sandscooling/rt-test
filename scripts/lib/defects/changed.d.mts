@@ -13,10 +13,18 @@ export interface Selection {
   readonly unattributed: readonly string[];
 }
 
-export declare function requireChangeset(git: Git): Set<string>;
+export declare const CHANGED_FLAG: "--changed";
+export declare function requireChangeset(git: Git, flag?: string): Set<string>;
+/** Reads each source's records at HEAD once, however often it is asked. */
 export declare function headRecordsIn(git: Git): HeadRecords;
 export declare function selectChanged(
   catalog: Catalog,
   changed: ReadonlySet<string>,
   headRecords: HeadRecords,
 ): Selection;
+/** The defects whose own record, test file or mutated file changed; no import widens it. */
+export declare function selectEdited(
+  catalog: Catalog,
+  changed: ReadonlySet<string>,
+  headRecords: HeadRecords,
+): readonly Pick[];

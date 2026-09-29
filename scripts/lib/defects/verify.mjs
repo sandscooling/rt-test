@@ -6,7 +6,13 @@ import { parseArgs } from "node:util";
 import { gitIn } from "../git.mjs";
 import { isAtOrInside } from "../paths.mjs";
 import { loadCatalog, recordLinks, snapshotFiles } from "./catalog.mjs";
-import { headRecordsIn, requireChangeset, selectChanged } from "./changed.mjs";
+import {
+  CHANGED_FLAG,
+  headRecordsIn,
+  requireChangeset,
+  selectChanged,
+  selectEdited,
+} from "./changed.mjs";
 import { treeDifference, verifyInSandboxes } from "./pool.mjs";
 import { createVitestRunner, testFilesOf } from "./vitest.mjs";
 
@@ -14,6 +20,14 @@ const MIN_JOBS = 1;
 const SHARE_OF_CORES = 3 / 4;
 const DECIMAL_DIGITS = /^\d+$/;
 const PACKAGES_DIR = "node_modules";
+const ID_SEPARATORS = /[\s,]+/;
+const SELECTOR = Object.freeze({
+  CHANGED: CHANGED_FLAG,
+  EDITED: "--edited",
+  IDS: "--ids",
+});
+const NAMED_BY_ID = `named by ${SELECTOR.IDS}`;
+const ID_LIST_EXAMPLE = `${SELECTOR.IDS} D12,D40`;
 
 export const defaultJobs = (cores) =>
   Math.max(MIN_JOBS, Math.floor(cores * SHARE_OF_CORES));
@@ -23,41 +37,115 @@ function jobsFrom(text, cores) {
   return DECIMAL_DIGITS.test(text) ? Number(text) : Number.NaN;
 }
 
+function idsIn(list) {
+  const ids = list.split(ID_SEPARATORS).filter((id) => id !== "");
+  if (ids.length === 0) {
+    throw new Error(
+      `${SELECTOR.IDS} "${list}" names no defect; write ids such as ${ID_LIST_EXAMPLE}.`,
+    );
+  }
+  return ids;
+}
+
+const idsFrom = (lists) => [...new Set(lists.flatMap(idsIn))];
+
 export function parseOptions(argv, cores) {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: [...argv],
+    allowPositionals: true,
     options: {
       changed: { type: "boolean", default: false },
+      edited: { type: "boolean", default: false },
+      ids: { type: "string", multiple: true, default: [] },
       jobs: { type: "string" },
     },
   });
+  if (positionals.length > 0) {
+    const remedy = values.ids.length
+      ? "write several ids as one list"
+      : `name defects with ${SELECTOR.IDS}`;
+    throw new Error(
+      `${positionals.join(" ")} is not an option; ${remedy}, such as ${ID_LIST_EXAMPLE}.`,
+    );
+  }
   const jobs = jobsFrom(values.jobs, cores);
   if (!Number.isInteger(jobs) || jobs < MIN_JOBS) {
     throw new Error(
       `--jobs takes a whole number of sandboxes, at least ${MIN_JOBS}.`,
     );
   }
-  return { changed: values.changed, jobs };
+  return {
+    changed: values.changed,
+    edited: values.edited,
+    ids: idsFrom(values.ids),
+    jobs,
+  };
 }
 
-function pickChanged(catalog, git, log) {
+const selectorsOf = (options) => [
+  ...(options.changed ? [SELECTOR.CHANGED] : []),
+  ...(options.edited ? [SELECTOR.EDITED] : []),
+  ...(options.ids.length > 0 ? [SELECTOR.IDS] : []),
+];
+
+function pickByIds(catalog, ids) {
+  const wanted = new Set(ids);
+  const picks = catalog.defects
+    .filter((defect) => wanted.has(defect.id))
+    .map((defect) => ({ defect, reasons: [NAMED_BY_ID] }));
+  const found = new Set(picks.map(({ defect }) => defect.id));
+  const missing = ids.filter((id) => !found.has(id));
+  if (missing.length) {
+    throw new Error(
+      `${SELECTOR.IDS} names ${missing.join(", ")}, which no defects.json records.`,
+    );
+  }
+  return picks;
+}
+
+function pickChanged(catalog, changeset, headRecords, log) {
   const { picks, unattributed } = selectChanged(
     catalog,
-    requireChangeset(git),
-    headRecordsIn(git),
+    changeset,
+    headRecords,
   );
   if (unattributed.length) {
     log(
-      `--changed selects every defect: no import explains ${unattributed.join(", ")}.`,
+      `${SELECTOR.CHANGED} selects every defect: no import explains ${unattributed.join(", ")}.`,
     );
   }
-  log(
-    `--changed selected ${picks.length} of ${catalog.defects.length} defects; the full run in \`bun run check\` is the gate.`,
-  );
-  for (const { defect, reasons } of picks) {
-    log(`  ${defect.id}: ${reasons.join(", ")}`);
+  return picks;
+}
+
+function picksFor(catalog, options, selectors, git, log) {
+  const picks = pickByIds(catalog, options.ids);
+  const needingGit = selectors.filter((selector) => selector !== SELECTOR.IDS);
+  if (needingGit.length === 0) return picks;
+  const changeset = requireChangeset(git, needingGit.join(" with "));
+  const headRecords = headRecordsIn(git);
+  if (options.edited) {
+    picks.push(...selectEdited(catalog, changeset, headRecords));
   }
-  return picks.map((pick) => pick.defect);
+  if (options.changed) {
+    picks.push(...pickChanged(catalog, changeset, headRecords, log));
+  }
+  return picks;
+}
+
+function pickSelected(catalog, options, selectors, git, log) {
+  const reasons = new Map();
+  for (const pick of picksFor(catalog, options, selectors, git, log)) {
+    const known = reasons.get(pick.defect) ?? [];
+    reasons.set(pick.defect, new Set([...known, ...pick.reasons]));
+  }
+  const selected = catalog.defects.filter((defect) => reasons.has(defect));
+  log(
+    `${selectors.join(", ")} selected ${selected.length} of ${catalog.defects.length} defects; the full run in \`bun run check\` is the gate.`,
+  );
+  for (const defect of selected) {
+    log(`  ${defect.id}: ${[...reasons.get(defect)].join(", ")}`);
+  }
+  return selected;
 }
 
 function packagesAbove(dir) {
@@ -124,12 +212,21 @@ function assertLiveUnchanged(root, catalog, log) {
   }
 }
 
-function summarize(result, selected, options, log) {
+function logFilteredScope({ selected, total, selectors }, log) {
+  if (selectors.length) {
+    log(
+      `Selected by ${selectors.join(", ")}: ${selected.length} of ${total} defects; this is not the full run.`,
+    );
+  }
+}
+
+function summarize(result, counts, log) {
+  const { selected, selectors } = counts;
   for (const failure of result.failures) log(`FAILED ${failure}`);
   if (result.undetected.length) {
     log(`Not detected: ${result.undetected.join(", ")}`);
   }
-  const scope = options.changed ? "changed" : "bootstrap";
+  const scope = selectors.length ? "selected" : "bootstrap";
   const sandboxes =
     result.sandboxes === 1 ? "1 sandbox" : `${result.sandboxes} sandboxes`;
   log(
@@ -137,6 +234,7 @@ function summarize(result, selected, options, log) {
       ? `${selected.length}/${selected.length} ${scope} defects detected in ${sandboxes}; baseline green before and after, sandboxes restored.`
       : `${result.detected.length}/${selected.length} ${scope} defects detected; verification failed.`,
   );
+  logFilteredScope(counts, log);
 }
 
 export async function runVerification({
@@ -154,12 +252,15 @@ export async function runVerification({
       "No named defect was found, so verification would prove nothing.",
     );
   }
-  const selected = options.changed
-    ? pickChanged(catalog, git, log)
+  const selectors = selectorsOf(options);
+  const selected = selectors.length
+    ? pickSelected(catalog, options, selectors, git, log)
     : catalog.defects;
+  const counts = { selected, total: catalog.defects.length, selectors };
   if (selected.length === 0) {
     assertLiveUnchanged(root, catalog, log);
     log("No defect was verified.");
+    logFilteredScope(counts, log);
     return 0;
   }
   const files = new Set(testFilesOf(selected));
@@ -167,7 +268,7 @@ export async function runVerification({
     files: catalog.files,
     links: catalog.links,
     baseline: catalog.defects.filter((defect) => files.has(defect.test)),
-    baselineFiles: options.changed ? [...files] : undefined,
+    baselineFiles: selectors.length ? [...files] : undefined,
     selected,
     jobs: options.jobs,
     runTests,
@@ -175,6 +276,6 @@ export async function runVerification({
     log,
   });
   assertLiveUnchanged(root, catalog, log);
-  summarize(result, selected, options, log);
+  summarize(result, counts, log);
   return result.ok ? 0 : 1;
 }

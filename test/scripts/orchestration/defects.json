@@ -1015,6 +1015,13 @@
     "new": ""
   },
   {
+    "id": "D2637",
+    "defect": "The defect verifier run with --ids or --edited is not judged heavy, so a by-id proof escapes the run lease.",
+    "file": "scripts/lib/orchestration/heavy-command.mjs",
+    "old": "if (name === DEFECTS_ENTRY) return VERDICT.HEAVY;",
+    "new": "if (\n    name === DEFECTS_ENTRY &&\n    !after.some((word) => word === \"--edited\" || word.startsWith(\"--ids\"))\n  )\n    return VERDICT.HEAVY;"
+  },
+  {
     "id": "D2314",
     "defect": "A directory or name filter counts as a scoped Vitest target, so a run over a whole folder escapes the lease.",
     "file": "scripts/lib/orchestration/heavy-command.mjs",
