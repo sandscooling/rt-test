@@ -7,6 +7,7 @@ import {
   STRING_FIND,
   STRING_FIND_FLAGS,
   type AliasFindKind,
+  type CrawledLinks,
   type PatternBase,
   type ProjectSelectionFacts,
   type ReportedAlias,
@@ -190,7 +191,7 @@ export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
     setupFiles: jsonStrings(value, "setupFiles"),
     globalSetupFiles: jsonStrings(value, "globalSetupFiles"),
     aliases: jsonArray(value, "aliases", reportedAlias),
-    testFilePatterns: testFilePatterns(jsonField(value, "testFilePatterns")),
+    testFilePatterns: testFilePatterns(jsonRecord(value, "testFilePatterns")),
   };
 }
 
@@ -223,10 +224,17 @@ function testFilePatterns(value: unknown): TestFilePatterns {
     directory: jsonText(value, "directory"),
     vitestDirectory: jsonText(value, "vitestDirectory"),
     patternBases: jsonArray(value, "patternBases", patternBase),
+    crawledLinks: crawledLinks(jsonRecord(value, "crawledLinks")),
     include: jsonStrings(value, "include"),
     exclude: jsonStrings(value, "exclude"),
     includeSource: jsonStrings(value, "includeSource"),
   };
+}
+
+function crawledLinks(value: unknown): CrawledLinks {
+  return jsonBoolean(value, "complete")
+    ? { complete: true, links: jsonArray(value, "links", patternBase) }
+    : { complete: false, reason: jsonText(value, "reason") };
 }
 
 function patternBase(value: unknown): PatternBase {
@@ -275,6 +283,12 @@ function jsonArray<T>(
 function jsonStrings(value: unknown, key: string): string[] {
   const field = jsonField(value, key);
   if (isStringArray(field)) return field;
+  throw unreadable(`JSON field ${key}`, value);
+}
+
+function jsonRecord(value: unknown, key: string): Record<string, unknown> {
+  const field = jsonField(value, key);
+  if (isRecord(field)) return field;
   throw unreadable(`JSON field ${key}`, value);
 }
 

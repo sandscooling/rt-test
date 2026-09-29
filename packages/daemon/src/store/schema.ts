@@ -1,7 +1,7 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
 /** Written to `PRAGMA user_version`. A change to the tables below, or a stored value an older version's code cannot read, raises it and gives each older version in `STORE_MIGRATIONS` a path to it, since the opener refuses every version it cannot migrate. */
-export const STORE_SCHEMA_VERSION = 6;
+export const STORE_SCHEMA_VERSION = 7;
 /** Its code never force-stopped a run and never kept a workspace's selection facts. */
 const FORCE_STOP_UNAWARE_SCHEMA_VERSION = 1;
 /** Its code never kept a workspace's selection facts. */
@@ -12,6 +12,8 @@ const VITE_ROOT_UNAWARE_SCHEMA_VERSION = 3;
 const CRASH_UNAWARE_SCHEMA_VERSION = 4;
 /** Its code kept a workspace's selection facts without Vitest's own spelling of each pattern directory. */
 const VITEST_SPELLING_UNAWARE_SCHEMA_VERSION = 5;
+/** Its code kept a workspace's selection facts without the directory links Vitest's crawl follows. */
+const CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION = 6;
 export const STORE_FILE_NAME = "store.sqlite";
 /** How long a write waits for another process's write on the same file before it fails whole. */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -161,6 +163,10 @@ export const STORE_MIGRATIONS: ReadonlyMap<number, string> = new Map([
   ],
   [
     VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,
+    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+  ],
+  [
+    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,
     `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
   ],
 ]);

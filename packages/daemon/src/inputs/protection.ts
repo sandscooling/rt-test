@@ -13,6 +13,7 @@ import type {
   PatternBase,
   ProjectSelectionFacts,
 } from "../vitest/selection-facts.js";
+import type { Crawl } from "./crawl-links.js";
 import { absoluteInputPath } from "./input-filter.js";
 import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
 
@@ -23,6 +24,7 @@ const NOT_REPORTED_REASON = `${PATTERNS_DO_NOT_APPLY}: the discovery in effect d
 const ROOT_WORKSPACE = "at the consumer root";
 const REFUSED_REASON = `${PATTERNS_DO_NOT_APPLY}: picomatch cannot compile the test file pattern`;
 const REFUSED_CONSEQUENCE = "so the files it finds are not known";
+const UNKNOWN_LINKS_REASON = `${PATTERNS_DO_NOT_APPLY}: the directory links Vitest's crawl follows are not known for the project`;
 /** A refused pattern can be longer than picomatch's input limit, and its quote goes into every answer. */
 const MAX_QUOTED_PATTERN_LENGTH = 200;
 const TRUNCATION_MARK = "...";
@@ -41,6 +43,7 @@ const EXTGLOB_OPEN = "(";
 const BACKSLASHES = /\\/g;
 const PARENT_DIRECTORY = /^(\/?\.\.)+/;
 const DRIVE_RELATIVE_PATH = /^[A-Za-z]:$/;
+const UNC_PREFIX = "//";
 const GLOBSTAR = "**";
 const PARENT_STEP_LENGTH = 3;
 const ESCAPING_BACKSLASHES = /\\(?=[()[\]{}!*+?@|])/g;
@@ -79,6 +82,8 @@ type CompiledGlob =
       readonly matches: PathMatcher;
       /** Whether an absolute path lies below the crawl's root by its spelling, so the crawl can reach it. */
       readonly reaches: PathMatcher;
+      /** Whether the crawl passes over a directory, by its absolute path as the crawl spells it. */
+      readonly prunes: PathMatcher;
     }
   | Refused;
 
@@ -158,8 +163,18 @@ export function patternBase(pattern: string, cwd: string): string | undefined {
   if (pattern === "" || isNegated(pattern)) return undefined;
   const base = picomatch.scan(pattern).base.replace(ESCAPING_BACKSLASHES, "");
   const driveRoot = nonDriveRelative(base);
-  if (isAbsolute(driveRoot)) return posix.normalize(driveRoot);
-  return posix.join(cwd, base);
+  if (isAbsolute(driveRoot)) return spelledJoin(driveRoot);
+  return spelledJoin(cwd, base);
+}
+
+/** `posix.join`, keeping the `//` that begins a Windows UNC path, which it would collapse onto the current drive. */
+function spelledJoin(first: string, ...rest: string[]): string {
+  const joined = posix.join(first, ...rest);
+  const collapsedUnc =
+    process.platform === WINDOWS &&
+    first.startsWith(UNC_PREFIX) &&
+    !joined.startsWith(UNC_PREFIX);
+  return collapsedUnc ? `${POSIX_SEPARATOR}${joined}` : joined;
 }
 
 /**
@@ -173,8 +188,16 @@ function projectMatcher(
 ): Compiled {
   const fromRealPath = realPathMatcher(project, consumerRoot);
   if (!fromRealPath.ok) return fromRealPath;
-  const bySpelling = spelledMatcher(project, consumerRoot);
+  const { crawledLinks } = project.testFilePatterns;
+  const links = crawledLinks.complete ? crawledLinks.links : [];
+  const bySpelling = spelledMatcher(project, links, consumerRoot);
   if (!bySpelling.ok) return bySpelling;
+  if (!crawledLinks.complete) {
+    return {
+      ok: false,
+      reason: `${UNKNOWN_LINKS_REASON} ${JSON.stringify(project.projectName)}: ${crawledLinks.reason}`,
+    };
+  }
   return {
     ok: true,
     matches: (path) => fromRealPath.matches(path) || bySpelling.matches(path),
@@ -193,7 +216,7 @@ function realPathMatcher(
   const cwd = absoluteDirectory.replace(BACKSLASHES, POSIX_SEPARATOR);
   const calls: PathMatcher[] = [];
   for (const patterns of [include, includeSource]) {
-    const call = globCall(patterns, exclude, cwd, project);
+    const call = globCall(patterns, exclude, cwd, project.projectName);
     if (!call.ok) return call;
     calls.push(call.matches);
   }
@@ -211,11 +234,36 @@ function realPathMatcher(
 }
 
 /**
+ * What each of a project's globs from `cwd`, Vitest's spelling of its pattern directory, can find a file below: each
+ * pattern's base, for each pattern list that is not empty, or why picomatch refuses one of its patterns.
+ */
+export function projectCrawls(
+  globbed: readonly (readonly string[])[],
+  exclude: readonly string[],
+  cwd: string,
+  projectName: string,
+): { readonly ok: true; readonly crawls: readonly Crawl[] } | Refused {
+  const crawls: Crawl[] = [];
+  for (const patterns of globbed) {
+    if (patterns.length === 0) continue;
+    const glob = globCall(patterns, exclude, cwd, projectName);
+    if (!glob.ok) return glob;
+    crawls.push({
+      bases: patterns.flatMap((pattern) => patternBase(pattern, cwd) ?? []),
+      prunes: glob.prunes,
+    });
+  }
+  return { ok: true, crawls };
+}
+
+/**
  * Normalizes the patterns against Vitest's own spelling of the pattern directory, and names a file by each spelling
- * the crawl can reach it through: that directory's, or the one a pattern writes for its own directories.
+ * the crawl can reach it through: that directory's, the one a pattern writes for its own directories, or a directory
+ * link the crawl follows below them.
  */
 function spelledMatcher(
   project: ProjectSelectionFacts,
+  links: readonly PatternBase[],
   consumerRoot: string,
 ): Compiled {
   const {
@@ -229,6 +277,7 @@ function spelledMatcher(
   const spellings: readonly Spelling[] = [
     { spelled: vitestDirectory, directory },
     ...patternBases,
+    ...links,
   ].map((base: PatternBase) => ({
     spelled: base.spelled,
     real: absoluteInputPath(consumerRoot, base.directory),
@@ -236,7 +285,12 @@ function spelledMatcher(
   const globbed = [include, includeSource];
   const globs: Extract<CompiledGlob, { ok: true }>[] = [];
   for (const patterns of globbed) {
-    const glob = globCall(patterns, exclude, vitestDirectory, project);
+    const glob = globCall(
+      patterns,
+      exclude,
+      vitestDirectory,
+      project.projectName,
+    );
     if (!glob.ok) return glob;
     globs.push(glob);
   }
@@ -282,7 +336,7 @@ function globCall(
   patterns: readonly string[],
   exclude: readonly string[],
   cwd: string,
-  project: ProjectSelectionFacts,
+  projectName: string,
 ): CompiledGlob {
   const crawl: CrawlRoot = { root: cwd, depthOffset: 0 };
   const match: PathMatcher[] = [];
@@ -299,7 +353,7 @@ function globCall(
     } catch (error) {
       return {
         ok: false,
-        reason: `${REFUSED_REASON} ${quotedPattern(written)} of the project ${JSON.stringify(project.projectName)}, ${REFUSED_CONSEQUENCE}: ${errorText(error)}`,
+        reason: `${REFUSED_REASON} ${quotedPattern(written)} of the project ${JSON.stringify(projectName)}, ${REFUSED_CONSEQUENCE}: ${errorText(error)}`,
       };
     }
   }
@@ -322,6 +376,7 @@ function globCall(
       );
     },
     reaches: (spelled) => spelled.startsWith(below),
+    prunes: (directory) => ignored(posix.relative(cwd, directory)),
   };
 }
 
@@ -504,7 +559,7 @@ function isDynamicPattern(part: string): boolean {
 }
 
 /** What every path strictly below a `/`-separated directory begins with, a drive root such as `C:/` included. */
-function directoryPrefix(directory: string): string {
+export function directoryPrefix(directory: string): string {
   return directory.endsWith(POSIX_SEPARATOR)
     ? directory
     : `${directory}${POSIX_SEPARATOR}`;

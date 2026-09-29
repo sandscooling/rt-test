@@ -131,7 +131,10 @@ async function discoverWorkspace(
   return { ...loaded, status: "discovered", workspace, ...value };
 }
 
-/** An abort before collection starts fails the step, and the caller rejects once the session has closed. */
+/**
+ * An abort before collection starts, or during the walk for each project's crawled links after it, fails the step,
+ * and the caller rejects once the session has closed.
+ */
 async function collectWorkspace(
   session: WorkspaceSession,
   interruption: RunInterruption,
@@ -150,7 +153,7 @@ async function collectWorkspace(
     typecheckModules: session.typecheckModules,
     unsupportedProjects: session.unsupportedProjects,
     unhandledErrors: unhandledErrors.map(errorText),
-    selectionFacts: selectionFacts(session),
+    selectionFacts: await selectionFacts(session, interruption.signal),
   };
   for (const testModule of testModules) {
     sortModule(testModule, session, report);

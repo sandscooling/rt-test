@@ -26,6 +26,7 @@ function discoveryIncluding(include: readonly string[]): TestDiscovery {
     directory: ".",
     vitestDirectory: STARTED,
     patternBases: [{ spelled: "s:/src", directory: "src" }],
+    crawledLinks: { complete: true, links: [] },
     include,
     exclude: [],
     includeSource: [],
@@ -94,5 +95,14 @@ describe("a spelling Vitest's crawl does not reach", () => {
 describe("a pattern whose directories are a drive's root", () => {
   it("D2833: the base of a pattern whose first segment is a drive, such as S:/**/*.test.ts, is that drive's root, where Vitest's glob starts its crawl", () => {
     expect(patternBase("S:/**/*.test.ts", "C:/consumer")).toBe("S:/");
+  });
+});
+
+describe("a pattern directory on a network share", () => {
+  it("D2895: with process.platform read as win32, the base of a pattern below a UNC pattern directory keeps the // that names the server, where the walk for crawled links starts", async () => {
+    const base = await onPlatform("win32", async () =>
+      patternBase("src/**/*.test.ts", "//localhost/C$/consumer"),
+    );
+    expect(base).toBe("//localhost/C$/consumer/src");
   });
 });

@@ -3867,7 +3867,7 @@
     "id": "D2111",
     "defect": "The report includes browser-mode projects, which RT Test never discovers or runs.",
     "file": "packages/daemon/src/vitest/selection-facts.ts",
-    "old": "      .filter((project) => !usesBrowserMode(project))\n",
+    "old": "    if (usesBrowserMode(project)) continue;\n",
     "new": ""
   },
   {
@@ -5769,17 +5769,17 @@
   },
   {
     "id": "D2791",
-    "defect": "A version 4 store has no migration to version 6, so every existing store is refused once the daemon is upgraded.",
+    "defect": "A version 4 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
     "old": "  [\n    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
     "id": "D2792",
-    "defect": "A new store is created at an older schema version, so a daemon from before this change opens it and reads each discovery's selection facts without Vitest's spellings, or at version 4 fails reading a crashed run.",
+    "defect": "A new store is created at schema version 6, so a daemon from before the crawled links opens it and stores discoveries whose selection facts lack them, which this daemon then refuses to read.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "export const STORE_SCHEMA_VERSION = 6;",
-    "new": "export const STORE_SCHEMA_VERSION = 5;"
+    "old": "export const STORE_SCHEMA_VERSION = 7;",
+    "new": "export const STORE_SCHEMA_VERSION = 6;"
   },
   {
     "id": "D2793",
@@ -6023,15 +6023,15 @@
     "id": "D2804",
     "defect": "Protection never names a file by a pattern's own spelling of its directories, so an absolute pattern written through a link, a subst drive or a short name protects nothing.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "    ...patternBases,\n  ].map",
-    "new": "  ].map"
+    "old": "    ...patternBases,\n    ...links,\n  ].map",
+    "new": "    ...links,\n  ].map"
   },
   {
     "id": "D2805",
     "defect": "The glob by Vitest's spelling ignores the exclude patterns, so an excluded file found through that spelling is protected though Vitest never finds it.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "    const glob = globCall(patterns, exclude, vitestDirectory, project);",
-    "new": "    const glob = globCall(patterns, [], vitestDirectory, project);"
+    "old": "      exclude,\n      vitestDirectory,\n",
+    "new": "      [],\n      vitestDirectory,\n"
   },
   {
     "id": "D2806",
@@ -6051,7 +6051,7 @@
     "id": "D2808",
     "defect": "A pattern base keeps a doubled separator or a /./ segment raw, where Vitest's glob normalizes the pattern, so the crawl never reaches that spelling of the directory.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "  if (isAbsolute(driveRoot)) return posix.normalize(driveRoot);",
+    "old": "  if (isAbsolute(driveRoot)) return spelledJoin(driveRoot);",
     "new": "  if (isAbsolute(driveRoot)) return driveRoot;"
   },
   {
@@ -6126,7 +6126,7 @@
   },
   {
     "id": "D2831",
-    "defect": "A version 5 store has no migration to version 6, so every existing store is refused once the daemon is upgraded.",
+    "defect": "A version 5 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
     "old": "  [\n    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
@@ -6158,5 +6158,145 @@
     "file": "packages/daemon/src/store/columns.ts",
     "old": "    vitestDirectory: jsonText(value, \"vitestDirectory\"),",
     "new": "    vitestDirectory: jsonText(value, jsonField(value, \"vitestDirectory\") === undefined ? \"directory\" : \"vitestDirectory\"),"
+  },
+  {
+    "id": "D2850",
+    "defect": "The walk's cycle test stops at any link below a followed one, sooner than fdir, so a test file Vitest reaches only through a nested link is left unprotected and its results can read current when they are not.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "(earlier) => earlier.startsWith(resolved) || resolved.startsWith(earlier),",
+    "new": "() => true,"
+  },
+  {
+    "id": "D2851",
+    "defect": "Protection never names a file through a directory link the crawl follows, so a test file Vitest finds only through such a link is removed from the inputs.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    ...links,\n  ].map",
+    "new": "  ].map"
+  },
+  {
+    "id": "D2852",
+    "defect": "The walk has no cycle test, so it follows a link back to the consumer root again and again until a bound or an unresolvable spelling stops it, and every crawl through one leaves the links not known.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  return followed.some(",
+    "new": "  return false && followed.some("
+  },
+  {
+    "id": "D2853",
+    "defect": "A link fdir passes over because its realpath fails, such as a dangling one, makes the walk's links not known, so no pattern applies although Vitest finds every file through the live links.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  } catch {\n    return undefined;\n  }\n  if (",
+    "new": "  } catch {\n    return \"the link cannot be resolved\";\n  }\n  if ("
+  },
+  {
+    "id": "D2854",
+    "defect": "A directory fdir passes over because it cannot be read, such as a pattern base not on disk yet, makes the walk's links not known, so no pattern applies although Vitest finds nothing there.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  } catch {\n    return undefined;\n  }\n  for (",
+    "new": "  } catch {\n    return \"the directory cannot be read\";\n  }\n  for ("
+  },
+  {
+    "id": "D2855",
+    "defect": "A project whose crawled links are not known still lets patterns apply, matching from the real path alone, so a test file reached through an unknown link can be removed from the inputs.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  if (!crawledLinks.complete) {\n    return {\n",
+    "new": "  if (!crawledLinks.complete) {\n    return fromRealPath;\n    return {\n"
+  },
+  {
+    "id": "D2856",
+    "defect": "A pattern picomatch refuses is stored as a complete walk with no links, so a later build whose protection compiles the pattern protects nothing through the links Vitest follows.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "if (!planned.ok) return { complete: false, reason: UNCOMPILED_REASON };",
+    "new": "if (!planned.ok) return { complete: true, links: [] };"
+  },
+  {
+    "id": "D2857",
+    "defect": "An interrupted discovery's walk never checks the signal, so it keeps walking and returns links instead of ending with the discovery's abort.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "    signal.throwIfAborted();\n",
+    "new": ""
+  },
+  {
+    "id": "D2858",
+    "defect": "The store drops each project's crawled links on read, so a stored discovery reads back with every link lost and a project whose links were not known reads as known.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    crawledLinks: crawledLinks(jsonRecord(value, \"crawledLinks\")),",
+    "new": "    crawledLinks: { complete: true, links: [] },"
+  },
+  {
+    "id": "D2859",
+    "defect": "The version 6 migration keeps the stored selection facts, which lack crawled links, so reading any discovery stored before it fails.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D2860",
+    "defect": "Discovery walks none of a project's crawls, so it reports no crawled link and a test file Vitest finds through one is left unprotected.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "          globbed: [config.include, includeSource],",
+    "new": "          globbed: [],"
+  },
+  {
+    "id": "D2861",
+    "defect": "The walk follows only the first of a project's crawls, so a link below the includeSource patterns' crawl root is never followed and a source file reached through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  for (const crawl of planned.crawls) {",
+    "new": "  for (const crawl of planned.crawls.slice(0, 1)) {"
+  },
+  {
+    "id": "D2882",
+    "defect": "The walk drops a pattern base whose name only begins with another base's name, taking src2 as held by src, so a link below src2 is never followed and a test file Vitest reaches through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "base.startsWith(directoryPrefix(other))",
+    "new": "base.startsWith(other)"
+  },
+  {
+    "id": "D2883",
+    "defect": "A glob's walk starts only at its first pattern's base, so a link below a later pattern's base is never followed and a test file Vitest reaches through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "      bases: patterns.flatMap((pattern) => patternBase(pattern, cwd) ?? []),",
+    "new": "      bases: patterns.slice(0, 1).flatMap((pattern) => patternBase(pattern, cwd) ?? []),"
+  },
+  {
+    "id": "D2895",
+    "defect": "A pattern base below a Windows UNC pattern directory loses the // that names the server, so the walk reads a path on the current drive, finds nothing, and stores the links as complete and empty while Vitest's crawl follows a link below the base, leaving a test file reached through it unprotected.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "  return collapsedUnc ? `${POSIX_SEPARATOR}${joined}` : joined;",
+    "new": "  return joined;"
+  },
+  {
+    "id": "D2896",
+    "defect": "The reader takes a stored project with no crawled links as complete with none, so a record written without them lets patterns apply with no link spellings.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    crawledLinks: crawledLinks(jsonRecord(value, \"crawledLinks\")),",
+    "new": "    crawledLinks: crawledLinks(jsonField(value, \"crawledLinks\") ?? { complete: true, links: [] }),"
+  },
+  {
+    "id": "D2897",
+    "defect": "A crawl whose walk reaches the link bound is passed over as if complete, so every link past the bound goes unrecorded and a test file reached through one is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "    if (!walked.complete) return walked;",
+    "new": "    if (!walked.complete) continue;"
+  },
+  {
+    "id": "D2898",
+    "defect": "The walk reads a directory Vitest's exclude patterns prune, such as node_modules under the exclude **/node_modules, which matches nothing inside it, so a project whose excluded node_modules holds more than 1000 directory links, as a pnpm install does, reads its links as not known and no declared pattern applies.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "      if (!walk.crawl.prunes(path)) {",
+    "new": "      if (true) {"
+  },
+  {
+    "id": "D2899",
+    "defect": "The walk follows directory links Vitest's exclude patterns prune, so a project whose node_modules is itself a link to more than 1000 directory links reads its links as not known and no declared pattern applies.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "    returnsToFollowed(resolved, followed) ||\n    walk.crawl.prunes(path)\n",
+    "new": "    returnsToFollowed(resolved, followed) ||\n    false\n"
+  },
+  {
+    "id": "D2900",
+    "defect": "Discovery hands the walk a signal other than its own, so an interrupted discovery walks on through every crawl, holding the session, before it rejects.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "selectionFacts(session, interruption.signal)",
+    "new": "selectionFacts(session, new AbortController().signal)"
   }
 ]

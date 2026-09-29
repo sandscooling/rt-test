@@ -10,7 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { crawledLinks } from "../src/inputs/crawl-links.js";
 import { protection } from "../src/inputs/protection.js";
 import {
   discoverTests,
@@ -48,6 +49,16 @@ import {
   type RunResult,
   type VitestInstall,
 } from "./harness.js";
+
+/** Walks as it does, unless a test acts at the moment discovery starts the walk. */
+vi.mock("../src/inputs/crawl-links.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/inputs/crawl-links.js")>();
+  return {
+    ...actual,
+    crawledLinks: vi.fn<typeof actual.crawledLinks>(actual.crawledLinks),
+  };
+});
 
 const DISCOVERY_TIMEOUT_MS = 60_000;
 const MARKER_PREFIX = "ran-";
@@ -1532,6 +1543,34 @@ describe("interrupting a discovery", () => {
   );
 
   it(
+    "D2900: a discovery interrupted once its walk for crawled links has begun stops the walk, which throws the discovery's abort reason rather than walking on",
+    async () => {
+      const actual = await vi.importActual<
+        typeof import("../src/inputs/crawl-links.js")
+      >("../src/inputs/crawl-links.js");
+      const outcome = await inConsumerCopy("single", "vitest", async (root) => {
+        const controller = new AbortController();
+        let walked: unknown = "never walked";
+        vi.mocked(crawledLinks).mockImplementationOnce(
+          async (project, signal) => {
+            controller.abort(ABORT_REASON);
+            const walk = actual.crawledLinks(project, signal);
+            walked = await walk.then(
+              () => "walked on",
+              (error: unknown) => error,
+            );
+            return walk;
+          },
+        );
+        await settledDiscovery(root, controller.signal);
+        return walked;
+      });
+      expect(outcome).toBe(ABORT_REASON);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
     "D1303: an aborted discovery rejects only once the host's environment and exit code are restored",
     async () => {
       const { atSettle, exitCodeBefore } = await discoverInterrupted("vitest");
@@ -2196,7 +2235,8 @@ const selectionFactsRuns = new Map<
 
 /**
  * Discovers the selection-facts fixture once per install and root spelling, first writing the setup file it names
- * outside the consumer root and the `setup-link` directory link its bare project names.
+ * outside the consumer root, the `setup-link` directory link its bare project names, and `unit/shared`, a link to
+ * `setup` that the node project's crawl follows.
  */
 function discoverSelectionFacts(
   install: VitestInstall,
@@ -2211,6 +2251,7 @@ function discoverSelectionFacts(
     (root) => {
       writeFileSync(join(dirname(root), OUTSIDE_SETUP_FILE), "export {};\n");
       symlinkSync(join(root, "setup"), join(root, "setup-link"), "junction");
+      symlinkSync(join(root, "setup"), join(root, "unit/shared"), "junction");
       return settledDiscovery(root);
     },
     throughLink,
@@ -2500,6 +2541,10 @@ describe("reporting each workspace's selection facts", () => {
         directory: "unit",
         vitestDirectory: `${root}/unit`,
         patternBases: [{ spelled: `${root}/unit/src`, directory: "unit/src" }],
+        crawledLinks: {
+          complete: true,
+          links: [{ spelled: `${root}/unit/shared`, directory: "setup" }],
+        },
         include: ["**/*.test.mjs"],
         exclude: ["**/skipped/**"],
         includeSource: ["src/**/*.mjs"],
@@ -2535,9 +2580,30 @@ describe("reporting each workspace's selection facts", () => {
         directory: ".",
         vitestDirectory: root,
         patternBases: [{ spelled: `${root}/bare`, directory: "bare" }],
+        crawledLinks: { complete: true, links: [] },
         include: ["bare/*.test.mjs"],
         exclude: ["**/node_modules/**", "**/.git/**"],
         includeSource: [],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D2860: on Vitest 4.1, a directory link the project's crawl follows is reported in its spelling below Vitest's pattern directory, beside the root-relative directory it resolves to",
+    async () => {
+      const discovery = await discoverSelectionFacts("vitest-4");
+      const root = spelledRoot(discovery, ".");
+      expect(
+        projectFact(
+          discovery,
+          ".",
+          "node",
+          (facts) => facts.testFilePatterns.crawledLinks,
+        ),
+      ).toStrictEqual({
+        complete: true,
+        links: [{ spelled: `${root}/unit/shared`, directory: "setup" }],
       });
     },
     DISCOVERY_TIMEOUT_MS,
