@@ -20,6 +20,8 @@ C69. **Verify a logged coverage gap against the code**: A recorded coverage gap 
 
 C70. **Order assertions so the named defect reaches its own**: Inside a test, no assertion the type system already decides, or that no production change could make false, stands in for a guard.
 
+C168. **Keep a re-pointed record's old defect proven**: When a named-defect test's record takes a new mutation because the behavior it pinned changed, the old mutation's defect keeps a record of its own, or the change names the record that already detects it. FAIL on a re-anchor that retires a defect silently.
+
 ## Assertions
 
 C71. **Describe behavior in the test name**: A test name states the behavior and outcome ("rejects a missing fingerprint"), not the function under test.
