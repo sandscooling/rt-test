@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { STORE_SCHEMA_VERSION } from "./schema.js";
 
 const SELECT_SCHEMA_VERSION = "SELECT user_version FROM pragma_user_version";
@@ -39,18 +39,27 @@ export function inRecordRead<T>(database: DatabaseSync, read: () => T): T {
 
 /** The opener checks the version once, so this catches a newer RT Test migrating the store while it is open. */
 function refuseNewerSchema(database: DatabaseSync, outcome: string): void {
-  const version = database.prepare(SELECT_SCHEMA_VERSION).get()?.[
-    "user_version"
-  ];
-  if (typeof version !== "number") {
-    throw new Error(
-      `The store's schema version read as ${String(version)}, not a number`,
-    );
-  }
+  const version = headerNumber(
+    database.prepare(SELECT_SCHEMA_VERSION).get(),
+    "user_version",
+  );
   if (!isNewerSchema(version)) return;
   throw new NewerStoreSchemaError(
     `The RT Test store is at schema version ${version}, newer than the version ${STORE_SCHEMA_VERSION} this RT Test reads and writes: a newer RT Test migrated it after this daemon opened it, so ${outcome}. Restart the daemon with the newer RT Test.`,
   );
+}
+
+export function headerNumber(
+  row: Record<string, SQLOutputValue> | undefined,
+  column: string,
+): number {
+  const value = row?.[column];
+  if (typeof value !== "number") {
+    throw new Error(
+      `The store header's ${column} read as ${String(value)}, not a number`,
+    );
+  }
+  return value;
 }
 
 /** Written by a newer RT Test, whose records this one may misread or write in an older shape. */

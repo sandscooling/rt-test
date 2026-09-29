@@ -1283,6 +1283,42 @@ describe(
       });
       expect(refusals).toStrictEqual([REFUSAL, REFUSAL]);
     });
+
+    it("D2970: a discovery whose store write failed is logged with the storing error and never as ended, and a stored one is logged as ended", async () => {
+      /** The storing errors and `discovery ended:` entries a start sequence logs over `store`. */
+      async function endings(store: RtTestStore) {
+        const { log } = await begunThenStopped(
+          daemon(
+            confirmed("a"),
+            new ScriptedExecutor({
+              ended: true,
+              value: discovery(discovered("a")),
+            }),
+            store,
+          ),
+          (started) => started,
+        );
+        return {
+          storingErrors: log.entries.filter((entry) =>
+            entry.startsWith("error: storing the discovery"),
+          ).length,
+          ended: log.entries.filter((entry) =>
+            entry.startsWith("discovery ended:"),
+          ),
+        };
+      }
+      const failing = new RecordingStore();
+      failing.writeDiscovery = () => {
+        throw new Error("database is locked");
+      };
+      expect({
+        failed: await endings(failing),
+        stored: await endings(new RecordingStore()),
+      }).toStrictEqual({
+        failed: { storingErrors: 1, ended: [] },
+        stored: { storingErrors: 0, ended: ["discovery ended: a discovered"] },
+      });
+    });
   },
 );
 
