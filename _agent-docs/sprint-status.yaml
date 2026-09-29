@@ -22,7 +22,7 @@ sprint-2: in-progress
 2-3g-narrow-fingerprints: done
 2-3j-bound-dependency-build: done
 2-3f-schedule-runs: done
-2-3h-judge-runs: ready-for-dev
+2-3h-judge-runs: in-progress
 2-3i-schedule-answers: ready-for-dev
 2-3k-hold-self-changing-runs: backlog
 2-3l-hold-self-changing-discovery: backlog
