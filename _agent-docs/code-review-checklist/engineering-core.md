@@ -65,6 +65,8 @@ C23. **One limit for one dataset**: Two reads of the same dataset for two purpos
 
 C24. **Derive a truncation flag from the bound that cut**: A `truncated` flag compares against the same constant that bounded the read, and every bound in a multi-stage aggregation feeds it.
 
+C170. **Cut the text inside a bounded list**: A list bounded to keep an answer or record under a size limit also cuts each free-text field its items carry, so the bound limits bytes as well as items. FAIL on an uncut reason, detail or message inside such a list.
+
 C25. **Detect truncation where completeness decides**: When a bounded result drives a completeness decision (a uniqueness check, an "all done" verdict, a deletion loop), reaching the bound is detected and gates the decision rather than passing silently.
 
 C26. **Filter before slicing**: A visibility or scope filter runs before the slice to the caller's cap, and the read over-fetches to allow for it.

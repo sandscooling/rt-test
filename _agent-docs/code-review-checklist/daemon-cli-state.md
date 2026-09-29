@@ -29,6 +29,8 @@ C120. **Update one dimension without writing another**: An operation that change
 
 C121. **Keep result kinds apart**: Local test results, typecheck status, backend synchronization and live integration results are separate record kinds, and none changes another's status.
 
+C169. **Name every signal that ends a reported wait**: An answer that says a state lasts until an event names every source that can end it. FAIL when the promise the code awaits also resolves on a signal the text does not name, such as a retry at a periodic reconciliation, since a reader such as a wait then reports nothing coming when something is.
+
 ## Identity
 
 C122. **Bind every result to its identities**: A persisted result carries project identity, run identity, input fingerprint and adapter version; a write missing one is rejected, never defaulted.
