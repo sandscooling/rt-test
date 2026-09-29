@@ -708,10 +708,10 @@ describe("retrying at a periodic reconciliation", () => {
     ]);
   });
 
-  it("D2788: a retry armed because the last attempt stored nothing, planned once the inputs read current again, is logged with that reason and never as a failed run", async () => {
+  it("D2788: a retry armed because the last attempt stored nothing does not run a workspace whose latest run reads current again by plan time", async () => {
     let digest = "a-changed";
     let moveRevision = (): void => undefined;
-    const due = await running(
+    const outcome = await running(
       {
         seed: currentResults("a"),
         script: {
@@ -735,12 +735,13 @@ describe("retrying at a periodic reconciliation", () => {
         await flush();
         started.inputs.endPeriodicReconciliation();
         await flush();
-        return dueEntries(started.log);
+        return { calls: [...started.calls], due: dueEntries(started.log) };
       },
     );
-    expect(due.at(-1)).toBe(
-      "due: a, its last attempt stored nothing, so the periodic reconciliation retries it",
-    );
+    expect(outcome).toStrictEqual({
+      calls: ["run:a@1", "idle", "run:a@1", "idle"],
+      due: ["due: a, its inputs differ from those of its latest run"],
+    });
   });
 
   it("D2661: a workspace whose retry fails again is retried once for each periodic reconciliation, not repeatedly", async () => {

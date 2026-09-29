@@ -2,7 +2,7 @@ import { FORCE_STOP_GRACE_MS } from "../vitest/force-stop.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
-import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
+import type { NotConfirmedRun, VitestRun } from "../vitest/run-workspace.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
@@ -36,9 +36,30 @@ export type ExecutorJob = Exclude<ExecutorRequest, { type: "abort" }>;
 /** Executor to daemon: one per job. */
 export type ExecutorReply =
   | { readonly type: "discovered"; readonly discovery: TestDiscovery }
-  | { readonly type: "ran"; readonly run: WorkspaceRun | NotConfirmedRun }
+  | { readonly type: "ran"; readonly run: VitestRun | NotConfirmedRun }
   | {
       readonly type: "dependencies-built";
       readonly dependencies: DependencyInformation;
     }
   | { readonly type: "job-failed"; readonly error: string };
+
+const REPLY_TYPES: Readonly<Record<ExecutorReply["type"], true>> = {
+  discovered: true,
+  ran: true,
+  "dependencies-built": true,
+  "job-failed": true,
+};
+
+/**
+ * Whether a message on the executor's channel is a job's reply. The project's code runs in that process and can call
+ * `process.send` itself, as a library announcing readiness to a parent does.
+ */
+export function isExecutorReply(message: unknown): message is ExecutorReply {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    "type" in message &&
+    typeof message.type === "string" &&
+    Object.hasOwn(REPLY_TYPES, message.type)
+  );
+}

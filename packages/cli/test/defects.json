@@ -38,7 +38,7 @@
     "id": "D1716",
     "defect": "Control characters reach the terminal raw, so a consumer's workspace pattern can move the cursor and rewrite the listing the user confirms.",
     "file": "packages/cli/src/output.ts",
-    "old": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}]/gu;",
+    "old": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]/gu;",
     "new": "const UNPRINTABLE = /(?!)/gu;"
   },
   {
@@ -558,5 +558,12 @@
     "file": "packages/cli/src/commands/summary.ts",
     "old": "${REASON_SEPARATOR}${cutReasonText(run)}",
     "new": "${REASON_SEPARATOR}${oneLine(run.reason)}"
+  },
+  {
+    "id": "D2801",
+    "defect": "A line or paragraph separator in a value from the consumer's tree reaches the terminal unescaped, breaking the line the user reviews.",
+    "file": "packages/cli/src/output.ts",
+    "old": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]/gu;",
+    "new": "const UNPRINTABLE = /[\\p{Cc}\\p{Cf}]/gu;"
   }
 ]

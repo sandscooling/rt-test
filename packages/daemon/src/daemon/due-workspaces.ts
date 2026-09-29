@@ -20,8 +20,6 @@ export const DUE_REASON = {
     "its latest run failed with no input change to blame, so the periodic reconciliation retries it",
   crashedRun:
     "its latest run's executor process ended during the run with no input change to blame, so the periodic reconciliation retries it",
-  nothingStored:
-    "its last attempt stored nothing, so the periodic reconciliation retries it",
 } as const;
 
 /** Why the periodic reconciliation retries a workspace by its latest run: that run failed or crashed. Undefined for any other run. */

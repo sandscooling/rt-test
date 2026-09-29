@@ -18,7 +18,8 @@ import {
   type WorkspaceSession,
 } from "./workspace-session.js";
 
-export type WorkspaceRun =
+/** A run `runWorkspace` ended with, whatever the workspace's Vitest did. */
+export type VitestRun =
   | {
       readonly status: "ran";
       readonly workspace: VitestWorkspace;
@@ -51,7 +52,11 @@ export type WorkspaceRun =
       /** The signal aborted before the run's turn came, so the workspace was never loaded. */
       readonly status: "interrupted-before-load";
       readonly workspace: VitestWorkspace;
-    }
+    };
+
+/** A stored run: one `runWorkspace` ended with, or one the daemon's executor recorded when its process ended mid-run. */
+export type WorkspaceRun =
+  | VitestRun
   | {
       /** The run's executor process ended during the run with no stop asked of it, so the run left no result. */
       readonly status: "crashed";
@@ -68,7 +73,7 @@ export interface NotConfirmedRun {
 }
 
 type RanWorkspace = Omit<
-  Extract<WorkspaceRun, { status: "ran" }>,
+  Extract<VitestRun, { status: "ran" }>,
   "status" | "workspace" | "vitestVersion" | "closeError"
 >;
 
@@ -80,7 +85,7 @@ export function runWorkspace(
   workspace: VitestWorkspace,
   confirmedConfigFile: string,
   signal: AbortSignal,
-): Promise<WorkspaceRun | NotConfirmedRun> {
+): Promise<VitestRun | NotConfirmedRun> {
   return queueSessionJob(async () => {
     if (signal.aborted) {
       return { status: "interrupted-before-load", workspace };

@@ -12,7 +12,6 @@ import {
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
-  DUE_REASON,
   GROUP_REASON,
   orderQueue,
   queueGroup,
@@ -328,7 +327,7 @@ export class Scheduler {
       .map((entry) => ({ entry, latest: runs.get(entry.workspace.path) }));
   }
 
-  /** Each confirmed workspace whose latest run is not bound to its current fingerprint, or whose retry is owed. */
+  /** Each confirmed workspace whose latest run is not bound to its current fingerprint, or failed or crashed while its retry is owed. */
   #due(
     revision: number,
     view: ScheduleView,
@@ -342,8 +341,7 @@ export class Scheduler {
         staleReason(
           latest,
           fingerprintDigest(view.inputs.workspaceFingerprint(entry)),
-        ) ??
-        (retry ? (retryReason(latest) ?? DUE_REASON.nothingStored) : undefined);
+        ) ?? (retry ? retryReason(latest) : undefined);
       if (reason === undefined) continue;
       if (!retry && this.#ranAlready(path, revision, entry)) continue;
       due.push({ entry, latest, reason });

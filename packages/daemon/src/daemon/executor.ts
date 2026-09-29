@@ -12,6 +12,7 @@ import type { DaemonLog } from "./daemon-log.js";
 import { daemonEntryPoint } from "./entry-point.js";
 import {
   EXECUTOR_BOUND_MS,
+  isExecutorReply,
   type ExecutorJob,
   type ExecutorReply,
   type ExecutorRequest,
@@ -46,6 +47,8 @@ const PARSED_FILE_NOT_KNOWN =
   "and the file it was parsing, if any, is not known";
 const RECORD_NOT_REMOVED_REASON =
   "the dependency build's parse record could not be removed";
+const NOT_A_REPLY_REASON =
+  "the executor process sent a message that is no job reply, as the project's own code may, so the message was ignored";
 
 /** A job either ended and produced its record, or ended with nothing to store and the reason. */
 export type JobOutcome<T> =
@@ -273,8 +276,13 @@ export class Executor {
       detached: ownsProcessGroup(),
       windowsHide: true,
     });
-    child.on("message", (reply: ExecutorReply) => {
-      if (this.#child === child) this.#settle?.(reply);
+    child.on("message", (message: unknown) => {
+      if (this.#child !== child) return;
+      if (isExecutorReply(message)) {
+        this.#settle?.(message);
+        return;
+      }
+      this.#log.entry(`${NOT_A_REPLY_REASON} (process ${child.pid})`);
     });
     child.once("exit", (code, signal) => this.#exited(child, code, signal));
     child.on("error", (error) => {

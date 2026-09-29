@@ -20,8 +20,8 @@ export const NOT_STARTED = "not started:";
 
 const JSON_INDENT = 2;
 const LINE_BREAK = "\n";
-/** Control and invisible formatting characters, which could move the cursor or reorder what the user reviews. */
-const UNPRINTABLE = /[\p{Cc}\p{Cf}]/gu;
+/** Control and invisible formatting characters and line and paragraph separators, which could move the cursor, break a line or reorder what the user reviews. */
+const UNPRINTABLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const ESCAPE_RADIX = 16;
 const ESCAPE_DIGITS = 4;
 

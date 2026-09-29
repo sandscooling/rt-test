@@ -78,7 +78,7 @@ import {
   notDiscoveredLines,
 } from "../src/answer-text.js";
 import { main } from "../src/main.js";
-import { EXIT_FAILURE, Output, type ExitCode } from "../src/output.js";
+import { EXIT_FAILURE, Output, oneLine, type ExitCode } from "../src/output.js";
 import { decideTrust, type TrustDecision } from "../src/trust-prompt.js";
 
 const BIN = fileURLToPath(new URL("../src/bin.ts", import.meta.url));
@@ -1573,6 +1573,19 @@ describe("a query", () => {
       stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
     ).toBe(
       `  ${WORKSPACE_A}: latest run crashed: the executor process 7 exited (42 more characters), adapter version 3`,
+    );
+  });
+
+  it("D2801: a line or paragraph separator in a value from the consumer's tree prints escaped, never breaking the line", () => {
+    const separated = [
+      "a",
+      String.fromCodePoint(0x2028),
+      "b",
+      String.fromCodePoint(0x2029),
+      "c",
+    ].join("");
+    expect(oneLine(separated)).toBe(
+      ["a", "u2028b", "u2029c"].join(String.fromCharCode(92)),
     );
   });
 

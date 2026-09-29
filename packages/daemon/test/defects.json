@@ -5762,10 +5762,10 @@
   },
   {
     "id": "D2788",
-    "defect": "A retry armed because the last attempt stored nothing is logged as a failed run's.",
+    "defect": "A retry armed because the last attempt stored nothing runs a workspace whose latest run is bound to its current fingerprint again by plan time, so a current result runs again.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "(retry ? (retryReason(latest) ?? DUE_REASON.nothingStored) : undefined);",
-    "new": "(retry ? (retryReason(latest) ?? DUE_REASON.failedRun) : undefined);"
+    "old": ") ?? (retry ? retryReason(latest) : undefined);",
+    "new": ") ?? (retry ? (retryReason(latest) ?? \"its last attempt stored nothing\") : undefined);"
   },
   {
     "id": "D2791",
@@ -5815,5 +5815,19 @@
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "    const settle = this.#settle;",
     "new": "    const settle = undefined;"
+  },
+  {
+    "id": "D2799",
+    "defect": "A message the project's own code sends on the executor's channel, such as a readiness process.send, settles the run, which then ends mid-run and stores nothing.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      if (isExecutorReply(message)) {",
+    "new": "      if (message !== undefined) {"
+  },
+  {
+    "id": "D2800",
+    "defect": "A message on the executor's channel that is no job reply is dropped without a line in the daemon's log.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      this.#log.entry(`${NOT_A_REPLY_REASON} (process ${child.pid})`);",
+    "new": ""
   }
 ]

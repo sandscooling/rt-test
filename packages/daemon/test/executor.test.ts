@@ -1196,7 +1196,7 @@ const UNCAUGHT_EXIT =
 const TEARDOWN_EXIT =
   "the executor process <pid> exited during the job (exit code 3)";
 
-type CrashKind = "throw" | "exit-in-teardown" | "none";
+type CrashKind = "throw" | "exit-in-teardown" | "send-ready" | "none";
 
 /** Runs `job` in a fresh executor over a copy of the executor-crash fixture set to `crash`, then closes it. */
 function inCrashingConsumer<T>(
@@ -1294,6 +1294,51 @@ describe("a run whose executor process dies with no stop asked of it", () => {
         runIn,
       );
       expect(crashFacts(outcome)).toStrictEqual(crashedWith(TEARDOWN_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2799: a run whose global setup sends its own message on the executor's channel runs to completion, its tests passed",
+    async () => {
+      const outcome = await inCrashingConsumer("vitest", "send-ready", runIn);
+      expect(outcome.ended ? runSummary(outcome.value) : outcome).toStrictEqual(
+        {
+          execution: "completed",
+          modules: {
+            "a.test.mjs": {
+              held: finished("passed"),
+              second: finished("passed"),
+            },
+          },
+        },
+      );
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2800: a message on the executor's channel that is no job reply is logged as ignored, naming the process",
+    async () => {
+      const log = memoryLog();
+      await inConsumerCopy(CRASH_FIXTURE, "vitest", (root) =>
+        withEnvironment(CRASH_VARIABLE, "send-ready", async () => {
+          next.containment = undefined;
+          const executor = new Executor(log);
+          try {
+            await runIn(executor, root);
+          } finally {
+            await executor.close();
+          }
+        }),
+      );
+      expect(
+        log.entries
+          .filter((entry) => entry.includes("no job reply"))
+          .map(pidless),
+      ).toStrictEqual([
+        "the executor process sent a message that is no job reply, as the project's own code may, so the message was ignored (process <pid>)",
+      ]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
