@@ -920,14 +920,14 @@
     "id": "D1238",
     "defect": "The discovery writer writes outside a transaction, so a failure part way leaves the rows before it.",
     "file": "packages/daemon/src/store/write-discovery.ts",
-    "old": "return inWriteTransaction(database, () => {",
+    "old": "return inRecordWrite(database, () => {",
     "new": "return ((write: () => StoredDiscovery) => write())(() => {"
   },
   {
     "id": "D1239",
     "defect": "The run writer writes outside a transaction, so a reader mid-write sees part of the run.",
     "file": "packages/daemon/src/store/write-run.ts",
-    "old": "return inWriteTransaction(database, () => {",
+    "old": "return inRecordWrite(database, () => {",
     "new": "return ((write: () => StoredRun) => write())(() => {"
   },
   {
@@ -990,8 +990,8 @@
     "id": "D1248",
     "defect": "The run-by-identity read skips the scope check, so an empty scope answers with no run.",
     "file": "packages/daemon/src/store/read-runs.ts",
-    "old": "  requireScope(scope);\n  return inReadTransaction(database, () => selectRun(database, scope, runId));",
-    "new": "  return inReadTransaction(database, () => selectRun(database, scope, runId));"
+    "old": "  requireScope(scope);\n  return inRecordRead(database, () => selectRun(database, scope, runId));",
+    "new": "  return inRecordRead(database, () => selectRun(database, scope, runId));"
   },
   {
     "id": "D1249",
@@ -1032,7 +1032,7 @@
     "id": "D1260",
     "defect": "A store with a newer schema version is opened and read under this version's meaning.",
     "file": "packages/daemon/src/store/open-store.ts",
-    "old": "  if (header.userVersion > STORE_SCHEMA_VERSION) {\n    return \"it was written by a newer RT Test\";\n  }\n",
+    "old": "  if (isNewerSchema(header.userVersion)) {\n    return \"it was written by a newer RT Test\";\n  }\n",
     "new": ""
   },
   {
@@ -1648,13 +1648,13 @@
     "id": "D1457",
     "defect": "A failed store write ends the start sequence, so the workspaces after it never run.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      this.#nothingStored(workspacePath, `the store write failed`);\n      return false;",
+    "old": "      this.#nothingStored(workspacePath, storeFailureReason(error));\n      return false;",
     "new": "      throw error;"
   },
   {
     "id": "D1458",
     "defect": "A run that loaded nothing because its config changed is handed to the store instead of being listed with its reason.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
     "old": "  return run.status === \"not-confirmed\" ? { unstored: run.reason } : { run };",
     "new": "  return run.status === \"never\" ? { unstored: run.reason } : { run };"
   },
@@ -5323,8 +5323,8 @@
     "id": "D2691",
     "defect": "The daemon reads no stored results when it plans, so a restart rediscovers and reruns every workspace though its results read current.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return this.#parts.store.readLatestResults(this.#parts.scope);",
-    "new": "    return { discovery: undefined, latestRuns: [] };"
+    "old": "    const results = this.#parts.store.readLatestResults(this.#parts.scope);",
+    "new": "    const results: LatestResults = { discovery: undefined, discoveryRefusal: undefined, latestRuns: [] };"
   },
   {
     "id": "D2692",
@@ -6379,7 +6379,7 @@
   {
     "id": "D2906",
     "defect": "A run its interruption ended before its tests loaded is stored, not fingerprinted, instead of storing nothing and being listed with the interruption's paths.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
     "old": "    run.status === \"interrupted-before-load\" ||\n",
     "new": ""
   },
@@ -6578,5 +6578,187 @@
     "file": "packages/daemon/src/inputs/crawl-links.ts",
     "old": "(earlier) => earlier.startsWith(resolved) || resolved.startsWith(earlier),",
     "new": "(earlier) => earlier.startsWith(resolved.slice(0, -1)) || resolved.startsWith(earlier.slice(0, -1)),"
+  },
+  {
+    "id": "D2915",
+    "defect": "A latest discovery refused as unreadable throws the whole read of the latest results, so the readable latest runs are lost with it and the daemon never plans again.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    if (!(error instanceof UnreadableRecordError)) throw error;\n",
+    "new": "    throw error;\n"
+  },
+  {
+    "id": "D2916",
+    "defect": "A refused discovery's refusal keeps only its own message, dropping the cause that says why the stored value could not be read.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "return { discovery: undefined, discoveryRefusal: errorText(error) };",
+    "new": "return { discovery: undefined, discoveryRefusal: (error as Error).message };"
+  },
+  {
+    "id": "D2917",
+    "defect": "An unreadable stored input fingerprint is thrown as a plain error, so a latest discovery holding one stalls the daemon instead of reading as refused.",
+    "file": "packages/daemon/src/store/stored-records.ts",
+    "old": "  throw new UnreadableRecordError(\n    `The store holds an unreadable input fingerprint",
+    "new": "  throw new Error(\n    `The store holds an unreadable input fingerprint"
+  },
+  {
+    "id": "D2918",
+    "defect": "Tests stored under a workspace not discovered are thrown as a plain error, so a latest discovery holding them stalls the daemon instead of reading as refused.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "    throw new UnreadableRecordError(\n      `The store holds tests under",
+    "new": "    throw new Error(\n      `The store holds tests under"
+  },
+  {
+    "id": "D2919",
+    "defect": "Selection facts stored under a workspace not discovered are thrown as a plain error, so a latest discovery holding them stalls the daemon instead of reading as refused.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "    throw new UnreadableRecordError(\n      `The store holds selection facts under",
+    "new": "    throw new Error(\n      `The store holds selection facts under"
+  },
+  {
+    "id": "D2920",
+    "defect": "Any failure reading the latest discovery, a SQLite error included, is read as a refused record, so a broken store answers as though no discovery were stored.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "    if (!(error instanceof UnreadableRecordError)) throw error;\n",
+    "new": ""
+  },
+  {
+    "id": "D2921",
+    "defect": "The run writer takes the write lock without the schema guard, so a run is written in this version's shape into a store a newer RT Test migrated.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "import { inRecordWrite } from \"./transaction.js\";",
+    "new": "import { inWriteTransaction as inRecordWrite } from \"./transaction.js\";"
+  },
+  {
+    "id": "D2922",
+    "defect": "The discovery writer takes the write lock without the schema guard, so a discovery is written in this version's shape into a store a newer RT Test migrated.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "import { inRecordWrite } from \"./transaction.js\";",
+    "new": "import { inWriteTransaction as inRecordWrite } from \"./transaction.js\";"
+  },
+  {
+    "id": "D2923",
+    "defect": "The query's read of the latest results skips the schema guard, so it reads a store a newer RT Test migrated under this version's meaning.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "return inRecordRead(database, () => ({",
+    "new": "return inWriteTransaction(database, () => ({"
+  },
+  {
+    "id": "D2924",
+    "defect": "Newer is judged one version late, so a store exactly one schema version newer is read and written under this version's meaning.",
+    "file": "packages/daemon/src/store/transaction.ts",
+    "old": "  return userVersion > STORE_SCHEMA_VERSION;",
+    "new": "  return userVersion > STORE_SCHEMA_VERSION + 1;"
+  },
+  {
+    "id": "D2925",
+    "defect": "A write reads the schema version before it takes the write lock, so a migration a newer RT Test commits while the write waits is written over.",
+    "file": "packages/daemon/src/store/transaction.ts",
+    "old": "  return inWriteTransaction(database, () => {\n    refuseNewerSchema(database, NOTHING_STORED);\n    return write();\n  });",
+    "new": "  refuseNewerSchema(database, NOTHING_STORED);\n  return inWriteTransaction(database, write);"
+  },
+  {
+    "id": "D2926",
+    "defect": "A read takes the schema version outside the snapshot it reads the records from, so records a newer RT Test migrated as the read began are read under this version's meaning.",
+    "file": "packages/daemon/src/store/transaction.ts",
+    "old": "  database.exec(\"BEGIN\");\n  return finishTransaction(database, () => {\n    refuseNewerSchema(database, NOTHING_READ);\n    return read();\n  });",
+    "new": "  refuseNewerSchema(database, NOTHING_READ);\n  database.exec(\"BEGIN\");\n  return finishTransaction(database, read);"
+  },
+  {
+    "id": "D2927",
+    "defect": "A stored value the reader cannot rebuild is refused as a plain error, so a refused latest discovery stalls the daemon and no discovery is ever planned to replace it.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  return new UnreadableRecordError(",
+    "new": "  return new Error("
+  },
+  {
+    "id": "D2928",
+    "defect": "The refusal of the latest discovery is logged at every read of the latest results, so each plan repeats it.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (refusal === this.#loggedRefusal) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D2929",
+    "defect": "No read of the latest results notes a refused discovery, so the log never names it, not at start, at any plan, or before an answer quotes it cut.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#noteRefusal(results.discoveryRefusal);\n",
+    "new": ""
+  },
+  {
+    "id": "D2930",
+    "defect": "A record read skips the schema guard, so a daemon over a store a newer RT Test migrated reads it as holding no discovery, plans one, and answers a summary.",
+    "file": "packages/daemon/src/store/transaction.ts",
+    "old": "    refuseNewerSchema(database, NOTHING_READ);\n",
+    "new": ""
+  },
+  {
+    "id": "D2931",
+    "defect": "A run write refused for a newer schema is listed with the generic reason, so the answer hides the restart that would store it.",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "    ? `${STORE_WRITE_FAILED_REASON}: ${error.message}`",
+    "new": "    ? STORE_WRITE_FAILED_REASON"
+  },
+  {
+    "id": "D2932",
+    "defect": "Any failed store write puts its error's detail in the listed reason, where only the log should hold it.",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "    : STORE_WRITE_FAILED_REASON;",
+    "new": "    : `${STORE_WRITE_FAILED_REASON}: ${errorText(error)}`;"
+  },
+  {
+    "id": "D2933",
+    "defect": "A refused latest discovery answers as though none was ever stored, hiding the refusal and that a new discovery will replace it.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "          : refusedDiscoveryReason(discoveryRefusal, daemon),",
+    "new": "          : `the daemon serving ${daemon.consumerRoot} has stored no discovery for this worktree; ${activityClause(daemon)}`,"
+  },
+  {
+    "id": "D2934",
+    "defect": "The refusal an answer quotes is never cut, so a refusal quoting a huge stored value floods the answer and the count of what the log holds is lost.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  const { reason, omittedCharacters } = cutReason(refusal);",
+    "new": "  const { reason, omittedCharacters } = { reason: refusal, omittedCharacters: 0 };"
+  },
+  {
+    "id": "D2958",
+    "defect": "A summary reads the latest results without noting a refused discovery, so an answer that says the rest of the refusal is in the daemon log points at a log that does not hold it.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "  summary(): SummaryAnswer | NoAnswer {\n    const results = this.#latestResults();",
+    "new": "  summary(): SummaryAnswer | NoAnswer {\n    const results = this.#parts.store.readLatestResults(this.#parts.scope);"
+  },
+  {
+    "id": "D2959",
+    "defect": "A path status reads the latest results without noting a refused discovery, so an answer that says the rest of the refusal is in the daemon log points at a log that does not hold it.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    const results = this.#latestResults();",
+    "new": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    const results = this.#parts.store.readLatestResults(this.#parts.scope);"
+  },
+  {
+    "id": "D2960",
+    "defect": "The once-only guard keys on having logged a refusal rather than on its text, so a second, different refusal of the latest discovery is never logged.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (refusal === this.#loggedRefusal) return;",
+    "new": "    if (refusal === this.#loggedRefusal || (refusal !== undefined && this.#loggedRefusal !== undefined)) return;"
+  },
+  {
+    "id": "D2961",
+    "defect": "A readable read does not clear the logged refusal, so a refusal that returns after a readable discovery replaced it is never logged again.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#loggedRefusal = refusal;",
+    "new": "    this.#loggedRefusal = refusal ?? this.#loggedRefusal;"
+  },
+  {
+    "id": "D2962",
+    "defect": "A query row missing a column its reader needs is refused as an unreadable record, so a reader bug reads as no discovery and the daemon rediscovers instead of failing loudly.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    throw new Error(`The store query returned no ${name} column`);",
+    "new": "    throw new UnreadableRecordError(`The store query returned no ${name} column`);"
+  },
+  {
+    "id": "D2963",
+    "defect": "The latest discovery is read outside the snapshot the latest runs are read from, so when a writer commits a discovery and a run between the two reads, the answer pairs the older discovery with the newer run.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),",
+    "new": "  const discovery = latestDiscovery(database, scope);\n  return inRecordRead(database, () => ({\n    ...discovery,"
   }
 ]

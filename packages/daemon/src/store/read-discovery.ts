@@ -23,6 +23,7 @@ import {
   unreadWorkspaceSource,
   unsupportedProject,
   unsupportedVitest,
+  UnreadableRecordError,
   type Members,
   type Row,
 } from "./columns.js";
@@ -32,7 +33,7 @@ import {
   type StoredDiscovery,
   type StoreScope,
 } from "./stored-records.js";
-import { inReadTransaction } from "./transaction.js";
+import { inRecordRead } from "./transaction.js";
 
 const DISCOVERY_COLUMNS = `SELECT sequence, discovery_id, project_identity, worktree_identity, fingerprint_kind,
   fingerprint_digest, adapter_version, not_read
@@ -64,9 +65,7 @@ export function readLatestDiscovery(
   scope: StoreScope,
 ): StoredDiscovery | undefined {
   requireScope(scope);
-  return inReadTransaction(database, () =>
-    selectLatestDiscovery(database, scope),
-  );
+  return inRecordRead(database, () => selectLatestDiscovery(database, scope));
 }
 
 /** Reads inside the caller's transaction, so it shares that transaction's snapshot. */
@@ -199,12 +198,12 @@ function refuseDiscoveredDetails(
   tests: readonly DiscoveredTest[],
 ): void {
   if (tests.length > 0) {
-    throw new Error(
+    throw new UnreadableRecordError(
       `The store holds tests under the ${status} workspace ${workspace.path}`,
     );
   }
   if (column(row, SELECTION_FACTS) !== null) {
-    throw new Error(
+    throw new UnreadableRecordError(
       `The store holds selection facts under the ${status} workspace ${workspace.path}`,
     );
   }

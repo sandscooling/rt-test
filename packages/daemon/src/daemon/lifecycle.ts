@@ -23,11 +23,16 @@ import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
-import { errorText } from "../vitest/error-text.js";
 import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
 import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
+import {
+  interruptedRun,
+  runToStore,
+  storeFailureReason,
+  threwOutcome,
+} from "./job-endings.js";
 import type {
   DaemonActivity,
   DaemonIdentity,
@@ -48,7 +53,8 @@ const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
 /** The build a run waited on and one rebuild; a run waits through no more discards than these. */
 const DISCARDS_A_RUN_WAITS_THROUGH = 2;
-const JOB_THREW_REASON = "the job could not be run";
+const DISCOVERY_REFUSED_ENTRY =
+  "warning: the latest stored discovery was refused as unreadable, so a discovery is due as if none were stored, and no workspace runs until it is stored";
 
 export interface LifecycleParts {
   readonly identity: DaemonIdentity;
@@ -83,6 +89,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #scheduler: Scheduler;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJob[] = [];
+  #loggedRefusal: string | undefined;
   #sequence: Promise<void> = Promise.resolve();
   #stopping: Promise<void> | undefined;
   readonly #whenStopped: Promise<void>;
@@ -197,8 +204,20 @@ export class DaemonLifecycle implements DaemonHandlers {
     });
   }
 
+  /** Every read notes a refused discovery, so the log holds it whole before an answer quotes it cut. */
   #latestResults(): LatestResults {
-    return this.#parts.store.readLatestResults(this.#parts.scope);
+    const results = this.#parts.store.readLatestResults(this.#parts.scope);
+    this.#noteRefusal(results.discoveryRefusal);
+    return results;
+  }
+
+  /** Logs each refusal of the latest discovery once, as the reason a discovery is due. */
+  #noteRefusal(refusal: string | undefined): void {
+    if (refusal === this.#loggedRefusal) return;
+    this.#loggedRefusal = refusal;
+    if (refusal !== undefined) {
+      this.#parts.log.entry(`${DISCOVERY_REFUSED_ENTRY}: ${refusal}`);
+    }
   }
 
   #view(): DaemonView {
@@ -463,7 +482,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       return true;
     } catch (error) {
       this.#parts.log.error(`storing ${what}`, error);
-      this.#nothingStored(workspacePath, `the store write failed`);
+      this.#nothingStored(workspacePath, storeFailureReason(error));
       return false;
     }
   }
@@ -532,32 +551,6 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#parts.log.error(`closing ${what}`, error);
     }
   }
-}
-
-/** A job that threw ended with nothing, the same as one whose process died. */
-function threwOutcome<T>(error: unknown): JobOutcome<T> {
-  return { ended: false, reason: `${JOB_THREW_REASON}: ${errorText(error)}` };
-}
-
-/** A run its abort ended: interrupted before or after it loaded, or with nothing, as an exit after an abort ends it. */
-function interruptedRun(
-  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
-): boolean {
-  if (!outcome.ended) return true;
-  const run = outcome.value;
-  return (
-    run.status === "interrupted-before-load" ||
-    (run.status === "ran" && run.execution === "interrupted")
-  );
-}
-
-/** The run a job left to store, or why it left none. */
-function runToStore(
-  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
-): { readonly run: WorkspaceRun } | { readonly unstored: string } {
-  if (!outcome.ended) return { unstored: outcome.reason };
-  const run = outcome.value;
-  return run.status === "not-confirmed" ? { unstored: run.reason } : { run };
 }
 
 function discoverySummary(discovery: TestDiscovery): string {

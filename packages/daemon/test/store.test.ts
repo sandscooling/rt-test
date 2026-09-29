@@ -16,6 +16,7 @@ import {
   consumerIdentity,
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
+import { column, UnreadableRecordError } from "../src/store/columns.js";
 import { openStore, type RtTestStore } from "../src/store/open-store.js";
 import {
   STORE_APPLICATION_ID,
@@ -29,6 +30,7 @@ import type {
   StoreBindings,
   StoreScope,
 } from "../src/store/stored-records.js";
+import { NewerStoreSchemaError } from "../src/store/transaction.js";
 import { VITEST_ADAPTER_VERSION } from "../src/vitest/adapter-version.js";
 import type { TestDiscovery } from "../src/vitest/discover-tests.js";
 import type { VitestWorkspace } from "../src/vitest/find-workspaces.js";
@@ -2151,5 +2153,324 @@ describe("the latest run of each workspace a query reads", () => {
       });
     });
     expect(labels).toStrictEqual(["own"]);
+  });
+});
+
+describe("a latest discovery the store refuses as unreadable", () => {
+  const LEGACY_RUN: WorkspaceRun = {
+    status: "interrupted-before-load",
+    workspace: OTHER_WORKSPACE,
+  };
+
+  interface LatestRead {
+    readonly discovery: TestDiscovery | undefined;
+    readonly discoveryRefusal: string | undefined;
+    readonly runs: readonly WorkspaceRun[];
+  }
+
+  /** What a query reads once `corrupt` has run through a second connection over the stored `DISCOVERY` and a run of each workspace. */
+  function latestAfter(corrupt: string): Promise<Settled<LatestRead>> {
+    return inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      store.writeRun(bound(WORKTREE_A), LEGACY_RUN);
+      withRawDatabase(store.file, (database) => {
+        database.exec(corrupt);
+      });
+      const { discovery, discoveryRefusal, latestRuns } =
+        store.readLatestResults(WORKTREE_A);
+      return {
+        discovery: discovery?.discovery,
+        discoveryRefusal,
+        runs: latestRuns.map((stored) => stored.run),
+      };
+    });
+  }
+
+  /** No discovery beside `discoveryRefusal`, and each workspace's latest run still read. */
+  function refusedWith(discoveryRefusal: string): LatestRead {
+    return {
+      discovery: undefined,
+      discoveryRefusal,
+      runs: [FAILED_RUN, LEGACY_RUN],
+    };
+  }
+
+  function parseFailure(text: string): string {
+    try {
+      JSON.parse(text);
+      return "parsed";
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  it("D2915: a latest discovery refused as unreadable reads as none beside its refusal, and every latest run still reads", async () => {
+    expect(
+      await latestAfter(`UPDATE discoveries SET not_read = '{"x":1}'`),
+    ).toStrictEqual(
+      refusedWith('The store holds an unreadable not_read: {"x":1}'),
+    );
+  });
+
+  it("D2916: a refused discovery's refusal carries its cause chain", async () => {
+    expect(
+      await latestAfter("UPDATE discoveries SET not_read = 'not json'"),
+    ).toStrictEqual(
+      refusedWith(
+        `The store holds an unreadable not_read: "not json"\n  caused by: ${parseFailure("not json")}`,
+      ),
+    );
+  });
+
+  it("D2917: a latest discovery whose input fingerprint is unreadable is refused as a record, not thrown", async () => {
+    expect(
+      await latestAfter(
+        "PRAGMA ignore_check_constraints = ON; UPDATE discoveries SET fingerprint_kind = 'guessed'",
+      ),
+    ).toStrictEqual(
+      refusedWith(
+        "The store holds an unreadable input fingerprint: kind guessed, digest null",
+      ),
+    );
+  });
+
+  it("D2918: a latest discovery holding tests under a workspace not discovered is refused as a record, not thrown", async () => {
+    expect(
+      await latestAfter("UPDATE discovered_tests SET workspace_index = 1"),
+    ).toStrictEqual(
+      refusedWith(
+        `The store holds tests under the unsupported workspace ${OTHER_WORKSPACE.path}`,
+      ),
+    );
+  });
+
+  it("D2919: a latest discovery holding selection facts under a workspace not discovered is refused as a record, not thrown", async () => {
+    expect(
+      await latestAfter(
+        "UPDATE discovery_workspaces SET selection_facts = '[]' WHERE status = 'unsupported'",
+      ),
+    ).toStrictEqual(
+      refusedWith(
+        `The store holds selection facts under the unsupported workspace ${OTHER_WORKSPACE.path}`,
+      ),
+    );
+  });
+
+  it("D2920: a SQLite failure reading the latest discovery still throws, never read as a refused record", async () => {
+    expect(
+      rejection(
+        await latestAfter("ALTER TABLE discoveries DROP COLUMN not_read"),
+      ),
+    ).toContain("no such column: not_read");
+  });
+
+  it("D2962: a query row missing a column its reader needs throws as a store failure, never as a refused record", () => {
+    let outcome: unknown = "read";
+    try {
+      column({}, "not_read");
+    } catch (error) {
+      outcome = { refusedAsRecord: error instanceof UnreadableRecordError };
+    }
+    expect(outcome).toStrictEqual({ refusedAsRecord: false });
+  });
+
+  it("D2963: the latest discovery and the latest runs are read from one snapshot, so a discovery and a run committed as the read begins are answered together", async () => {
+    const read = await inStore((store, stateDirectory) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      const writer = openStore(stateDirectory);
+      const prepare = DatabaseSync.prototype.prepare;
+      let written = false;
+      const writeAtVersionRead = vi
+        .spyOn(DatabaseSync.prototype, "prepare")
+        .mockImplementation(function (this: DatabaseSync, sql: string) {
+          if (!written && sql.includes("pragma_user_version")) {
+            written = true;
+            writer.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+            writer.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+          }
+          return prepare.call(this, sql);
+        });
+      try {
+        const latest = store.readLatestResults(WORKTREE_A);
+        return {
+          discovery: latest.discovery?.discovery,
+          runs: latest.latestRuns.map((stored) => stored.run),
+        };
+      } finally {
+        writeAtVersionRead.mockRestore();
+        writer.close();
+      }
+    });
+    expect(read).toStrictEqual({
+      discovery: DISCOVERY,
+      runs: [BEFORE_LOAD_RUN],
+    });
+  });
+});
+
+describe("a store a newer RT Test migrated while this one held it open", () => {
+  const NEWER = STORE_SCHEMA_VERSION + 1;
+
+  interface NewerRefusal {
+    readonly newerSchema: boolean;
+    readonly namesFound: boolean;
+    readonly namesOwn: boolean;
+    readonly nothingStored: boolean;
+    readonly nothingRead: boolean;
+    readonly namesRestart: boolean;
+  }
+
+  const WRITE_REFUSAL: NewerRefusal = {
+    newerSchema: true,
+    namesFound: true,
+    namesOwn: true,
+    nothingStored: true,
+    nothingRead: false,
+    namesRestart: true,
+  };
+  const READ_REFUSAL: NewerRefusal = {
+    ...WRITE_REFUSAL,
+    nothingStored: false,
+    nothingRead: true,
+  };
+
+  function migrateTo(file: string, version: number): void {
+    withRawDatabase(file, (database) => {
+      database.exec(`PRAGMA user_version = ${version}`);
+    });
+  }
+
+  /** What `work`'s refusal names, or that it went ahead. */
+  function refusalOf(work: () => unknown): NewerRefusal | "went ahead" {
+    try {
+      work();
+      return "went ahead";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        newerSchema: error instanceof NewerStoreSchemaError,
+        namesFound: message.includes(`schema version ${NEWER}`),
+        namesOwn: message.includes(`version ${STORE_SCHEMA_VERSION} `),
+        nothingStored: message.includes("nothing was stored"),
+        nothingRead: message.includes("nothing was read"),
+        namesRestart: message.includes(
+          "Restart the daemon with the newer RT Test",
+        ),
+      };
+    }
+  }
+
+  it("D2921: a run written into a store a newer RT Test migrated is refused whole, naming both versions, that nothing was stored and the restart", async () => {
+    const outcome = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      migrateTo(store.file, NEWER);
+      return {
+        refusal: refusalOf(() =>
+          store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN),
+        ),
+        runs: countRows(store.file, "runs"),
+      };
+    });
+    expect(outcome).toStrictEqual({ refusal: WRITE_REFUSAL, runs: 1 });
+  });
+
+  it("D2922: a discovery written into a store a newer RT Test migrated is refused whole, naming both versions, that nothing was stored and the restart", async () => {
+    const outcome = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      migrateTo(store.file, NEWER);
+      return {
+        refusal: refusalOf(() =>
+          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY),
+        ),
+        discoveries: countRows(store.file, "discoveries"),
+      };
+    });
+    expect(outcome).toStrictEqual({ refusal: WRITE_REFUSAL, discoveries: 1 });
+  });
+
+  it("D2923: a query's read of a store a newer RT Test migrated is refused, naming both versions, that nothing was read and the restart", async () => {
+    const refusal = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      migrateTo(store.file, NEWER);
+      return refusalOf(() => store.readLatestResults(WORKTREE_A));
+    });
+    expect(refusal).toStrictEqual(READ_REFUSAL);
+  });
+
+  it("D2924: a store one schema version newer is refused by the opener and the transaction guard alike, and one at this version by neither", async () => {
+    const verdicts = await inStore((store, stateDirectory) => {
+      const verdictsAt = (version: number) => {
+        migrateTo(store.file, version);
+        const guarded = refusalOf(() => store.readLatestResults(WORKTREE_A));
+        return {
+          opener: openRefusal(stateDirectory) === OPENED ? "opens" : "refuses",
+          guard:
+            guarded === "went ahead"
+              ? "reads"
+              : guarded.newerSchema
+                ? "refuses"
+                : "fails",
+        };
+      };
+      return {
+        current: verdictsAt(STORE_SCHEMA_VERSION),
+        newer: verdictsAt(NEWER),
+      };
+    });
+    expect(verdicts).toStrictEqual({
+      current: { opener: "opens", guard: "reads" },
+      newer: { opener: "refuses", guard: "refuses" },
+    });
+  });
+
+  it("D2925: a write reads the schema version under the write lock it writes with, so a migration committed while it waited is refused", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const store = openStore(defaultStateDirectory(dir));
+      try {
+        const { held, result } = await whileWriteHeld(
+          store.file,
+          `PRAGMA user_version = ${NEWER}`,
+          () => refusalOf(() => store.writeRun(bound(WORKTREE_A), FAILED_RUN)),
+        );
+        return {
+          held,
+          refusal: result,
+          runs: countRows(store.file, "runs"),
+        };
+      } finally {
+        store.close();
+      }
+    });
+    expect(outcome).toStrictEqual({
+      held: true,
+      refusal: WRITE_REFUSAL,
+      runs: 0,
+    });
+  });
+
+  it("D2926: a read takes the schema version from the snapshot it reads the records from, so a migration committed as the read begins is refused", async () => {
+    const refusal = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      const exec = DatabaseSync.prototype.exec;
+      let migrated = false;
+      const migrateAtBegin = vi
+        .spyOn(DatabaseSync.prototype, "exec")
+        .mockImplementation(function (this: DatabaseSync, statement: string) {
+          exec.call(this, statement);
+          if (statement === "BEGIN" && !migrated) {
+            migrated = true;
+            migrateTo(store.file, NEWER);
+          }
+        });
+      try {
+        return refusalOf(() => store.readLatestResults(WORKTREE_A));
+      } finally {
+        migrateAtBegin.mockRestore();
+      }
+    });
+    expect(refusal).toStrictEqual(READ_REFUSAL);
   });
 });

@@ -1,6 +1,7 @@
 import type { SQLOutputValue } from "node:sqlite";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
+import { UnreadableRecordError } from "./columns.js";
 import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "./schema.js";
 
 /** The inputs a result was produced from, or not fingerprinted when the daemon could not vouch for them from the job's start to its end. */
@@ -76,7 +77,7 @@ export function fingerprintFromColumns(
   if (kind === FINGERPRINT_DIGEST && typeof digest === "string") {
     return { kind: FINGERPRINT_DIGEST, digest };
   }
-  throw new Error(
+  throw new UnreadableRecordError(
     `The store holds an unreadable input fingerprint: kind ${String(kind)}, digest ${String(digest)}`,
   );
 }

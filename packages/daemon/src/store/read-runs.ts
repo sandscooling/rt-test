@@ -35,7 +35,7 @@ import {
   type StoredRun,
   type StoreScope,
 } from "./stored-records.js";
-import { inReadTransaction } from "./transaction.js";
+import { inRecordRead } from "./transaction.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 
@@ -98,7 +98,7 @@ export function readRuns(
 ): StoredRun[] {
   requireScope(scope);
   const keys = [scope.projectIdentity, scope.worktreeIdentity];
-  return inReadTransaction(database, () => {
+  return inRecordRead(database, () => {
     const runs = database.prepare(SELECT_RUNS).all(...keys);
     const modules = rowsBy(
       database.prepare(SELECT_SCOPE_MODULES).all(...keys),
@@ -124,7 +124,7 @@ export function readRun(
   runId: string,
 ): StoredRun | undefined {
   requireScope(scope);
-  return inReadTransaction(database, () => selectRun(database, scope, runId));
+  return inRecordRead(database, () => selectRun(database, scope, runId));
 }
 
 /** Reads inside the caller's transaction, so a writer can read back what it has not yet committed. */
