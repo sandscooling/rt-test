@@ -34,9 +34,12 @@ import {
   SESSION_VARIABLES,
 } from "../src/inputs/environment-digest.js";
 import {
+  discoveryFingerprint,
   ProjectInputs,
+  protectedFileChangedSince,
   SnapshotReads,
   workspaceFingerprint,
+  type FingerprintResult,
 } from "../src/inputs/fingerprint.js";
 import { gitSources } from "../src/inputs/git-sources.js";
 import {
@@ -57,7 +60,10 @@ import type {
   WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
 import { readJson, ROOT_PATH } from "../src/vitest/find-workspaces.js";
-import type { SelectionFacts } from "../src/vitest/selection-facts.js";
+import type {
+  EnvSource,
+  SelectionFacts,
+} from "../src/vitest/selection-facts.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
   eventually,
@@ -66,6 +72,7 @@ import {
   type MemoryLog,
 } from "./daemon-harness.js";
 import {
+  DISCOVERED_VITEST_VERSION,
   REPO,
   discoveredWorkspace,
   fakeVitest,
@@ -2086,6 +2093,355 @@ describe("the fingerprint's parts", () => {
     expect(changed).toBe(true);
   });
 });
+
+/** The consumer root's own env source, in Vitest's mode with Vite's default prefix. */
+const ROOT_ENV_SOURCE: EnvSource = {
+  envDirectory: ".",
+  envPrefixes: ["VITE_"],
+  mode: "test",
+};
+const ENV_FILE = ".env";
+const LOCAL_ENV_FILE = ".env.local";
+/** How the inputs hold a link to anything but a file: by the digest of its target's path. */
+const HELD_LINK = "link:9f2c6a1e";
+
+/** The source of a config that loads env files from `directory`, root-relative. */
+function envSourceAt(directory: string): EnvSource {
+  return { ...ROOT_ENV_SOURCE, envDirectory: directory };
+}
+
+/** A workspace at `path` under `root`, listing no test module, with one project per list of env sources. */
+function workspaceWithEnv(
+  root: string,
+  path: string,
+  ...projects: (readonly EnvSource[])[]
+): WorkspaceDiscovery {
+  return discoveredWorkspace(
+    { path, directory: path === ROOT_PATH ? root : join(root, path) },
+    [],
+    {
+      reported: true,
+      projects: projects.map((envSources, index) =>
+        projectFacts({ projectName: `project-${index}`, envSources }),
+      ),
+    },
+  );
+}
+
+/** The root workspace's discovery, its one project naming the root's env files. */
+function envDiscovery(root: string): TestDiscovery {
+  return {
+    workspaces: [workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE])],
+    notRead: [],
+  };
+}
+
+function printed(print: FingerprintResult): string | undefined {
+  return print.ok ? print.digest : undefined;
+}
+
+/** The fingerprint of `entry` over inputs holding `held`, with every file outside them read afresh. */
+function envPrint(
+  root: string,
+  entry: WorkspaceDiscovery,
+  held: Readonly<Record<string, string>> = {},
+): string | undefined {
+  return printed(
+    workspaceFingerprint(
+      new ProjectInputs(root, new Map(Object.entries(held))),
+      entry,
+    ),
+  );
+}
+
+/** Whether `write` moves the fingerprint `print` reads, which must be computed before it. */
+function movedBy(
+  print: () => string | undefined,
+  write: () => void,
+): { computed: boolean; changed: boolean } {
+  const before = print();
+  write();
+  const after = print();
+  return {
+    computed: before !== undefined,
+    changed: after !== undefined && after !== before,
+  };
+}
+
+const MOVED = { computed: true, changed: true };
+
+describe(
+  "each workspace's env files",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3065: an edit to a listed env file git ignores changes its workspace's fingerprint at the next composition", async () => {
+      const outcome = await inTempDir((root) => {
+        repository(root, `${LOCAL_ENV_FILE}\n`, {
+          [LOCAL_ENV_FILE]: "VITE_A=1\n",
+          "src/a.ts": "",
+        });
+        const entry = workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]);
+        return tracking(root, async ({ tracker }) =>
+          movedBy(
+            () => printed(tracker.current().workspaceFingerprint(entry)),
+            () => appendFileSync(join(root, LOCAL_ENV_FILE), "VITE_B=2\n"),
+          ),
+        );
+      });
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3066: creating a listed env file changes the discovery's fingerprint", async () => {
+      const outcome = await inTempDir((root) =>
+        movedBy(
+          () =>
+            printed(
+              discoveryFingerprint(
+                new ProjectInputs(root, new Map()),
+                envDiscovery(root),
+              ),
+            ),
+          () => writeFileSync(join(root, LOCAL_ENV_FILE), "VITE_A=1\n"),
+        ),
+      );
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3067: the discovery's fingerprint counts an env file only its second workspace lists", async () => {
+      const outcome = await inTempDir((root) => {
+        mkdirSync(join(root, "packages/b"), { recursive: true });
+        const discovery: TestDiscovery = {
+          workspaces: [
+            workspaceWithEnv(root, ROOT_PATH, []),
+            workspaceWithEnv(root, "packages/b", [envSourceAt("packages/b")]),
+          ],
+          notRead: [],
+        };
+        return movedBy(
+          () =>
+            printed(
+              discoveryFingerprint(
+                new ProjectInputs(root, new Map()),
+                discovery,
+              ),
+            ),
+          () => writeFileSync(join(root, "packages/b", ENV_FILE), "VITE_B=1\n"),
+        );
+      });
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3068: an edit to a listed env file that keeps its size changes its workspace's fingerprint", async () => {
+      const outcome = await inTempDir((root) => {
+        writeFileSync(join(root, ENV_FILE), "VITE_A=1\n");
+        const entry = workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]);
+        return movedBy(
+          () => envPrint(root, entry),
+          () => writeFileSync(join(root, ENV_FILE), "VITE_A=2\n"),
+        );
+      });
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3069: creating a listed env file changes its workspace's fingerprint, and deleting it again restores the fingerprint it had without it", async () => {
+      const prints = await inTempDir((root) => {
+        const entry = workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]);
+        const absent = envPrint(root, entry);
+        writeFileSync(join(root, LOCAL_ENV_FILE), "VITE_A=1\n");
+        const created = envPrint(root, entry);
+        rmSync(join(root, LOCAL_ENV_FILE));
+        return { absent, created, deleted: envPrint(root, entry) };
+      });
+      expect({
+        computed: prints.absent !== undefined,
+        createdMoved:
+          prints.created !== undefined && prints.created !== prints.absent,
+        deletedRestored: prints.deleted === prints.absent,
+      }).toStrictEqual({
+        computed: true,
+        createdMoved: true,
+        deletedRestored: true,
+      });
+    });
+
+    it("D3070: the root config's env file changes the fingerprint of a workspace whose own config loads env files from its own directory", async () => {
+      const outcome = await inTempDir((root) => {
+        mkdirSync(join(root, "packages/app"), { recursive: true });
+        const entry = workspaceWithEnv(root, "packages/app", [
+          envSourceAt("packages/app"),
+          ROOT_ENV_SOURCE,
+        ]);
+        return movedBy(
+          () => envPrint(root, entry),
+          () => writeFileSync(join(root, LOCAL_ENV_FILE), "VITE_ROOT=1\n"),
+        );
+      });
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3071: an env file only a workspace's second project names changes the workspace's fingerprint", async () => {
+      const outcome = await inTempDir((root) => {
+        mkdirSync(join(root, "b"));
+        const entry = workspaceWithEnv(
+          root,
+          ROOT_PATH,
+          [envSourceAt("a")],
+          [envSourceAt("b")],
+        );
+        return movedBy(
+          () => envPrint(root, entry),
+          () => writeFileSync(join(root, "b", ENV_FILE), "VITE_B=1\n"),
+        );
+      });
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3072: a listed env file the snapshot holds as a file's content, which the workspace's narrowed inputs leave out, changes its fingerprint by the held digest", async () => {
+      const changed = await inTempDir((root) => {
+        const entry = workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]);
+        const narrowed = new ProjectInputs(root, new Map([["a.ts", "file:1"]]));
+        const digestWith = (envFile: string): string | undefined => {
+          const project = new ProjectInputs(
+            root,
+            new Map([
+              ["a.ts", "file:1"],
+              [ENV_FILE, envFile],
+            ]),
+          );
+          return printed(
+            workspaceFingerprint(
+              project,
+              entry,
+              new SnapshotReads(root),
+              narrowed,
+            ),
+          );
+        };
+        const before = digestWith("file:1");
+        return before !== undefined && before !== digestWith("file:2");
+      });
+      expect(changed).toBe(true);
+    });
+
+    it("D3073: a listed env file the inputs hold by type or link target, as a FIFO, socket, device or link to anything but a file, is read as Vite reads it, so an edit there changes the fingerprint", async () => {
+      const outcome = await inTempDir((root) => {
+        writeFileSync(join(root, ENV_FILE), "VITE_A=1\n");
+        const entry = workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]);
+        return movedBy(
+          () => envPrint(root, entry, { [ENV_FILE]: HELD_LINK }),
+          () => writeFileSync(join(root, ENV_FILE), "VITE_A=2\n"),
+        );
+      });
+      expect(outcome).toStrictEqual(MOVED);
+    });
+
+    it("D3074: a discovered workspace whose selection facts are not reported has no fingerprint, the reason saying its env files are not known", () => {
+      const print = workspaceFingerprint(
+        new ProjectInputs(REPO, new Map()),
+        workspaceAt(REPO, [], { reported: false }),
+      );
+      expect(
+        print.ok
+          ? print
+          : {
+              ok: false,
+              saysNotKnown:
+                print.reason.includes("env files") &&
+                print.reason.includes("not known"),
+            },
+      ).toStrictEqual({ ok: false, saysNotKnown: true });
+    });
+
+    it("D3075: a discovery holding a workspace whose selection facts are not reported has no fingerprint, the reason naming that workspace", async () => {
+      const outcome = await inTempDir((root) => {
+        const print = discoveryFingerprint(new ProjectInputs(root, new Map()), {
+          workspaces: [
+            workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]),
+            discoveredWorkspace(
+              { path: "packages/b", directory: join(root, "packages/b") },
+              [],
+              { reported: false },
+            ),
+          ],
+          notRead: [],
+        });
+        return print.ok
+          ? print
+          : { ok: false, namesWorkspace: print.reason.includes("packages/b") };
+      });
+      expect(outcome).toStrictEqual({ ok: false, namesWorkspace: true });
+    });
+
+    it("D3076: a workspace whose discovery failed, which loaded no config, keeps a fingerprint rather than one of unknown env files", () => {
+      const print = workspaceFingerprint(new ProjectInputs(REPO, new Map()), {
+        status: "failed",
+        workspace: { path: ROOT_PATH, directory: REPO },
+        vitestVersion: DISCOVERED_VITEST_VERSION,
+        error: "Error: Failed to load config",
+      });
+      expect(print.ok).toBe(true);
+    });
+
+    it("D3077: a listed env file no watch covers, created or modified after a job started, is reported as possibly changed during it, naming the file", async () => {
+      const outcome = await inTempDir((dir) => {
+        const created = join(dir, "created");
+        const modified = join(dir, "modified");
+        mkdirSync(created);
+        writeTree(modified, { [ENV_FILE]: "VITE_A=1\n" });
+        modifiedAt(join(modified, ENV_FILE), -AN_HOUR_MS);
+        const since = Date.now();
+        writeFileSync(join(created, LOCAL_ENV_FILE), "VITE_A=1\n");
+        appendFileSync(join(modified, ENV_FILE), "VITE_B=2\n");
+        const changed = (root: string): string | undefined =>
+          protectedFileChangedSince(
+            new ProjectInputs(root, new Map()),
+            envDiscovery(root),
+            since,
+          );
+        return {
+          created: changed(created)?.startsWith(`${LOCAL_ENV_FILE},`) === true,
+          modified: changed(modified)?.startsWith(`${ENV_FILE},`) === true,
+        };
+      });
+      expect(outcome).toStrictEqual({ created: true, modified: true });
+    });
+
+    it("D3078: a listed env file with nothing at its path is not reported as possibly changed during a job", async () => {
+      const changed = await inTempDir((root) =>
+        protectedFileChangedSince(
+          new ProjectInputs(root, new Map()),
+          envDiscovery(root),
+          Date.now(),
+        ),
+      );
+      expect(changed).toBeUndefined();
+    });
+
+    it("D3079: a listed test module no watch covers that cannot be found is still reported as possibly changed during a job", async () => {
+      const changed = await inTempDir((root) =>
+        protectedFileChangedSince(
+          new ProjectInputs(root, new Map()),
+          discoveryListing(root, ["gen/a.test.ts"]),
+          Date.now(),
+        ),
+      );
+      expect(changed?.startsWith("gen/a.test.ts,")).toBe(true);
+    });
+
+    it("D3080: a listed env file the inputs hold as a link to anything but a file, edited after a job started, is reported as possibly changed during it", async () => {
+      const changed = await inTempDir((root) => {
+        const since = Date.now();
+        writeFileSync(join(root, ENV_FILE), "VITE_A=1\n");
+        return protectedFileChangedSince(
+          new ProjectInputs(root, new Map([[ENV_FILE, HELD_LINK]])),
+          envDiscovery(root),
+          since,
+        );
+      });
+      expect(changed?.startsWith(`${ENV_FILE},`)).toBe(true);
+    });
+  },
+);
 
 /** A variable no shell, terminal or agent sets, planted so its value is the test's alone. */
 const PLANTED_VARIABLE = "RT_TEST_PLANTED_BY_VALUE";

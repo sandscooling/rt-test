@@ -61,6 +61,19 @@ export interface TestFilePatterns {
   readonly includeSource: readonly string[];
 }
 
+/** Vite's `envPrefix` for a config that sets none. */
+const DEFAULT_ENV_PREFIX = "VITE_";
+
+/** Where one resolved Vite config loads env files from. */
+export interface EnvSource {
+  /** Null when the config turns env files off. */
+  readonly envDirectory: string | null;
+  /** Only a variable whose name begins with one of these reaches the env Vite gives tests. */
+  readonly envPrefixes: readonly string[];
+  /** As Vite resolved it, which names the `.env.<mode>` files. */
+  readonly mode: string;
+}
+
 export interface ProjectSelectionFacts {
   readonly projectName: string;
   /** Where Vite resolves an import beginning with `/`, such as an alias replacement `/src`, before the file system. */
@@ -71,6 +84,8 @@ export interface ProjectSelectionFacts {
   readonly globalSetupFiles: readonly string[];
   readonly aliases: readonly ReportedAlias[];
   readonly testFilePatterns: TestFilePatterns;
+  /** The project's own config's, then the root config's: Vitest gives the project's tests the env of both. */
+  readonly envSources: readonly EnvSource[];
 }
 
 /** Per project not in browser mode. Only a discovery stored without every fact this version reads is not reported. */
@@ -83,7 +98,8 @@ export type SelectionFacts =
 
 export const STRING_FIND_FLAGS = "";
 
-type ViteAlias = TestProject["vite"]["config"]["resolve"]["alias"][number];
+type ViteConfig = TestProject["vite"]["config"];
+type ViteAlias = ViteConfig["resolve"]["alias"][number];
 
 /**
  * Reads resolved config, and the directories each project's crawl passes through for the links it follows. Carries
@@ -151,7 +167,39 @@ async function projectFacts(
       exclude: [...config.exclude],
       includeSource: [...includeSource],
     },
+    envSources: [
+      envSource(project.vite.config, rootRelative),
+      envSource(session.instance.vite.config, rootRelative),
+    ],
   };
+}
+
+/**
+ * Vite resolves `envDir` to an absolute path or `false`, and leaves `mode` as a JavaScript config wrote it, naming the
+ * `.env.<mode>` files by its string form.
+ */
+function envSource(
+  config: ViteConfig,
+  rootRelative: (path: string) => string,
+): EnvSource {
+  const { envDir, envPrefix, mode } = config;
+  return {
+    envDirectory: envDir === false ? null : rootRelative(envDir),
+    envPrefixes: envPrefixes(envPrefix),
+    mode: String(mode),
+  };
+}
+
+/**
+ * Vite leaves `envPrefix` on the resolved config as a config file wrote it, which a JavaScript one need not type as
+ * declared, and tests each prefix as a string.
+ */
+function envPrefixes(written: unknown): string[] {
+  if (written === undefined) return [DEFAULT_ENV_PREFIX];
+  const prefixes: readonly unknown[] = Array.isArray(written)
+    ? written
+    : [written];
+  return prefixes.map((prefix) => String(prefix));
 }
 
 function patternBases(

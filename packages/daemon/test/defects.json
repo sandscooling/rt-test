@@ -2999,7 +2999,7 @@
     "id": "D1898",
     "defect": "A listed test module no watch covers is never checked for an edit during a job, so a discovery that read it mid-edit is stored under its digest.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
-    "old": "    if (project.digests.has(path)) continue;\n    const modified",
+    "old": "    if (watched(path)) continue;\n    const modified",
     "new": "    continue;\n    const modified"
   },
   {
@@ -3013,8 +3013,8 @@
     "id": "D1900",
     "defect": "A listed test module that cannot be read is taken as deleted, so its workspace gets a fingerprint from an input set it could not establish.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
-    "old": "    if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {\n      return { ok: true, digest: ABSENT_MODULE };",
-    "new": "    if (true) {\n      return { ok: true, digest: ABSENT_MODULE };"
+    "old": "    if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {\n      return { ok: true, digest: ABSENT_FILE };",
+    "new": "    if (true) {\n      return { ok: true, digest: ABSENT_FILE };"
   },
   {
     "id": "D1901",
@@ -5776,10 +5776,10 @@
   },
   {
     "id": "D2792",
-    "defect": "A new store is created at schema version 6, so a daemon from before the crawled links opens it and stores discoveries whose selection facts lack them, which this daemon then refuses to read.",
+    "defect": "A new store is created at schema version 7, so a daemon from before the env sources opens it and stores discoveries whose selection facts lack them, which this daemon then refuses to read.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "export const STORE_SCHEMA_VERSION = 7;",
-    "new": "export const STORE_SCHEMA_VERSION = 6;"
+    "old": "export const STORE_SCHEMA_VERSION = 8;",
+    "new": "export const STORE_SCHEMA_VERSION = 7;"
   },
   {
     "id": "D2793",
@@ -6949,5 +6949,369 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);",
     "new": "    log.entry(`discovery ended: ${discoverySummary(discovery)}`);"
+  },
+  {
+    "id": "D3036",
+    "defect": "The store reads every env source's mode back as test, so a project that sets its own mode names another mode's env files once its discovery is read back.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    mode: jsonText(value, \"mode\"),",
+    "new": "    mode: \"test\","
+  },
+  {
+    "id": "D3037",
+    "defect": "The store refuses an env source whose env directory is null, so every discovery holding a config that turns env files off is unreadable after a restart.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    envDirectory:\n      jsonField(value, \"envDirectory\") === null\n        ? null\n        : jsonText(value, \"envDirectory\"),",
+    "new": "    envDirectory: jsonText(value, \"envDirectory\"),"
+  },
+  {
+    "id": "D3038",
+    "defect": "A stored project with no env sources reads back as having none, so a malformed record reads as a project naming no env file instead of being refused.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    envSources: jsonArray(value, \"envSources\", envSource),",
+    "new": "    envSources: jsonField(value, \"envSources\") === undefined ? [] : jsonArray(value, \"envSources\", envSource),"
+  },
+  {
+    "id": "D3039",
+    "defect": "A stored env directory that is false or empty reads back as env files turned off, so a malformed record lists no env file instead of being refused.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "      jsonField(value, \"envDirectory\") === null",
+    "new": "      !jsonField(value, \"envDirectory\")"
+  },
+  {
+    "id": "D3040",
+    "defect": "The version 7 migration keeps the stored selection facts, which lack env sources, so reading any discovery stored before it fails.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+  },
+  {
+    "id": "D3041",
+    "defect": "A version 7 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "  [\n    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "new": ""
+  },
+  {
+    "id": "D3042",
+    "defect": "A project's env directory is reported as Vite's absolute path, so the env files listed for it are named unlike every other input and never match one.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    envDirectory: envDir === false ? null : rootRelative(envDir),",
+    "new": "    envDirectory: envDir === false ? null : envDir,"
+  },
+  {
+    "id": "D3043",
+    "defect": "A project's own env source is read from the root config, so the env files in a directory its own config names are never listed.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      envSource(project.vite.config, rootRelative),",
+    "new": "      envSource(session.instance.vite.config, rootRelative),"
+  },
+  {
+    "id": "D3044",
+    "defect": "A config that turns env files off is reported with the consumer root as its env directory, so files Vite never loads are listed in place of none.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    envDirectory: envDir === false ? null : rootRelative(envDir),",
+    "new": "    envDirectory: envDir === false ? \".\" : rootRelative(envDir),"
+  },
+  {
+    "id": "D3045",
+    "defect": "A config that sets no env prefix reports none, where Vite passes every VITE_ variable to its tests.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  if (written === undefined) return [DEFAULT_ENV_PREFIX];",
+    "new": "  if (written === undefined) return [];"
+  },
+  {
+    "id": "D3046",
+    "defect": "An env prefix written as a string is split into its characters, so the report names one-character prefixes Vite never tests.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    : [written];",
+    "new": "    : [...String(written)];"
+  },
+  {
+    "id": "D3047",
+    "defect": "An env prefix a JavaScript config writes as null or a number is carried as written, so the stored report is refused as unreadable once read back.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  return prefixes.map((prefix) => String(prefix));",
+    "new": "  return prefixes as string[];"
+  },
+  {
+    "id": "D3048",
+    "defect": "The root config's env source is read from the project's own config, so a root .env.local every project's tests read is never listed for a project with its own env directory.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      envSource(session.instance.vite.config, rootRelative),",
+    "new": "      envSource(project.vite.config, rootRelative),"
+  },
+  {
+    "id": "D3049",
+    "defect": "Every env source is reported in mode test, so a project that sets its own mode lists .env.test in place of the .env.<mode> files Vite loads for it.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    mode: String(mode),\n  };",
+    "new": "    mode: \"test\",\n  };"
+  },
+  {
+    "id": "D3050",
+    "defect": "A project reports the root config's env source before its own, so a reader taking the project's own source first reads the root's.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      envSource(project.vite.config, rootRelative),\n      envSource(session.instance.vite.config, rootRelative),",
+    "new": "      envSource(session.instance.vite.config, rootRelative),\n      envSource(project.vite.config, rootRelative),"
+  },
+  {
+    "id": "D3051",
+    "defect": "A project reports only its own env source, so the root config's env files, which Vitest gives every project's tests, are never listed.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "      envSource(session.instance.vite.config, rootRelative),\n    ],",
+    "new": "    ],"
+  },
+  {
+    "id": "D3052",
+    "defect": "A source names no .env.<mode>.local file, so an edit to the mode's local env file, which Vite loads last, never stales its workspace.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    `${ENV_FILE}.${mode}${LOCAL_SUFFIX}`,\n",
+    "new": ""
+  },
+  {
+    "id": "D3053",
+    "defect": "A source whose config turns env files off still names the consumer root's env files, so edits to files Vite never loads stale its workspace.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  if (envDirectory === null) return [];",
+    "new": "  if (envDirectory === null) return sourceEnvFiles({ ...source, envDirectory: \".\" });"
+  },
+  {
+    "id": "D3054",
+    "defect": "A FIFO at a listed env path digests as nothing there, so its workspace keeps a fingerprint though Vite reads whatever the FIFO carries.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  if (stats?.isFIFO() === true) return { ok: false, reason: FIFO_REASON };",
+    "new": "  if (stats?.isFIFO() === true) return NOTHING_READ;"
+  },
+  {
+    "id": "D3055",
+    "defect": "The reader opens whatever is at a listed env path before checking its kind, so a FIFO is opened, releasing a writer waiting on it.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  const kind = readableKind(stats);\n  if (kind !== undefined) return kind;\n",
+    "new": ""
+  },
+  {
+    "id": "D3056",
+    "defect": "The reader reads an opened env file without checking the open handle, so a FIFO swapped in after the check is read.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    read = readableKind(fstatSync(descriptor)) ?? contentDigest(descriptor);",
+    "new": "    read = contentDigest(descriptor);"
+  },
+  {
+    "id": "D3057",
+    "defect": "The reader reads any entry that exists as a file, so a directory at a listed env path, which Vite skips, refuses its workspace's fingerprint.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  return stats?.isFile() === true ? undefined : NOTHING_READ;",
+    "new": "  return stats === undefined ? NOTHING_READ : undefined;"
+  },
+  {
+    "id": "D3058",
+    "defect": "A socket at a listed env path refuses the fingerprint, where Vite skips it, so the workspace is never current.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  if (stats?.isFIFO() === true) return",
+    "new": "  if (stats?.isFIFO() === true || stats?.isSocket() === true) return"
+  },
+  {
+    "id": "D3059",
+    "defect": "An env file that cannot be opened digests as nothing there, so its workspace gets a fingerprint without the content Vite reads.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    return ABSENT_CODES.has((error as NodeJS.ErrnoException).code ?? \"\")\n      ? NOTHING_READ\n      : refusal(error);",
+    "new": "    return NOTHING_READ;"
+  },
+  {
+    "id": "D3060",
+    "defect": "A failed read of an env file throws out of the fingerprint and leaves its descriptor open, where it should refuse with the error.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  try {\n    read = readableKind(fstatSync(descriptor)) ?? contentDigest(descriptor);\n  } catch (error) {\n    read = refusal(error);\n  }",
+    "new": "  read = readableKind(fstatSync(descriptor)) ?? contentDigest(descriptor);"
+  },
+  {
+    "id": "D3061",
+    "defect": "A failed close of an env file throws out of the fingerprint, where it should refuse with the error.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  try {\n    closeSync(descriptor);\n  } catch (error) {\n    return refusal(error);\n  }",
+    "new": "  closeSync(descriptor);"
+  },
+  {
+    "id": "D3062",
+    "defect": "An env file removed between its check and its open refuses the fingerprint, where Vite would read nothing there.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  \"ENOENT\",\n",
+    "new": ""
+  },
+  {
+    "id": "D3063",
+    "defect": "An env file replaced by a socket or a device with no driver between its check and its open refuses the fingerprint, where Vite skips such an entry.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  \"ENXIO\",\n",
+    "new": ""
+  },
+  {
+    "id": "D3064",
+    "defect": "A listed env file with nothing at its path refuses the fingerprint, so a workspace whose .env.test.local was never written is never current.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    stats = statSync(path, { throwIfNoEntry: false });",
+    "new": "    stats = statSync(path);"
+  },
+  {
+    "id": "D3065",
+    "defect": "A workspace's fingerprint leaves out its env files, so an edit to a gitignored .env.local leaves its results current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      envFiles: listed.envFiles,\n      vitestVersion: vitestVersion",
+    "new": "      envFiles: [],\n      vitestVersion: vitestVersion"
+  },
+  {
+    "id": "D3066",
+    "defect": "The discovery's fingerprint leaves out the env files it lists, so a discovery whose modules read an env file since edited stays current and is never run again.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      envFiles: listed.envFiles,\n      vitestVersions:",
+    "new": "      envFiles: [],\n      vitestVersions:"
+  },
+  {
+    "id": "D3067",
+    "defect": "The discovery's env files are those of its first workspace alone, so an edit to another workspace's env file leaves the discovery current.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  for (const entry of discovery.workspaces) {",
+    "new": "  for (const entry of discovery.workspaces.slice(0, 1)) {"
+  },
+  {
+    "id": "D3068",
+    "defect": "An env file's digest does not depend on its content, so an edit that keeps it in place leaves its workspace's results current.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "      .update(readFileSync(descriptor))",
+    "new": "      .update(\"\")"
+  },
+  {
+    "id": "D3069",
+    "defect": "A listed env file with nothing at its path refuses the fingerprint, so a workspace whose .env.local does not exist yet, or was deleted, is never current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      return read.ok ? { ok: true, digest: read.digest ?? ABSENT_FILE } : read;",
+    "new": "      return read.ok && read.digest !== undefined ? { ok: true, digest: read.digest } : { ok: false, reason: \"nothing there\" };"
+  },
+  {
+    "id": "D3070",
+    "defect": "A project's env files are those of its own source alone, so an edit to the root config's .env.local, which Vitest gives every project's tests, leaves a project with its own env directory current.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  return [...new Set(project.envSources.flatMap(sourceEnvFiles))];",
+    "new": "  return [...new Set(project.envSources.slice(0, 1).flatMap(sourceEnvFiles))];"
+  },
+  {
+    "id": "D3071",
+    "defect": "A workspace's env files are those of its first project alone, so an edit to an env file only another project names leaves the workspace current.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    files: [...new Set(entry.selectionFacts.projects.flatMap(projectEnvFiles))],",
+    "new": "    files: [...new Set(entry.selectionFacts.projects.slice(0, 1).flatMap(projectEnvFiles))],"
+  },
+  {
+    "id": "D3072",
+    "defect": "A listed env file the snapshot holds is read from disk instead, so answers from one snapshot can disagree and an edit the tracker has read is not the one fingerprinted.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    const held = heldEnvDigest(inputs.project, path);",
+    "new": "    const held = undefined;"
+  },
+  {
+    "id": "D3073",
+    "defect": "A listed env file the inputs hold by type or link target is taken from that held digest, which does not change with what Vite reads there, so an edit to it leaves its workspace current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "  return held !== undefined && holdsFileContent(held) ? held : undefined;",
+    "new": "  return held;"
+  },
+  {
+    "id": "D3074",
+    "defect": "A discovered workspace whose selection facts are not reported reads as naming no env file, so it gets a fingerprint without the env files its tests read.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    return { known: false, unreportedWorkspace: entry.workspace.path };",
+    "new": "    return { known: true, files: [] };"
+  },
+  {
+    "id": "D3075",
+    "defect": "A discovery holding a workspace whose env files are not known takes the other workspaces' env files, so it gets a fingerprint and is not rediscovered after the upgrade.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    if (!listed.known) return listed;",
+    "new": "    if (!listed.known) continue;"
+  },
+  {
+    "id": "D3076",
+    "defect": "A workspace whose discovery failed reads as one whose env files are not known, so it loses the fingerprint it had and every run of it is stored not fingerprinted.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  if (entry.status !== \"discovered\") return { known: true, files: [] };",
+    "new": "  if (entry.status !== \"discovered\") return { known: false, unreportedWorkspace: entry.workspace.path };"
+  },
+  {
+    "id": "D3077",
+    "defect": "The time check before protection covers no env file, so a gitignored env file created or edited during the discovery's job leaves the discovery stored under its digest.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "  for (const path of protectedFiles(discovery)) {",
+    "new": "  for (const path of protectedModules(discovery)) {"
+  },
+  {
+    "id": "D3078",
+    "defect": "A listed env file with nothing at its path is reported as possibly changed, so almost every discovery, whose .env.test.local never exists, is stored not fingerprinted.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    if (modified === NOTHING_THERE && !modules.has(path)) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D3079",
+    "defect": "A listed test module the time check cannot find is taken as unchanged, as an env file is, so a module deleted during the discovery's job leaves the discovery stored under its digest.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    if (modified === NOTHING_THERE && !modules.has(path)) continue;",
+    "new": "    if (modified === NOTHING_THERE) continue;"
+  },
+  {
+    "id": "D3080",
+    "defect": "The time check skips every env file the inputs hold, a link to a missing file or a directory included, whose held digest the fingerprint does not take, so its target edited during the discovery's job goes unseen.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      : heldEnvDigest(project, path) !== undefined;",
+    "new": "      : project.digests.has(path);"
+  },
+  {
+    "id": "D3081",
+    "defect": "Protection names no env file, so a declared rt-test.json pattern covering an env directory removes its env files from the inputs, and an edit to one no longer raises the input revision.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    for (const file of projectEnvFiles(project)) files.add(file);\n",
+    "new": ""
+  },
+  {
+    "id": "D3082",
+    "defect": "A stat of a listed env path that fails with anything but no entry digests as nothing there, so its workspace gets a fingerprint without the content Vite may read.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    stats = statSync(path, { throwIfNoEntry: false });\n  } catch (error) {\n    return refusal(error);\n  }",
+    "new": "    stats = statSync(path, { throwIfNoEntry: false });\n  } catch {\n    return NOTHING_READ;\n  }"
+  },
+  {
+    "id": "D3083",
+    "defect": "The reader leaves an env file's descriptor open after reading it, so the daemon leaks one descriptor per listed env file per answer until opens fail.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  try {\n    closeSync(descriptor);\n  } catch (error) {\n    return refusal(error);\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D3084",
+    "defect": "The reader's check of the opened handle refuses only a FIFO and reads anything else, so a socket or directory swapped in after the stat is read rather than skipped as Vite skips it.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    read = readableKind(fstatSync(descriptor)) ?? contentDigest(descriptor);",
+    "new": "    read = (fstatSync(descriptor).isFIFO() ? { ok: false, reason: FIFO_REASON } : undefined) ?? contentDigest(descriptor);"
+  },
+  {
+    "id": "D3085",
+    "defect": "A mode a JavaScript config writes as a number is reported as written, so the stored report is refused as unreadable once read back.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    mode: String(mode),\n  };",
+    "new": "    mode,\n  };"
+  },
+  {
+    "id": "D3091",
+    "defect": "A stored env source with no envDirectory key reads back as env files turned off, so a malformed record lists no env file instead of being refused.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "      jsonField(value, \"envDirectory\") === null",
+    "new": "      jsonField(value, \"envDirectory\") == null"
+  },
+  {
+    "id": "D3092",
+    "defect": "A stored env source whose mode is missing reads back without refusal, so a malformed record names .env.undefined files in place of its mode's.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "    mode: jsonText(value, \"mode\"),",
+    "new": "    mode: String(jsonField(value, \"mode\")),"
   }
 ]

@@ -84,6 +84,8 @@ const CRASH_UNAWARE_VERSION = 4;
 const VITEST_SPELLING_UNAWARE_VERSION = 5;
 /** The schema version before each project's selection facts carried the directory links Vitest's crawl follows. */
 const CRAWLED_LINKS_UNAWARE_VERSION = 6;
+/** The schema version before each project's selection facts carried the env sources Vite loads env files from. */
+const ENV_SOURCES_UNAWARE_VERSION = 7;
 /** What a project's test file patterns lacked before Vitest's spellings were kept, the crawled links added later included. */
 const SPELLINGS_AND_LINKS_UNAWARE_FIELDS: readonly (keyof TestFilePatterns)[] =
   ["vitestDirectory", "patternBases", "crawledLinks"];
@@ -317,8 +319,19 @@ const CART_PROJECT_FACTS: ProjectSelectionFacts = {
     exclude: ["**/node_modules/**"],
     includeSource: ["src/**/*.ts"],
   },
+  envSources: [
+    {
+      envDirectory: "packages/cart/web",
+      envPrefixes: ["VITE_", "CART_"],
+      mode: "staging",
+    },
+    { envDirectory: ".", envPrefixes: ["VITE_"], mode: "test" },
+  ],
 };
-/** A project with no setup files, global setup files or aliases, matching from the consumer root, whose crawled links are not known. */
+/**
+ * A project with no setup files, global setup files or aliases, matching from the consumer root, whose crawled links
+ * are not known and whose own config turns env files off.
+ */
 const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
   projectName: "empty",
   viteRoot: ".",
@@ -338,6 +351,10 @@ const EMPTY_PROJECT_FACTS: ProjectSelectionFacts = {
     exclude: [],
     includeSource: [],
   },
+  envSources: [
+    { envDirectory: null, envPrefixes: ["VITE_"], mode: "test" },
+    { envDirectory: ".", envPrefixes: ["VITE_"], mode: "test" },
+  ],
 };
 const SELECTION_FACTS: SelectionFacts = {
   reported: true,
@@ -679,11 +696,32 @@ function writeViteRootUnawareStore(
   return file;
 }
 
-/** Writes `DISCOVERY` and the runs through a store, then strips `unaware` from each stored project's test file patterns and takes the header back to `userVersion`, as a store from before those fields were kept holds them. */
+/** Each stored project without the test file pattern fields `unaware`, as a store from before they were kept holds it. */
+function withoutPatternFields(
+  unaware: readonly (keyof TestFilePatterns)[],
+): (project: ProjectSelectionFacts) => object {
+  return (project) => {
+    const patterns: Partial<TestFilePatterns> = {
+      ...project.testFilePatterns,
+    };
+    for (const field of unaware) delete patterns[field];
+    return { ...project, testFilePatterns: patterns };
+  };
+}
+
+/** Each stored project without its env sources, as a store from before they were kept holds it. */
+function withoutEnvSources({
+  envSources: _dropped,
+  ...rest
+}: ProjectSelectionFacts): object {
+  return rest;
+}
+
+/** Writes `DISCOVERY` and the runs through a store, then rewrites each stored project with `strip` and takes the header back to `userVersion`, as a store from before the stripped fields were kept holds them. */
 function writeFactsUnawareStore(
   stateDirectory: string,
   userVersion: number,
-  unaware: readonly (keyof TestFilePatterns)[],
+  strip: (project: ProjectSelectionFacts) => object,
   runs: readonly WorkspaceRun[] = [],
 ): string {
   withOpenStore(stateDirectory, (store) => {
@@ -704,14 +742,7 @@ function writeFactsUnawareStore(
       const projects = JSON.parse(
         String(row["selection_facts"]),
       ) as ProjectSelectionFacts[];
-      const stripped = projects.map((project) => {
-        const patterns: Partial<TestFilePatterns> = {
-          ...project.testFilePatterns,
-        };
-        for (const field of unaware) delete patterns[field];
-        return { ...project, testFilePatterns: patterns };
-      });
-      update.run(JSON.stringify(stripped), Number(row["rowid"]));
+      update.run(JSON.stringify(projects.map(strip)), Number(row["rowid"]));
     }
     database.exec(`PRAGMA user_version = ${userVersion}`);
   });
@@ -728,7 +759,7 @@ function inSpellingUnawareStore(
       writeFactsUnawareStore(
         stateDirectory,
         userVersion,
-        SPELLINGS_AND_LINKS_UNAWARE_FIELDS,
+        withoutPatternFields(SPELLINGS_AND_LINKS_UNAWARE_FIELDS),
       );
       return withOpenStore(
         stateDirectory,
@@ -1558,7 +1589,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 7 once opened", async () => {
+  it("D1280: the store is at schema version 8 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1566,7 +1597,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(7);
+    expect(version).toBe(8);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -1792,6 +1823,96 @@ describe("storing each discovered workspace's selection facts", () => {
     );
   });
 
+  it("D3036: each project's env sources, with their env directory, prefixes and a mode of the project's own, read back as written after the store is reopened", async () => {
+    const sources = await acrossReopen(
+      (store) => {
+        store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      },
+      (store) =>
+        discoveredFacts(store)?.flatMap((facts) =>
+          facts.reported
+            ? facts.projects.map(({ envSources }) => envSources)
+            : [],
+        ),
+    );
+    expect(sources).toStrictEqual([
+      [
+        {
+          envDirectory: "packages/cart/web",
+          envPrefixes: ["VITE_", "CART_"],
+          mode: "staging",
+        },
+        { envDirectory: ".", envPrefixes: ["VITE_"], mode: "test" },
+      ],
+      [
+        { envDirectory: null, envPrefixes: ["VITE_"], mode: "test" },
+        { envDirectory: ".", envPrefixes: ["VITE_"], mode: "test" },
+      ],
+    ]);
+  });
+
+  it("D3037: an env source whose config turns env files off reads back with no env directory, never refused as unreadable", async () => {
+    const directory = await acrossReopen(
+      (store) => {
+        store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      },
+      (store) =>
+        discoveredFacts(store)?.flatMap((facts) =>
+          facts.reported
+            ? facts.projects
+                .filter(({ projectName }) => projectName === "empty")
+                .map(({ envSources }) => envSources[0]?.envDirectory)
+            : [],
+        ),
+    );
+    expect(directory).toStrictEqual([null]);
+  });
+
+  it("D3038: a stored project with no env sources is refused as unreadable, never read as naming no env file", async () => {
+    const reason = await readingStoredFacts([
+      withoutEnvSources(CART_PROJECT_FACTS),
+    ]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field envSources",
+    );
+  });
+
+  it("D3039: a stored env directory that is neither a string nor null is refused as unreadable, never read as env files turned off", async () => {
+    const reason = await readingStoredFacts([
+      {
+        ...CART_PROJECT_FACTS,
+        envSources: [
+          { envDirectory: false, envPrefixes: ["VITE_"], mode: "test" },
+        ],
+      },
+    ]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field envDirectory",
+    );
+  });
+
+  it("D3091: a stored env source with no env directory is refused as unreadable, never read as env files turned off", async () => {
+    const reason = await readingStoredFacts([
+      {
+        ...CART_PROJECT_FACTS,
+        envSources: [{ envPrefixes: ["VITE_"], mode: "test" }],
+      },
+    ]);
+    expect(reason).toContain(
+      "The store holds an unreadable JSON field envDirectory",
+    );
+  });
+
+  it("D3092: a stored env source with no mode is refused as unreadable, never read with a mode it did not record", async () => {
+    const reason = await readingStoredFacts([
+      {
+        ...CART_PROJECT_FACTS,
+        envSources: [{ envDirectory: ".", envPrefixes: ["VITE_"] }],
+      },
+    ]);
+    expect(reason).toContain("The store holds an unreadable JSON field mode");
+  });
+
   it("D2847: a stored project with no spelling of its pattern directory is refused as unreadable, never read with another field in its place", async () => {
     const { vitestDirectory: _vitestDirectory, ...withoutVitestDirectory } =
       CART_PROJECT_FACTS.testFilePatterns;
@@ -1888,7 +2009,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 7 once opened", async () => {
+  it("D2097: the store is at schema version 8 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1899,7 +2020,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(7);
+    expect(version).toBe(8);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -1961,7 +2082,7 @@ describe("opening a store written before each project's Vite root", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2846: a version 3 store opens at version 7, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
+  it("D2846: a version 3 store opens at version 8, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1975,12 +2096,12 @@ describe("opening a store written before each project's Vite root", () => {
         };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 7, facts: [SELECTION_FACTS] });
+    expect(outcome).toStrictEqual({ version: 8, facts: [SELECTION_FACTS] });
   });
 });
 
 describe("opening a store written before crashed runs", () => {
-  it("D2791: a version 4 store opens at version 7, every run it held unchanged", async () => {
+  it("D2791: a version 4 store opens at version 8, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1998,7 +2119,7 @@ describe("opening a store written before crashed runs", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 7, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 8, runs: [RAN_RUN, FAILED_RUN] });
   });
 
   it("D2829: each discovered workspace of a version 4 store reads back as not reporting selection facts, and the rest of the discovery unchanged", async () => {
@@ -2006,7 +2127,7 @@ describe("opening a store written before crashed runs", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2792: a new store is created at schema version 7", async () => {
+  it("D2792: a new store is created at schema version 8", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2014,7 +2135,7 @@ describe("opening a store written before crashed runs", () => {
         return schemaVersionOf(join(stateDirectory, STORE_FILE_NAME));
       }),
     );
-    expect(version).toBe(7);
+    expect(version).toBe(8);
   });
 });
 
@@ -2026,14 +2147,14 @@ describe("opening a store written before Vitest's spellings of the pattern direc
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2831: a version 5 store opens at version 7, every run it held unchanged", async () => {
+  it("D2831: a version 5 store opens at version 8, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
         const file = writeFactsUnawareStore(
           stateDirectory,
           VITEST_SPELLING_UNAWARE_VERSION,
-          SPELLINGS_AND_LINKS_UNAWARE_FIELDS,
+          withoutPatternFields(SPELLINGS_AND_LINKS_UNAWARE_FIELDS),
           [RAN_RUN, FAILED_RUN],
         );
         const runs = withOpenStore(stateDirectory, (store) =>
@@ -2042,19 +2163,19 @@ describe("opening a store written before Vitest's spellings of the pattern direc
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 7, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 8, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
 describe("opening a store written before the directory links Vitest's crawl follows", () => {
-  it("D2859: a version 6 store opens at version 7, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
+  it("D2859: a version 6 store opens at version 8, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
         const file = writeFactsUnawareStore(
           stateDirectory,
           CRAWLED_LINKS_UNAWARE_VERSION,
-          ["crawledLinks"],
+          withoutPatternFields(["crawledLinks"]),
         );
         const discovery = withOpenStore(
           stateDirectory,
@@ -2064,9 +2185,52 @@ describe("opening a store written before the directory links Vitest's crawl foll
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 7,
+      version: 8,
       discovery: withoutReportedFacts(DISCOVERY),
     });
+  });
+});
+
+describe("opening a store written before each project's env sources", () => {
+  it("D3040: a version 7 store opens at version 8, each discovered workspace reading back as not reporting selection facts rather than its report without env sources being read", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeFactsUnawareStore(
+          stateDirectory,
+          ENV_SOURCES_UNAWARE_VERSION,
+          withoutEnvSources,
+        );
+        const discovery = withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+        return { version: schemaVersionOf(file), discovery };
+      }),
+    );
+    expect(outcome).toStrictEqual({
+      version: 8,
+      discovery: withoutReportedFacts(DISCOVERY),
+    });
+  });
+
+  it("D3041: a version 7 store opens at version 8, every run it held unchanged", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeFactsUnawareStore(
+          stateDirectory,
+          ENV_SOURCES_UNAWARE_VERSION,
+          withoutEnvSources,
+          [RAN_RUN, FAILED_RUN],
+        );
+        const runs = withOpenStore(stateDirectory, (store) =>
+          runsOf(store, WORKTREE_A),
+        );
+        return { version: schemaVersionOf(file), runs };
+      }),
+    );
+    expect(outcome).toStrictEqual({ version: 8, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
