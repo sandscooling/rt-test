@@ -66,6 +66,14 @@ _Avoid_: cancelled run
 A run stopped before it finished, so each test it had not finished gets no outcome from it.
 _Avoid_: cancelled run, aborted run
 
+**Execution state**:
+What the daemon is doing with a Vitest workspace: running it, holding it queued to run, holding it interrupted by a change until the next round decides it, or idle. It is independent of every result's outcome and freshness.
+_Avoid_: status, activity
+
+**Round**:
+The daemon's decision, once the input revision has held still, its inputs have settled, its dependency build has ended and any rediscovery it needs has ended, of what to run at that revision, made with the selection over the paths changed since the previous round. A round is pending until that decision is made.
+_Avoid_: cycle, pass, tick
+
 **Force-stopped run**:
 An interrupted run whose Vitest workers were stopped without waiting, because the grace period after the interrupt passed with the run still going, so the project's `afterAll` hooks and teardown did not run.
 _Avoid_: killed run
