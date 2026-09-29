@@ -114,20 +114,30 @@ async function withSystemRoot<T>(body: () => Promise<T>): Promise<T> {
 
 const STILL_WAITING = "still waiting";
 
-/**
- * Settles `work` with the answer bound's clock stopped, or reports it still waiting once the stand-ins have had every
- * turn they need to answer, so a job left waiting fails its assertion rather than the test's timeout.
- */
-async function settledSoon<T>(work: () => Promise<T>) {
+/** Runs `body` with the helper's answer and start bounds on a clock only the test moves. */
+async function withStoppedClock<T>(body: () => Promise<T>): Promise<T> {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
-    return await Promise.race([
-      settled(work()),
-      flush().then(() => STILL_WAITING),
-    ]);
+    return await body();
   } finally {
     vi.useRealTimers();
   }
+}
+
+/**
+ * Resolves with `work`'s outcome, or reports it still waiting once the stand-ins have had every turn they need to
+ * answer, so a job left waiting fails its assertion rather than the test's timeout.
+ */
+function soon<T>(work: Promise<T>): Promise<Awaited<T> | typeof STILL_WAITING> {
+  return Promise.race([
+    work,
+    flush().then((): typeof STILL_WAITING => STILL_WAITING),
+  ]);
+}
+
+/** Settles `work` with the bounds' clock stopped, or reports it still waiting. */
+function settledSoon<T>(work: () => Promise<T>) {
+  return withStoppedClock(() => soon(settled(work())));
 }
 
 /** Emits an error on a stand-in helper and says whether a listener handled it or the emit threw it. */
@@ -609,5 +619,78 @@ describe("the job object helper", () => {
       }),
     );
     expect(helpers.map((helper) => helper.commands)).toStrictEqual([[]]);
+  });
+
+  it("D2844: a helper whose ready line comes after the answer bound but inside the start bound serves the job that started it", async () => {
+    const helpers = standInHelpers([
+      { start: [], answer: answersEveryCommand },
+    ]);
+    const outcome = await withSystemRoot(() =>
+      withStoppedClock(async () => {
+        const contained = settled(
+          new WindowsJobs().contain(standInExecutor().child).then(() => "held"),
+        );
+        await vi.advanceTimersByTimeAsync(15_000);
+        for (const helper of helpers) helper.stdout.write("ready\n");
+        return soon(contained);
+      }),
+    );
+    expect({
+      outcome,
+      commands: helpers.map((helper) => helper.commands),
+    }).toStrictEqual({
+      outcome: "held",
+      commands: [["assign 4242", "hold 7"]],
+    });
+  });
+
+  it("D2845: closing the jobs while an end is unanswered lets that end finish before the helper is ended", async () => {
+    standInHelpers([{ start: ["ready"], answer: answersEveryCommand }]);
+    const outcome = await withSystemRoot(() =>
+      settledSoon(async () => {
+        const jobs = new WindowsJobs();
+        const tree = await jobs.contain(standInExecutor().child);
+        const ending = tree.end().then(() => "ended");
+        // The stand-in never emits `close`, so this close stays waiting on it.
+        void jobs.close();
+        return ending;
+      }),
+    );
+    expect(outcome).toBe("ended");
+  });
+
+  it("D2848: a helper whose first line is neither ready nor a compile failure is killed when its start is refused", async () => {
+    const helpers = standInHelpers([
+      { start: ["garbage"], answer: answersEveryCommand },
+    ]);
+    const outcome = await withSystemRoot(() =>
+      settledSoon(() => new WindowsJobs().contain(standInExecutor().child)),
+    );
+    expect({
+      outcome,
+      kills: helpers.map((helper) => helper.kill.mock.calls.length),
+    }).toStrictEqual({
+      outcome: { thrown: "the job object helper did not start: garbage" },
+      kills: [1],
+    });
+  });
+
+  it("D2849: a helper start that never answers is refused at the 60 s start bound, and not before", async () => {
+    standInHelpers([{ start: [], answer: answersEveryCommand }]);
+    const outcome = await withSystemRoot(() =>
+      withStoppedClock(async () => {
+        const contained = settled(
+          new WindowsJobs().contain(standInExecutor().child).then(() => "held"),
+        );
+        await vi.advanceTimersByTimeAsync(59_999);
+        const before = await soon(contained);
+        await vi.advanceTimersByTimeAsync(1);
+        return { before, after: await soon(contained) };
+      }),
+    );
+    expect(outcome).toStrictEqual({
+      before: STILL_WAITING,
+      after: { thrown: "the job object helper did not answer within 60000 ms" },
+    });
   });
 });

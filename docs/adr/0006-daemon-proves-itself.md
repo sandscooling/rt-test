@@ -32,7 +32,8 @@ Measured on Windows 11 with Node 24.19.0:
 
 - A shell child started by a `globalSetup`, by a test in a threads worker and by a test in a forks worker ended with its job, where libuv's job alone left the last one running.
 - A stop and a daemon SIGKILL mid-run each left no helper, executor, worker or child.
-- The helper's first job cost about 1.5 s warm and 2.5 s cold, for PowerShell's start and the class's compile. Each later job's containment cost under 1 ms to set up and to end, measured before the step that arms kill-on-close only after that proof was added, and not measured since.
+- The helper's first job cost about 1.5 s warm and 2.5 s cold, for PowerShell's start and the class's compile, and 2.3 to 2.6 s unloaded once the step that arms kill-on-close after the proof was added. Each later job's containment cost under 1 ms to set up and to end, measured before that step was added, and not measured since.
+- Under 16 busy loops on 16 logical cores, 55 helper starts took a median of 6.4 s and 9.0 s at the 90th percentile, 4 more passed 10 s, and one of 22 alternating starts took 11.3 s, while each command's answer after the start took under 0.4 s. So the helper's start has a bound of its own, 60 s (`HELPER_START_TIMEOUT_MS`), apart from the 10 s bound on each command's answer (`TOOL_TIMEOUT_MS`), and a start that passes it refuses its job with the reason.
 - Node 22 was not measured on Windows.
 
 On Linux a child spawned by a `globalSetup` or by a test ended with its job, and a daemon killed mid-run left no executor, worker or test child. A new process per job costs about 0.4 to 0.5 s of process start and Vitest import. That is accepted, since it also gives each run a fresh process, as a user's own `vitest` run has.

@@ -2306,8 +2306,8 @@
     "id": "D1699",
     "defect": "A helper that misses its answer bound still reads as alive, so the next job asks the silent helper instead of starting a new one.",
     "file": "packages/daemon/src/daemon/windows-job.ts",
-    "old": "        this.#end(\n          new Error(\n            `the job object helper did not answer",
-    "new": "        this.#waiting.shift()?.(\n          new Error(\n            `the job object helper did not answer"
+    "old": "        this.#end(\n          new Error(`the job object helper did not answer",
+    "new": "        this.#waiting.shift()?.(\n          new Error(`the job object helper did not answer"
   },
   {
     "id": "D1696",
@@ -5932,8 +5932,8 @@
     "id": "D2837",
     "defect": "Closing the jobs leaves their running helper, and every job tree it holds, running.",
     "file": "packages/daemon/src/daemon/windows-job.ts",
-    "old": "      this.#process.once(\"close\", () => resolve());\n      this.#end(new Error(HELPER_CLOSED));",
-    "new": "      this.#process.once(\"close\", () => resolve());"
+    "old": "      void this.#answered().then(() => this.#end(new Error(HELPER_CLOSED)));",
+    "new": "      void this.#answered();"
   },
   {
     "id": "D2838",
@@ -5976,6 +5976,34 @@
     "file": "packages/daemon/src/daemon/windows-job.ts",
     "old": "    if (this.#closed) throw new Error(HELPER_CLOSED);\n",
     "new": ""
+  },
+  {
+    "id": "D2844",
+    "defect": "A helper whose start passes the answer bound, though it is inside the start bound, is ended, so on a loaded machine the job that started it is refused and a discovery stores nothing.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    const ready = await helper.#next(HELPER_START_TIMEOUT_MS);",
+    "new": "    const ready = await helper.#next(TOOL_TIMEOUT_MS);"
+  },
+  {
+    "id": "D2845",
+    "defect": "Closing the jobs ends the helper while an end it was sent is still unanswered, so a job that ended normally just before a stop fails with \"the job object helper was closed\".",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "      void this.#answered().then(() => this.#end(new Error(HELPER_CLOSED)));",
+    "new": "      this.#end(new Error(HELPER_CLOSED));"
+  },
+  {
+    "id": "D2848",
+    "defect": "A helper whose first line is neither ready nor a compile failure is left running, reading its input, after its start is refused.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    child.kill();\n",
+    "new": ""
+  },
+  {
+    "id": "D2849",
+    "defect": "A helper start that never answers holds its job forever, so a hung PowerShell blocks every later job.",
+    "file": "packages/daemon/src/daemon/windows-job.ts",
+    "old": "    const ready = await helper.#next(HELPER_START_TIMEOUT_MS);",
+    "new": "    const ready = await helper.#next(2_147_483_647);"
   },
   {
     "id": "D2802",

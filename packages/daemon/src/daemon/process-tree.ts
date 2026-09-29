@@ -3,7 +3,7 @@ import { errorText } from "../vitest/error-text.js";
 import { hasExited } from "./child-exit.js";
 import { WINDOWS } from "./endpoint.js";
 import { isRunning } from "./runtime-directory.js";
-import { WindowsJobs } from "./windows-job.js";
+import { WindowsJobs, type JobTree } from "./windows-job.js";
 import { runSystemTool } from "./windows-system-tool.js";
 
 const KILL_SIGNAL = "SIGKILL";
@@ -58,10 +58,7 @@ function endGroupOf(child: ChildProcess): void {
 }
 
 /** A job the helper cannot end is ended by the parent walk instead. */
-async function endJobTree(
-  tree: ContainedTree,
-  child: ChildProcess,
-): Promise<void> {
+async function endJobTree(tree: JobTree, child: ChildProcess): Promise<void> {
   try {
     await tree.end();
   } catch (error) {

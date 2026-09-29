@@ -6,6 +6,11 @@ import { systemToolPath, TOOL_TIMEOUT_MS } from "./windows-system-tool.js";
 
 const POWERSHELL = ["WindowsPowerShell", "v1.0", "powershell.exe"] as const;
 const ENCODED_COMMAND_ENCODING = "utf16le";
+/**
+ * Bounds the wait for `READY`, which follows PowerShell's start and the class's compile, whose time machine load
+ * decides; each later answer is bounded by `TOOL_TIMEOUT_MS`.
+ */
+const HELPER_START_TIMEOUT_MS = 60_000;
 const READY = "ready";
 /** Written, with PowerShell's reason, when a policy such as Constrained Language Mode blocks `Add-Type`. */
 const BLOCKED_BY_POLICY = "blocked-by-policy";
@@ -190,6 +195,8 @@ export class WindowsJobs {
 class JobHelper {
   readonly #process: ChildProcess;
   readonly #waiting: ((line: string | Error) => void)[] = [];
+  /** Settles after every earlier answer has, since the helper answers in the order it is asked. */
+  #lastAnswer: Promise<unknown> = Promise.resolve();
   #ended: Error | undefined;
 
   private constructor(child: ChildProcess) {
@@ -219,7 +226,7 @@ class JobHelper {
       { stdio: ["pipe", "pipe", "inherit"], windowsHide: true },
     );
     const helper = new JobHelper(child);
-    const ready = await helper.#next();
+    const ready = await helper.#next(HELPER_START_TIMEOUT_MS);
     if (ready === READY) return helper;
     child.kill();
     throw startFailure(ready);
@@ -233,7 +240,7 @@ class JobHelper {
   async ask(command: string): Promise<string> {
     if (this.#ended !== undefined) throw this.#ended;
     this.#process.stdin!.write(`${command}\n`);
-    const answer = await this.#next();
+    const answer = await this.#next(TOOL_TIMEOUT_MS);
     if (answer === OK) return "";
     if (answer.startsWith(`${OK}${WORD_SEPARATOR}`)) {
       return answer.slice(OK.length + WORD_SEPARATOR.length);
@@ -241,30 +248,35 @@ class JobHelper {
     throw new Error(`the job object helper refused "${command}": ${answer}`);
   }
 
+  /** Ends the helper once every command sent has its answer, so a job ended just before a stop is not reported as failed. */
   close(): Promise<void> {
     if (!this.alive) return Promise.resolve();
     return new Promise((resolve) => {
       this.#process.once("close", () => resolve());
-      this.#end(new Error(HELPER_CLOSED));
+      void this.#answered().then(() => this.#end(new Error(HELPER_CLOSED)));
     });
   }
 
-  #next(): Promise<string> {
+  async #answered(): Promise<void> {
+    while (this.#waiting.length > 0) await this.#lastAnswer;
+  }
+
+  #next(bound: number): Promise<string> {
     if (this.#ended !== undefined) return Promise.reject(this.#ended);
-    return new Promise((resolve, reject) => {
+    const answer = new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#end(
-          new Error(
-            `the job object helper did not answer within ${TOOL_TIMEOUT_MS} ms`,
-          ),
+          new Error(`the job object helper did not answer within ${bound} ms`),
         );
-      }, TOOL_TIMEOUT_MS);
+      }, bound);
       this.#waiting.push((line) => {
         clearTimeout(timer);
         if (line instanceof Error) reject(line);
         else resolve(line);
       });
     });
+    this.#lastAnswer = answer.catch(() => undefined);
+    return answer;
   }
 
   /**
