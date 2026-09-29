@@ -36,6 +36,21 @@ const EXECUTOR_ENTRY = "executor-main";
 const UNHANDLED_REJECTIONS_THROW = "--unhandled-rejections=throw";
 const ABORTED_BEFORE_SEND_REASON =
   "the stop arrived before the job was sent to its executor process, so the job was not run";
+const INTERRUPTED_BEFORE_SEND_REASON =
+  "the run was interrupted by a change before the job was sent to its executor process, so the job was not run";
+
+/** What an abort is for, which names why a job aborted before it was sent ended with nothing. */
+export const ABORT_PURPOSE = {
+  stop: "stop",
+  interruption: "interruption",
+} as const;
+
+type AbortPurpose = (typeof ABORT_PURPOSE)[keyof typeof ABORT_PURPOSE];
+
+const UNSENT_REASONS: Readonly<Record<AbortPurpose, string>> = {
+  [ABORT_PURPOSE.stop]: ABORTED_BEFORE_SEND_REASON,
+  [ABORT_PURPOSE.interruption]: INTERRUPTED_BEFORE_SEND_REASON,
+};
 const NOT_STARTED_REASON =
   "the executor process could not be started, so the job was not run";
 const NO_PARSE_RECORD_REASON =
@@ -80,8 +95,8 @@ export class Executor {
   /** The parse record of the dependency build in progress; a build is busy in synchronous code, so it cannot read an abort. */
   #buildRecord: string | undefined;
   #buildStopped = false;
-  /** An abort that arrived while the job's executor was being contained, before the job was sent to it. */
-  #abortBeforeSend = false;
+  /** What an abort that arrived while the job's executor was being contained, before the job was sent to it, was for. */
+  #abortBeforeSend: AbortPurpose | undefined;
   /** Whether the daemon asked the job in progress to stop, by an abort or a close, so its executor's exit is no crash. */
   #stopAsked = false;
   readonly #containment: TreeContainment = treeContainment();
@@ -146,20 +161,23 @@ export class Executor {
 
   /**
    * Aborts the job in progress, and ends the executor's process tree when the job has not ended within the bound.
-   * A dependency build's tree is ended at once.
+   * A dependency build's tree is ended at once. A stop outranks an interruption asked of the same job. Returns
+   * whether a job was in progress, which a job whose reply has settled no longer is.
    */
-  abort(): void {
+  abort(purpose: AbortPurpose = ABORT_PURPOSE.stop): boolean {
     const child = this.#child;
-    if (child === undefined) return;
+    if (child === undefined) return false;
     if (this.#settle === undefined) {
-      this.#abortBeforeSend = true;
-      return;
+      if (this.#abortBeforeSend !== ABORT_PURPOSE.stop) {
+        this.#abortBeforeSend = purpose;
+      }
+      return true;
     }
     this.#stopAsked = true;
     if (this.#buildRecord !== undefined) {
       this.#buildStopped = true;
       endProcessTree(child);
-      return;
+      return true;
     }
     if (child.connected)
       child.send({ type: "abort" } satisfies ExecutorRequest);
@@ -167,6 +185,7 @@ export class Executor {
       this.#boundPassed = true;
       endProcessTree(child);
     }, EXECUTOR_BOUND_MS);
+    return true;
   }
 
   /**
@@ -199,7 +218,7 @@ export class Executor {
    * that whole tree has ended.
    */
   async #job(request: ExecutorJob): Promise<JobReply> {
-    this.#abortBeforeSend = false;
+    this.#abortBeforeSend = undefined;
     const child = this.#startChild();
     const exited = new Promise<void>((ended) => {
       if (neverStarted(child) || hasExited(child)) ended();
@@ -226,9 +245,9 @@ export class Executor {
         `the executor process ${child.pid} ended before its job was sent, so the job was not run`,
       );
     }
-    if (this.#abortBeforeSend) {
+    if (this.#abortBeforeSend !== undefined) {
       await tree.end();
-      return this.#unsent(child, exited, ABORTED_BEFORE_SEND_REASON);
+      return this.#unsent(child, exited, UNSENT_REASONS[this.#abortBeforeSend]);
     }
     return new Promise((resolve) => {
       this.#buildRecord =

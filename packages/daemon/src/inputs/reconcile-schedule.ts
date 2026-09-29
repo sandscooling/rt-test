@@ -1,10 +1,13 @@
-/** How long after a reconciliation ends the next one runs, the longest an input change no event reported goes unseen. */
-const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * How long after a reconciliation ends the next one runs, the longest an input change no event reported goes unseen,
+ * and how long after the last reconciliation counted as periodic the next one to end counts.
+ */
+export const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 /** The soonest after a reconciliation that could not establish the input set that an event starts the next one. */
 const LOST_INPUT_SET_RETRY_MS = 10 * 1000;
 const LOST_INPUT_SET_RETRY_REASON =
   "an input event arrived while the input set could not be established";
-export const PERIODIC_REASON = "the periodic reconciliation";
+const PERIODIC_REASON = "the periodic reconciliation";
 
 /** When the next reconciliation runs, each timed from the end of the last one. */
 export class ReconcileSchedule {

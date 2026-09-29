@@ -13,7 +13,11 @@ import {
 } from "../../../test/scripts/child-end.js";
 import { recordStarted } from "../../../test/scripts/run-cleanup.mjs";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
-import { Executor, type JobOutcome } from "../src/daemon/executor.js";
+import {
+  ABORT_PURPOSE,
+  Executor,
+  type JobOutcome,
+} from "../src/daemon/executor.js";
 import {
   createParseRecord,
   openParseRecord,
@@ -229,6 +233,49 @@ function discoverIn(executor: Executor, root: string) {
   return executor.discover({ consumerRoot: root, workspaces: [] });
 }
 
+const STOPPED_BEFORE_SEND =
+  "the stop arrived before the job was sent to its executor process, so the job was not run";
+const INTERRUPTED_BEFORE_SEND =
+  "the run was interrupted by a change before the job was sent to its executor process, so the job was not run";
+
+interface AbortedWhileHeld {
+  readonly outcome: JobOutcome<TestDiscovery>;
+  readonly events: string[];
+  /** The outcome of the discovery run next on the same executor, when one was asked for. */
+  readonly next: JobOutcome<TestDiscovery> | undefined;
+}
+
+/**
+ * Starts a discovery whose executor is held before its job is sent, calls `abort` while it is held, then lets the hold
+ * go, and hands back the discovery's outcome and each step the containment recorded. With `runNext`, a second
+ * discovery then runs on the same executor.
+ */
+async function abortedWhileHeld(
+  abort: (executor: Executor) => void,
+  runNext = false,
+): Promise<AbortedWhileHeld> {
+  const { events, release } = recording({ hold: true });
+  const [outcome, next] = await inTempDir((root) =>
+    recordingSends(events, async () => {
+      const executor = new Executor(memoryLog());
+      try {
+        const job = discoverIn(executor, root);
+        await eventually(() => events.includes("contain"));
+        abort(executor);
+        release();
+        const first = await job;
+        return [
+          first,
+          runNext ? await discoverIn(executor, root) : undefined,
+        ] as const;
+      } finally {
+        await executor.close();
+      }
+    }),
+  );
+  return { outcome, events, next };
+}
+
 describe("holding each executor's tree before its job", () => {
   it(
     "D1681: an executor is sent its job only once it is held with the processes it starts",
@@ -286,21 +333,9 @@ describe("holding each executor's tree before its job", () => {
   it(
     "D1684: an abort that arrives while the executor is being held leaves the job unrun and ends its tree",
     async () => {
-      const { events, release } = recording({ hold: true });
-      const outcome = await inTempDir((root) =>
-        recordingSends(events, async () => {
-          const executor = new Executor(memoryLog());
-          try {
-            const job = discoverIn(executor, root);
-            await eventually(() => events.includes("contain"));
-            executor.abort();
-            release();
-            return await job;
-          } finally {
-            await executor.close();
-          }
-        }),
-      );
+      const { outcome, events } = await abortedWhileHeld((executor) => {
+        executor.abort();
+      });
       expect({
         outcome,
         steps: events.filter((event) => event !== "close"),
@@ -311,6 +346,79 @@ describe("holding each executor's tree before its job", () => {
         },
         steps: ["contain", "contained", "end", "exit"],
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2877: an interruption that arrives while the executor is being held leaves the job unrun with the interruption's reason, never the stop's",
+    async () => {
+      const { outcome } = await abortedWhileHeld((executor) => {
+        executor.abort(ABORT_PURPOSE.interruption);
+      });
+      expect(outcome).toStrictEqual({
+        ended: false,
+        reason: expect.stringContaining(INTERRUPTED_BEFORE_SEND),
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2891: an interruption asked after a stop, while the executor is being held, leaves the job unrun with the stop's reason",
+    async () => {
+      const { outcome } = await abortedWhileHeld((executor) => {
+        executor.abort(ABORT_PURPOSE.stop);
+        executor.abort(ABORT_PURPOSE.interruption);
+      });
+      expect(outcome).toStrictEqual({
+        ended: false,
+        reason: expect.stringContaining(STOPPED_BEFORE_SEND),
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2907: after an interruption left a job unrun before its send, the next job on the same executor runs",
+    async () => {
+      const { outcome, next } = await abortedWhileHeld((executor) => {
+        executor.abort(ABORT_PURPOSE.interruption);
+      }, true);
+      expect({ first: outcome.ended, next: next?.ended }).toStrictEqual({
+        first: false,
+        next: true,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2908: an abort while the executor is being held, before its job is sent, says it reached the job",
+    async () => {
+      const reached: boolean[] = [];
+      await abortedWhileHeld((executor) => {
+        reached.push(executor.abort(ABORT_PURPOSE.interruption));
+      });
+      expect(reached).toStrictEqual([true]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2892: an abort once a job's reply has settled reaches no job, and says so",
+    async () => {
+      recording();
+      const reached = await inTempDir(async (root) => {
+        const executor = new Executor(memoryLog());
+        try {
+          await discoverIn(executor, root);
+          return executor.abort(ABORT_PURPOSE.interruption);
+        } finally {
+          await executor.close();
+        }
+      });
+      expect(reached).toBe(false);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -716,7 +824,9 @@ describe("stopping a dependency build", () => {
   it(
     "D2244: an abort mid-build ends the build's process at once rather than after the bound a Vitest job is given",
     async () => {
-      const { outcome } = await stoppedMidBuild((executor) => executor.abort());
+      const { outcome } = await stoppedMidBuild((executor) => {
+        executor.abort();
+      });
       expect(outcome).toStrictEqual({ ended: false, reason: STOPPED });
     },
     DAEMON_TEST_TIMEOUT_MS,
@@ -725,7 +835,9 @@ describe("stopping a dependency build", () => {
   it(
     "D2245: an abort mid-parse gives the stop's reason, never a crash's naming the file being parsed",
     async () => {
-      const { outcome } = await stoppedMidBuild((executor) => executor.abort());
+      const { outcome } = await stoppedMidBuild((executor) => {
+        executor.abort();
+      });
       expect(outcome).toStrictEqual({ ended: false, reason: STOPPED });
     },
     DAEMON_TEST_TIMEOUT_MS,
@@ -743,7 +855,9 @@ describe("stopping a dependency build", () => {
   it(
     "D2251: an abort mid-build settles the build before the bound a Vitest job is given has passed",
     async () => {
-      const { stopMs } = await stoppedMidBuild((executor) => executor.abort());
+      const { stopMs } = await stoppedMidBuild((executor) => {
+        executor.abort();
+      });
       expect(stopMs).toBeLessThan(EXECUTOR_BOUND_MS);
     },
     DAEMON_TEST_TIMEOUT_MS,
@@ -1371,15 +1485,31 @@ describe("a run whose executor process dies with no stop asked of it", () => {
         "vitest",
         "none",
         async (executor, root) => {
-          await stoppedWhileHeld(executor, root, (stopping) =>
-            stopping.abort(),
-          );
+          await stoppedWhileHeld(executor, root, (stopping) => {
+            stopping.abort();
+          });
           return withEnvironment(CRASH_VARIABLE, "throw", () =>
             runIn(executor, root),
           );
         },
       );
       expect(crashFacts(outcome)).toStrictEqual(crashedWith(UNCAUGHT_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("interrupting a run in progress", () => {
+  it(
+    "D2909: an abort of a run whose job was sent and is running says it reached the job",
+    async () => {
+      const reached: boolean[] = [];
+      await inCrashingConsumer("vitest", "none", (executor, root) =>
+        stoppedWhileHeld(executor, root, (running) => {
+          reached.push(running.abort(ABORT_PURPOSE.interruption));
+        }),
+      );
+      expect(reached).toStrictEqual([true]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1393,7 +1523,9 @@ describe("an executor process that dies after a stop, or during a job that is no
         "vitest",
         "exit-in-teardown",
         (executor, root) =>
-          stoppedWhileHeld(executor, root, (stopping) => stopping.abort()),
+          stoppedWhileHeld(executor, root, (stopping) => {
+            stopping.abort();
+          }),
       );
       expect(crashFacts(outcome)).toStrictEqual({
         ended: false,

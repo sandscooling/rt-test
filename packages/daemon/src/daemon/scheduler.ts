@@ -46,7 +46,10 @@ export interface RunReport {
   readonly revision: number;
   /** Whether a run record was stored. */
   readonly stored: boolean;
-  /** Whether the run was stored not fingerprinted because its inputs changed while it ran. */
+  /**
+   * Whether its inputs changed while it ran with a fingerprint taken at its end, or a change interrupted it; such a
+   * run was stored not fingerprinted, or nothing was stored.
+   */
   readonly changedWhileRunning: boolean;
 }
 

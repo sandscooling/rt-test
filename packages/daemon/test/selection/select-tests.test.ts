@@ -33,6 +33,7 @@ import {
 import {
   manifest,
   narrowedInTree,
+  placedInTree,
   rootManifest,
   selectedByNarrowing,
   selectedPaths,
@@ -1478,5 +1479,40 @@ describe("each Vitest workspace's inputs, as Narrowing narrows them to what its 
         ? sets
         : Object.values(sets).map((paths) => paths.includes(GUIDE)),
     ).toStrictEqual([true, true]);
+  });
+});
+
+describe("where a build places a run's changed paths", () => {
+  it("D2880: a workspace selection will not run, as an unsupported one, has each changed path placed inside its inputs by widening", async () => {
+    const tree = consumer({
+      vitest: { a: {}, c: { notRunnable: NOT_CONFIRMED } },
+      files: { "packages/c/src/c.ts": "export const c = 1;\n" },
+    });
+    expect(
+      await placedInTree(tree, ["packages/c/src/c.ts"], "packages/c"),
+    ).toStrictEqual({ inside: [], widened: ["packages/c/src/c.ts"] });
+  });
+
+  it("D2902: a build asked again, with a path it has not placed beside one it has, places the new path by its own selection", async () => {
+    expect(
+      await placedInTree(
+        TWO_APART,
+        ["packages/a/src/a.ts", "packages/b/src/b.ts"],
+        "packages/a",
+        [["packages/b/src/b.ts"]],
+      ),
+    ).toStrictEqual({ inside: ["packages/a/src/a.ts"], widened: [] });
+  });
+
+  it("D2881: a changed path selection refuses is placed by widening, and the paths beside it are still placed", async () => {
+    // A legal Linux file name that Windows' path rules read as drive-relative.
+    const refused = "a:b.txt";
+    expect(
+      await placedInTree(
+        TWO_APART,
+        [refused, "packages/a/src/a.ts", "packages/b/src/b.ts"],
+        "packages/a",
+      ),
+    ).toStrictEqual({ inside: ["packages/a/src/a.ts"], widened: [refused] });
   });
 });

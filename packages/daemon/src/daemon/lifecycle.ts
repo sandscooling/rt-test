@@ -24,15 +24,21 @@ import type {
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
-import type { WorkspaceRun } from "../vitest/run-workspace.js";
+import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
-import type { Executor, JobOutcome } from "./executor.js";
+import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
 import type {
   DaemonActivity,
   DaemonIdentity,
   UnstoredJob,
 } from "./protocol.js";
+import {
+  changedWhileRunning,
+  keptAlthoughChanged,
+  RunWatch,
+  runVerdict,
+} from "./run-judgment.js";
 import { Scheduler, type DiscoverReport, type RunReport } from "./scheduler.js";
 import type { DaemonHandlers } from "./server.js";
 
@@ -43,8 +49,6 @@ const UNCONFIRMED_RUN_REASON =
 /** The build a run waited on and one rebuild; a run waits through no more discards than these. */
 const DISCARDS_A_RUN_WAITS_THROUGH = 2;
 const JOB_THREW_REASON = "the job could not be run";
-const MOVED_DURING_RUN_REASON =
-  "its workspace's input fingerprint at its end differs from the one at its start";
 
 export interface LifecycleParts {
   readonly identity: DaemonIdentity;
@@ -68,8 +72,9 @@ export interface LifecycleParts {
  * scheduler discover again when the stored discovery is not current and run each confirmed workspace whose latest
  * run is not bound to its current fingerprint, answering status and queries throughout. Each job begins once the
  * input events seen before it are read, and a run once the dependency build at that revision has ended or none can
- * begin. Each is stored under the input fingerprint it started from, or not fingerprinted when its inputs moved
- * while it ran.
+ * begin. A discovery is stored under the input fingerprint it started from, or not fingerprinted when its inputs
+ * moved while it ran; a run is judged by its workspace's inputs alone, and interrupted with nothing stored once a
+ * change inside them makes it worthless.
  */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;
@@ -300,44 +305,85 @@ export class DaemonLifecycle implements DaemonHandlers {
     if (this.#beginsNothing(plannedRevision)) return undefined;
     log.entry(`run started: ${workspace.path}`);
     const mark = inputs.beginJob();
-    const startInputs = this.#runInputs();
-    const started = startInputs.workspaceFingerprint(entry);
+    let startInputs: CurrentInputs;
+    let watch: RunWatch;
+    try {
+      startInputs = this.#runInputs();
+      watch = new RunWatch({
+        entry,
+        window: mark.window,
+        startView: startInputs,
+        builds: this.#builds,
+        view: () => this.#runInputs(),
+        inputsChanged: () => inputs.changed(),
+        isStopping: () => this.isStopping(),
+        interrupt: () => executor.abort(ABORT_PURPOSE.interruption),
+        log,
+      });
+    } catch (error) {
+      await inputs.endJob(mark);
+      throw error;
+    }
     const revision = startInputs.facts.revision;
     const outcome = await executor
       .run(workspace, confirmed.configFile)
       .catch((error: unknown) => threwOutcome<WorkspaceRun>(error));
-    const verdict = await inputs.endJob(mark);
-    const report = (stored: boolean): RunReport => ({
+    watch.runReturned();
+    try {
+      await inputs.endJob(mark);
+      return await this.#settleRun(entry, revision, outcome, watch);
+    } finally {
+      await watch.close();
+    }
+  }
+
+  /**
+   * Stores nothing for a run its interruption ended or that left no run to store. Otherwise stores the run, judged
+   * once its end revision's build has ended, with no await between that wait and the view it is judged by.
+   */
+  async #settleRun(
+    entry: WorkspaceDiscovery,
+    revision: number,
+    outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
+    watch: RunWatch,
+  ): Promise<RunReport> {
+    const { log } = this.#parts;
+    const path = entry.workspace.path;
+    const job = `the run of ${path}`;
+    const report = (stored: boolean, changed: boolean): RunReport => ({
       revision,
       stored,
-      changedWhileRunning:
-        !verdict.fingerprinted && verdict.changedWhileRunning,
+      changedWhileRunning: changed,
     });
-    if (!outcome.ended) {
-      this.#nothingStored(workspace.path, outcome.reason);
-      return report(false);
+    const { interruption } = watch;
+    if (interruption !== undefined && interruptedRun(outcome)) {
+      this.#nothingStored(path, interruption);
+      return report(false, true);
     }
-    const run = outcome.value;
-    if (run.status === "not-confirmed") {
-      this.#nothingStored(workspace.path, run.reason);
-      return report(false);
+    const left = runToStore(outcome);
+    if ("unstored" in left) {
+      this.#nothingStored(path, left.unstored);
+      return report(false, changedWhileRunning(watch.judge(this.#runInputs())));
     }
+    const { run } = left;
+    await this.#awaitBuild(`the verdict on ${job}`);
+    const judgment = watch.judge(this.#runInputs());
     const bindings = this.#bindings(
-      `the run of ${workspace.path}`,
-      verdict,
-      () => unmoved(started, this.#runInputs().workspaceFingerprint(entry)),
+      job,
+      runVerdict(judgment),
+      () => watch.started,
     );
-    const stored = this.#store(
-      `the run of ${workspace.path}`,
-      workspace.path,
-      () => this.#parts.store.writeRun(bindings, run),
+    const stored = this.#store(job, path, () =>
+      this.#parts.store.writeRun(bindings, run),
     );
     if (stored) {
+      const kept = keptAlthoughChanged(judgment);
+      if (kept !== undefined) log.entry(`${job} ${kept}`);
       log.entry(
-        `run ended: ${workspace.path} ${run.status}${"execution" in run ? ` ${run.execution}` : ""}`,
+        `run ended: ${path} ${run.status}${"execution" in run ? ` ${run.execution}` : ""}`,
       );
     }
-    return report(stored);
+    return report(stored, changedWhileRunning(judgment));
   }
 
   /** A job starts only at the revision that was planned and settled, and never after a stop; otherwise the scheduler plans again. */
@@ -385,7 +431,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     return this.#parts.inputs.current(this.#builds.narrowing());
   }
 
-  /** The job's record is bound to its fingerprint only when its inputs held still from its start to its end. */
+  /** The job's record is bound to `fingerprint` only when its verdict says so. */
   #bindings(
     job: string,
     verdict: JobVerdict,
@@ -493,16 +539,25 @@ function threwOutcome<T>(error: unknown): JobOutcome<T> {
   return { ended: false, reason: `${JOB_THREW_REASON}: ${errorText(error)}` };
 }
 
-/** A run's fingerprint at its start, when its workspace's fingerprint at its end is the same one. */
-function unmoved(
-  started: FingerprintResult,
-  ended: FingerprintResult,
-): FingerprintResult {
-  if (!started.ok) return started;
-  if (!ended.ok) return ended;
-  return started.digest === ended.digest
-    ? started
-    : { ok: false, reason: MOVED_DURING_RUN_REASON };
+/** A run its abort ended: interrupted before or after it loaded, or with nothing, as an exit after an abort ends it. */
+function interruptedRun(
+  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
+): boolean {
+  if (!outcome.ended) return true;
+  const run = outcome.value;
+  return (
+    run.status === "interrupted-before-load" ||
+    (run.status === "ran" && run.execution === "interrupted")
+  );
+}
+
+/** The run a job left to store, or why it left none. */
+function runToStore(
+  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
+): { readonly run: WorkspaceRun } | { readonly unstored: string } {
+  if (!outcome.ended) return { unstored: outcome.reason };
+  const run = outcome.value;
+  return run.status === "not-confirmed" ? { unstored: run.reason } : { run };
 }
 
 function discoverySummary(discovery: TestDiscovery): string {

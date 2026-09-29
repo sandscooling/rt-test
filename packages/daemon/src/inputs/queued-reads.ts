@@ -56,13 +56,16 @@ export class QueuedReads {
     this.#retryLostInputSet = parts.retryLostInputSet;
   }
 
-  /** `filter` is the last reconciliation's; without it, or an established input set, nothing is read. */
+  /**
+   * `filter` is the last reconciliation's; without it, or an established input set, nothing is read, and each path
+   * marks its jobs as a cause, since no read vouches for it as an input.
+   */
   async read(
     batch: readonly [string, WatchEventType][],
     filter: InputFilter | undefined,
   ): Promise<void> {
     if (filter === undefined || !this.#state.established) {
-      for (const [path] of batch) this.#jobs.record(this.#label(path));
+      for (const [path] of batch) this.#jobs.recordCause(this.#label(path));
       this.#retryLostInputSet();
       return;
     }
@@ -95,7 +98,7 @@ export class QueuedReads {
     switch (entry.kind) {
       case "absent": {
         const wasDirectory = this.#state.hasDirectory(path);
-        record(this.#state.remove(relative, path));
+        record(this.#absentChanged(filter, path, relative, wasDirectory));
         if (wasDirectory) this.#watcher.dropDirectory(path);
         return;
       }
@@ -110,6 +113,21 @@ export class QueuedReads {
         this.#inputSetLost(`${relative} cannot be read: ${entry.reason}`);
         return;
     }
+  }
+
+  /**
+   * The inputs a read that found `path` absent removed. A path never held, which the caller found not excluded, came
+   * and went before its read, so it counts as changed unless the declaration would have hidden it.
+   */
+  #absentChanged(
+    filter: InputFilter,
+    path: string,
+    relative: string,
+    wasDirectory: boolean,
+  ): readonly string[] {
+    const removed = this.#state.remove(relative, path);
+    if (removed.length > 0 || wasDirectory) return removed;
+    return filter.declares(path) === undefined ? [relative] : [];
   }
 
   /**
@@ -170,8 +188,8 @@ export class QueuedReads {
     );
   }
 
-  #recordAll(descriptions: readonly string[]): void {
-    for (const description of descriptions) this.#jobs.record(description);
+  #recordAll(changed: readonly string[]): void {
+    for (const path of changed) this.#jobs.recordPath(path);
   }
 
   #label(path: string): string {

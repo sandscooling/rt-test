@@ -10,21 +10,36 @@ import {
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DependencyBuilds } from "../src/daemon/dependency-builds.js";
-import type { Executor, JobOutcome } from "../src/daemon/executor.js";
+import {
+  ABORT_PURPOSE,
+  type Executor,
+  type JobOutcome,
+} from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
 import type { DaemonActivity, DaemonIdentity } from "../src/daemon/protocol.js";
+import { RunWatch, type RunJudgment } from "../src/daemon/run-judgment.js";
 import {
   ProjectInputs,
   type FingerprintResult,
 } from "../src/inputs/fingerprint.js";
-import type { JobVerdict } from "../src/inputs/input-jobs.js";
-import { InputTracker } from "../src/inputs/input-tracker.js";
+import { JobWindows, type JobVerdict } from "../src/inputs/input-jobs.js";
+import {
+  InputTracker,
+  type CurrentInputs,
+} from "../src/inputs/input-tracker.js";
 import {
   NARROWING,
+  Narrowing,
   narrowingAt,
   type QueryNarrowing,
   type WorkspaceNarrowing,
 } from "../src/inputs/narrowed-inputs.js";
+import {
+  DEPENDENCY_BUILD_FAILED,
+  SELECTION_REFUSED,
+  type InputsNotNarrowed,
+} from "../src/query/answer.js";
+import { buildSelectionInput } from "../src/selection/selection-input.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
@@ -59,9 +74,17 @@ import {
 } from "./daemon-harness.js";
 import { inTempDir, settle } from "./harness.js";
 import {
+  builtAt,
+  discoveredIn,
+  failedAt,
+  ranWorkspace,
+} from "./round-fixtures.js";
+import {
+  ABSENT_ROOT,
   DISCOVERY_DIGEST,
   Deferred,
   FINGERPRINTED,
+  NO_DECLARATION,
   RecordingStore,
   SCOPE,
   SETTLED_INPUTS,
@@ -104,15 +127,19 @@ const SENTINEL = "z.md";
 const RECONCILIATION_ENDED = "input reconciliation ended";
 /** Why the tracker cannot vouch for its inputs, as it says while its watcher has failed. */
 const WATCHER_FAILED = "the watcher failed: ENOSPC";
+/** Why no fingerprint can be taken while a reconciliation runs, as the tracker says it. */
+const RECONCILING = "a reconciliation of the inputs is running";
 
 type RunOutcome = JobOutcome<WorkspaceRun | NotConfirmedRun>;
+type AbortPurpose = NonNullable<Parameters<Executor["abort"]>[0]>;
 
-/** An executor that answers each job from a script, and records the jobs it was given. */
+/** An executor that answers each job from a script, and records the jobs it was given and what each abort was for. */
 class ScriptedExecutor implements Pick<
   Executor,
   "discover" | "run" | "abort" | "close"
 > {
   readonly runs: string[] = [];
+  readonly purposes: AbortPurpose[] = [];
   discoveries = 0;
   aborts = 0;
   readonly #discovery: Promise<JobOutcome<TestDiscovery>>;
@@ -139,8 +166,11 @@ class ScriptedExecutor implements Pick<
     return this.#runs(workspace.path);
   }
 
-  abort(): void {
+  /** Reaches the job in progress, as the executor's abort does while one runs. */
+  abort(purpose: AbortPurpose = ABORT_PURPOSE.stop): boolean {
     this.aborts += 1;
+    this.purposes.push(purpose);
+    return true;
   }
 
   close(): Promise<void> {
@@ -197,10 +227,11 @@ class ScriptedBuilds implements Pick<
     ]);
   }
 
-  abort(): void {
+  abort(): boolean {
     this.aborts += 1;
     this.#aborted.resolve({ ended: false, reason: BUILD_ABORTED });
     this.#aborted = new Deferred<BuildOutcome>();
+    return true;
   }
 
   close(): Promise<void> {
@@ -281,18 +312,29 @@ function daemon(
   };
 }
 
-/** A daemon over one confirmed workspace `a`, discovered and run once, with inputs the test scripts. */
-function scripted(script: InputsScript): Daemon {
-  const executor = new ScriptedExecutor({
-    ended: true,
-    value: discovery(discovered("a")),
-  });
+/**
+ * A daemon over one confirmed workspace `a`, discovered and run once, with inputs the test scripts. Each run calls
+ * `during` with the inputs and the run's count from 1, as what the run sees change while it runs. Every build fails,
+ * so each workspace's inputs are the whole project's.
+ */
+function scripted(
+  script: InputsScript,
+  during: (inputs: StandInInputs, run: number) => void = () => undefined,
+): Daemon {
+  const inputs = new StandInInputs(script);
+  const executor: ScriptedExecutor = new ScriptedExecutor(
+    { ended: true, value: discovery(discovered("a")) },
+    (path) => {
+      during(inputs, executor.runs.length);
+      return { ended: true, value: interrupted(path) };
+    },
+  );
   return daemon(
     confirmed("a"),
     executor,
     new RecordingStore(),
     IDENTITY,
-    new StandInInputs(script),
+    inputs,
   );
 }
 
@@ -672,12 +714,8 @@ describe("the start sequence", () => {
   it("D1877: a run whose inputs changed while it ran is stored not fingerprinted, and the log names the run and the change", async () => {
     const reason = "its inputs changed while it ran: packages/a/src/a.ts";
     const { store, log } = await begun(
-      scripted({
-        verdicts: [
-          FINGERPRINTED,
-          FINGERPRINTED,
-          { fingerprinted: false, reason, changedWhileRunning: true },
-        ],
+      scripted({}, (inputs, run) => {
+        if (run === 1) inputs.recordPath("packages/a/src/a.ts");
       }),
     );
     expect({
@@ -704,9 +742,9 @@ describe("the start sequence", () => {
         },
       }),
     );
-    expect(store.runFingerprints).toStrictEqual([
-      { kind: "not-fingerprinted" },
-    ]);
+    expect(store.runFingerprints[0]).toStrictEqual({
+      kind: "not-fingerprinted",
+    });
   });
 
   it("D1879: a discovery during which a listed test module no watch covers may have changed is stored not fingerprinted, naming the module", async () => {
@@ -1312,9 +1350,10 @@ class FinishesOnAbort extends ScriptedBuilds {
     return this.#finish.promise;
   }
 
-  override abort(): void {
-    super.abort();
+  override abort(): boolean {
+    const reached = super.abort();
     this.#finish.resolve(BUILT);
+    return reached;
   }
 }
 
@@ -2197,28 +2236,29 @@ describe(
 
     it("D2519: a run whose build is discarded twice in a row while it waits proceeds, is stored not fingerprinted, and the log says why", async () => {
       const held = new Deferred<BuildOutcome>();
-      const outcome = await inTempDir(async (root) =>
-        thenStopped(
-          await begun(
-            rootedAt(
-              root,
-              {
-                verdicts: [FINGERPRINTED, FINGERPRINTED, EDITED, EDITED],
-                fingerprintOf: failingWhileBuilding,
-              },
-              new ScriptedBuilds((index) => (index < 2 ? BUILT : held.promise)),
-            ),
+      const outcome = await inTempDir(async (root) => {
+        const { lifecycle, store, log } = await begun(
+          rootedAt(
+            root,
+            {
+              verdicts: [FINGERPRINTED, FINGERPRINTED, EDITED, EDITED],
+              fingerprintOf: failingWhileBuilding,
+            },
+            new ScriptedBuilds((index) => (index < 2 ? BUILT : held.promise)),
           ),
-          async ({ store, log }) => ({
-            runs: [...store.runFingerprints],
-            logged: log.entries.filter(
-              (entry) =>
-                entry.includes(PROCEEDS_WITHOUT_BUILD) &&
-                entry.includes(EDITED_REASON),
-            ).length,
-          }),
-        ),
-      );
+        );
+        // The run's verdict waits for the build still held at its end revision, which the stop ends.
+        lifecycle.stop();
+        await lifecycle.stopped();
+        return {
+          runs: [...store.runFingerprints],
+          logged: log.entries.filter(
+            (entry) =>
+              entry.includes(PROCEEDS_WITHOUT_BUILD) &&
+              entry.includes(EDITED_REASON),
+          ).length,
+        };
+      });
       expect(outcome).toStrictEqual({
         runs: [{ kind: "not-fingerprinted" }],
         logged: 1,
@@ -2555,16 +2595,8 @@ describe("what the daemon reports of a job once it has ended", () => {
 
   it("D2740: a run whose inputs changed while it ran, at a revision the change did not move, is run once more", async () => {
     const { executor } = await begun(
-      scripted({
-        verdicts: [
-          FINGERPRINTED,
-          FINGERPRINTED,
-          {
-            fingerprinted: false,
-            reason: "its inputs changed while it ran: packages/a/src/a.ts",
-            changedWhileRunning: true,
-          },
-        ],
+      scripted({}, (inputs, run) => {
+        if (run === 1) inputs.recordPath("packages/a/src/a.ts");
       }),
     );
     expect(executor.runs).toStrictEqual(["a", "a"]);
@@ -2573,16 +2605,7 @@ describe("what the daemon reports of a job once it has ended", () => {
   it("D2747: a run that began with its inputs unsettled is not run once more at the same revision", async () => {
     const { executor } = await begun(
       scripted({
-        verdicts: [
-          FINGERPRINTED,
-          FINGERPRINTED,
-          {
-            fingerprinted: false,
-            reason:
-              "its inputs were unsettled when it started: a reconciliation was running",
-            changedWhileRunning: false,
-          },
-        ],
+        fingerprintOf: () => ({ ok: false, reason: RECONCILING }),
       }),
     );
     expect(executor.runs).toStrictEqual(["a"]);
@@ -2617,5 +2640,669 @@ describe("a job planned at a revision that then moved", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Package workspaces `a` and `b`: selection puts a path under `a/` in Vitest workspace `a`'s inputs, and a path under
+ * `b/` in no Vitest workspace's.
+ */
+const A_AND_B: DependencyInformation = {
+  ...NO_DEPENDENCIES,
+  packageWorkspaces: [workspace("a"), workspace("b")],
+};
+const INSIDE = "a/src/a.ts";
+const OUTSIDE = "b/src/b.ts";
+/** A legal Linux file name that Windows' path rules read as drive-relative, so selection refuses it. */
+const REFUSED_PATH = "a:b.txt";
+const NOT_FINGERPRINTED_LINE = "the run of a is stored not fingerprinted: ";
+const KEPT_LINE =
+  "the run of a is stored under its input fingerprint, since only paths outside its workspace's inputs changed while it ran";
+const INTERRUPTED_REASON =
+  "a change inside its workspace's inputs interrupted it, so nothing of it was stored";
+const UNHEALTHY = "the input watcher is unhealthy: the watcher failed: ENOSPC";
+const NOT_FINGERPRINTED = { kind: "not-fingerprinted" };
+
+/** A daemon over workspace `a`, started from `root`, whose every dependency build narrows over package workspaces `a` and `b`. */
+function narrowedDaemon(
+  root: string,
+  inputs: StandInInputs,
+  executor: ScriptedExecutor,
+): Daemon {
+  return daemon(
+    { ...confirmed("a"), consumerRoot: root },
+    executor,
+    new RecordingStore(),
+    { ...IDENTITY, consumerRoot: root },
+    inputs,
+    new ScriptedBuilds(() => ({ ended: true, value: A_AND_B })),
+  );
+}
+
+/**
+ * Runs a daemon over narrowed builds in a root of its own, calling `during` in each run as `scripted` does, hands
+ * `body` the daemon once it has run all it can, and stops it after.
+ */
+function narrowedRun<T>(
+  during: (inputs: StandInInputs, run: number) => void | Promise<void>,
+  body: (started: Daemon) => Promise<T>,
+  inputs: StandInInputs = new StandInInputs(),
+): Promise<T> {
+  return inTempDir(async (root) => {
+    const executor: ScriptedExecutor = new ScriptedExecutor(
+      { ended: true, value: discovery(discovered("a")) },
+      async (path) => {
+        await during(inputs, executor.runs.length);
+        return { ended: true, value: interrupted(path) };
+      },
+    );
+    return thenStopped(
+      await begun(narrowedDaemon(root, inputs, executor)),
+      body,
+    );
+  });
+}
+
+/** An executor whose every run holds until an abort, which ends the run in progress with `aborted`. */
+class HoldingExecutor extends ScriptedExecutor {
+  readonly #aborted: RunOutcome;
+  readonly #during: (run: number) => void;
+  #held: Deferred<RunOutcome> | undefined;
+
+  /** `during` is called as each run starts, with the run's count from 1. */
+  constructor(aborted: RunOutcome, during: (run: number) => void) {
+    super({ ended: true, value: discovery(discovered("a")) });
+    this.#aborted = aborted;
+    this.#during = during;
+  }
+
+  override run(workspace: VitestWorkspace): Promise<RunOutcome> {
+    this.runs.push(workspace.path);
+    const held = new Deferred<RunOutcome>();
+    this.#held = held;
+    this.#during(this.runs.length);
+    return held.promise;
+  }
+
+  override abort(purpose?: AbortPurpose): boolean {
+    const reached = super.abort(purpose);
+    this.#held?.resolve(this.#aborted);
+    this.#held = undefined;
+    return reached;
+  }
+}
+
+/** What a run its abort reached returns: interrupted after its tests loaded. */
+const INTERRUPTED_RUN: RunOutcome = {
+  ended: true,
+  value: ranWorkspace("a", ["passed"], "interrupted"),
+};
+
+/**
+ * Runs `a` over narrowed builds with an executor that holds each run until an abort ends it with `aborted`. While the
+ * first run holds, `a/src/a.ts` changes and the revision moves, so the next build places the change inside `a`'s
+ * inputs. Hands `body` the daemon once that has settled, and stops it after.
+ */
+function withInterruptedRun<T>(
+  aborted: RunOutcome,
+  body: (started: Daemon) => Promise<T>,
+): Promise<T> {
+  return inTempDir(async (root) => {
+    const inputs = new StandInInputs();
+    const executor = new HoldingExecutor(aborted, (run) => {
+      if (run !== 1) return;
+      inputs.recordPath(INSIDE);
+      inputs.moveRevision();
+    });
+    const started = await begun(narrowedDaemon(root, inputs, executor));
+    await flush();
+    return thenStopped(started, body);
+  });
+}
+
+describe(
+  "judging a run by its workspace's inputs",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D2862: a run during which only a path outside its workspace's inputs changed is stored under the fingerprint it started from", async () => {
+      const fingerprints = await narrowedRun(
+        (inputs) => inputs.recordPath(OUTSIDE),
+        async ({ store }) => [...store.runFingerprints],
+      );
+      expect(fingerprints).toStrictEqual([
+        { kind: "digest", digest: "a-digest" },
+      ]);
+    });
+
+    it("D2889: a run stored under its fingerprint while paths outside its inputs changed is logged with those paths", async () => {
+      const logged = await narrowedRun(
+        (inputs) => inputs.recordPath(OUTSIDE),
+        async ({ log }) =>
+          log.entries.filter((entry) => entry.startsWith(KEPT_LINE)),
+      );
+      expect(logged).toStrictEqual([`${KEPT_LINE}: ${OUTSIDE}`]);
+    });
+
+    it("D2863: a run during which a path inside its workspace's inputs changed, with its fingerprint at the end the same, is stored not fingerprinted, the log naming the path", async () => {
+      const outcome = await narrowedRun(
+        (inputs, run) => {
+          if (run === 1) inputs.recordPath(INSIDE);
+        },
+        async ({ store, log }) => ({
+          stored: store.runFingerprints[0],
+          logged: log.entries.filter((entry) =>
+            entry.startsWith(NOT_FINGERPRINTED_LINE),
+          ),
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        stored: NOT_FINGERPRINTED,
+        logged: [
+          `${NOT_FINGERPRINTED_LINE}its inputs changed while it ran: ${INSIDE}`,
+        ],
+      });
+    });
+
+    it("D2864: a run during which a watcher failure was recorded is stored not fingerprinted, the log naming the failure", async () => {
+      const outcome = await narrowedRun(
+        (inputs, run) => {
+          if (run === 1) inputs.recordCause(WATCHER_FAILED);
+        },
+        async ({ store, log }) => ({
+          stored: [...store.runFingerprints],
+          logged: log.entries.filter((entry) =>
+            entry.startsWith(NOT_FINGERPRINTED_LINE),
+          ),
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        stored: [NOT_FINGERPRINTED],
+        logged: [
+          `${NOT_FINGERPRINTED_LINE}its inputs could not be vouched for while it ran: ${WATCHER_FAILED}`,
+        ],
+      });
+    });
+
+    it("D2890: a run whose workspace fingerprint could not be taken at its end is logged with why", async () => {
+      const phase = { ended: false };
+      const { log } = await begun(
+        scripted(
+          {
+            fingerprintOf: () =>
+              phase.ended
+                ? { ok: false, reason: UNHEALTHY }
+                : { ok: true, digest: "a-digest" },
+          },
+          () => {
+            phase.ended = true;
+          },
+        ),
+      );
+      expect(
+        log.entries.filter((entry) => entry.startsWith(NOT_FINGERPRINTED_LINE)),
+      ).toStrictEqual([
+        `${NOT_FINGERPRINTED_LINE}its workspace's input fingerprint could not be taken at its end: ${UNHEALTHY}`,
+      ]);
+    });
+
+    it("D2886: a run during which an input changed, whose fingerprint could not be taken at its end, is not run once more at the same revision", async () => {
+      const phase = { ended: false };
+      const { executor } = await begun(
+        scripted(
+          {
+            fingerprintOf: () =>
+              phase.ended
+                ? { ok: false, reason: UNHEALTHY }
+                : { ok: true, digest: "a-digest" },
+          },
+          (inputs) => {
+            inputs.recordPath(INSIDE);
+            phase.ended = true;
+          },
+        ),
+      );
+      expect(executor.runs).toStrictEqual(["a"]);
+    });
+
+    it("D2870: a run a change inside its workspace's inputs made worthless is interrupted once the newer build has ended, stores nothing, is listed with the reason naming the path, and runs again", async () => {
+      const outcome = await withInterruptedRun(
+        INTERRUPTED_RUN,
+        async ({ lifecycle, store, executor }) => ({
+          runs: [...executor.runs],
+          stored: store.runs.length,
+          unstored: lifecycle.status().unstoredJobs,
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        runs: ["a", "a"],
+        stored: 0,
+        unstored: [
+          { workspacePath: "a", reason: `${INTERRUPTED_REASON}: ${INSIDE}` },
+        ],
+      });
+    });
+
+    it("D2888: a run's interruption is asked of the executor as an interruption, never as a stop", async () => {
+      const purposes = await withInterruptedRun(
+        INTERRUPTED_RUN,
+        async ({ executor }) => [...executor.purposes],
+      );
+      expect(purposes).toStrictEqual([ABORT_PURPOSE.interruption]);
+    });
+
+    it("D2912: a run nothing changed during logs no line saying paths outside its inputs changed", async () => {
+      const logged = await narrowedRun(
+        () => undefined,
+        async ({ log }) =>
+          log.entries.filter((entry) => entry.startsWith(KEPT_LINE)),
+      );
+      expect(logged).toStrictEqual([]);
+    });
+
+    it("D2904: a run whose inputs moved while it ran only by a change outside its workspace's inputs is stored under the fingerprint it started from", async () => {
+      const fingerprints = await narrowedRun(
+        async (inputs, run) => {
+          if (run !== 1) return;
+          inputs.recordPath(OUTSIDE);
+          inputs.moveRevision();
+          await flush();
+        },
+        async ({ store }) => {
+          // The run spent a flush waiting for the newer build, so it settles one flush later than a plain run.
+          await flush();
+          return [...store.runFingerprints];
+        },
+      );
+      expect(fingerprints).toStrictEqual([
+        { kind: "digest", digest: "a-digest" },
+      ]);
+    });
+
+    it("D2905: a run whose inputs moved just before it returned is judged once its end revision's build has ended, so a change outside its inputs leaves it stored under its fingerprint", async () => {
+      const inputs: StandInInputs = new StandInInputs({
+        fingerprintOf: (path, narrowing) =>
+          narrowing !== undefined &&
+          narrowingAt(narrowing, inputs.revision).kind === NARROWING.building
+            ? { ok: false, reason: "the dependency build has not ended" }
+            : { ok: true, digest: `${path}-digest` },
+      });
+      const fingerprints = await narrowedRun(
+        (running, run) => {
+          if (run !== 1) return;
+          running.recordPath(OUTSIDE);
+          running.moveRevision();
+        },
+        async ({ store }) => [...store.runFingerprints],
+        inputs,
+      );
+      expect(fingerprints).toStrictEqual([
+        { kind: "digest", digest: "a-digest" },
+      ]);
+    });
+
+    it("D2906: a run its interruption ended before its tests loaded stores nothing and is listed with the interruption's reason", async () => {
+      const outcome = await withInterruptedRun(
+        { ended: true, value: interrupted("a") },
+        async ({ lifecycle, store }) => ({
+          stored: store.runs.length,
+          unstored: lifecycle.status().unstoredJobs,
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        stored: 0,
+        unstored: [
+          { workspacePath: "a", reason: `${INTERRUPTED_REASON}: ${INSIDE}` },
+        ],
+      });
+    });
+
+    it("D2885: a run its executor returns finished although its interruption was asked is stored, judged by the change inside its inputs", async () => {
+      const stored = await withInterruptedRun(
+        { ended: true, value: ranWorkspace("a") },
+        async ({ store }) => ({
+          status: store.runs[0]?.status,
+          fingerprint: store.runFingerprints[0],
+        }),
+      );
+      expect(stored).toStrictEqual({
+        status: "ran",
+        fingerprint: NOT_FINGERPRINTED,
+      });
+    });
+  },
+);
+
+const A_DIGEST: FingerprintResult = { ok: true, digest: "a-digest" };
+const TRACKER_STOPPED = "the input tracker has stopped";
+/** As many paths as a reason names before it counts the rest. */
+const NAMED_PATHS = 20;
+
+/** Why a view's inputs are not narrowed when selection refused one of their paths. */
+const REFUSED_INPUTS: InputsNotNarrowed = {
+  kind: SELECTION_REFUSED,
+  reason: `selection refused the path ${REFUSED_PATH}`,
+};
+
+/**
+ * The inputs at `revision` as a run's watch reads them, each workspace's fingerprint `fingerprint`, and not narrowed
+ * for `notNarrowed` when it is given.
+ */
+function viewAt(
+  revision: number,
+  fingerprint: FingerprintResult = A_DIGEST,
+  unavailable?: string,
+  notNarrowed?: InputsNotNarrowed,
+): CurrentInputs {
+  return {
+    facts: { ...SETTLED_INPUTS, revision },
+    ...(unavailable === undefined ? {} : { unavailable }),
+    ...(notNarrowed === undefined ? {} : { inputsNotNarrowed: notNarrowed }),
+    snapshot: undefined,
+    workspaceFingerprint: () => fingerprint,
+    discoveryFingerprint: () => fingerprint,
+    protectedFileChangedSince: () => undefined,
+  };
+}
+
+/** The builds' state once a build over the discovery of workspace `a` ended at `revision`, placing paths over `dependencies`. */
+function narrowedAt(
+  revision: number,
+  dependencies: DependencyInformation = A_AND_B,
+): QueryNarrowing {
+  const built = buildSelectionInput(
+    discovery(discovered("a")),
+    ABSENT_ROOT,
+    NO_DECLARATION,
+  );
+  if (!built.built) throw new Error(built.reason);
+  return builtAt(
+    revision,
+    new Narrowing(built.input, dependencies, () => undefined),
+  );
+}
+
+/** The builds' state once the build at `revision` failed, so every path lies in every workspace's inputs. */
+function failedBuildAt(revision: number): QueryNarrowing {
+  return failedAt(revision, DEPENDENCY_BUILD_FAILED, BUILD_FAILED_REASON);
+}
+
+interface WatchCase {
+  readonly entry?: WorkspaceDiscovery;
+  /** The run's workspace fingerprint at its start. */
+  readonly start?: FingerprintResult;
+  /** The builds' state as the run starts, at revision 1. */
+  readonly builds: QueryNarrowing;
+  /** Whether each abort reaches the run's job; it does unless this says not. */
+  readonly reaches?: boolean;
+  /** Why every view's inputs are not narrowed, as a view says when selection refused its inputs. */
+  readonly notNarrowed?: InputsNotNarrowed;
+}
+
+/**
+ * A run's watch over stand-in parts, whose inputs and builds the test moves. No build is ever pending, so the watch
+ * wakes at each change of the inputs.
+ */
+class WatchedRun {
+  readonly windows = new JobWindows();
+  readonly log = memoryLog();
+  readonly watch: RunWatch;
+  interrupts = 0;
+  stopping = false;
+  /** Makes the builds' next read throw, as a failure inside the watch would. */
+  throwsOnce = false;
+  #revision = 1;
+  #builds: QueryNarrowing;
+  #changes: (() => void)[] = [];
+  readonly #notNarrowed: InputsNotNarrowed | undefined;
+
+  constructor(watchCase: WatchCase) {
+    this.#builds = watchCase.builds;
+    this.#notNarrowed = watchCase.notNarrowed;
+    const { window } = this.windows.open(undefined);
+    this.watch = new RunWatch({
+      entry: watchCase.entry ?? discovered("a"),
+      window,
+      startView: viewAt(1, watchCase.start, undefined, this.#notNarrowed),
+      builds: {
+        narrowing: () => this.#narrowing(),
+        pending: () => false,
+        ended: () => Promise.resolve(),
+      },
+      view: () => this.#view(this.#revision),
+      inputsChanged: () =>
+        new Promise((resolve) => this.#changes.push(resolve)),
+      isStopping: () => this.stopping,
+      interrupt: () => {
+        this.interrupts += 1;
+        return watchCase.reaches ?? true;
+      },
+      log: this.log,
+    });
+  }
+
+  /** Moves the inputs to `revision`, where the builds' state is `builds`, and lets the watch wake to it. */
+  async moveTo(
+    revision: number,
+    builds: QueryNarrowing = this.#builds,
+  ): Promise<void> {
+    this.#revision = revision;
+    this.#builds = builds;
+    const waiting = this.#changes;
+    this.#changes = [];
+    for (const resolve of waiting) resolve();
+    await flush();
+  }
+
+  /** Judges the run at its end, at `revision` where the builds' state is `builds`, without waking the watch. */
+  judgeAt(
+    revision: number,
+    builds: QueryNarrowing,
+    view: CurrentInputs = this.#view(revision),
+  ): RunJudgment {
+    this.#revision = revision;
+    this.#builds = builds;
+    return this.watch.judge(view);
+  }
+
+  #view(revision: number): CurrentInputs {
+    return viewAt(revision, A_DIGEST, undefined, this.#notNarrowed);
+  }
+
+  #narrowing(): QueryNarrowing {
+    if (this.throwsOnce) {
+      this.throwsOnce = false;
+      throw new Error("EIO: the builds' state could not be read");
+    }
+    return this.#builds;
+  }
+}
+
+/** Runs `body` over a watched run, then closes its watch. */
+async function watched<T>(
+  watchCase: WatchCase,
+  body: (run: WatchedRun) => Promise<T> | T,
+): Promise<T> {
+  const run = new WatchedRun(watchCase);
+  try {
+    return await body(run);
+  } finally {
+    await run.watch.close();
+  }
+}
+
+/** A judgment's kind, with the changed paths inside when it names them. */
+function judged(judgment: RunJudgment): unknown {
+  return judgment.kind === "changed-inside"
+    ? { kind: judgment.kind, paths: judgment.paths }
+    : { kind: judgment.kind };
+}
+
+describe("placing a run's changed paths by each build it saw", () => {
+  it("D2865: a path only a build that ended while the run ran places inside its workspace's inputs leaves the run not fingerprinted", async () => {
+    const judgment = await watched(
+      { builds: narrowedAt(1, NO_DEPENDENCIES), reaches: false },
+      async (run) => {
+        run.windows.recordPath(INSIDE);
+        await run.moveTo(2, narrowedAt(2));
+        return judged(run.judgeAt(3, narrowedAt(3, NO_DEPENDENCIES)));
+      },
+    );
+    expect(judgment).toStrictEqual({ kind: "changed-inside", paths: [INSIDE] });
+  });
+
+  it("D2866: a path only the build at the run's end revision places inside its workspace's inputs leaves the run not fingerprinted", async () => {
+    const judgment = await watched(
+      { builds: narrowedAt(1, NO_DEPENDENCIES) },
+      (run) => {
+        run.windows.recordPath(INSIDE);
+        return judged(run.judgeAt(2, narrowedAt(2)));
+      },
+    );
+    expect(judgment).toStrictEqual({ kind: "changed-inside", paths: [INSIDE] });
+  });
+
+  it("D2867: a test module the discovery lists for the workspace lies inside its inputs though no build's selection includes it", async () => {
+    const module = "a/a.test.ts";
+    const judgment = await watched(
+      {
+        entry: discoveredIn("a", ["a.test.ts"]),
+        builds: narrowedAt(1, NO_DEPENDENCIES),
+      },
+      (run) => {
+        run.windows.recordPath(module);
+        return judged(run.judgeAt(1, narrowedAt(1, NO_DEPENDENCIES)));
+      },
+    );
+    expect(judgment).toStrictEqual({ kind: "changed-inside", paths: [module] });
+  });
+
+  it("D2868: a path inside the workspace's inputs that changed after the reason's naming cap still leaves the run not fingerprinted", async () => {
+    const judgment = await watched({ builds: narrowedAt(1) }, (run) => {
+      for (let index = 0; index < NAMED_PATHS; index += 1) {
+        run.windows.recordPath(`b/src/b${index}.ts`);
+      }
+      run.windows.recordPath(INSIDE);
+      return judged(run.judgeAt(1, narrowedAt(1)));
+    });
+    expect(judgment).toStrictEqual({ kind: "changed-inside", paths: [INSIDE] });
+  });
+
+  it("D2869: a watch that fails while the run runs counts every path the run saw change inside its workspace's inputs", async () => {
+    const judgment = await watched({ builds: narrowedAt(1) }, async (run) => {
+      run.windows.recordPath(OUTSIDE);
+      run.throwsOnce = true;
+      await run.moveTo(2);
+      return judged(run.judgeAt(2, narrowedAt(2)));
+    });
+    expect(judgment).toStrictEqual({
+      kind: "changed-inside",
+      paths: [OUTSIDE],
+    });
+  });
+
+  it("D2903: at revisions whose selection refused their inputs, a path the build places outside the workspace's inputs counts inside, and never interrupts the run", async () => {
+    const outcome = await watched(
+      { builds: narrowedAt(1), notNarrowed: REFUSED_INPUTS },
+      async (run) => {
+        run.windows.recordPath(OUTSIDE);
+        await run.moveTo(2, narrowedAt(2));
+        return {
+          judgment: judged(run.judgeAt(2, narrowedAt(2))),
+          interrupts: run.interrupts,
+        };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      judgment: { kind: "changed-inside", paths: [OUTSIDE] },
+      interrupts: 0,
+    });
+  });
+
+  it("D2887: a run whose end view can vouch for no inputs is judged by its unavailable end fingerprint, never by a build that view cannot place for", async () => {
+    const judgment = await watched({ builds: narrowedAt(1) }, (run) => {
+      run.windows.recordPath(OUTSIDE);
+      return judged(
+        run.judgeAt(
+          2,
+          failedBuildAt(2),
+          viewAt(2, { ok: false, reason: TRACKER_STOPPED }, TRACKER_STOPPED),
+        ),
+      );
+    });
+    expect(judgment).toStrictEqual({ kind: "end-unavailable" });
+  });
+});
+
+describe("interrupting a run in progress", () => {
+  it("D2871: a change only a failed build places inside the workspace's inputs never interrupts the run", async () => {
+    const interrupts = await watched({ builds: narrowedAt(1) }, async (run) => {
+      run.windows.recordPath(OUTSIDE);
+      await run.moveTo(2, failedBuildAt(2));
+      return run.interrupts;
+    });
+    expect(interrupts).toBe(0);
+  });
+
+  it("D2872: a changed path selection refuses never interrupts the run", async () => {
+    const interrupts = await watched({ builds: narrowedAt(1) }, async (run) => {
+      run.windows.recordPath(REFUSED_PATH);
+      await run.moveTo(2, narrowedAt(2));
+      return run.interrupts;
+    });
+    expect(interrupts).toBe(0);
+  });
+
+  it("D2876: a change inside the workspace's inputs interrupts nothing until a newer revision's build has ended", async () => {
+    const interrupts = await watched({ builds: narrowedAt(1) }, async (run) => {
+      run.windows.recordPath(INSIDE);
+      await run.moveTo(2);
+      return run.interrupts;
+    });
+    expect(interrupts).toBe(0);
+  });
+
+  it("D2873: a run that started with no input fingerprint is never interrupted, whatever changed inside its workspace's inputs", async () => {
+    const interrupts = await watched(
+      { builds: narrowedAt(1), start: { ok: false, reason: RECONCILING } },
+      async (run) => {
+        run.windows.recordPath(INSIDE);
+        await run.moveTo(2, narrowedAt(2));
+        return run.interrupts;
+      },
+    );
+    expect(interrupts).toBe(0);
+  });
+
+  it("D2874: once a stop is asked, a change inside the workspace's inputs never interrupts the run", async () => {
+    const interrupts = await watched({ builds: narrowedAt(1) }, async (run) => {
+      run.windows.recordPath(INSIDE);
+      run.stopping = true;
+      await run.moveTo(2, narrowedAt(2));
+      return run.interrupts;
+    });
+    expect(interrupts).toBe(0);
+  });
+
+  it("D2911: a path inside the workspace's inputs recorded after a newer build has ended interrupts the run, though the revision did not move", async () => {
+    const interrupts = await watched({ builds: narrowedAt(1) }, async (run) => {
+      run.windows.recordPath(OUTSIDE);
+      await run.moveTo(2, narrowedAt(2));
+      run.windows.recordPath(INSIDE);
+      await run.moveTo(2);
+      return run.interrupts;
+    });
+    expect(interrupts).toBe(1);
+  });
+
+  it("D2875: an interruption whose abort reached no job records no interruption", async () => {
+    const outcome = await watched(
+      { builds: narrowedAt(1), reaches: false },
+      async (run) => {
+        run.windows.recordPath(INSIDE);
+        await run.moveTo(2, narrowedAt(2));
+        return { asked: run.interrupts, interruption: run.watch.interruption };
+      },
+    );
+    expect(outcome).toStrictEqual({ asked: 1, interruption: undefined });
   });
 });

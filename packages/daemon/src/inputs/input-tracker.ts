@@ -41,7 +41,10 @@ import { NON_INPUTS_FILE, type NonInputsDeclaration } from "./non-inputs.js";
 import { protection } from "./protection.js";
 import { keepReleasedFiles } from "./protection-walk.js";
 import { QueuedReads, RENAME_EVENT } from "./queued-reads.js";
-import { PERIODIC_REASON, ReconcileSchedule } from "./reconcile-schedule.js";
+import {
+  RECONCILE_INTERVAL_MS,
+  ReconcileSchedule,
+} from "./reconcile-schedule.js";
 
 const IGNORE_FILE = ".gitignore";
 const CHANGE_EVENT = "change";
@@ -92,7 +95,10 @@ export interface TrackedInputs {
    * ending or the pending reads draining; at once when the tracker has stopped.
    */
   changed(): Promise<void>;
-  /** How many periodic reconciliations have ended in this daemon's life, whether one asked for or another absorbed it. */
+  /**
+   * How many reconciliations have counted as periodic in this daemon's life: each that ended at least
+   * `RECONCILE_INTERVAL_MS` after the last one counted, whatever asked for it, the first one starting the measure.
+   */
   periodicReconciliations(): number;
   /** The declaration in effect, which decides with the protection in effect which files are inputs. */
   nonInputsDeclaration(): NonInputsDeclaration;
@@ -147,8 +153,9 @@ export class InputTracker implements TrackedInputs {
   #started = false;
   #reconciling = false;
   #reconcileRequested = false;
-  #periodicRequested = false;
   #periodicEnded = 0;
+  /** When, by `performance.now()`, the last reconciliation counted as periodic ended; the first one's end starts it. */
+  #periodicMeasuredFrom: number | undefined;
   #reconciliation: Promise<void> = Promise.resolve();
   #processing: Promise<void> | undefined;
   #inFlight = 0;
@@ -361,13 +368,12 @@ export class InputTracker implements TrackedInputs {
   #markUnhealthy(reason: string): void {
     this.#watchFailure = reason;
     this.#log.entry(`input watcher unhealthy: ${reason}`);
-    this.#jobs.record(reason);
+    this.#jobs.recordCause(reason);
   }
 
   #requestReconciliation(reason: string): void {
     if (this.#stopped) return;
     this.#reconcileRequested = true;
-    if (reason === PERIODIC_REASON) this.#periodicRequested = true;
     if (this.#reconciling) return;
     this.#reconciling = true;
     this.#log.entry(`input reconciliation started: ${reason}`);
@@ -390,15 +396,24 @@ export class InputTracker implements TrackedInputs {
     }
     this.#reconciling = false;
     if (this.#stopped) return;
-    if (this.#periodicRequested) {
-      this.#periodicRequested = false;
-      this.#periodicEnded += 1;
-    }
+    this.#countPeriodic();
     this.#markFirstReconciled();
     this.#schedule.periodic();
     this.#processQueue();
     this.#ledger.notify();
     this.#signalChange();
+  }
+
+  /**
+   * Counts by elapsed time, whoever asked: each end re-arms the timer, so reconciliations that run often keep it from
+   * firing.
+   */
+  #countPeriodic(): void {
+    const endedAt = performance.now();
+    const from = this.#periodicMeasuredFrom;
+    if (from !== undefined && endedAt - from < RECONCILE_INTERVAL_MS) return;
+    if (from !== undefined) this.#periodicEnded += 1;
+    this.#periodicMeasuredFrom = endedAt;
   }
 
   #retryLostInputSet(): void {
@@ -433,7 +448,7 @@ export class InputTracker implements TrackedInputs {
         new Set([...this.#queue.keys()].map((path) => this.#label(path))),
       );
       this.#commit();
-      for (const path of changed) this.#jobs.record(path);
+      for (const path of changed) this.#jobs.recordPath(path);
       this.#establishFailure = undefined;
       this.#log.entry(
         `input reconciliation ended: ${inventory.inputs.size} inputs, ${changed.length} changed, revision ${this.#state.revision}`,
@@ -494,7 +509,7 @@ export class InputTracker implements TrackedInputs {
   #inputSetLost(reason: string): void {
     this.#state.lose();
     this.#establishFailure = reason;
-    this.#jobs.record(reason);
+    this.#jobs.recordCause(reason);
     this.#log.entry(
       `warning: the input set could not be established: ${reason}`,
     );

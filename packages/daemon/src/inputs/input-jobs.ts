@@ -4,9 +4,17 @@ const LIST_SEPARATOR = ", ";
 
 /** Taken when a job starts; its verdict is judged against it when the job ends. */
 export interface JobMark {
-  readonly window: ChangeWindow;
+  readonly window: JobWindow;
   /** Why the job's inputs cannot be vouched for from its start, when they cannot. */
   readonly unsettled?: string;
+}
+
+/** What made one job's inputs uncertain, readable while it runs; each set keeps its first-recorded order. */
+export interface JobWindow {
+  /** Every input that changed, by the input state's own root-relative key. */
+  readonly paths: ReadonlySet<string>;
+  /** Every cause that names no input: a watcher failure, a lost input set, or an event no read vouches for. */
+  readonly causes: ReadonlySet<string>;
 }
 
 export type JobVerdict =
@@ -18,33 +26,30 @@ export type JobVerdict =
       readonly changedWhileRunning: boolean;
     };
 
-/** What made one running job's inputs uncertain. */
-interface ChangeWindow {
-  readonly named: string[];
-  /** The distinct descriptions past the cap, so one repeated does not count twice. */
-  readonly omitted: Set<string>;
+interface ChangeWindow extends JobWindow {
+  readonly paths: Set<string>;
+  readonly causes: Set<string>;
 }
 
 /** The change windows of the jobs running now; each learns every change and failure seen while it runs. */
 export class JobWindows {
-  readonly #open = new Set<ChangeWindow>();
+  /** By the view each job's mark holds. */
+  readonly #open = new Map<JobWindow, ChangeWindow>();
 
   open(unsettled: string | undefined): JobMark {
-    const window: ChangeWindow = { named: [], omitted: new Set() };
-    this.#open.add(window);
+    const window: ChangeWindow = { paths: new Set(), causes: new Set() };
+    this.#open.set(window, window);
     return unsettled === undefined ? { window } : { window, unsettled };
   }
 
-  /** Records, for each job running, one thing that makes its inputs uncertain. */
-  record(description: string): void {
-    for (const window of this.#open) {
-      if (window.named.includes(description)) continue;
-      if (window.named.length < MAX_NAMED_CHANGES) {
-        window.named.push(description);
-      } else {
-        window.omitted.add(description);
-      }
-    }
+  /** Records, for each job running, an input that changed, by the input state's own key. */
+  recordPath(path: string): void {
+    for (const window of this.#open.values()) window.paths.add(path);
+  }
+
+  /** Records, for each job running, a cause of uncertainty that names no input. */
+  recordCause(cause: string): void {
+    for (const window of this.#open.values()) window.causes.add(cause);
   }
 
   /** `unavailable` says why no fingerprint can be computed at the job's end, when none can. */
@@ -57,11 +62,12 @@ export class JobWindows {
         changedWhileRunning: false,
       };
     }
-    const { named, omitted } = mark.window;
-    if (named.length > 0) {
+    const { paths, causes } = mark.window;
+    const changes = [...new Set([...causes, ...paths])];
+    if (changes.length > 0) {
       return {
         fingerprinted: false,
-        reason: `its inputs changed while it ran: ${named.join(LIST_SEPARATOR)}${omitted.size > 0 ? ` and ${omitted.size} more` : ""}`,
+        reason: `its inputs changed while it ran: ${namedList(changes)}`,
         changedWhileRunning: unavailable === undefined,
       };
     }
@@ -73,6 +79,13 @@ export class JobWindows {
           changedWhileRunning: false,
         };
   }
+}
+
+/** Names up to `MAX_NAMED_CHANGES` of `descriptions` and counts the rest. */
+export function namedList(descriptions: readonly string[]): string {
+  const named = descriptions.slice(0, MAX_NAMED_CHANGES).join(LIST_SEPARATOR);
+  const rest = descriptions.length - MAX_NAMED_CHANGES;
+  return rest > 0 ? `${named} and ${rest} more` : named;
 }
 
 /**

@@ -22,16 +22,20 @@ import type { WorkspaceDiscovery } from "../src/vitest/discover-tests.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
 import { ABSENT_ROOT, discovered, workspace } from "./scheduling-harness.js";
 
-/** A run of `path` that finished the given outcomes, one test each, in one module. */
+/** A run of `path` that finished the given outcomes, one test each, in one module, and whose execution ended as `execution`. */
 export function ranWorkspace(
   path: string,
   outcomes: readonly TestOutcome[] = ["passed"],
+  execution: Extract<
+    WorkspaceRun,
+    { status: "ran" }
+  >["execution"] = "completed",
 ): WorkspaceRun {
   return {
     status: "ran",
     workspace: workspace(path),
     vitestVersion: "5.0.1",
-    execution: "completed",
+    execution,
     modules: [
       {
         projectName: "unit",

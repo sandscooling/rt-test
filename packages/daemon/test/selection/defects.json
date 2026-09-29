@@ -2476,5 +2476,26 @@
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
     "old": "      change: paths,\n",
     "new": "      change: [],\n"
+  },
+  {
+    "id": "D2880",
+    "defect": "A workspace missing from its build's selection input, as an unsupported one is, has no changed path placed inside its inputs, so a run of it during which one of its files changed and was restored is stored under its fingerprint and reads current.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    if (!selectable) return { inside: [], widened: [...paths] };",
+    "new": "    if (false) return { inside: [], widened: [...paths] };"
+  },
+  {
+    "id": "D2881",
+    "defect": "One changed path selection refuses marks every path beside it refused, so a change a narrowed build places inside the workspace's inputs no longer interrupts its run.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "      const rest = unplaced.filter((path) => path !== outcome.path);",
+    "new": "      const rest = unplaced;"
+  },
+  {
+    "id": "D2902",
+    "defect": "A held build places only the paths of its first `place` call, so a path that changed after the watch's first judgment and that only that build places inside the workspace's inputs is judged outside, and the run is stored under its fingerprint.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    this.#placeUnplaced(paths.filter((path) => !this.#placed.has(path)));",
+    "new": "    if (this.#placed.size === 0)\n      this.#placeUnplaced(paths.filter((path) => !this.#placed.has(path)));"
   }
 ]

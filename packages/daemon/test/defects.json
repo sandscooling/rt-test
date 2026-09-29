@@ -1655,8 +1655,8 @@
     "id": "D1458",
     "defect": "A run that loaded nothing because its config changed is handed to the store instead of being listed with its reason.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    if (run.status === \"not-confirmed\") {",
-    "new": "    if (run.status === \"never\") {"
+    "old": "  return run.status === \"not-confirmed\" ? { unstored: run.reason } : { run };",
+    "new": "  return run.status === \"never\" ? { unstored: run.reason } : { run };"
   },
   {
     "id": "D1459",
@@ -1669,8 +1669,8 @@
     "id": "D1461",
     "defect": "A run that ends after the stop arrived is dropped instead of stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const run = outcome.value;",
-    "new": "    const run = outcome.value;\n    if (this.isStopping()) return;"
+    "old": "    const { run } = left;\n",
+    "new": "    const { run } = left;\n    if (this.isStopping()) return report(false, false);\n"
   },
   {
     "id": "D1462",
@@ -2285,8 +2285,8 @@
     "id": "D1684",
     "defect": "An abort that arrives while the executor is being held is ignored, so the job runs after the stop began.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "    if (this.#abortBeforeSend) {",
-    "new": "    if (this.#abortBeforeSend && Date.now() < 0) {"
+    "old": "    if (this.#abortBeforeSend !== undefined) {",
+    "new": "    if (this.#abortBeforeSend !== undefined && Date.now() < 0) {"
   },
   {
     "id": "D1689",
@@ -2872,9 +2872,9 @@
   {
     "id": "D1878",
     "defect": "A run is stored under its start fingerprint even when its workspace's fingerprint at its end differs.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "  return started.digest === ended.digest\n    ? started",
-    "new": "  return true\n    ? started"
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (end !== undefined && end.digest !== start.digest) {",
+    "new": "  if (end !== undefined && false) {"
   },
   {
     "id": "D1879",
@@ -3153,15 +3153,15 @@
     "id": "D1920",
     "defect": "A watcher that went unhealthy during a job is not recorded against it, so a job that spanned lost events is stored under its digest once a reconciliation has made the watcher healthy again.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n    this.#jobs.record(reason);\n",
+    "old": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n    this.#jobs.recordCause(reason);\n",
     "new": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n"
   },
   {
     "id": "D1921",
     "defect": "Every reconciliation request is recorded against the running jobs, so a job during which a reconciliation found no change is stored not fingerprinted.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    this.#reconcileRequested = true;\n    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n    if (this.#reconciling) return;",
-    "new": "    this.#reconcileRequested = true;\n    this.#jobs.record(reason);\n    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n    if (this.#reconciling) return;"
+    "old": "    this.#reconcileRequested = true;\n    if (this.#reconciling) return;",
+    "new": "    this.#reconcileRequested = true;\n    this.#jobs.recordCause(reason);\n    if (this.#reconciling) return;"
   },
   {
     "id": "D1922",
@@ -3293,8 +3293,8 @@
     "id": "D1961",
     "defect": "After a reconciliation that could not establish the input set, an event reporting the cause fixed starts no reconciliation, so results read unknown until the periodic one 5 minutes later.",
     "file": "packages/daemon/src/inputs/queued-reads.ts",
-    "old": "      for (const [path] of batch) this.#jobs.record(this.#label(path));\n      this.#retryLostInputSet();\n",
-    "new": "      for (const [path] of batch) this.#jobs.record(this.#label(path));\n"
+    "old": "      for (const [path] of batch) this.#jobs.recordCause(this.#label(path));\n      this.#retryLostInputSet();\n",
+    "new": "      for (const [path] of batch) this.#jobs.recordCause(this.#label(path));\n"
   },
   {
     "id": "D1962",
@@ -4329,7 +4329,7 @@
     "id": "D2244",
     "defect": "An abort sends a build's process the abort message and waits out the bound a Vitest job is given, which a build busy in synchronous code can never read.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "    if (this.#buildRecord !== undefined) {\n      this.#buildStopped = true;\n      endProcessTree(child);\n      return;\n    }\n",
+    "old": "    if (this.#buildRecord !== undefined) {\n      this.#buildStopped = true;\n      endProcessTree(child);\n      return true;\n    }\n",
     "new": ""
   },
   {
@@ -4364,8 +4364,8 @@
     "id": "D2251",
     "defect": "A stop marks the build stopped but ends its process only once the bound a Vitest job is given has passed, so the stop waits the bound out.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "      this.#buildStopped = true;\n      endProcessTree(child);\n      return;",
-    "new": "      this.#buildStopped = true;\n      setTimeout(() => endProcessTree(child), EXECUTOR_BOUND_MS);\n      return;"
+    "old": "      this.#buildStopped = true;\n      endProcessTree(child);\n      return true;",
+    "new": "      this.#buildStopped = true;\n      setTimeout(() => endProcessTree(child), EXECUTOR_BOUND_MS);\n      return true;"
   },
   {
     "id": "D2252",
@@ -5274,15 +5274,15 @@
     "id": "D2680",
     "defect": "The tracker never counts a periodic reconciliation as ended, so the scheduler is never told to retry what failed with no input change to blame.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "      this.#periodicEnded += 1;\n",
+    "old": "    if (from !== undefined) this.#periodicEnded += 1;\n",
     "new": ""
   },
   {
     "id": "D2681",
     "defect": "Every reconciliation counts as a periodic one, so an edit's or a start's reconciliation retries what failed with no input change to blame.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    if (reason === PERIODIC_REASON) this.#periodicRequested = true;",
-    "new": "    this.#periodicRequested = true;"
+    "old": "    if (from !== undefined && endedAt - from < RECONCILE_INTERVAL_MS) return;",
+    "new": "    if (from !== undefined && endedAt - from < 0) return;"
   },
   {
     "id": "D2684",
@@ -5309,8 +5309,8 @@
     "id": "D2687",
     "defect": "A change recorded again past the cap is counted again, so a verdict says more changes went unnamed than there were.",
     "file": "packages/daemon/src/inputs/input-jobs.ts",
-    "old": "        window.omitted.add(description);",
-    "new": "        window.omitted.add(`${description}${window.omitted.size}`);"
+    "old": "    for (const window of this.#open.values()) window.paths.add(path);",
+    "new": "    for (const window of this.#open.values())\n      window.paths.add(window.paths.has(path) ? `${path}${window.paths.size}` : path);"
   },
   {
     "id": "D2688",
@@ -5440,17 +5440,17 @@
   },
   {
     "id": "D2737",
-    "defect": "The periodic flag is not cleared once counted, so every reconciliation after the first periodic one counts as periodic and an edit's reconciliation retries what failed.",
+    "defect": "The periodic measure does not restart when a reconciliation is counted, so every reconciliation after the first periodic one counts as periodic and an edit's reconciliation retries what failed.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "      this.#periodicRequested = false;\n",
-    "new": ""
+    "old": "    this.#periodicMeasuredFrom = endedAt;",
+    "new": "    this.#periodicMeasuredFrom ??= endedAt;"
   },
   {
     "id": "D2738",
-    "defect": "A periodic request that arrives while another reconciliation runs is not counted, so the retry waits another interval.",
+    "defect": "A reconciliation that ends exactly the interval after the last one counted, as the one a timer's request was absorbed into does, is not counted, so the retry waits another interval.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n    if (this.#reconciling) return;\n",
-    "new": "    if (this.#reconciling) return;\n    if (reason === PERIODIC_REASON) this.#periodicRequested = true;\n"
+    "old": "endedAt - from < RECONCILE_INTERVAL_MS",
+    "new": "endedAt - from <= RECONCILE_INTERVAL_MS"
   },
   {
     "id": "D2746",
@@ -5477,22 +5477,22 @@
     "id": "D2739",
     "defect": "A run whose executor died is reported as stored, so a periodic reconciliation never retries it.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      this.#nothingStored(workspace.path, outcome.reason);\n      return report(false);\n",
-    "new": "      this.#nothingStored(workspace.path, outcome.reason);\n      return report(true);\n"
+    "old": "      this.#nothingStored(path, left.unstored);\n      return report(false,",
+    "new": "      this.#nothingStored(path, left.unstored);\n      return report(true,"
   },
   {
     "id": "D2740",
     "defect": "The run's report never says its inputs changed while it ran, so a save of identical bytes during a run is not rerun once at the revision it left unmoved.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "        !verdict.fingerprinted && verdict.changedWhileRunning,\n",
-    "new": "        false,\n"
+    "old": "    return report(stored, changedWhileRunning(judgment));",
+    "new": "    return report(stored, false);"
   },
   {
     "id": "D2747",
     "defect": "The run's report says its inputs changed while it ran for any run stored not fingerprinted, so a run that began with its inputs unsettled is rerun once more at the same revision.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "        !verdict.fingerprinted && verdict.changedWhileRunning,\n",
-    "new": "        !verdict.fingerprinted,\n"
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    changedWhileRunning:\n      judgment.kind === JUDGMENT.moved ||",
+    "new": "    changedWhileRunning:\n      true ||"
   },
   {
     "id": "D2748",
@@ -6158,5 +6158,278 @@
     "file": "packages/daemon/src/store/columns.ts",
     "old": "    vitestDirectory: jsonText(value, \"vitestDirectory\"),",
     "new": "    vitestDirectory: jsonText(value, jsonField(value, \"vitestDirectory\") === undefined ? \"directory\" : \"vitestDirectory\"),"
+  },
+  {
+    "id": "D2862",
+    "defect": "A narrowed build places every changed path inside the running workspace's inputs, so a change outside them leaves the run stored not fingerprinted and throws its fresh results away.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    const placed = placement.build.place(paths, workspacePath);",
+    "new": "    const placed = { inside: paths, widened: [] };"
+  },
+  {
+    "id": "D2863",
+    "defect": "A run's end verdict ignores the changed paths inside its workspace's inputs, so a run during which such a path changed and was restored is stored under its start fingerprint and reads current.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (inside.length > 0) {",
+    "new": "  if (inside.length > 0 && end === undefined) {"
+  },
+  {
+    "id": "D2864",
+    "defect": "A cause that names no path, such as a watcher failure, recorded while a run ran does not keep it from being stored under its start fingerprint, so a run whose changes went unwatched reads current.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (window.causes.size > 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D2865",
+    "defect": "A build that ends while a run runs is not held for the run's verdict, so a path only that build places inside the workspace's inputs, such as a file that joined them and left mid-run, leaves the run stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    this.#hold(placement ?? WIDENED_PLACEMENT);\n    return true;",
+    "new": "    return true;"
+  },
+  {
+    "id": "D2866",
+    "defect": "The build at a run's end revision does not place the run's changed paths, so a path only that build puts in the workspace's inputs leaves the run stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    if (end !== undefined) this.#hold(end);\n",
+    "new": ""
+  },
+  {
+    "id": "D2867",
+    "defect": "A changed test module the discovery lists for the workspace lies outside its inputs whenever selection does not include it, so a run during which one of its own test files changed can be stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  const modules = paths.filter((path) => testModules.has(path));",
+    "new": "  const modules = paths.filter(() => false);"
+  },
+  {
+    "id": "D2868",
+    "defect": "A job's window keeps only as many changed paths as a reason names, so a change inside the workspace's inputs past that cap leaves the run stored under its fingerprint.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "    for (const window of this.#open.values()) window.paths.add(path);",
+    "new": "    for (const window of this.#open.values())\n      if (window.paths.size < MAX_NAMED_CHANGES) window.paths.add(path);"
+  },
+  {
+    "id": "D2869",
+    "defect": "A watch that fails while its run runs holds nothing for the builds it then misses, so a path one of them placed inside the workspace's inputs is judged outside and the run is stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "      this.#hold(WIDENED_PLACEMENT);\n      log.error(",
+    "new": "      log.error("
+  },
+  {
+    "id": "D2870",
+    "defect": "A change a narrowed build places inside a running workspace's inputs never interrupts the run, so a run that can no longer become current runs to its end before its rerun can start.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    if (paths === undefined || !interrupt()) return;",
+    "new": "    if (true) return;"
+  },
+  {
+    "id": "D2871",
+    "defect": "A failed build's widened placement interrupts the run, so while builds fail every edit anywhere interrupts every run in progress.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "      for (const path of paths) inside.add(path);\n      continue;",
+    "new": "      for (const path of paths) {\n        inside.add(path);\n        narrowed.add(path);\n      }\n      continue;"
+  },
+  {
+    "id": "D2872",
+    "defect": "A changed path selection refuses interrupts the run, so one refusable path stops every run in progress.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    for (const path of placed.widened) inside.add(path);",
+    "new": "    for (const path of placed.widened) {\n      inside.add(path);\n      narrowed.add(path);\n    }"
+  },
+  {
+    "id": "D2873",
+    "defect": "A run that started with no input fingerprint is judged by its changed paths while it runs, so a change inside its workspace's inputs interrupts a run that could never read current, and its reruns loop.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (!start.ok) {",
+    "new": "  if (!start.ok && end !== undefined) {"
+  },
+  {
+    "id": "D2874",
+    "defect": "A run's watch ignores a stop, so a change inside its workspace's inputs after the stop was asked interrupts the run with an interruption's reason.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    this.#parts = parts;",
+    "new": "    this.#parts = { ...parts, isStopping: () => false };"
+  },
+  {
+    "id": "D2875",
+    "defect": "An interruption whose abort reached no job is recorded anyway, so a run whose reply had already settled is dropped as interrupted and its outcome is lost.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    if (paths === undefined || !interrupt()) return;",
+    "new": "    if (paths === undefined) return;\n    interrupt();"
+  },
+  {
+    "id": "D2876",
+    "defect": "A run is judged for interruption at every input change, so a change its start build places inside the workspace's inputs interrupts it before the newer revision's build has ended.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "      if (this.#newerBuildEnded) this.#interruptIfWorthless();",
+    "new": "      this.#interruptIfWorthless();"
+  },
+  {
+    "id": "D2877",
+    "defect": "An interruption that arrives before its job is sent ends the job with the stop's reason, so the daemon logs and lists a stop that no one asked for.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      return this.#unsent(child, exited, UNSENT_REASONS[this.#abortBeforeSend]);",
+    "new": "      return this.#unsent(child, exited, ABORTED_BEFORE_SEND_REASON);"
+  },
+  {
+    "id": "D2878",
+    "defect": "Each reconciliation restarts the periodic measure, so an agent whose commits or edits reconcile more often than every interval holds off the periodic retry for good.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (from !== undefined && endedAt - from < RECONCILE_INTERVAL_MS) return;",
+    "new": "    if (from !== undefined && endedAt - from < RECONCILE_INTERVAL_MS) {\n      this.#periodicMeasuredFrom = endedAt;\n      return;\n    }"
+  },
+  {
+    "id": "D2879",
+    "defect": "A read that changed an input records it against the running jobs as a cause that names no path, so a change outside a running workspace's inputs still leaves its run stored not fingerprinted, and a change inside never interrupts it.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    for (const path of changed) this.#jobs.recordPath(path);",
+    "new": "    for (const path of changed) this.#jobs.recordCause(path);"
+  },
+  {
+    "id": "D2885",
+    "defect": "A run its executor returns finished after its interruption was asked is dropped as interrupted, so its finished results are lost instead of stored and judged.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (interruption !== undefined && interruptedRun(outcome)) {",
+    "new": "    if (interruption !== undefined) {"
+  },
+  {
+    "id": "D2886",
+    "defect": "A run during which an input changed is reported as changed while it ran even when no fingerprint could be taken at its end, so it runs once more at a revision it cannot be bound to.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "      (judgment.kind === JUDGMENT.changedInside && judgment.endFingerprinted),",
+    "new": "      judgment.kind === JUDGMENT.changedInside,"
+  },
+  {
+    "id": "D2887",
+    "defect": "A run whose end view can vouch for no inputs is placed by that revision's build anyway, so a failed build the watch had not yet held names outside paths as changed inside instead of the unavailable end fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (view.unavailable !== undefined) return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D2888",
+    "defect": "A run's interruption is asked of the executor as a stop, so an interruption that lands before the job is sent ends it with the stop's reason.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        interrupt: () => executor.abort(ABORT_PURPOSE.interruption),",
+    "new": "        interrupt: () => executor.abort(),"
+  },
+  {
+    "id": "D2889",
+    "defect": "A run stored under its fingerprint although paths outside its inputs changed while it ran is logged without those paths, so the log never says why the change left it current.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      if (kept !== undefined) log.entry(`${job} ${kept}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D2890",
+    "defect": "A run whose workspace fingerprint could not be taken at its end is logged as having its fingerprint move, never with why none could be taken.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (end !== undefined && !end.ok) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D2891",
+    "defect": "An interruption asked after a stop, before the job is sent, replaces the stop, so the job ends with the interruption's reason although the daemon is stopping.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      if (this.#abortBeforeSend !== ABORT_PURPOSE.stop) {\n        this.#abortBeforeSend = purpose;\n      }",
+    "new": "      this.#abortBeforeSend = purpose;"
+  },
+  {
+    "id": "D2892",
+    "defect": "An abort with no job in progress says it reached one, so an interruption asked after a run's reply settled is recorded and the run's outcome is dropped.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (child === undefined) return false;",
+    "new": "    if (child === undefined) return true;"
+  },
+  {
+    "id": "D2893",
+    "defect": "An event naming a file that came and went before its read records nothing, so a run during which a file inside its workspace's inputs existed only between two reads is stored under its fingerprint.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (removed.length > 0 || wasDirectory) return removed;",
+    "new": "    return removed;"
+  },
+  {
+    "id": "D2894",
+    "defect": "An event naming an ignored file that came and went before its read is recorded as a changed path, so a test that writes and removes temp files under a gitignored folder in its workspace invalidates every run.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      if (filter.excludes(path)) {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D2903",
+    "defect": "A revision whose selection refused its own inputs is held as narrowed, so a path its build places outside is judged outside although that revision's fingerprint covers every input, and a run during which such a path changed and was restored is stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    workspaces.kind === NARROWING.narrowed &&\n    view.inputsNotNarrowed === undefined;",
+    "new": "    workspaces.kind === NARROWING.narrowed;"
+  },
+  {
+    "id": "D2904",
+    "defect": "A build that ended while a run ran is held as widened, so a run whose inputs moved only by changes outside its workspace's inputs is stored not fingerprinted and its fresh results are thrown away.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    this.#hold(placement ?? WIDENED_PLACEMENT);",
+    "new": "    this.#hold(WIDENED_PLACEMENT);"
+  },
+  {
+    "id": "D2905",
+    "defect": "A run's verdict is taken before its end revision's build has ended, so a run whose inputs moved just before it returned, only by changes outside its workspace's inputs, is stored not fingerprinted.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await this.#awaitBuild(`the verdict on ${job}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D2906",
+    "defect": "A run its interruption ended before its tests loaded is stored, not fingerprinted, instead of storing nothing and being listed with the interruption's paths.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    run.status === \"interrupted-before-load\" ||\n",
+    "new": ""
+  },
+  {
+    "id": "D2907",
+    "defect": "An abort's purpose held for a job never sent is not cleared when the next job starts, so after one interruption before a send every later job on that executor ends unrun with that reason.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    this.#abortBeforeSend = undefined;\n    const child = this.#startChild();",
+    "new": "    const child = this.#startChild();"
+  },
+  {
+    "id": "D2908",
+    "defect": "An abort of a job held before its send answers that it reached no job, so the watch records no interruption and the interrupted run is stored, replacing the outcomes the agent is fixing.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "        this.#abortBeforeSend = purpose;\n      }\n      return true;",
+    "new": "        this.#abortBeforeSend = purpose;\n      }\n      return false;"
+  },
+  {
+    "id": "D2909",
+    "defect": "An abort of a run whose job was sent answers that it reached no job, so the watch records no interruption and the interrupted run is stored, replacing the outcomes the agent is fixing.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    }, EXECUTOR_BOUND_MS);\n    return true;",
+    "new": "    }, EXECUTOR_BOUND_MS);\n    return false;"
+  },
+  {
+    "id": "D2910",
+    "defect": "A change a reconciliation finds is recorded against running jobs as a cause, so a change outside a running workspace's inputs found only by a reconciliation leaves its run stored not fingerprinted, and one inside never interrupts it.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      for (const path of changed) this.#jobs.recordPath(path);",
+    "new": "      for (const path of changed) this.#jobs.recordCause(path);"
+  },
+  {
+    "id": "D2911",
+    "defect": "A path recorded inside the workspace's inputs at an unmoved revision after a newer build has ended does not interrupt the run, since the watch judges only when it captures a new build.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "      if (this.#newerBuildEnded) this.#interruptIfWorthless();",
+    "new": "      if (false) this.#interruptIfWorthless();"
+  },
+  {
+    "id": "D2912",
+    "defect": "A run nothing changed during logs that only paths outside its inputs changed, naming none.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  if (judgment.kind !== JUDGMENT.kept || judgment.outside.length === 0) {",
+    "new": "  if (judgment.kind !== JUDGMENT.kept) {"
+  },
+  {
+    "id": "D2913",
+    "defect": "An event naming a file the declaration makes a non-input that came and went before its read is recorded as a changed path, so a test that writes and removes temp files under a declared folder invalidates every run.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    return filter.declares(path) === undefined ? [relative] : [];",
+    "new": "    return [relative];"
   }
 ]

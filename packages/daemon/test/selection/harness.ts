@@ -3,7 +3,10 @@ import { dirname, join } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { expect } from "vitest";
 import { ProjectInputs } from "../../src/inputs/fingerprint.js";
-import { Narrowing } from "../../src/inputs/narrowed-inputs.js";
+import {
+  Narrowing,
+  type PathPlacement,
+} from "../../src/inputs/narrowed-inputs.js";
 import { readNonInputs } from "../../src/inputs/non-inputs.js";
 import { protection } from "../../src/inputs/protection.js";
 import { selectTests } from "../../src/selection/select-tests.js";
@@ -316,6 +319,24 @@ export function narrowedInTree(
         [...narrowing.workspaceInputs(project, path).digests.keys()].sort(),
       ]),
     );
+  });
+}
+
+/**
+ * Where the tree's narrowing places the root-relative `paths` for the workspace at `workspacePath`, as a run's
+ * judgment asks it, after the same placement was asked about each of `earlier`, as the judgments before it were. The
+ * narrowing is built from the tree's discovery and dependency information, as the daemon builds it.
+ */
+export function placedInTree(
+  tree: TreeCase,
+  paths: readonly string[],
+  workspacePath: string,
+  earlier: readonly (readonly string[])[] = [],
+): Promise<Settled<PathPlacement>> {
+  return inTree(tree, (root) => {
+    const { placement } = narrowingIn(root, tree);
+    for (const batch of earlier) placement.place(batch, workspacePath);
+    return placement.place(paths, workspacePath);
   });
 }
 

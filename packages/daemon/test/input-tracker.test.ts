@@ -128,6 +128,8 @@ const STATE_DIRECTORY = ".rt-test";
 const SETTLE_MS = 10_000;
 /** How long after a reconciliation ends the next one runs, as the ticket's requirement states it: 5 minutes. */
 const RECONCILE_INTERVAL = 300_000;
+/** Two thirds of the interval: one such wait never reaches it, and two in a row pass it. */
+const SOONER_THAN_INTERVAL = 200_000;
 /** How long events stream before the job ends, enough for the tracker to read several. */
 const STREAM_MS = 50;
 const RECONCILING = "a reconciliation of the inputs is running";
@@ -172,6 +174,15 @@ const NEVER_WRITTEN = "c.ts";
 const A_MD_CHANGED = {
   fingerprinted: false,
   reason: "its inputs changed while it ran: a.md",
+  changedWhileRunning: true,
+};
+/**
+ * The verdict of a job during which the tracker read a change to a.md, after an event on the never-written path it
+ * held reads, which found absent counts as a path that came and went.
+ */
+const HELD_AND_A_MD_CHANGED = {
+  fingerprinted: false,
+  reason: `its inputs changed while it ran: ${NEVER_WRITTEN}, a.md`,
   changedWhileRunning: true,
 };
 /** How long before protection a job began, so a file written as the test starts was modified during it. */
@@ -584,6 +595,19 @@ async function withFakeTimeouts<T>(body: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Runs `body` with fake `setTimeout` and a fake `performance` clock that moves only as the test advances it, so the
+ * time between two reconciliations' ends is the time the test advanced.
+ */
+async function withFakeElapsed<T>(body: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    return await body();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+/**
  * Runs `body` with fake `setTimeout` and a fake `Date` that moves only as the test advances it, so a read the tracker
  * takes later is stamped later without a real wait.
  */
@@ -593,6 +617,42 @@ async function withFakeClock<T>(body: () => Promise<T>): Promise<T> {
     return await body();
   } finally {
     vi.useRealTimers();
+  }
+}
+
+/** What a job's window recorded: the changed paths and the causes that name none. */
+interface WindowFacts {
+  readonly paths: readonly string[];
+  readonly causes: readonly string[];
+}
+
+/**
+ * Over a tracker `track` starts on `root`, with silent watches, opens a job, writes the root-relative `path` and
+ * removes it again, then delivers the one event naming it, which its read finds absent. Hands back what the job's
+ * window recorded once the job has ended.
+ */
+async function windowAfterTransient(
+  root: string,
+  path: string,
+  track: typeof tracking,
+): Promise<WindowFacts> {
+  const watches = silentCapturedWatches();
+  try {
+    return await track(root, async ({ tracker }) => {
+      const mark = tracker.beginJob();
+      const absolute = join(root, ...path.split("/"));
+      mkdirSync(dirname(absolute), { recursive: true });
+      writeFileSync(absolute, "a file that came and went\n");
+      rmSync(absolute);
+      deliver(watches, root, join(...path.split("/")));
+      await tracker.endJob(mark);
+      return {
+        paths: [...mark.window.paths],
+        causes: [...mark.window.causes],
+      };
+    });
+  } finally {
+    vi.mocked(watch).mockReset();
   }
 }
 
@@ -1076,6 +1136,107 @@ describe("a job's inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
       );
     });
     expect(fingerprinted).toBe(true);
+  });
+
+  it("D2879: an input a job saw change is recorded in its window by the input's root-relative key, never as a cause naming no input", async () => {
+    const window = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      try {
+        return await tracking(root, async ({ tracker }) => {
+          const mark = tracker.beginJob();
+          appendFileSync(join(root, "src", "a.ts"), "export {};\n");
+          deliver(watches, root, join("src", "a.ts"));
+          await tracker.endJob(mark);
+          return {
+            paths: [...mark.window.paths],
+            causes: [...mark.window.causes],
+          };
+        });
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(window).toStrictEqual({ paths: ["src/a.ts"], causes: [] });
+  });
+
+  it("D2893: a file a job saw come and go before its read is recorded in the job's window by its root-relative key", async () => {
+    const window = await inTempDir((root) => {
+      writeTree(root, { "src/a.ts": "" });
+      return windowAfterTransient(root, "src/gone.ts", tracking);
+    });
+    expect(window).toStrictEqual({ paths: ["src/gone.ts"], causes: [] });
+  });
+
+  it("D2894: a file git ignores that a job saw come and go before its read is not recorded in the job's window", async () => {
+    const window = await inTempDir((root) => {
+      repository(root, "*.tmp\n", { "src/a.ts": "" });
+      return windowAfterTransient(root, "src/gone.tmp", trackingOwnGitHome);
+    });
+    expect(window).toStrictEqual({ paths: [], causes: [] });
+  });
+
+  // The tracker drops an event naming a file already declared, so the declaration must come to cover the file between
+  // its event and its read for the read to judge it.
+  it("D2913: a file a job saw come and go, which the declaration came to cover before its read, is not recorded in the job's window", async () => {
+    const goneName = "gone.md";
+    const window = await inTempDir(async (root) => {
+      writeTree(root, DOCS_DECLARED);
+      const watches = silentCapturedWatches();
+      try {
+        return await trackingOwnGitHome(
+          root,
+          async ({ tracker }) => {
+            const held = holdingReadsOf(goneName);
+            const mark = tracker.beginJob();
+            const gone = join(root, "docs", goneName);
+            writeFileSync(gone, "a file that came and went\n");
+            rmSync(gone);
+            deliver(watches, root, join("docs", goneName));
+            await held.entered;
+            const protecting = tracker.protectInputs(
+              discoveryListing(root, []),
+            );
+            held.release();
+            await protecting;
+            await tracker.endJob(mark);
+            return {
+              paths: [...mark.window.paths],
+              causes: [...mark.window.causes],
+            };
+          },
+          { discovery: unreportedDiscovery(root) },
+        );
+      } finally {
+        vi.mocked(readEntryDigest).mockReset();
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(window).toStrictEqual({ paths: [], causes: [] });
+  });
+
+  it("D2910: an input a reconciliation finds changed, with no event for it, is recorded in the job's window by its root-relative key, never as a cause", async () => {
+    const window = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      silentCapturedWatches();
+      try {
+        return await withFakeTimeouts(() =>
+          tracking(root, async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            appendFileSync(join(root, "src", "a.ts"), "export {};\n");
+            await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+            await tracker.endJob(mark);
+            return {
+              paths: [...mark.window.paths],
+              causes: [...mark.window.causes],
+            };
+          }),
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(window).toStrictEqual({ paths: ["src/a.ts"], causes: [] });
   });
 
   it("D2085: a wait for the inputs to settle, begun after a stop that left an event unread, resolves", async () => {
@@ -2981,7 +3142,7 @@ describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         vi.mocked(watch).mockReset();
       }
     });
-    expect(verdict).toStrictEqual(A_MD_CHANGED);
+    expect(verdict).toStrictEqual(HELD_AND_A_MD_CHANGED);
   });
 
   it("D2165: while protection walks, the input facts read the reconciliation incomplete, naming the walk", async () => {
@@ -3034,7 +3195,7 @@ describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         vi.mocked(watch).mockReset();
       }
     });
-    expect(verdict).toStrictEqual(A_MD_CHANGED);
+    expect(verdict).toStrictEqual(HELD_AND_A_MD_CHANGED);
   });
 });
 
@@ -3139,7 +3300,7 @@ describe("the count of periodic reconciliations", () => {
   it("D2680: the count is 0 once the first reconciliation has ended, and rises by one when the periodic reconciliation ends", async () => {
     const outcome = await inTempDir((root) => {
       writeTree(root, { "src/a.ts": "" });
-      return withFakeTimeouts(() =>
+      return withFakeElapsed(() =>
         tracking(root, async ({ tracker }) => {
           const before = tracker.periodicReconciliations();
           await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
@@ -3191,7 +3352,7 @@ describe("the count of periodic reconciliations", () => {
       writeTree(root, { "src/a.ts": "" });
       const watches = silentCapturedWatches();
       try {
-        return await withFakeTimeouts(() =>
+        return await withFakeElapsed(() =>
           tracking(root, async ({ tracker, log }) => {
             await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
             await untilEnds(log, 2);
@@ -3216,11 +3377,34 @@ describe("the count of periodic reconciliations", () => {
       writeTree(root, { "src/a.ts": "" });
       const watches = silentCapturedWatches();
       try {
-        return await withFakeTimeouts(() =>
+        return await withFakeElapsed(() =>
           tracking(root, async ({ tracker, log }) => {
             deliver(watches, root, DECLARATION_FILE);
             vi.advanceTimersByTime(RECONCILE_INTERVAL);
             await untilEnds(log, 2);
+            return tracker.periodicReconciliations();
+          }),
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(count).toBe(1);
+  });
+
+  it("D2878: reconciliations another cause starts more often than the interval still count one as periodic once the interval has passed since the last one counted", async () => {
+    const count = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      try {
+        return await withFakeElapsed(() =>
+          tracking(root, async ({ tracker, log }) => {
+            await vi.advanceTimersByTimeAsync(SOONER_THAN_INTERVAL);
+            deliver(watches, root, DECLARATION_FILE);
+            await untilEnds(log, 2);
+            await vi.advanceTimersByTimeAsync(SOONER_THAN_INTERVAL);
+            deliver(watches, root, DECLARATION_FILE);
+            await untilEnds(log, 3);
             return tracker.periodicReconciliations();
           }),
         );
@@ -3237,7 +3421,7 @@ describe("a job's verdict", () => {
     const failure = "the watcher failed: ENOSPC";
     const windows = new JobWindows();
     const mark = windows.open(undefined);
-    windows.record(failure);
+    windows.recordCause(failure);
     const verdict = windows.close(mark, failure);
     expect(
       "changedWhileRunning" in verdict && verdict.changedWhileRunning,
@@ -3247,7 +3431,7 @@ describe("a job's verdict", () => {
   it("D2684: a job during which a change was recorded is judged as having had its inputs change while it ran", () => {
     const windows = new JobWindows();
     const mark = windows.open(undefined);
-    windows.record("a.md");
+    windows.recordPath("a.md");
     expect(windows.close(mark, undefined)).toStrictEqual(A_MD_CHANGED);
   });
 
@@ -3279,10 +3463,10 @@ describe("a job's verdict", () => {
     const windows = new JobWindows();
     const mark = windows.open(undefined);
     for (let named = 0; named < 20; named += 1) {
-      windows.record(`named-${named}.ts`);
+      windows.recordPath(`named-${named}.ts`);
     }
     for (const past of ["past-1.ts", "past-1.ts", "past-2.ts"]) {
-      windows.record(past);
+      windows.recordPath(past);
     }
     const verdict = windows.close(mark, undefined);
     expect("reason" in verdict && verdict.reason.endsWith(" and 2 more")).toBe(

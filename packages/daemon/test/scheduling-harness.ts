@@ -275,8 +275,8 @@ export interface InputsScript {
   /** Keeps every job's end waiting on the inputs until the inputs stop. */
   readonly heldJobEnds?: boolean;
   /**
-   * Each job's verdict, in the order the jobs end: the discovery, the guard around its protection, then each run. A
-   * job past the list is fingerprinted.
+   * Each job's verdict, in the order the jobs end: the discovery, the guard around its protection, then each run and
+   * each build. A job past the list is fingerprinted. A run takes its place in the order, but is judged from its window.
    */
   readonly verdicts?: readonly JobVerdict[];
   /**
@@ -339,6 +339,8 @@ export class StandInInputs implements TrackedInputs {
   readonly #released = new Deferred<void>();
   readonly #script: InputsScript;
   readonly #verdicts: JobVerdict[];
+  /** The window of each job running, which a run's verdict is judged from. */
+  readonly #windows = new JobWindows();
   #settles = 0;
   #heldByCondition = false;
 
@@ -431,13 +433,25 @@ export class StandInInputs implements TrackedInputs {
 
   beginJob(): JobMark {
     this.jobsBegun += 1;
-    return new JobWindows().open(undefined);
+    return this.#windows.open(undefined);
   }
 
-  async endJob(): Promise<JobVerdict> {
+  /** A discovery's or a build's verdict is scripted; a run's is judged from its window, which this closes. */
+  async endJob(mark: JobMark): Promise<JobVerdict> {
     this.jobsEnded += 1;
     if (this.#script.heldJobEnds === true) await this.#released.promise;
+    this.#windows.close(mark, undefined);
     return this.#verdicts.shift() ?? FINGERPRINTED;
+  }
+
+  /** Records, for each job running, an input that changed, as the tracker records a read that changed one. */
+  recordPath(path: string): void {
+    this.#windows.recordPath(path);
+  }
+
+  /** Records, for each job running, a cause that names no input, as the tracker records a watcher failure. */
+  recordCause(cause: string): void {
+    this.#windows.recordCause(cause);
   }
 
   protectInputs(
