@@ -3811,8 +3811,8 @@
     "id": "D2103",
     "defect": "The project reader reads a missing global setup list as empty, so a malformed record reads as a project with no global setup files.",
     "file": "packages/daemon/src/store/columns.ts",
-    "old": "    globalSetupFiles: stringArray(jsonField(value, \"globalSetupFiles\")),",
-    "new": "    globalSetupFiles: stringArray(jsonField(value, \"globalSetupFiles\") ?? []),"
+    "old": "    globalSetupFiles: jsonStrings(value, \"globalSetupFiles\"),",
+    "new": "    globalSetupFiles: jsonStrings({ globalSetupFiles: [], ...(value as object) }, \"globalSetupFiles\"),"
   },
   {
     "id": "D2104",
@@ -5925,8 +5925,8 @@
     "id": "D2828",
     "defect": "A stored project with no pattern spellings is read as having none, so a report stored without them narrows protection instead of being refused.",
     "file": "packages/daemon/src/store/columns.ts",
-    "old": "    patternBases: arrayOf(jsonField(value, \"patternBases\"), patternBase),",
-    "new": "    patternBases: arrayOf(jsonField(value, \"patternBases\") ?? [], patternBase),"
+    "old": "    patternBases: jsonArray(value, \"patternBases\", patternBase),",
+    "new": "    patternBases: jsonArray({ patternBases: [], ...(value as object) }, \"patternBases\", patternBase),"
   },
   {
     "id": "D2829",

@@ -104,7 +104,7 @@ function storedDiscovery(database: DatabaseSync, row: Row): StoredDiscovery {
     discoveryId: text(row, "discovery_id"),
     discovery: {
       workspaces: readWorkspaces(database, integer(row, "sequence")),
-      notRead: arrayOf(json(row, "not_read"), unreadWorkspaceSource),
+      notRead: arrayOf(row, "not_read", unreadWorkspaceSource),
     },
   };
 }
@@ -178,13 +178,14 @@ function discoveredWorkspace(
     workspace,
     vitestVersion: text(row, "vitest_version"),
     tests,
-    failedModules: arrayOf(json(row, "failed_modules"), failedModule),
-    typecheckModules: arrayOf(json(row, "typecheck_modules"), moduleReport),
+    failedModules: arrayOf(row, "failed_modules", failedModule),
+    typecheckModules: arrayOf(row, "typecheck_modules", moduleReport),
     unsupportedProjects: arrayOf(
-      json(row, "unsupported_projects"),
+      row,
+      "unsupported_projects",
       unsupportedProject,
     ),
-    unhandledErrors: stringArray(json(row, "unhandled_errors")),
+    unhandledErrors: stringArray(row, "unhandled_errors"),
     selectionFacts: selectionFacts(row),
     ...closeError(row),
   };
@@ -214,7 +215,7 @@ function selectionFacts(row: Row): SelectionFacts {
   if (column(row, SELECTION_FACTS) === null) return { reported: false };
   return {
     reported: true,
-    projects: arrayOf(json(row, SELECTION_FACTS), projectSelectionFacts),
+    projects: arrayOf(row, SELECTION_FACTS, projectSelectionFacts),
   };
 }
 

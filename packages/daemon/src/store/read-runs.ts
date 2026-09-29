@@ -221,12 +221,13 @@ function ranRun(
     execution: member(RUN_EXECUTIONS, text(row, "execution"), "runs.execution"),
     forceStopped: forceStopped(row),
     modules,
-    typecheckModules: arrayOf(json(row, "typecheck_modules"), moduleReport),
+    typecheckModules: arrayOf(row, "typecheck_modules", moduleReport),
     unsupportedProjects: arrayOf(
-      json(row, "unsupported_projects"),
+      row,
+      "unsupported_projects",
       unsupportedProject,
     ),
-    unhandledErrors: stringArray(json(row, "unhandled_errors")),
+    unhandledErrors: stringArray(row, "unhandled_errors"),
     ...(nothingRan === undefined
       ? {}
       : {
@@ -276,7 +277,7 @@ function recordedModule(
       ...report,
       state,
       tests,
-      errors: stringArray(json(row, "errors")),
+      errors: stringArray(row, "errors"),
     };
   }
   if (tests.length > 0) {
@@ -284,7 +285,7 @@ function recordedModule(
   }
   switch (state) {
     case "failed":
-      return { ...report, state, errors: stringArray(json(row, "errors")) };
+      return { ...report, state, errors: stringArray(row, "errors") };
     case "crashed":
     case "not-run":
       return { ...report, state };
@@ -306,7 +307,7 @@ function testRunState(row: Row): TestRunState {
   return {
     execution,
     outcome: member(TEST_OUTCOMES, text(row, "outcome"), "run_tests.outcome"),
-    errors: stringArray(json(row, "errors")),
+    errors: stringArray(row, "errors"),
   };
 }
 
