@@ -405,6 +405,7 @@ Tests session: threadId d599b63d-e165-46ef-812e-bcae2f15df8d
 - D3104: The CLI's line for a queued workspace every reason of which the answer leaves unnamed says nothing of them. (AC1, review row 12)
 - D3105: After a failed step, the round stays held once the scheduler tries again, so an answer names a failure the daemon has moved past. (AC1, review row 13)
 - The review's gap round also repaired D2989 (a held round's idle reason is now `round-held`), D3015 (the held round's new text) and D3034 (a chain step's detail is a cut reason, now shown), re-anchored D3008 (`explainedSelection`), D3032 (the nothing-selected detail's new condition) and D3033 (the not-runnable list shown whatever was selected), reworded D2978's defect sentence to the held round's new meaning, and gave D3026 and D3027's shared fixture two unnamed fallbacks and an incomplete workspace total for D3101 and D3102.
+
 #### Deliberately Untested
 
 - packages/daemon/src/client.ts: re-exports only.
