@@ -145,11 +145,24 @@ export function recordLinks(root) {
 
 const text = (files, path) => files.get(path).toString("utf8");
 
+export function parseRecords(json, where) {
+  try {
+    return JSON.parse(json);
+  } catch (error) {
+    throw new Error(`${where} is not valid JSON: ${error.message}`, {
+      cause: error,
+    });
+  }
+}
+
 function readRecords(files) {
   return [...files.keys()]
     .filter((path) => /(^|\/)defects\.json$/.test(path))
     .flatMap((source) =>
-      JSON.parse(text(files, source)).map((record) => ({ ...record, source })),
+      parseRecords(text(files, source), source).map((record) => ({
+        ...record,
+        source,
+      })),
     );
 }
 

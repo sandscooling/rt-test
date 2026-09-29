@@ -211,4 +211,13 @@ describe("the records at HEAD", () => {
     headRecords(CALC_RECORDS);
     expect(commands).toHaveLength(1);
   });
+
+  it("D2683: names HEAD and the path of a defects.json at HEAD that is not valid JSON", () => {
+    const headRecords = headRecordsIn(
+      fakeGit({ show: { ok: true, out: '[{"id":"D1",' } }),
+    );
+    expect(() => headRecords(CALC_RECORDS)).toThrow(
+      /HEAD:test\/calc\/defects\.json is not valid JSON/,
+    );
+  });
 });

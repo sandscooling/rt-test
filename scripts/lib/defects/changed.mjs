@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { changedPaths } from "../git.mjs";
-import { isInSandboxDir, SANDBOX_FILES } from "./catalog.mjs";
+import { isInSandboxDir, parseRecords, SANDBOX_FILES } from "./catalog.mjs";
 import { importClosures } from "./imports.mjs";
 
 const ROOT_INPUTS = new Set(["vitest.config.ts", "package.json", "bun.lock"]);
@@ -25,7 +25,10 @@ function recordsAtHead(git, source) {
   const shown = git(["show", `HEAD:${source}`]);
   if (!shown.ok) return new Map();
   return new Map(
-    JSON.parse(shown.out).map((record) => [record.id, recordText(record)]),
+    parseRecords(shown.out, `HEAD:${source}`).map((record) => [
+      record.id,
+      recordText(record),
+    ]),
   );
 }
 

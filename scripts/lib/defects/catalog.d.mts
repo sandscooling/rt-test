@@ -30,6 +30,11 @@ export declare function walkTree(
   dir?: string,
 ): { files: string[]; links: string[] };
 export declare function snapshotFiles(root: string): Map<string, Buffer>;
+/** Parses a defects.json text, naming `where` when it is not valid JSON. */
+export declare function parseRecords(
+  json: string,
+  where: string,
+): Omit<Defect, "source" | "test">[];
 export declare function buildCatalog(
   files: Files,
   links?: readonly Link[],
