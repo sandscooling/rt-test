@@ -1398,5 +1398,19 @@
     "file": "scripts/lib/defects/verify.mjs",
     "old": "const remedy = values.ids.length",
     "new": "const remedy = true"
+  },
+  {
+    "id": "D2682",
+    "defect": "A defects.json in the working tree that is not valid JSON fails with the parser's bare message, naming neither the file nor where it was read.",
+    "file": "scripts/lib/defects/catalog.mjs",
+    "old": "parseRecords(text(files, source), source)",
+    "new": "JSON.parse(text(files, source))"
+  },
+  {
+    "id": "D2683",
+    "defect": "A defects.json at HEAD that is not valid JSON fails with the parser's bare message, naming neither HEAD nor the file.",
+    "file": "scripts/lib/defects/changed.mjs",
+    "old": "parseRecords(shown.out, `HEAD:${source}`)",
+    "new": "JSON.parse(shown.out)"
   }
 ]

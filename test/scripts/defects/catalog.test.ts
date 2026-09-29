@@ -61,6 +61,13 @@ describe("the defect catalog", () => {
     expect(() => buildCatalog(filesOf(tree))).toThrow(/exactly one named/);
   });
 
+  it("D2682: names the path of a defects.json that is not valid JSON", () => {
+    const tree = { ...TREE, "test/calc/defects.json": '[{"id":"D1",' };
+    expect(() => buildCatalog(filesOf(tree))).toThrow(
+      /test\/calc\/defects\.json is not valid JSON/,
+    );
+  });
+
   it("D902: rejects a record whose mutated file the sandbox does not copy", () => {
     const { [OTHER]: _removed, ...tree } = TREE;
     expect(() => buildCatalog(filesOf(tree))).toThrow(/not in the sandbox/);
