@@ -2488,8 +2488,8 @@
     "id": "D2881",
     "defect": "One changed path selection refuses marks every path beside it refused, so a change a narrowed build places inside the workspace's inputs no longer interrupts its run.",
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
-    "old": "      const rest = unplaced.filter((path) => path !== outcome.path);",
-    "new": "      const rest = unplaced;"
+    "old": "    if (selectable.length === 0) return;",
+    "new": "    if (selectable.length < paths.length) {\n      for (const path of selectable) this.#placed.set(path, REFUSED);\n      return;\n    }"
   },
   {
     "id": "D2902",

@@ -2662,12 +2662,15 @@ const INTERRUPTED_REASON =
   "a change inside its workspace's inputs interrupted it, so nothing of it was stored";
 const UNHEALTHY = "the input watcher is unhealthy: the watcher failed: ENOSPC";
 const NOT_FINGERPRINTED = { kind: "not-fingerprinted" };
+const PLACEMENT_FAILED =
+  "error: placing the paths that changed during the run of a, so every one counts inside its inputs";
 
-/** A daemon over workspace `a`, started from `root`, whose every dependency build narrows over package workspaces `a` and `b`. */
+/** A daemon over workspace `a`, started from `root`, whose every dependency build narrows over `dependencies`. */
 function narrowedDaemon(
   root: string,
   inputs: StandInInputs,
   executor: ScriptedExecutor,
+  dependencies: DependencyInformation = A_AND_B,
 ): Daemon {
   return daemon(
     { ...confirmed("a"), consumerRoot: root },
@@ -2675,8 +2678,24 @@ function narrowedDaemon(
     new RecordingStore(),
     { ...IDENTITY, consumerRoot: root },
     inputs,
-    new ScriptedBuilds(() => ({ ended: true, value: A_AND_B })),
+    new ScriptedBuilds(() => ({ ended: true, value: dependencies })),
   );
+}
+
+/**
+ * Dependency information listing package workspaces `a` and `b` as `A_AND_B` does, whose read throws once
+ * `failing.on` is set, as a build that fails to place a run's changed paths.
+ */
+function failingOnceOn(failing: { on: boolean }): DependencyInformation {
+  return {
+    ...NO_DEPENDENCIES,
+    get packageWorkspaces() {
+      if (failing.on) {
+        throw new Error("the build's package workspaces could not be read");
+      }
+      return A_AND_B.packageWorkspaces;
+    },
+  };
 }
 
 /**
@@ -2954,6 +2973,35 @@ describe(
           { workspacePath: "a", reason: `${INTERRUPTED_REASON}: ${INSIDE}` },
         ],
       });
+    });
+
+    it("D2914: a run whose build fails to place its changed paths at the end verdict is stored not fingerprinted, the log naming the failed placement", async () => {
+      const failing = { on: false };
+      const outcome = await inTempDir(async (root) => {
+        const inputs = new StandInInputs();
+        const executor: ScriptedExecutor = new ScriptedExecutor(
+          { ended: true, value: discovery(discovered("a")) },
+          (path) => {
+            if (executor.runs.length === 1) {
+              inputs.recordPath(OUTSIDE);
+              failing.on = true;
+            }
+            return { ended: true, value: interrupted(path) };
+          },
+        );
+        return thenStopped(
+          await begun(
+            narrowedDaemon(root, inputs, executor, failingOnceOn(failing)),
+          ),
+          async ({ store, log }) => ({
+            stored: store.runFingerprints[0],
+            logged: log.entries.filter((entry) =>
+              entry.startsWith(PLACEMENT_FAILED),
+            ).length,
+          }),
+        );
+      });
+      expect(outcome).toStrictEqual({ stored: NOT_FINGERPRINTED, logged: 1 });
     });
 
     it("D2885: a run its executor returns finished although its interruption was asked is stored, judged by the change inside its inputs", async () => {

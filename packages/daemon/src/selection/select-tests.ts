@@ -83,7 +83,7 @@ interface PathOutcome {
 export function selectTests(input: SelectionInput): SelectionOutcome {
   const paths = new Set<string>();
   for (const raw of input.change) {
-    const refusal = refusalReason(raw);
+    const refusal = changedPathRefusal(raw);
     if (refusal !== undefined) {
       return {
         state: SELECTION_STATE.refused,
@@ -99,8 +99,11 @@ export function selectTests(input: SelectionInput): SelectionOutcome {
   return assemble(context, outcomes);
 }
 
-/** A Windows root includes a drive-relative `C:foo`, which resolves against that drive's own directory. */
-function refusalReason(path: string): string | undefined {
+/**
+ * Why selection refuses a changed path, or undefined when it takes it. A Windows root includes a drive-relative
+ * `C:foo`, which resolves against that drive's own directory.
+ */
+export function changedPathRefusal(path: string): string | undefined {
   if (posix.isAbsolute(path) || win32.parse(path).root !== "") {
     return `${path} is absolute; a changed path is relative to the consumer root`;
   }

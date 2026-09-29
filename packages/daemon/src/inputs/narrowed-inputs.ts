@@ -5,7 +5,7 @@ import {
   type InputsNotNarrowed,
 } from "../query/answer.js";
 import { normalizeRelativePath } from "../selection/graph-state.js";
-import { selectTests } from "../selection/select-tests.js";
+import { changedPathRefusal, selectTests } from "../selection/select-tests.js";
 import type { DiscoveredSelectionInput } from "../selection/selection-input.js";
 import {
   NO_SELECTION,
@@ -169,8 +169,8 @@ export class BuildPlacement {
 
   /**
    * Which of the root-relative `paths` lie among the workspace's inputs by this build, whether or not each exists at
-   * its revision, by the rule the narrowed sets apply. A refused path is set apart and the rest are selected again,
-   * so one refusable path never hides where the others lie.
+   * its revision, by the rule the narrowed sets apply. A path selection refuses is set apart before the rest are
+   * selected, so one refusable path never hides where the others lie.
    */
   place(paths: readonly string[], workspacePath: string): PathPlacement {
     const selectable = this.#input.workspaces.some(
@@ -188,25 +188,24 @@ export class BuildPlacement {
     return { inside, widened };
   }
 
+  /** Selection refuses exactly the paths `changedPathRefusal` names, so those are set apart and the rest selected once. */
   #placeUnplaced(paths: readonly string[]): void {
-    let unplaced = paths;
-    while (unplaced.length > 0) {
-      const outcome = this.select(unplaced);
-      if (outcome.state !== SELECTION_STATE.refused) {
-        const including = includingByPath(outcome, unplaced, this.#input);
-        for (const path of unplaced) {
-          this.#placed.set(path, including.get(path) ?? []);
-        }
-        return;
-      }
-      const rest = unplaced.filter((path) => path !== outcome.path);
-      if (rest.length === unplaced.length) {
-        // A refusal naming no path given would refuse the next call alike.
-        for (const path of unplaced) this.#placed.set(path, REFUSED);
-        return;
-      }
-      this.#placed.set(outcome.path, REFUSED);
-      unplaced = rest;
+    const selectable: string[] = [];
+    for (const path of paths) {
+      if (changedPathRefusal(path) === undefined) selectable.push(path);
+      else this.#placed.set(path, REFUSED);
+    }
+    if (selectable.length === 0) return;
+    const outcome = this.select(selectable);
+    const including =
+      outcome.state === SELECTION_STATE.refused
+        ? undefined
+        : includingByPath(outcome, selectable, this.#input);
+    for (const path of selectable) {
+      this.#placed.set(
+        path,
+        including === undefined ? REFUSED : (including.get(path) ?? []),
+      );
     }
   }
 }

@@ -1,6 +1,8 @@
 /** Changed paths or reasons a job's verdict names before it counts the rest. */
 const MAX_NAMED_CHANGES = 20;
 const LIST_SEPARATOR = ", ";
+/** How a job's reason begins when a change while it ran keeps it from its fingerprint; the paths follow it. */
+export const CHANGED_WHILE_RUNNING_REASON = "its inputs changed while it ran";
 
 /** Taken when a job starts; its verdict is judged against it when the job ends. */
 export interface JobMark {
@@ -67,7 +69,7 @@ export class JobWindows {
     if (changes.length > 0) {
       return {
         fingerprinted: false,
-        reason: `its inputs changed while it ran: ${namedList(changes)}`,
+        reason: `${CHANGED_WHILE_RUNNING_REASON}: ${namedList(changes)}`,
         changedWhileRunning: unavailable === undefined,
       };
     }

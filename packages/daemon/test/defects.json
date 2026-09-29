@@ -6578,5 +6578,12 @@
     "file": "packages/daemon/src/inputs/crawl-links.ts",
     "old": "(earlier) => earlier.startsWith(resolved) || resolved.startsWith(earlier),",
     "new": "(earlier) => earlier.startsWith(resolved.slice(0, -1)) || resolved.startsWith(earlier.slice(0, -1)),"
+  },
+  {
+    "id": "D2914",
+    "defect": "A build that throws while placing a run's changed paths at its end verdict leaves the finished run neither stored nor listed, and the scheduler holds its retry until the next input change.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "      return this.#judgment(fingerprint, [WIDENED_PLACEMENT]);",
+    "new": "      throw error;"
   }
 ]

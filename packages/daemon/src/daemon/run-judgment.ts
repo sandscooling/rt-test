@@ -1,5 +1,6 @@
 import type { FingerprintResult } from "../inputs/fingerprint.js";
 import {
+  CHANGED_WHILE_RUNNING_REASON,
   namedList,
   type JobVerdict,
   type JobWindow,
@@ -17,7 +18,6 @@ import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import type { DaemonLog } from "./daemon-log.js";
 import type { DependencyBuilds } from "./dependency-builds.js";
 
-const CHANGED_INSIDE_REASON = "its inputs changed while it ran";
 const CAUSES_REASON = "its inputs could not be vouched for while it ran";
 const NO_START_FINGERPRINT_REASON = "it started without an input fingerprint";
 const END_UNAVAILABLE_REASON =
@@ -172,7 +172,7 @@ function judgmentReason(
     case JUDGMENT.noStartFingerprint:
       return `${NO_START_FINGERPRINT_REASON}: ${judgment.reason}`;
     case JUDGMENT.changedInside:
-      return `${CHANGED_INSIDE_REASON}: ${namedList(judgment.paths)}`;
+      return `${CHANGED_WHILE_RUNNING_REASON}: ${namedList(judgment.paths)}`;
     case JUDGMENT.causes:
       return `${CAUSES_REASON}: ${namedList(judgment.causes)}`;
     case JUDGMENT.endUnavailable:
@@ -297,11 +297,24 @@ export class RunWatch {
     this.#returned = true;
   }
 
-  /** Judges the run by `endView`, the inputs once its end revision's build has ended or none could. */
+  /**
+   * Judges the run by `endView`, the inputs once its end revision's build has ended or none could. A build that fails
+   * to place the changed paths widens them, so the run is still stored, not fingerprinted.
+   */
   judge(endView: CurrentInputs): RunJudgment {
     const end = placementOf(endView, this.#parts.builds.narrowing());
     if (end !== undefined) this.#hold(end);
-    return this.#judgment(endView.workspaceFingerprint(this.#parts.entry));
+    const { entry, log } = this.#parts;
+    const fingerprint = endView.workspaceFingerprint(entry);
+    try {
+      return this.#judgment(fingerprint);
+    } catch (error) {
+      log.error(
+        `placing the paths that changed during the run of ${entry.workspace.path}, so every one counts inside its inputs`,
+        error,
+      );
+      return this.#judgment(fingerprint, [WIDENED_PLACEMENT]);
+    }
   }
 
   /** Ends the watch and resolves once it has stopped; call once the end view is taken. */
@@ -377,13 +390,16 @@ export class RunWatch {
     );
   }
 
-  #judgment(end: FingerprintResult | undefined): RunJudgment {
+  #judgment(
+    end: FingerprintResult | undefined,
+    placements: readonly HeldPlacement[] = this.#held,
+  ): RunJudgment {
     return judgeRun({
       workspacePath: this.#parts.entry.workspace.path,
       start: this.started,
       window: this.#parts.window,
       testModules: this.#testModules,
-      placements: this.#held,
+      placements,
       end,
     });
   }
