@@ -13,6 +13,7 @@ import {
 } from "../../../scripts/lib/orchestration/claims.mjs";
 import {
   claimsDirFor,
+  mainCheckoutRoot,
   runClaimsCli,
 } from "../../../scripts/lib/orchestration/claims-cli.mjs";
 import {
@@ -263,6 +264,25 @@ describe("file claims", PROCESS_SCENARIO, () => {
       return cli(tree, "lane-b");
     });
     expect(code).toBe(1);
+  });
+
+  it("D2724: reads the main checkout of a hand-built linked worktree from its .git file when git cannot read the repository", () => {
+    const seen = withTemp((base) => {
+      const main = join(base, "main");
+      const tree = join(base, "wt-1");
+      const admin = join(main, ".git", "worktrees", "wt-1");
+      mkdirSync(admin, { recursive: true });
+      mkdirSync(tree, { recursive: true });
+      writeFileSync(join(admin, "commondir"), "../..\n");
+      writeFileSync(join(tree, ".git"), `gitdir: ${admin}\n`);
+      vi.stubEnv(GIT_CEILING, base);
+      try {
+        return { found: mainCheckoutRoot(tree), main };
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+    expect(seen.found).toBe(seen.main);
   });
 
   it("D701: keeps claims in the directory FILE_CLAIMS_DIR names", () => {

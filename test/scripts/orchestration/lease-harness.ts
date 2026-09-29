@@ -3,6 +3,8 @@ import { join } from "node:path";
 import {
   beat,
   type LeaseOwner,
+  type LeaseRecord,
+  type ProcessProbe,
 } from "../../../scripts/lib/orchestration/lease.mjs";
 
 export const NOW = 1_700_000_000_000;
@@ -24,6 +26,31 @@ export const alive =
   (...pids: number[]) =>
   (pid: number | undefined) =>
     pid !== undefined && pids.includes(pid);
+
+/**
+ * A process probe that answers as the OS does: `processes` maps each held id to the start time of the process
+ * holding it, and a probe given a start time is answered by that process alone.
+ */
+export const holds =
+  (processes: Readonly<Record<number, string>>): ProcessProbe =>
+  (pid, startedAt) => {
+    const held = pid === undefined ? undefined : processes[pid];
+    return (
+      held !== undefined && (startedAt === undefined || startedAt === held)
+    );
+  };
+
+/** A holder record for lane t-b, its heartbeat `age` ms before NOW, with `fields` laid over it. */
+export const recordAged = (
+  age: number,
+  fields: Partial<LeaseRecord> = {},
+): LeaseRecord => ({
+  ...owner("t-b", HOLDER_PID),
+  at: NOW,
+  heartbeatAt: NOW - age,
+  file: LEASE_FILE,
+  ...fields,
+});
 
 /** Writes `record` as the lease in `dir`, its heartbeat stamped at `heartbeatAt`. */
 export function writeLease(

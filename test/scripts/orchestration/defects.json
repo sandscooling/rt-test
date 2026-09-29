@@ -458,8 +458,8 @@
     "id": "D700",
     "defect": "A worktree keeps its claims in its own tree, so a lane there and a lane in the main checkout both claim one file.",
     "file": "scripts/lib/orchestration/claims-cli.mjs",
-    "old": "return basename(commonDir) === \".git\" ? dirname(commonDir) : root;",
-    "new": "return root;"
+    "old": "checkoutFromFiles(root) ?? checkoutFromGit(root);",
+    "new": "root;"
   },
   {
     "id": "D701",
@@ -787,29 +787,29 @@
     "id": "D2274",
     "defect": "The queue head replaces a live lease, so two heavy runs overlap.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "const holder = current && !isStale(current, now, running) ? current : null;",
+    "old": "const holder = current && !stale ? current : null;",
     "new": "const holder = null;"
   },
   {
     "id": "D2275",
     "defect": "A lease whose heartbeat is exactly 60 s old is reclaimed, one beat before it has lapsed.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "now - record.heartbeatAt > STALE_AFTER_MS",
-    "new": "now - record.heartbeatAt >= STALE_AFTER_MS"
+    "old": "beatAge > STALE_AFTER_MS",
+    "new": "beatAge >= STALE_AFTER_MS"
   },
   {
     "id": "D2276",
-    "defect": "A lease whose holder process is gone stays held until its heartbeat lapses, so a crashed wrapper blocks every lane for a minute.",
+    "defect": "A lease whose holder process is gone stays held while its heartbeat is under 20 s old, so a crashed wrapper blocks every lane for those seconds.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "return !running(record.pid) ||",
-    "new": "return false ||"
+    "old": "if (beatAge < IDENTITY_TRUSTED_MS) return running(record.pid);",
+    "new": "if (beatAge < IDENTITY_TRUSTED_MS) return true;"
   },
   {
     "id": "D2277",
     "defect": "A lease whose wrapper was killed is reclaimed while the run it started still loads the machine.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "if (record.childPid !== undefined && running(record.childPid)) return false;",
-    "new": ""
+    "old": "return running(record.childPid, record.childStartedAt);",
+    "new": "return false;"
   },
   {
     "id": "D2278",
@@ -843,7 +843,7 @@
     "id": "D2282",
     "defect": "The lease never records the run's pid, so a killed wrapper's still-running run loses the lease.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "JSON.stringify({ ...storedFields(current), childPid }),",
+    "old": "JSON.stringify({ ...storedFields(current), childPid, childStartedAt }),",
     "new": "JSON.stringify(storedFields(current)),"
   },
   {
@@ -1347,14 +1347,14 @@
     "id": "D2361",
     "defect": "A lease whose recorded run has ended is held forever, since any recorded child keeps it.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "if (record.childPid !== undefined && running(record.childPid)) return false;",
-    "new": "if (record.childPid !== undefined) return false;"
+    "old": "return running(record.childPid, record.childStartedAt);",
+    "new": "return true;"
   },
   {
     "id": "D2362",
     "defect": "status reports a lease kept only by its recorded run as BUSY, hiding that its wrapper is gone.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "orphaned: !stale && current !== null && !running(current.pid),",
+    "old": "orphaned: current !== null && !owned && !stale,",
     "new": "orphaned: false,"
   },
   {
@@ -1403,8 +1403,8 @@
     "id": "D2369",
     "defect": "A run under a hold records nothing in it, so the hold's death lets the next waiter overlap the run, and a hold gone before recording lets the run go unleased.",
     "file": "scripts/lib/orchestration/lease-cli.mjs",
-    "old": "return hold !== null && recordChild(ctx.dir, hold.pid, ctx.pid, ctx.now());",
-    "new": "return hold !== null;"
+    "old": "hold !== null &&\n    recordChild(ctx.dir, hold.pid, ctx.pid, ctx.now(), record.startedAt)",
+    "new": "hold !== null"
   },
   {
     "id": "D2370",
@@ -1431,8 +1431,8 @@
     "id": "D2373",
     "defect": "A file-system error recording the run's pid is thrown out of the spawn handler and kills the wrapper.",
     "file": "scripts/lib/orchestration/lease-cli.mjs",
-    "old": "  try {\n    recordChild(ctx.dir, ctx.pid, childPid, ctx.now());\n  } catch (error) {\n    ctx.err(\n      `${PROG}: could not record run pid ${childPid} in the lease: ${error.message}`,\n    );\n  }",
-    "new": "  recordChild(ctx.dir, ctx.pid, childPid, ctx.now());"
+    "old": "  try {\n    if (!recordChild(ctx.dir, ctx.pid, childPid, ctx.now())) return;\n    const childStartedAt = startTimeOf(ctx, childPid);\n    if (childStartedAt === undefined) return;\n    recordChild(ctx.dir, ctx.pid, childPid, ctx.now(), childStartedAt);\n  } catch (error) {\n    ctx.err(\n      `${PROG}: could not record run pid ${childPid} in the lease: ${error.message}`,\n    );\n  }",
+    "new": "  if (!recordChild(ctx.dir, ctx.pid, childPid, ctx.now())) return;\n  const childStartedAt = startTimeOf(ctx, childPid);\n  if (childStartedAt === undefined) return;\n  recordChild(ctx.dir, ctx.pid, childPid, ctx.now(), childStartedAt);"
   },
   {
     "id": "D2374",
@@ -1452,7 +1452,210 @@
     "id": "D2376",
     "defect": "A take runs without the lock, so two waiters can both replace a stale lease.",
     "file": "scripts/lib/orchestration/lease.mjs",
-    "old": "  return withLock(dir, () => {\n    const current = readLease(dir);\n    const holder",
-    "new": "  return ((fn) => fn())(() => {\n    const current = readLease(dir);\n    const holder"
+    "old": "  return withLock(dir, () => {\n    const current = readLease(dir);\n    const stale",
+    "new": "  return ((fn) => fn())(() => {\n    const current = readLease(dir);\n    const stale"
+  },
+  {
+    "id": "D2696",
+    "defect": "A holder whose heartbeat is 30 s old is judged by its id alone, so a dead wrapper's id taken by another process keeps the lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "return running(record.pid, record.startedAt);",
+    "new": "return running(record.pid);"
+  },
+  {
+    "id": "D2697",
+    "defect": "A holder whose heartbeat is exactly 20 s old is still judged by its id alone, one beat past the age at which its start time is asked.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "beatAge < IDENTITY_TRUSTED_MS",
+    "new": "beatAge <= IDENTITY_TRUSTED_MS"
+  },
+  {
+    "id": "D2698",
+    "defect": "A run is judged by its pid alone, so a reused run pid keeps a dead wrapper's lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "return running(record.childPid, record.childStartedAt);",
+    "new": "return running(record.childPid);"
+  },
+  {
+    "id": "D2699",
+    "defect": "A run is asked for its wrapper's start time, so the run's own process no longer keeps a dead wrapper's lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "return running(record.childPid, record.childStartedAt);",
+    "new": "return running(record.childPid, record.startedAt);"
+  },
+  {
+    "id": "D2700",
+    "defect": "A holder recorded without a start time is judged dead once its heartbeat is 20 s old, so a lease written by the old code is reclaimed under a live holder.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "return running(record.pid, record.startedAt);",
+    "new": "return record.startedAt !== undefined && running(record.pid, record.startedAt);"
+  },
+  {
+    "id": "D2701",
+    "defect": "A run recorded without a start time is judged dead, so a lease written by the old code is reclaimed under a live run.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "return running(record.childPid, record.childStartedAt);",
+    "new": "return record.childStartedAt !== undefined && running(record.childPid, record.childStartedAt);"
+  },
+  {
+    "id": "D2702",
+    "defect": "A waiter is judged by its id alone, so a dead waiter whose id another process holds keeps the queue head and blocks every waiter behind it.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (!isStale(entry, now, running)) live.push(entry);",
+    "new": "if (!isStale({ ...entry, startedAt: undefined }, now, running)) live.push(entry);"
+  },
+  {
+    "id": "D2703",
+    "defect": "A checked start time is reused for 20 s and one beat more, so a probe answers from its cache at exactly 20 s.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "at - last.at < IDENTITY_TRUSTED_MS",
+    "new": "at - last.at <= IDENTITY_TRUSTED_MS"
+  },
+  {
+    "id": "D2704",
+    "defect": "A start time checked as running vouches for the id's next start time too, so a second process holding the id is judged by the first one's check.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "last?.startedAt === startedAt && at - last.at",
+    "new": "last !== undefined && at - last.at"
+  },
+  {
+    "id": "D2705",
+    "defect": "A start time whose check fails counts as gone, so a failed process query reclaims a live holder's lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "let alive = true;",
+    "new": "let alive = false;"
+  },
+  {
+    "id": "D2706",
+    "defect": "A failed start-time check is not remembered, so every poll repeats the query and reports the failure again.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "    let alive = true;\n    try {\n      alive = confirm({ pid, startedAt: BigInt(startedAt) });\n    } catch (error) {\n      report(\n        `process ${pid} counts as running, since its start time could not be checked: ${error.message}`,\n      );\n    }\n    if (alive) checked.set(pid, { startedAt, at });\n    else checked.delete(pid);",
+    "new": "    let alive = true;\n    let failed = false;\n    try {\n      alive = confirm({ pid, startedAt: BigInt(startedAt) });\n    } catch (error) {\n      failed = true;\n      report(\n        `process ${pid} counts as running, since its start time could not be checked: ${error.message}`,\n      );\n    }\n    if (alive && !failed) checked.set(pid, { startedAt, at });\n    else checked.delete(pid);"
+  },
+  {
+    "id": "D2707",
+    "defect": "A record with no start time is put to the start-time check as time zero, so an old record is judged dead while its process runs.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "    if (typeof startedAt !== \"string\" || !DECIMAL_DIGITS.test(startedAt)) {\n      return true;\n    }",
+    "new": "    if (typeof startedAt !== \"string\" || !DECIMAL_DIGITS.test(startedAt)) {\n      startedAt = \"0\";\n    }"
+  },
+  {
+    "id": "D2708",
+    "defect": "A start time that is not decimal text is put to the start-time check, so a damaged record is reported as an unreadable start time.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "typeof startedAt !== \"string\" || !DECIMAL_DIGITS.test(startedAt)",
+    "new": "typeof startedAt !== \"string\""
+  },
+  {
+    "id": "D2709",
+    "defect": "A start time found dead leaves the id's earlier proof standing, so the earlier start time is judged running from the cache.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "    else checked.delete(pid);",
+    "new": ""
+  },
+  {
+    "id": "D2710",
+    "defect": "The queue entry omits the waiter's start time, so a dead waiter whose id is reused keeps its place in the queue.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "writeFileSync(partial, JSON.stringify({ ...owner, at: now }));",
+    "new": "writeFileSync(partial, JSON.stringify({ ...owner, startedAt: undefined, at: now }));"
+  },
+  {
+    "id": "D2711",
+    "defect": "The run's start time is read before its pid is recorded, so a slow query leaves a lease that names no run and lapses with its wrapper.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "    if (!recordChild(ctx.dir, ctx.pid, childPid, ctx.now())) return;\n    const childStartedAt = startTimeOf(ctx, childPid);\n    if (childStartedAt === undefined) return;\n    recordChild(ctx.dir, ctx.pid, childPid, ctx.now(), childStartedAt);",
+    "new": "    const childStartedAt = startTimeOf(ctx, childPid);\n    recordChild(ctx.dir, ctx.pid, childPid, ctx.now(), childStartedAt);"
+  },
+  {
+    "id": "D2712",
+    "defect": "A start time that cannot be read aborts the run instead of recording the process by its pid alone.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "  try {\n    return ctx.startedAt(pid);\n  } catch (error) {\n    ctx.err(\n      `${PROG}: process ${pid} is recorded by its pid alone, since its start time could not be read: ${error.message}`,\n    );\n    return undefined;\n  }",
+    "new": "  return ctx.startedAt(pid);"
+  },
+  {
+    "id": "D2713",
+    "defect": "A run joining its own lane's hold records no start time as the hold's run, so a reused wrapper id keeps the hold.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "ctx.now(), record.startedAt)",
+    "new": "ctx.now())"
+  },
+  {
+    "id": "D2714",
+    "defect": "The start time is recorded as hexadecimal text, which the liveness check reads as another process's start time.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "processRecords([pid]).get(pid)?.startedAt.toString();",
+    "new": "processRecords([pid]).get(pid)?.startedAt.toString(16);"
+  },
+  {
+    "id": "D2715",
+    "defect": "An unchanged holder is judged again under the lock by its ids alone, so a holder whose start time shows it gone keeps the lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "const stale = sameRecord(current, judged)\n      ? judgedStale\n      : current !== null && isStale(current, now, byIdAlone(running));",
+    "new": "const stale = current !== null && isStale(current, now, byIdAlone(running));"
+  },
+  {
+    "id": "D2716",
+    "defect": "A holder replaced by another process while it was being judged keeps the earlier verdict, so a live new holder's lease is reclaimed or a dead one's is kept.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "  a.pid === b.pid &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2717",
+    "defect": "A holder that beat its lease while it was being judged keeps the earlier stale verdict, so a live holder loses its lease.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "  a.heartbeatAt === b.heartbeatAt &&\n",
+    "new": ""
+  },
+  {
+    "id": "D2718",
+    "defect": "A holder that recorded its run while it was being judged keeps the earlier stale verdict, so a live run's lease is reclaimed.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "  a.pid === b.pid &&\n  a.childPid === b.childPid;",
+    "new": "  a.pid === b.pid;"
+  },
+  {
+    "id": "D2719",
+    "defect": "status judges the owner a second time to decide whether it is orphaned, doubling the start-time queries.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "orphaned: current !== null && !owned && !stale,",
+    "new": "orphaned: current !== null && !ownerRuns(current, now, running) && !stale,"
+  },
+  {
+    "id": "D2720",
+    "defect": "The probe skips its own id check, so an ended process recorded without a start time counts as running and a crashed wrapper keeps its lease until its heartbeat lapses.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (!isRunning(pid)) {",
+    "new": "if (false) {"
+  },
+  {
+    "id": "D2721",
+    "defect": "A start time found dead is cached as live, so a holder or run already found gone reads as running again on the next poll.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "if (alive) checked.set(pid, { startedAt, at });\n    else checked.delete(pid);",
+    "new": "checked.set(pid, { startedAt, at });"
+  },
+  {
+    "id": "D2722",
+    "defect": "A holder that changed while being judged is judged again under the lock with its start times, so a process query runs while the lease lock is held.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "isStale(current, now, byIdAlone(running))",
+    "new": "isStale(current, now, running)"
+  },
+  {
+    "id": "D2723",
+    "defect": "The lease's default probe asks the OS for start times, so the run-lease hook's denial runs a process query that can outlast the hook's timeout.",
+    "file": "scripts/lib/orchestration/lease.mjs",
+    "old": "export const isStale = (record, now = Date.now(), running = isRunning) =>",
+    "new": "export const isStale = (record, now = Date.now(), running = processProbe(() => {})) =>"
+  },
+  {
+    "id": "D2724",
+    "defect": "The main checkout of a linked worktree is asked of git alone, so a worktree git cannot read keeps its claims in its own tree and the hook spawns git for every layout.",
+    "file": "scripts/lib/orchestration/claims-cli.mjs",
+    "old": "checkoutFromFiles(root) ?? checkoutFromGit(root);",
+    "new": "checkoutFromGit(root);"
   }
 ]

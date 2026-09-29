@@ -14,12 +14,19 @@ import {
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
+import { ownerRunning } from "../../../test/scripts/run-cleanup.mjs";
 import { isRunning } from "../processes.mjs";
 
 export const LEASE_DIR = "_agent-docs/.scratch/run-lease";
 export const HEARTBEAT_MS = 10_000;
 const STALE_AFTER_MS = 60_000;
 const ORPHANED_RUN_LIMIT_MS = 60 * 60_000;
+/**
+ * How long a proof that a live process is the recorded one holds before it is sought again: its own heartbeat, or
+ * its start time read from the OS, which costs a process query of about a second on Windows.
+ */
+const IDENTITY_TRUSTED_MS = 2 * HEARTBEAT_MS;
+const DECIMAL_DIGITS = /^\d+$/;
 
 const LEASE_FILE = "lease.json";
 const QUEUE_DIR = "queue";
@@ -37,8 +44,10 @@ const STORED_FIELDS = [
   "worktree",
   "command",
   "pid",
+  "startedAt",
   "at",
   "childPid",
+  "childStartedAt",
 ];
 
 const leaseFile = (dir) => join(dir, LEASE_FILE);
@@ -136,19 +145,62 @@ function readRecord(file) {
 export const readLease = (dir) => readRecord(leaseFile(dir));
 
 /**
+ * Whether the process a record names still runs: a process holds its id, and has its start time when the record
+ * holds one. A start time checked as running, or whose check failed, counts as running without another query while
+ * its id stays held, for a bounded time. A failed check counts as running, as the id alone would, and is reported.
+ */
+export function processProbe(
+  report,
+  { now = Date.now, confirm = ownerRunning } = {},
+) {
+  const checked = new Map();
+  return (pid, startedAt) => {
+    if (!isRunning(pid)) {
+      checked.delete(pid);
+      return false;
+    }
+    if (typeof startedAt !== "string" || !DECIMAL_DIGITS.test(startedAt)) {
+      return true;
+    }
+    const at = now();
+    const last = checked.get(pid);
+    if (last?.startedAt === startedAt && at - last.at < IDENTITY_TRUSTED_MS) {
+      return true;
+    }
+    let alive = true;
+    try {
+      alive = confirm({ pid, startedAt: BigInt(startedAt) });
+    } catch (error) {
+      report(
+        `process ${pid} counts as running, since its start time could not be checked: ${error.message}`,
+      );
+    }
+    if (alive) checked.set(pid, { startedAt, at });
+    else checked.delete(pid);
+    return alive;
+  };
+}
+
+// A recent heartbeat, stamped by the owner or by a run joining its hold, stands in for the owner's start time.
+function ownerRuns(record, now, running) {
+  const beatAge = now - record.heartbeatAt;
+  if (beatAge > STALE_AFTER_MS) return false;
+  if (beatAge < IDENTITY_TRUSTED_MS) return running(record.pid);
+  return running(record.pid, record.startedAt);
+}
+
+function recordedRunRuns(record, now, running) {
+  if (record.childPid === undefined) return false;
+  if (now - record.heartbeatAt > ORPHANED_RUN_LIMIT_MS) return false;
+  return running(record.childPid, record.childStartedAt);
+}
+
+/**
  * A holder is stale once its process is gone or its heartbeat has lapsed, unless the run it started still runs:
  * a wrapper killed on its own leaves that run loading the machine. That run keeps the lease for a bounded time only.
  */
-export function isStale(record, now = Date.now(), running = isRunning) {
-  if (
-    record.childPid !== undefined &&
-    now - record.heartbeatAt > ORPHANED_RUN_LIMIT_MS
-  ) {
-    return true;
-  }
-  if (record.childPid !== undefined && running(record.childPid)) return false;
-  return !running(record.pid) || now - record.heartbeatAt > STALE_AFTER_MS;
-}
+export const isStale = (record, now = Date.now(), running = isRunning) =>
+  !ownerRuns(record, now, running) && !recordedRunRuns(record, now, running);
 
 const storedFields = (record) =>
   Object.fromEntries(
@@ -200,10 +252,21 @@ export function joinQueue(dir, owner, now = Date.now()) {
 
 const leaveQueue = (entry) => removeIfPresent(entry.file);
 
+const sameRecord = (a, b) =>
+  a !== null &&
+  b !== null &&
+  a.heartbeatAt === b.heartbeatAt &&
+  a.pid === b.pid &&
+  a.childPid === b.childPid;
+
+const byIdAlone = (running) => (pid) => running(pid);
+
 /**
  * Takes the lease when this waiter heads the queue and the lease is free or stale. The holder is re-read and the
- * lease created under the lock, so two waiters never both replace it. `rejoin` means a lapsed heartbeat cost this
- * waiter its entry.
+ * lease created under the lock, so two waiters never both replace it. The holder is judged before the lock, since
+ * judging it may query the OS for longer than the lock may be held. A holder that changed meanwhile is re-judged
+ * under it by its ids alone, so it counts as running for this poll where only a start time would show it gone.
+ * `rejoin` means a lapsed heartbeat cost this waiter its entry.
  */
 export function takeTurn(
   dir,
@@ -212,9 +275,14 @@ export function takeTurn(
 ) {
   const waiting = liveQueue(dir, { now, running, prune: true });
   const position = waiting.findIndex((w) => w.file === entry.file);
+  const judged = readLease(dir);
+  const judgedStale = judged !== null && isStale(judged, now, running);
   return withLock(dir, () => {
     const current = readLease(dir);
-    const holder = current && !isStale(current, now, running) ? current : null;
+    const stale = sameRecord(current, judged)
+      ? judgedStale
+      : current !== null && isStale(current, now, byIdAlone(running));
+    const holder = current && !stale ? current : null;
     if (position !== 0 || holder) {
       return { taken: false, rejoin: position === -1, position, holder };
     }
@@ -226,14 +294,23 @@ export function takeTurn(
   });
 }
 
-/** Records the pid of the run the holder started, while `pid` still holds the lease. */
-export function recordChild(dir, pid, childPid, now = Date.now()) {
+/**
+ * Records the run the holder started, by its pid and, when known, its start time, while `pid` still holds the
+ * lease. A run recorded by its pid alone keeps the lease while any process holds that pid.
+ */
+export function recordChild(
+  dir,
+  pid,
+  childPid,
+  now = Date.now(),
+  childStartedAt,
+) {
   return withLock(dir, () => {
     const current = readLease(dir);
     if (current?.pid !== pid) return false;
     writeFileSync(
       current.file,
-      JSON.stringify({ ...storedFields(current), childPid }),
+      JSON.stringify({ ...storedFields(current), childPid, childStartedAt }),
     );
     return beat(current.file, now);
   });
@@ -276,10 +353,12 @@ export function leaseStatus(
   { now = Date.now(), running = isRunning } = {},
 ) {
   const current = readLease(dir);
-  const stale = current !== null && isStale(current, now, running);
+  const owned = current !== null && ownerRuns(current, now, running);
+  const stale =
+    current !== null && !owned && !recordedRunRuns(current, now, running);
   return {
     holder: stale ? null : current,
-    orphaned: !stale && current !== null && !running(current.pid),
+    orphaned: current !== null && !owned && !stale,
     stale: stale ? current : null,
     queue: liveQueue(dir, { now, running }),
   };
