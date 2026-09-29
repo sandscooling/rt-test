@@ -6760,5 +6760,12 @@
     "file": "packages/daemon/src/store/open-store.ts",
     "old": "  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),",
     "new": "  const discovery = latestDiscovery(database, scope);\n  return inRecordRead(database, () => ({\n    ...discovery,"
+  },
+  {
+    "id": "D2970",
+    "defect": "A discovery whose store write failed is still logged as ended, so right after the log says it stored nothing it reads as though the discovery ended well.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);",
+    "new": "    log.entry(`discovery ended: ${discoverySummary(discovery)}`);"
   }
 ]

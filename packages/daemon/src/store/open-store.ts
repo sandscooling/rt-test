@@ -26,6 +26,7 @@ import {
   type StoreScope,
 } from "./stored-records.js";
 import {
+  headerNumber,
   inRecordRead,
   inWriteTransaction,
   isNewerSchema,
@@ -168,19 +169,6 @@ function isNew(header: StoreHeader): boolean {
     header.applicationId === UNSET_HEADER_VALUE &&
     header.userVersion === UNSET_HEADER_VALUE
   );
-}
-
-function headerNumber(
-  row: Record<string, SQLOutputValue> | undefined,
-  column: string,
-): number {
-  const value = row?.[column];
-  if (typeof value !== "number") {
-    throw new Error(
-      `The store header's ${column} read as ${String(value)}, not a number`,
-    );
-  }
-  return value;
 }
 
 function isNotADatabase(error: unknown): boolean {
