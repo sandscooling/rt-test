@@ -1,4 +1,5 @@
 import { isAbsolute, posix } from "node:path";
+import { WINDOWS } from "../daemon/endpoint.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import {
@@ -47,7 +48,10 @@ export type Protection =
       readonly files: ReadonlySet<string>;
       /** Equal for two values whose discovered projects match the same files by pattern. */
       readonly patternKey: string;
-      /** Whether a root-relative path is a listed file or one a discovered project's test file patterns find. */
+      /**
+       * Whether a root-relative path is a listed file, in any case on Windows, or one a discovered project's test
+       * file patterns find.
+       */
       readonly protects: (path: string) => boolean;
     };
 
@@ -90,6 +94,7 @@ export function protection(
     matchers.push(compiled.matches);
   }
   const files = protectedFiles(discovery);
+  const listed = new Set([...files].map(caseComparable));
   return {
     applies: true,
     files,
@@ -97,8 +102,17 @@ export function protection(
       projects.map((project) => project.testFilePatterns),
     ),
     protects: (path) =>
-      files.has(path) || matchers.some((matches) => matches(path)),
+      listed.has(caseComparable(path)) ||
+      matchers.some((matches) => matches(path)),
   };
+}
+
+/**
+ * Lower-cased on Windows, whose file system opens a listed file whatever case its name is spelled in, as Vite opens
+ * `.env.local` for a `.ENV.local` on disk.
+ */
+function caseComparable(path: string): string {
+  return process.platform === WINDOWS ? path.toLowerCase() : path;
 }
 
 /** Root-relative: every file `protectedModules` names, and every env file its projects' env sources name. */

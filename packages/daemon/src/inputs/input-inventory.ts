@@ -269,7 +269,7 @@ async function linkDigest(
       readAtMs,
     });
   }
-  const digest = textDigest(await readlink(path));
+  const digest = wholeDigest(await readlink(path));
   return inputDigest(LINK_KIND, digest, stampOf(link, readAtMs));
 }
 
@@ -300,8 +300,9 @@ export function holdsFileContent(digest: string): boolean {
   return digest.startsWith(`${FILE_KIND}${KIND_SEPARATOR}`);
 }
 
-export function textDigest(text: string): string {
-  return createHash(DIGEST_ALGORITHM).update(text).digest(DIGEST_ENCODING);
+/** A digest of text or bytes held whole in memory, where `contentDigest` streams a file. */
+export function wholeDigest(content: string | Uint8Array): string {
+  return createHash(DIGEST_ALGORITHM).update(content).digest(DIGEST_ENCODING);
 }
 
 function specialKind(stats: Stats): string {
