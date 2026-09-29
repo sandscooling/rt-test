@@ -58,6 +58,10 @@ _Avoid_: version, generation
 Reading every input again to establish the current input fingerprints, without relying on change events.
 _Avoid_: rescan, resync
 
+**Edit**:
+A change to an input that the daemon does not attribute to one of its own runs or discoveries.
+_Avoid_: user change, manual change
+
 **Run**:
 One execution of a selection by the daemon, under its own run identity.
 _Avoid_: job, pass
@@ -77,6 +81,10 @@ _Avoid_: status, activity
 **Round**:
 The daemon's decision, once the input revision has held still, its inputs have settled, its dependency build has ended, any rediscovery it needs has ended and no job begun at an earlier revision is in progress, of what to run at that revision; the selection over the paths changed since the previous round orders what it runs first and explains it. A round is pending until that decision is made, and held after a scheduling step fails until the daemon tries again.
 _Avoid_: cycle, pass, tick
+
+**Self-changing workspace**:
+A Vitest workspace that became due three times in a row only through changes the daemon's own runs and discoveries made to the same input, which the daemon holds, running it no more until an edit reaches its inputs.
+_Avoid_: looping workspace, flapping workspace
 
 **Force-stopped run**:
 An interrupted run whose Vitest workers were stopped without waiting, because the grace period after the interrupt passed with the run still going, so the project's `afterAll` hooks and teardown did not run.
