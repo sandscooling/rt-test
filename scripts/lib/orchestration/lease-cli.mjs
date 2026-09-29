@@ -15,6 +15,7 @@ import {
   leaseStatus,
   processProbe,
   readLease,
+  readLeaseLocked,
   recordChild,
   RELEASE,
   releaseLane,
@@ -173,7 +174,7 @@ async function waitTurn(ctx, owner) {
 /** Beats the lease while this process holds it; `onLost` runs once another holder or a release takes it. */
 function keepAlive(ctx, file, pid, onLost) {
   const tick = () => {
-    if (readLease(ctx.dir)?.pid === pid) beat(file, ctx.now());
+    if (readLeaseLocked(ctx.dir)?.pid === pid) beat(file, ctx.now());
     else {
       clearInterval(timer);
       onLost();
@@ -310,7 +311,7 @@ const leaseRecord = (ctx, owner, command) => ({
 
 // A live manual hold by the same lane and thread lets its own runs through without queueing behind it.
 function ownHold(ctx, owner) {
-  const current = readLease(ctx.dir);
+  const current = readLeaseLocked(ctx.dir);
   const own =
     current !== null &&
     current.command === HOLD_COMMAND &&
@@ -395,7 +396,7 @@ async function acquire(ctx, args) {
   await new Promise((resolveHold) =>
     keepAlive(ctx, file, ctx.pid, resolveHold),
   );
-  const current = readLease(ctx.dir);
+  const current = readLeaseLocked(ctx.dir);
   if (current === null) ctx.out(`RELEASED ${describe(record)}`);
   else ctx.out(`LOST ${describe(record)} to ${describe(current)}`);
   return EXIT.OK;

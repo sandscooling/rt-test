@@ -857,8 +857,8 @@
     "id": "D2284",
     "defect": "The holder never renews its heartbeat mid-run, so any run over 60 s is reclaimed while it still runs.",
     "file": "scripts/lib/orchestration/lease-cli.mjs",
-    "old": "if (readLease(ctx.dir)?.pid === pid) beat(file, ctx.now());",
-    "new": "if (readLease(ctx.dir)?.pid === pid) void file;"
+    "old": "if (readLeaseLocked(ctx.dir)?.pid === pid) beat(file, ctx.now());",
+    "new": "if (readLeaseLocked(ctx.dir)?.pid === pid) void file;"
   },
   {
     "id": "D2285",
@@ -1657,5 +1657,26 @@
     "file": "scripts/lib/orchestration/claims-cli.mjs",
     "old": "checkoutFromFiles(root) ?? checkoutFromGit(root);",
     "new": "checkoutFromGit(root);"
+  },
+  {
+    "id": "D2725",
+    "defect": "A run reads its lane's hold outside the lock, so a rewrite read mid-write queues the run behind its own lane's hold.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "function ownHold(ctx, owner) {\n  const current = readLeaseLocked(ctx.dir);",
+    "new": "function ownHold(ctx, owner) {\n  const current = readLease(ctx.dir);"
+  },
+  {
+    "id": "D2726",
+    "defect": "A hold's heartbeat reads the lease outside the lock, so a rewrite read mid-write ends a live manual hold as LOST.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "if (readLeaseLocked(ctx.dir)?.pid === pid) beat(file, ctx.now());",
+    "new": "if (readLease(ctx.dir)?.pid === pid) beat(file, ctx.now());"
+  },
+  {
+    "id": "D2727",
+    "defect": "An acquire whose hold was taken reads the taker outside the lock, so LOST names a half-written lease instead of the holder.",
+    "file": "scripts/lib/orchestration/lease-cli.mjs",
+    "old": "  const current = readLeaseLocked(ctx.dir);\n  if (current === null) ctx.out(",
+    "new": "  const current = readLease(ctx.dir);\n  if (current === null) ctx.out("
   }
 ]

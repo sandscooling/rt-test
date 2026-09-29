@@ -144,6 +144,9 @@ function readRecord(file) {
 
 export const readLease = (dir) => readRecord(leaseFile(dir));
 
+/** The lease as its last writer left it: every write of its content holds the lock, so a read under it is never torn. */
+export const readLeaseLocked = (dir) => withLock(dir, () => readLease(dir));
+
 /**
  * Whether the process a record names still runs: a process holds its id, and has its start time when the record
  * holds one. A start time checked as running, or whose check failed, counts as running without another query while
