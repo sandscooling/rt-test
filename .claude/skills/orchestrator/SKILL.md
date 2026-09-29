@@ -19,49 +19,16 @@ Read `_agent-docs/_flow-config.yaml` first. `{cfg.KEY}` means a value from it.
 
 A lane is one unit of agreed work. Its **group** is a short slug (`m1-store`, `vitest-spike`, or the ticket key). Member **names** are `rt-<lane>-<role>`; the `rt-` prefix keeps them apart from other projects' sessions on this machine.
 
-| Role   | Name                                                                          | Runs                                                                                      |
-| ------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| create | `rt-<lane>-create` for `/create-ticket`, `rt-<lane>-cr` for `/change-request` | `/create-ticket`, or `/change-request` for new work                                       |
-| dev    | `rt-<lane>-dev`                                                               | `/dev-ticket`                                                                             |
-| tests  | `rt-<lane>-tests`                                                             | `/create-tests`                                                                           |
-| review | `rt-<lane>-review`                                                            | `/review-changes`                                                                         |
-| spike  | `rt-<lane>-spike`                                                             | research that edits no tracked file; its findings go to the owner or a later lane's brief |
+| Role                                                | `model`           | `effort`                                             |
+| --------------------------------------------------- | ----------------- | ---------------------------------------------------- |
+| create (`create-ticket`, `change-request`, scoping) | `claude-opus-5-5` | `high`                                               |
+| review                                              | `claude-opus-5-5` | `medium`; `high` for contracts, the server, security |
+| dev                                                 | `claude-opus-5-5` | `medium`; `high` for daemon concurrency and state    |
+| tests                                               | `claude-opus-5-5` | `medium`; `high` for a mutation-proof suite          |
+| spike                                               | `claude-opus-5-5` | `medium`                                             |
+| trivial or mechanical, editing no code              | `claude-opus-5-5` | `low`                                                |
 
-**The order is create, dev, tests, review, and each member answers the one after it.** Dev writes no test and runs no suite. The tests member writes and repairs the tests, runs the targeted ones, and sends code bugs back to dev. The review reads the change cold, fixes its own code findings, sends its test gaps to the tests member, and its report triggers the lane's commit, which you make.
-
-**A `change-request` inline fix is the lane's code change**: its create member builds it and writes its own threadId into the record as the dev session, and the lane's tests and review members follow it exactly as they follow dev. A proposal-path `change-request` writes planning docs under a grant (§ Files you write) and lands in its own commit.
-
-**The author of a change is the worst judge of whether its tests prove anything**, so every build lane gets a review session that did not write the code, and the dev session never runs `/review-changes` on its own work. Hand the review the record path, the tests member's threadId, and the sibling paths to leave out of its scope, and nothing about why dev decided anything.
-
-Names and groups use letters, digits, dots, underscores, and hyphens only. **Your own group is `orchestrator`** (or none, when the owner started you by hand); never give it to a lane, because that is how a member recognizes it is not in one.
-
-**Members are sessions, never subagents.** A subagent vanishes with your turn and nobody can see it. A member is spawned with `session_spawn`, messaged with `session_wake` on its threadId, and found with `session_list`. Its name survives restarts.
-
-**`stopped` is a state, not a loss.** A stopped member keeps its whole history, and `session_wake` restarts it under the same name. **A member exists only from the stage that needs it**: spawn it once, when the lane reaches its role, and wake it after that.
-
-**Dispatch means the member's arrival carries the work.** Run `session_list({ group })` immediately before every dispatch, then:
-
-- name absent: `session_spawn({ name, group, message })`
-- present, whether live or `stopped`: `session_wake({ name: <its threadId>, message })`
-
-**Every message between sessions goes by `session_wake` on the recipient's threadId, never by `SendMessage` and never by name.** `SendMessage` only queues for the recipient's next turn, so a report to an idle session sits unread until something else wakes it. `session_wake` starts a turn on an idle or stopped session, and on a busy one it lands right after the tool call in hand. Three sessions on this machine are named "Orchestrator", and a threadId survives renames; it changes only on a handoff, so a successor re-addresses its crew.
-
-Never send a standby or roll-call message: a settled member answers it by going idle, which stalls the lane with nothing reporting why.
-
-**To PAUSE a live member, `session_wake` it** with: finish the tool call in hand, stop every background agent it started and check the files those touched, end the turn, keep the claims, and wait for your wake. It lands right after the tool call in hand. **A pause does not hold while the member has a question open in its own thread**: the owner's answer starts a new turn. Before a window where the tree must stay still, ask the owner to hold thread answers until you say it is over.
-
-**Pass `model` and `options` on every `session_spawn`, by role; never let a member inherit yours.** The owner sets this table:
-
-| Role                                                | `model`             | `effort`                                             |
-| --------------------------------------------------- | ------------------- | ---------------------------------------------------- |
-| create (`create-ticket`, `change-request`, scoping) | `claude-opus-5-5`   | `high`                                               |
-| review                                              | `claude-opus-5-5`   | `medium`; `high` for contracts, the server, security |
-| dev                                                 | `claude-sonnet-5-5` | `medium`                                             |
-| tests                                               | `claude-sonnet-5-5` | `medium`; `high` for a mutation-proof suite          |
-| spike                                               | `claude-sonnet-5-5` | `medium`                                             |
-| trivial or mechanical, editing no code              | `claude-sonnet-5-5` | `low`                                                |
-
-Every spawn also passes `{"id":"contextWindow","value":"1m"}`: Sonnet starts at 200k, and the context hook's handoff warning assumes a 1M window, so a 200k member compacts before it is warned. Never run a coding member at `low` effort, since it then may report a change done without running its checks. Tell a Sonnet spike to read its sources rather than answer from memory. `session_models` lists the slugs and option ids. The successor orchestrator in a handoff stays on `claude-opus-5-5`.
+Every spawn also passes `{"id":"contextWindow","value":"1m"}`, since the context hook's handoff warning assumes a 1M window, so a smaller member compacts before it is warned. Never run a coding member at `low` effort, since it then may report a change done without running its checks. Spawn no Sonnet session: in this project it spent more tokens than Opus for the same work and built in more defects. Tell a spike to read its sources rather than answer from memory. `session_models` lists the slugs and option ids. The successor orchestrator in a handoff stays on `claude-opus-5-5`.
 
 Escalate a problem the table's model has already failed on by spawning a NEW session on `claude-fable-5-1`, or on another provider's model for a second view, with a written brief (the record, every measured attempt, every traced failure and what was ruled out), never by switching a live session's model, which drops its reasoning. The next round of that work goes back to the table's model.
 
