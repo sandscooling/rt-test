@@ -21,6 +21,7 @@ import {
   TEST_STATES,
   type DaemonIdentity,
   type InputFacts,
+  type InputsNotNarrowed,
   type NotDiscoveredEntry,
   type StartPlan,
   type SummaryResponse,
@@ -1259,6 +1260,18 @@ const SETTLED_INPUTS: InputFacts = {
   gitUnread: [],
 };
 
+const NOT_NARROWED_STATEMENT =
+  "Warning: no workspace's inputs are narrowed to those its selection includes, since";
+const NOT_NARROWED_REASON =
+  "the executor process 7 exited during the job (exit code 1)";
+
+/** The human answer's lines that say its workspaces' inputs are not narrowed, given why. */
+function notNarrowedLines(inputsNotNarrowed: InputsNotNarrowed): string[] {
+  return contextLines(humanAnswer({ inputsNotNarrowed })).filter((line) =>
+    line.includes(NOT_NARROWED_REASON),
+  );
+}
+
 /** A summary answer with no test, a stale discovery and settled inputs, overridden by `more`. */
 function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
   return {
@@ -1291,12 +1304,16 @@ function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
 }
 
 /** The freshness counts of a `summary --json` that are not zero. */
-async function nonZeroFreshness(root: string): Promise<Document> {
-  const run = await runCli(["summary", "--json"], { cwd: root });
+/** A summary run's freshness counts that are not zero. */
+function freshnessOf(run: CliRun): Document {
   const freshness = countsOf(run)["freshness"] as Document | undefined;
   return Object.fromEntries(
     Object.entries(freshness ?? {}).filter(([, count]) => count !== 0),
   );
+}
+
+async function nonZeroFreshness(root: string): Promise<Document> {
+  return freshnessOf(await runCli(["summary", "--json"], { cwd: root }));
 }
 
 function notDiscoveredKinds(run: CliRun): unknown[] {
@@ -1384,6 +1401,41 @@ describe("a query", () => {
       expect(outcome).toStrictEqual({
         before: { current: 2 },
         after: { stale: 2 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2536: once the build at an edit's revision has ended, an edit to one workspace's own test leaves the other workspace's result current",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        ignoreFixtureMarkers(root);
+        for (const name of ["a", "b"]) {
+          writeFileSync(
+            join(root, "packages", name, "package.json"),
+            JSON.stringify({ name, private: true }),
+          );
+        }
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        appendFileSync(
+          join(root, WORKSPACE_B, "passes.test.mjs"),
+          "// an edit\n",
+        );
+        let after: Document = {};
+        let notNarrowed: unknown;
+        await eventually(async () => {
+          const run = await runCli(["summary", "--json"], { cwd: root });
+          after = freshnessOf(run);
+          notNarrowed = documentOf(run)["inputsNotNarrowed"];
+          return after["stale"] !== undefined && after["unknown"] === undefined;
+        });
+        return { after, notNarrowed };
+      });
+      expect(outcome).toStrictEqual({
+        after: { current: 1, stale: 1 },
+        notNarrowed: undefined,
       });
     },
     DAEMON_TEST_TIMEOUT_MS,
@@ -1688,6 +1740,49 @@ describe("a query", () => {
     expect(
       lines.some((line) => /^warning: /i.test(line) && line.includes(reason)),
     ).toBe(true);
+  });
+
+  it("D2535: a human answer after a failed build warns that no workspace's inputs are narrowed, naming the failed build and why", () => {
+    expect(
+      notNarrowedLines({
+        kind: "dependency-build-failed",
+        reason: NOT_NARROWED_REASON,
+      }),
+    ).toStrictEqual([
+      `${NOT_NARROWED_STATEMENT} the last dependency build failed: ${NOT_NARROWED_REASON}`,
+    ]);
+  });
+
+  it("D2562: a human answer over a discovery with no selection input warns that no workspace's inputs are narrowed, naming that cause", () => {
+    expect(
+      notNarrowedLines({
+        kind: "no-selection-input",
+        reason: NOT_NARROWED_REASON,
+      }),
+    ).toStrictEqual([
+      `${NOT_NARROWED_STATEMENT} the discovery yields no selection input: ${NOT_NARROWED_REASON}`,
+    ]);
+  });
+
+  it("D2563: a human answer whose selection refused an input's path warns that no workspace's inputs are narrowed, naming that cause", () => {
+    expect(
+      notNarrowedLines({
+        kind: "selection-refused",
+        reason: NOT_NARROWED_REASON,
+      }),
+    ).toStrictEqual([
+      `${NOT_NARROWED_STATEMENT} selection refused an input's path: ${NOT_NARROWED_REASON}`,
+    ]);
+  });
+
+  it("D2564: --json fields keep why no workspace's inputs are narrowed", () => {
+    const inputsNotNarrowed: InputsNotNarrowed = {
+      kind: "dependency-build-failed",
+      reason: NOT_NARROWED_REASON,
+    };
+    expect(
+      answerFields(humanAnswer({ inputsNotNarrowed }))["inputsNotNarrowed"],
+    ).toStrictEqual(inputsNotNarrowed);
   });
 
   it(

@@ -2434,5 +2434,40 @@
     "file": "packages/daemon/src/selection/extends-lookup.ts",
     "old": "  const versioned = rest === \"\" ? undefined : typesVersionsCause(root);",
     "new": "  const versioned = undefined;"
+  },
+  {
+    "id": "D2532",
+    "defect": "Each workspace's narrowed inputs are every input of the project, so an edit in one workspace stales every other workspace's results.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    return sets.refused ? project : (sets.sets.get(workspacePath) ?? project);",
+    "new": "    return project;"
+  },
+  {
+    "id": "D2533",
+    "defect": "An input the tracker holds that selection calls a declared non-input lies in no workspace's inputs, so its edit stales nothing.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "  return report.nothingSelected?.kind === NO_SELECTION.declaredNonInput\n    ? everyWorkspace\n    : report.selected.map(({ workspace }) => workspace);",
+    "new": "  return report.selected.map(({ workspace }) => workspace);"
+  },
+  {
+    "id": "D2551",
+    "defect": "A workspace a path reaches only through a dependency edge is left out of that path's sets, so an edit to a dependency leaves its dependent's results current.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    : report.selected.map(({ workspace }) => workspace);",
+    "new": "    : report.selected\n        .filter(({ reasons }) => reasons.some(({ steps }) => steps.length === 0))\n        .map(({ workspace }) => workspace);"
+  },
+  {
+    "id": "D2552",
+    "defect": "A discovered workspace selection will not run gets no inputs at all, so an edit to its sources stales nothing.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    return sets.refused ? project : (sets.sets.get(workspacePath) ?? project);",
+    "new": "    return sets.refused ? project : (sets.sets.get(workspacePath) ?? new ProjectInputs(project.root, new Map()));"
+  },
+  {
+    "id": "D2553",
+    "defect": "A narrowing never reports its selection's refusal, so answers drop selection-refused while every workspace widens.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    return sets.refused ? sets.reason : undefined;",
+    "new": "    return undefined;"
   }
 ]

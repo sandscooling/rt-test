@@ -118,6 +118,22 @@ export interface UnfingerprintedWorkspace {
   readonly reason: string;
 }
 
+export const DEPENDENCY_BUILD_FAILED = "dependency-build-failed";
+export const NO_SELECTION_INPUT = "no-selection-input";
+export const SELECTION_REFUSED = "selection-refused";
+
+/**
+ * Why no workspace's inputs are narrowed to those its selection includes: each is fingerprinted over the whole
+ * project's inputs, or, while the build after a failed one runs, has no fingerprint.
+ */
+export interface InputsNotNarrowed {
+  readonly kind:
+    | typeof DEPENDENCY_BUILD_FAILED
+    | typeof NO_SELECTION_INPUT
+    | typeof SELECTION_REFUSED;
+  readonly reason: string;
+}
+
 export const WORKSPACE_UNSUPPORTED_VITEST = "workspace-unsupported-vitest";
 export const WORKSPACE_DISCOVERY_FAILED = "workspace-discovery-failed";
 export const WORKSPACE_NOT_CONFIRMED = "workspace-not-confirmed";
@@ -192,10 +208,19 @@ export interface AnswerContext {
   readonly currentAdapterVersion: number;
   readonly discovery: DiscoveryFacts;
   readonly inputs: InputFacts;
-  /** Only those whose own inputs failed; `inputs` says when none can be computed. */
+  /**
+   * Each discovered workspace with no fingerprint while one can be computed for the project: its own inputs could not
+   * be read, or the dependency build its inputs wait for has not ended. `inputs` says when none can be computed.
+   */
   readonly unfingerprintedWorkspaces: readonly UnfingerprintedWorkspace[];
   /** Why every file stays an input, present only while the daemon's `rt-test.json` cannot be used. */
   readonly nonInputsUnusable?: string;
+  /**
+   * Why no workspace's inputs are narrowed, present only while the last dependency build over the discovery failed,
+   * until a later one succeeds, while the discovery yields no selection input, or while selection refuses an input's
+   * path, which is known only while a fingerprint can be computed.
+   */
+  readonly inputsNotNarrowed?: InputsNotNarrowed;
   readonly activity: DaemonActivity;
   readonly unstoredJobs: readonly UnstoredJob[];
 }

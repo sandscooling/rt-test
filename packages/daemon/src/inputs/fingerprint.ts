@@ -46,23 +46,26 @@ export class ProjectInputs {
 }
 
 /** The inputs of one Vitest workspace: those of the project its results can depend on, and its own test modules. */
-export interface WorkspaceInputs {
+interface WorkspaceInputs {
   readonly selected: ProjectInputs;
+  /** Every input of the project, among which `selected` lies. */
+  readonly project: ProjectInputs;
   /** Root-relative, `/`-separated. */
   readonly testModules: readonly string[];
 }
 
 /**
- * Maps a Vitest workspace to its inputs: every input of the project, whose narrowing to what the workspace's
- * selection reads replaces this body. Whatever it narrows to, it returns each test module the latest discovery
- * lists for the workspace, whatever git ignores, so a stored result can match only while its tests' positions in
- * their modules are unchanged.
+ * Maps a Vitest workspace to its inputs: `narrowed`, those its selection includes, when a narrowing is given, and
+ * every input of the project otherwise. Either way it returns each test module the latest discovery lists for the
+ * workspace, whatever git ignores, so a stored result can match only while its tests' positions in their modules
+ * are unchanged.
  */
 function workspaceInputs(
   project: ProjectInputs,
   testModules: readonly string[],
+  narrowed: ProjectInputs | undefined,
 ): WorkspaceInputs {
-  return { selected: project, testModules };
+  return { selected: narrowed ?? project, project, testModules };
 }
 
 /**
@@ -102,14 +105,22 @@ export class SnapshotReads {
   };
 }
 
-/** A Vitest workspace's current input fingerprint, or why none can be computed. */
+/**
+ * A Vitest workspace's current input fingerprint, or why none can be computed. `narrowed` is the workspace's
+ * narrowed inputs among `project`'s; without it, the fingerprint covers every input of the project.
+ */
 export function workspaceFingerprint(
   project: ProjectInputs,
   entry: WorkspaceDiscovery,
   reads = new SnapshotReads(project.root),
+  narrowed?: ProjectInputs,
 ): FingerprintResult {
   const { vitestVersion } = reads;
-  const inputs = workspaceInputs(project, workspaceTestModules(entry));
+  const inputs = workspaceInputs(
+    project,
+    workspaceTestModules(entry),
+    narrowed,
+  );
   const modules = unselectedModuleDigests(inputs, reads);
   if (!modules.ok) return modules;
   return {
@@ -130,7 +141,11 @@ export function discoveryFingerprint(
   reads = new SnapshotReads(project.root),
 ): FingerprintResult {
   const { vitestVersion } = reads;
-  const inputs = workspaceInputs(project, discoveredTestModules(discovery));
+  const inputs = workspaceInputs(
+    project,
+    discoveredTestModules(discovery),
+    undefined,
+  );
   const modules = unselectedModuleDigests(inputs, reads);
   if (!modules.ok) return modules;
   return {
@@ -151,7 +166,10 @@ type ModuleDigests =
   | { readonly ok: true; readonly digests: readonly (readonly string[])[] }
   | { readonly ok: false; readonly reason: string };
 
-/** Reads each listed test module the selected inputs leave out, such as one git ignores, since no watch covers it. */
+/**
+ * Digests each listed test module the selected inputs leave out: from the project's inputs when they hold it, and
+ * otherwise from disk, such as one git ignores, since no watch covers it.
+ */
 function unselectedModuleDigests(
   inputs: WorkspaceInputs,
   reads: SnapshotReads,
@@ -159,7 +177,7 @@ function unselectedModuleDigests(
   const digests: string[][] = [];
   for (const path of [...new Set(inputs.testModules)].sort()) {
     if (inputs.selected.digests.has(path)) continue;
-    const read = reads.moduleDigest(path);
+    const read = heldDigest(inputs.project, path) ?? reads.moduleDigest(path);
     if (!read.ok) {
       return {
         ok: false,
@@ -169,6 +187,15 @@ function unselectedModuleDigests(
     digests.push([path, read.digest]);
   }
   return { ok: true, digests };
+}
+
+/** The digest the snapshot holds for an input, so a module a narrowed set leaves out is never read again. */
+function heldDigest(
+  project: ProjectInputs,
+  path: string,
+): FingerprintResult | undefined {
+  const digest = project.digests.get(path);
+  return digest === undefined ? undefined : { ok: true, digest };
 }
 
 function moduleDigest(path: string): FingerprintResult {

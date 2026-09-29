@@ -2,6 +2,8 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { expect } from "vitest";
+import { ProjectInputs } from "../../src/inputs/fingerprint.js";
+import { Narrowing } from "../../src/inputs/narrowed-inputs.js";
 import { readNonInputs } from "../../src/inputs/non-inputs.js";
 import { protection } from "../../src/inputs/protection.js";
 import { selectTests } from "../../src/selection/select-tests.js";
@@ -261,6 +263,44 @@ export function selectInTree(
         protection: protection(treeDiscovery(root, tree), root),
       },
     });
+  });
+}
+
+/**
+ * Each Vitest workspace's narrowed inputs, sorted, when the tracker holds `inputs` over the tree, or why selection
+ * refused them: the narrowing is built from the tree's discovery and dependency information, as the daemon builds it.
+ */
+export function narrowedInTree(
+  tree: TreeCase,
+  inputs: readonly string[],
+): Promise<Settled<Record<string, string[]> | { refused: string }>> {
+  return inTree(tree, (root) => {
+    const build = buildSelectionInput(
+      treeDiscovery(root, tree),
+      root,
+      readNonInputs(root),
+    );
+    if (!build.built) throw new Error(build.reason);
+    const narrowing = new Narrowing(
+      build.input,
+      buildDependencyInformation(
+        findPackageWorkspaces(root),
+        build.input.workspaces,
+      ),
+      () => undefined,
+    );
+    const project = new ProjectInputs(
+      root,
+      new Map(inputs.map((path) => [path, `${path}-digest`])),
+    );
+    const refused = narrowing.refusal(project);
+    if (refused !== undefined) return { refused };
+    return Object.fromEntries(
+      tree.workspaces.map(({ path }) => [
+        path,
+        [...narrowing.workspaceInputs(project, path).digests.keys()].sort(),
+      ]),
+    );
   });
 }
 

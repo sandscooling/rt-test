@@ -60,12 +60,16 @@ export {
 } from "./daemon/protocol.js";
 export {
   activityText,
+  DEPENDENCY_BUILD_FAILED,
   FRESHNESS_VALUES,
+  NO_SELECTION_INPUT,
   RECONCILIATION_INCOMPLETE,
+  SELECTION_REFUSED,
   TEST_STATES,
   WATCHER_UNHEALTHY,
   type FileCounts,
   type InputFacts,
+  type InputsNotNarrowed,
   type LatestRunFacts,
   type NotDiscoveredEntry,
   type TestCounts,

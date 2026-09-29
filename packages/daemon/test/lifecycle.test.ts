@@ -7,12 +7,18 @@ import {
   type PathLike,
   type WatchListener,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { DependencyBuilds } from "../src/daemon/dependency-builds.js";
 import type { Executor, JobOutcome } from "../src/daemon/executor.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
 import type { DaemonIdentity } from "../src/daemon/protocol.js";
-import type { FingerprintResult } from "../src/inputs/fingerprint.js";
+import {
+  ProjectInputs,
+  type FingerprintResult,
+} from "../src/inputs/fingerprint.js";
 import {
   JobWindows,
   type JobMark,
@@ -23,7 +29,22 @@ import {
   type CurrentInputs,
   type TrackedInputs,
 } from "../src/inputs/input-tracker.js";
+import {
+  NARROWING,
+  narrowingAt,
+  type QueryNarrowing,
+  type WorkspaceNarrowing,
+} from "../src/inputs/narrowed-inputs.js";
+import {
+  NON_INPUTS_ABSENT,
+  NON_INPUTS_FILE,
+  type NonInputsDeclaration,
+} from "../src/inputs/non-inputs.js";
 import type { InputFacts } from "../src/query/answer.js";
+import type {
+  DependencyInformation,
+  SelectableWorkspace,
+} from "../src/selection/selection-types.js";
 import {
   openStore,
   type LatestResults,
@@ -83,6 +104,8 @@ const DISCOVERY_DIGEST = "discovery-digest";
 const SENTINEL = "z.md";
 const RECONCILIATION_ENDED = "input reconciliation ended";
 const FINGERPRINTED: JobVerdict = { fingerprinted: true };
+/** Why the tracker cannot vouch for its inputs, as it says while its watcher has failed. */
+const WATCHER_FAILED = "the watcher failed: ENOSPC";
 const SETTLED_INPUTS: InputFacts = {
   revision: 1,
   reconciliation: { state: "complete" },
@@ -96,9 +119,15 @@ function workspace(path: string): VitestWorkspace {
   return { path, directory: `/consumer/${path}` };
 }
 
+/**
+ * The confirmed start's root, a name under the temp directory no test creates, so each build over it fails before its
+ * job begins, whatever the host holds at `/consumer`.
+ */
+const ABSENT_ROOT = join(tmpdir(), `rt-test-absent-root-${randomUUID()}`);
+
 function confirmed(...paths: readonly string[]): ConfirmedStart {
   return {
-    consumerRoot: "/consumer",
+    consumerRoot: ABSENT_ROOT,
     workspaces: paths.map((path) => ({
       path,
       configFile: `${path}/vitest.config.mjs`,
@@ -196,6 +225,67 @@ class ScriptedExecutor implements Pick<
   }
 
   close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+type BuildOutcome = JobOutcome<DependencyInformation>;
+
+const NO_DEPENDENCIES: DependencyInformation = {
+  packageWorkspaces: [],
+  notRead: [],
+  withoutManifest: [],
+  edges: [],
+  uncertainties: [],
+};
+const BUILD_ABORTED = "the build was aborted";
+
+/**
+ * A build executor that answers each build from a script, given the build's index from 0, and records the workspaces
+ * each was given. Each answer waits for the next event-loop turn, as a child process's reply does, so builds that
+ * repeat without end still let `flush` return. An abort ends every held build, as the real executor ends its job.
+ */
+class ScriptedBuilds implements Pick<
+  Executor,
+  "buildDependencies" | "abort" | "close"
+> {
+  readonly builds: (readonly string[])[] = [];
+  aborts = 0;
+  closes = 0;
+  readonly #answer: (index: number) => BuildOutcome | Promise<BuildOutcome>;
+  #aborted = new Deferred<BuildOutcome>();
+
+  constructor(
+    answer: (index: number) => BuildOutcome | Promise<BuildOutcome> = () => ({
+      ended: true,
+      value: NO_DEPENDENCIES,
+    }),
+  ) {
+    this.#answer = answer;
+  }
+
+  buildDependencies(
+    _consumerRoot: string,
+    workspaces: readonly SelectableWorkspace[],
+  ): Promise<BuildOutcome> {
+    const index = this.builds.length;
+    this.builds.push(workspaces.map(({ workspace }) => workspace.path));
+    return Promise.race([
+      new Promise((resolve) => setImmediate(resolve)).then(() =>
+        this.#answer(index),
+      ),
+      this.#aborted.promise,
+    ]);
+  }
+
+  abort(): void {
+    this.aborts += 1;
+    this.#aborted.resolve({ ended: false, reason: BUILD_ABORTED });
+    this.#aborted = new Deferred<BuildOutcome>();
+  }
+
+  close(): Promise<void> {
+    this.closes += 1;
     return Promise.resolve();
   }
 }
@@ -307,8 +397,16 @@ interface InputsScript {
    * job past the list is fingerprinted.
    */
   readonly verdicts?: readonly JobVerdict[];
-  /** A workspace's current fingerprint, asked at its run's start and again at its end. */
-  readonly fingerprintOf?: (workspacePath: string) => FingerprintResult;
+  /**
+   * A workspace's current fingerprint, asked at its run's start and again at its end, given the narrowing the view
+   * was asked for.
+   */
+  readonly fingerprintOf?: (
+    workspacePath: string,
+    narrowing: QueryNarrowing | undefined,
+  ) => FingerprintResult;
+  /** Why the tracker cannot vouch for its inputs; undefined while it can. */
+  readonly unavailable?: string;
   /** Why a file the discovery protects by path, which no watch covers, may have changed during the discovery. */
   readonly moduleChanged?: string | undefined;
   /** Why a file only protection's walk found may have changed during the discovery, which protection resolves with. */
@@ -320,11 +418,23 @@ interface InputsScript {
   readonly heldSettle?: number;
 }
 
-/** Inputs whose reconciliation, fingerprints and job verdicts the test scripts, recording each start and stop. */
+const NO_DECLARATION: NonInputsDeclaration = {
+  file: NON_INPUTS_FILE,
+  state: NON_INPUTS_ABSENT,
+};
+
+/**
+ * Inputs whose reconciliation, fingerprints and job verdicts the test scripts, recording each start and stop. The
+ * revision moves only when the test moves it, and `changed()` resolves only then or at the stop.
+ */
 class StandInInputs implements TrackedInputs {
   starts = 0;
   stops = 0;
   jobsBegun = 0;
+  jobsEnded = 0;
+  revision = SETTLED_INPUTS.revision;
+  #changeWaiters: (() => void)[] = [];
+  #stopped = false;
   /** The discovery each protection was given, in call order. */
   readonly protected: (TestDiscovery | undefined)[] = [];
   /** The job start each protection was given, in call order. */
@@ -350,19 +460,43 @@ class StandInInputs implements TrackedInputs {
     return this.reconciled.promise;
   }
 
-  current(): CurrentInputs {
+  current(narrowing?: QueryNarrowing): CurrentInputs {
     const fingerprintOf =
       this.#script.fingerprintOf ??
       ((path: string): FingerprintResult => ({
         ok: true,
         digest: `${path}-digest`,
       }));
+    const { unavailable } = this.#script;
     return {
-      facts: SETTLED_INPUTS,
-      workspaceFingerprint: (entry) => fingerprintOf(entry.workspace.path),
+      facts: { ...SETTLED_INPUTS, revision: this.revision },
+      ...(unavailable === undefined ? {} : { unavailable }),
+      workspaceFingerprint: (entry) =>
+        fingerprintOf(entry.workspace.path, narrowing),
       discoveryFingerprint: () => ({ ok: true, digest: DISCOVERY_DIGEST }),
       protectedFileChangedSince: () => this.#script.moduleChanged,
     };
+  }
+
+  changed(): Promise<void> {
+    if (this.#stopped) return Promise.resolve();
+    return new Promise((resolve) => this.#changeWaiters.push(resolve));
+  }
+
+  /** Moves the revision, as a read that changed an input does, and signals the change. */
+  moveRevision(): void {
+    this.revision += 1;
+    this.#signalChange();
+  }
+
+  nonInputsDeclaration(): NonInputsDeclaration {
+    return NO_DECLARATION;
+  }
+
+  #signalChange(): void {
+    const waiting = this.#changeWaiters;
+    this.#changeWaiters = [];
+    for (const resolve of waiting) resolve();
   }
 
   settled(): Promise<void> {
@@ -379,6 +513,7 @@ class StandInInputs implements TrackedInputs {
   }
 
   async endJob(): Promise<JobVerdict> {
+    this.jobsEnded += 1;
     if (this.#script.heldJobEnds === true) await this.#released.promise;
     return this.#verdicts.shift() ?? FINGERPRINTED;
   }
@@ -394,6 +529,8 @@ class StandInInputs implements TrackedInputs {
 
   stop(): Promise<void> {
     this.stops += 1;
+    this.#stopped = true;
+    this.#signalChange();
     this.#released.resolve();
     this.reconciled.resolve();
     this.settleHeld.resolve();
@@ -408,14 +545,28 @@ interface Daemon {
   readonly log: MemoryLog;
   readonly endpointCloses: { count: number };
   readonly inputs: StandInInputs;
+  readonly builds: ScriptedBuilds;
 }
 
+/** Every build ends failed, so each workspace covers the whole project's inputs, as before any build. */
+function failingBuilds(): Executor {
+  return new ScriptedBuilds(() => ({
+    ended: false,
+    reason: "the test builds no dependency information",
+  })) as unknown as Executor;
+}
+
+/**
+ * The start's consumer root from `confirmed` does not exist, so each build over it fails before its job begins unless
+ * the test starts from a root it wrote.
+ */
 function daemon(
   start: ConfirmedStart,
   executor: ScriptedExecutor,
   store: RtTestStore = new RecordingStore(),
   identity: DaemonIdentity = IDENTITY,
   inputs: StandInInputs = new StandInInputs(),
+  builds: ScriptedBuilds = new ScriptedBuilds(),
 ): Daemon {
   const log = memoryLog();
   const endpointCloses = { count: 0 };
@@ -426,6 +577,7 @@ function daemon(
     store,
     log,
     executor: executor as unknown as Executor,
+    buildExecutor: builds as unknown as Executor,
     inputs,
     closeEndpoint: () => {
       endpointCloses.count += 1;
@@ -439,6 +591,7 @@ function daemon(
     log,
     endpointCloses,
     inputs,
+    builds,
   };
 }
 
@@ -560,6 +713,7 @@ async function declaredModuleStart(
     executor: new EditingExecutor(found, async () => {
       held = await during(module, handled);
     }) as unknown as Executor,
+    buildExecutor: failingBuilds(),
     inputs: new InputTracker({
       consumerRoot: root,
       exclusions: [],
@@ -636,6 +790,7 @@ async function idleStart(dir: string): Promise<IdleStart> {
         workspace: { path: ".", directory: root },
       }),
     }) as unknown as Executor,
+    buildExecutor: failingBuilds(),
     inputs: new InputTracker({
       consumerRoot: root,
       exclusions: [],
@@ -1038,8 +1193,9 @@ describe(
     /** How many jobs have begun while the given wait is held, and how many once it is released. */
     async function jobsAroundHeldSettle(
       heldSettle: number,
+      script: InputsScript = {},
     ): Promise<{ held: number; released: number }> {
-      const { inputs } = await begun(scripted({ heldSettle }));
+      const { inputs } = await begun(scripted({ ...script, heldSettle }));
       const held = inputs.jobsBegun;
       inputs.settleHeld.resolve();
       await flush();
@@ -1060,8 +1216,12 @@ describe(
       });
     });
 
+    // A pending dependency build waits for the inputs itself, so the run's own wait shows only with none pending, as
+    // while the tracker cannot vouch for its inputs.
     it("D2082: a run's job begins only once the inputs have settled", async () => {
-      expect(await jobsAroundHeldSettle(2)).toStrictEqual({
+      expect(
+        await jobsAroundHeldSettle(2, { unavailable: WATCHER_FAILED }),
+      ).toStrictEqual({
         held: 2,
         released: 3,
       });
@@ -1287,6 +1447,13 @@ describe("stopping", () => {
     expect(stopped).toBe(true);
   });
 
+  it("D2537: a stop closes the build executor, so no build process outlives the daemon", async () => {
+    const { lifecycle, builds } = await begun(scripted({}));
+    lifecycle.stop();
+    await lifecycle.stopped();
+    expect(builds.closes).toBe(1);
+  });
+
   it("D1953: a stop during the first reconciliation of the inputs starts no discovery", async () => {
     const { lifecycle, executor } = await begun(
       scripted({ heldReconciliation: true }),
@@ -1317,3 +1484,557 @@ describe("stopping", () => {
     });
   });
 });
+
+const BUILT: BuildOutcome = { ended: true, value: NO_DEPENDENCIES };
+const BUILD_FAILED_REASON =
+  "the executor process 7 exited during the job (exit code 1)";
+const BUILD_FAILED: BuildOutcome = {
+  ended: false,
+  reason: BUILD_FAILED_REASON,
+};
+const EDITED_REASON = "its inputs changed while it ran: packages/a/src/a.ts";
+const EDITED: JobVerdict = { fingerprinted: false, reason: EDITED_REASON };
+const PROCEEDS_WITHOUT_BUILD = "proceeds without its dependency build";
+
+function storedAs(discoveryId: string, found: TestDiscovery): StoredDiscovery {
+  return {
+    ...SCOPE,
+    inputFingerprint: { kind: "not-fingerprinted" },
+    adapterVersion: 3,
+    discoveryId,
+    discovery: found,
+  };
+}
+
+/** A discovery of workspace `a` that reports its selection facts, so it yields a selection input. */
+const STORED_A = storedAs("discovery-a", discovery(discovered("a")));
+
+interface BuildsCase {
+  readonly script?: InputsScript;
+  readonly answer?: (index: number) => BuildOutcome | Promise<BuildOutcome>;
+}
+
+interface StartedBuilds {
+  readonly builds: DependencyBuilds;
+  readonly inputs: StandInInputs;
+  readonly executor: ScriptedBuilds;
+  readonly log: MemoryLog;
+  /** How the view at the inputs' current revision takes each workspace's inputs. */
+  view(): WorkspaceNarrowing;
+}
+
+/**
+ * Starts the dependency builds and their stand-in inputs over a consumer root the test wrote, so each build reaches
+ * the build executor, and stops both once `body` ends, aborting any build it left held.
+ */
+function withBuilds<T>(
+  buildsCase: BuildsCase,
+  body: (started: StartedBuilds) => Promise<T>,
+): Promise<T> {
+  return inTempDir(async (root) => {
+    const inputs = new StandInInputs(buildsCase.script);
+    const executor = new ScriptedBuilds(buildsCase.answer);
+    const log = memoryLog();
+    const builds = new DependencyBuilds({
+      inputs,
+      executor: executor as unknown as Executor,
+      consumerRoot: root,
+      stateDirectory: join(root, ".rt-test"),
+      log,
+    });
+    inputs.start();
+    builds.start();
+    try {
+      return await body({
+        builds,
+        inputs,
+        executor,
+        log,
+        view: () => narrowingAt(builds.narrowing(), inputs.revision),
+      });
+    } finally {
+      const stopped = builds.stop();
+      executor.abort();
+      await inputs.stop();
+      await stopped;
+    }
+  });
+}
+
+/** The kind of input fact a view carries, or the view itself when it carries none. */
+function notNarrowedKind(view: WorkspaceNarrowing): unknown {
+  return view.kind !== NARROWING.narrowed && view.notNarrowed !== undefined
+    ? { kind: view.kind, notNarrowed: view.notNarrowed.kind }
+    : view;
+}
+
+describe("the dependency builds", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
+  it("D2504: no dependency build starts until the first reconciliation of the inputs has ended", async () => {
+    const counts = await withBuilds(
+      { script: { heldReconciliation: true } },
+      async ({ builds, inputs, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        const before = executor.builds.length;
+        inputs.reconciled.resolve();
+        await flush();
+        return { before, after: executor.builds.length };
+      },
+    );
+    expect(counts).toStrictEqual({ before: 0, after: 1 });
+  });
+
+  it("D2505: a build during which an input event arrived, with the revision unmoved, is never used", async () => {
+    const rebuild = new Deferred<BuildOutcome>();
+    const kind = await withBuilds(
+      {
+        script: { verdicts: [EDITED] },
+        answer: (index) => (index === 0 ? BUILT : rebuild.promise),
+      },
+      async ({ builds, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        return view().kind;
+      },
+    );
+    expect(kind).toBe(NARROWING.building);
+  });
+
+  it("D2506: a build over a discovery that a new one replaced while it ran is never used, and the new one gets its own build", async () => {
+    const first = new Deferred<BuildOutcome>();
+    const built = await withBuilds(
+      { answer: (index) => (index === 0 ? first.promise : BUILT) },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        builds.use(storedAs("discovery-b", discovery(discovered("b"))));
+        first.resolve(BUILT);
+        await flush();
+        return executor.builds;
+      },
+    );
+    expect(built).toStrictEqual([["a"], ["b"]]);
+  });
+
+  it("D2507: a failed build is logged once at warning level, naming why", async () => {
+    const levels = await withBuilds(
+      { answer: () => BUILD_FAILED },
+      async ({ builds, log }) => {
+        builds.use(STORED_A);
+        await flush();
+        return log.entries
+          .filter((entry) => entry.includes(BUILD_FAILED_REASON))
+          .map((entry) => entry.startsWith("warning: "));
+      },
+    );
+    expect(levels).toStrictEqual([true]);
+  });
+
+  it("D2508: a failed build is never retried at the same input revision", async () => {
+    const count = await withBuilds(
+      { answer: () => BUILD_FAILED },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        return executor.builds.length;
+      },
+    );
+    expect(count).toBe(1);
+  });
+
+  it("D2509: the next change of the input revision after a failed build starts another build", async () => {
+    const count = await withBuilds(
+      { answer: () => BUILD_FAILED },
+      async ({ builds, inputs, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.moveRevision();
+        await flush();
+        return executor.builds.length;
+      },
+    );
+    expect(count).toBe(2);
+  });
+
+  it("D2510: while the build after a failed one runs, the view still carries the failure", async () => {
+    const rebuild = new Deferred<BuildOutcome>();
+    const view = await withBuilds(
+      { answer: (index) => (index === 0 ? BUILD_FAILED : rebuild.promise) },
+      async ({ builds, inputs, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.moveRevision();
+        await flush();
+        return notNarrowedKind(view());
+      },
+    );
+    expect(view).toStrictEqual({
+      kind: NARROWING.building,
+      notNarrowed: "dependency-build-failed",
+    });
+  });
+
+  it("D2511: while the tracker cannot vouch for its inputs, no build starts", async () => {
+    const count = await withBuilds(
+      { script: { unavailable: WATCHER_FAILED } },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        return executor.builds.length;
+      },
+    );
+    expect(count).toBe(0);
+  });
+
+  it("D2512: a stop ends the build in progress without waiting for it to end", async () => {
+    const held = new Deferred<BuildOutcome>();
+    const stop = await withBuilds(
+      { answer: () => held.promise },
+      async ({ builds, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        let stopped = false;
+        void builds.stop().then(() => {
+          stopped = true;
+        });
+        await flush();
+        return { aborts: executor.aborts, stopped };
+      },
+    );
+    expect(stop).toStrictEqual({ aborts: 1, stopped: true });
+  });
+
+  it("D2514: a stop while a build waits for the inputs to settle starts no build", async () => {
+    const count = await withBuilds(
+      { script: { heldSettle: 0 } },
+      async ({ builds, inputs, executor }) => {
+        builds.use(STORED_A);
+        await flush();
+        const stopped = builds.stop();
+        await inputs.stop();
+        await stopped;
+        await flush();
+        return executor.builds.length;
+      },
+    );
+    expect(count).toBe(0);
+  });
+
+  it("D2515: a build whose executor call throws reads as a failed build, and its job mark is closed", async () => {
+    const outcome = await withBuilds(
+      { answer: () => Promise.reject(new Error("spawn EAGAIN")) },
+      async ({ builds, inputs, view }) => {
+        builds.use(STORED_A);
+        await flush();
+        return {
+          view: notNarrowedKind(view()),
+          begun: inputs.jobsBegun,
+          ended: inputs.jobsEnded,
+        };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      view: { kind: NARROWING.widened, notNarrowed: "dependency-build-failed" },
+      begun: 1,
+      ended: 1,
+    });
+  });
+
+  it("D2558: a recorded build ends a run of discards, so the next discard starts the count again", async () => {
+    const held = new Deferred<BuildOutcome>();
+    const consecutive = await withBuilds(
+      {
+        script: { verdicts: [EDITED, FINGERPRINTED, EDITED] },
+        answer: (index) => (index < 3 ? BUILT : held.promise),
+      },
+      async ({ builds, inputs }) => {
+        builds.use(STORED_A);
+        await flush();
+        inputs.moveRevision();
+        await flush();
+        return builds.discards().consecutive;
+      },
+    );
+    expect(consecutive).toBe(1);
+  });
+
+  it("D2560: a build discarded because a new discovery replaced its own never counts toward the new discovery's discards", async () => {
+    const first = new Deferred<BuildOutcome>();
+    const held = new Deferred<BuildOutcome>();
+    const discards = await withBuilds(
+      { answer: (index) => (index === 0 ? first.promise : held.promise) },
+      async ({ builds }) => {
+        builds.use(STORED_A);
+        await flush();
+        builds.use(storedAs("discovery-b", discovery(discovered("b"))));
+        first.resolve(BUILT);
+        await flush();
+        const { total, consecutive } = builds.discards();
+        return { total, consecutive };
+      },
+    );
+    expect(discards).toStrictEqual({ total: 1, consecutive: 0 });
+  });
+
+  it("D2561: a narrowing whose selection refuses an input's path is logged once at warning level, naming the path", async () => {
+    const refusedPath = "a:b.txt";
+    const warnings = await withBuilds({}, async ({ builds, log }) => {
+      builds.use(STORED_A);
+      await flush();
+      const state = builds.narrowing().state;
+      const latest = state?.selectionInput === true ? state.latest : undefined;
+      if (latest?.built !== true) return latest;
+      const refused = new ProjectInputs(
+        "/consumer",
+        new Map([[refusedPath, "a-digest"]]),
+      );
+      latest.narrowing.refusal(refused);
+      latest.narrowing.refusal(refused);
+      return log.entries.filter(
+        (entry) => entry.startsWith("warning: ") && entry.includes(refusedPath),
+      ).length;
+    });
+    expect(warnings).toBe(1);
+  });
+
+  it("D2516: a discovery that yields no selection input builds nothing and reads widened, with that as the reason", async () => {
+    const outcome = await withBuilds({}, async ({ builds, executor, view }) => {
+      builds.use(
+        storedAs(
+          "discovery-unreported",
+          discovery({
+            ...discovered("a"),
+            selectionFacts: { reported: false },
+          }),
+        ),
+      );
+      await flush();
+      return { builds: executor.builds.length, view: notNarrowedKind(view()) };
+    });
+    expect(outcome).toStrictEqual({
+      builds: 0,
+      view: { kind: NARROWING.widened, notNarrowed: "no-selection-input" },
+    });
+  });
+});
+
+/**
+ * A daemon over one confirmed workspace `a`, started from `root`, a directory the test wrote, so each dependency build
+ * reaches `builds`.
+ */
+function rootedAt(
+  root: string,
+  script: InputsScript,
+  builds: ScriptedBuilds,
+  store: RecordingStore = new RecordingStore(),
+  executor: ScriptedExecutor = new ScriptedExecutor({
+    ended: true,
+    value: discovery(discovered("a")),
+  }),
+): Daemon {
+  return daemon(
+    { ...confirmed("a"), consumerRoot: root },
+    executor,
+    store,
+    { ...IDENTITY, consumerRoot: root },
+    new StandInInputs(script),
+    builds,
+  );
+}
+
+/** Runs `body` over the started daemon, then stops it. */
+async function thenStopped<T>(
+  started: Daemon,
+  body: (started: Daemon) => Promise<T>,
+): Promise<T> {
+  try {
+    return await body(started);
+  } finally {
+    started.lifecycle.stop();
+    await started.lifecycle.stopped();
+  }
+}
+
+/** A fingerprint that fails while the view waits for its build, as a building view's does. */
+function failingWhileBuilding(
+  path: string,
+  narrowing: QueryNarrowing | undefined,
+): FingerprintResult {
+  return narrowing !== undefined &&
+    narrowingAt(narrowing, SETTLED_INPUTS.revision).kind === NARROWING.building
+    ? { ok: false, reason: "the dependency build has not ended" }
+    : { ok: true, digest: `${path}-digest` };
+}
+
+describe(
+  "each run's wait for its dependency build",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D2513: while the tracker cannot vouch for its inputs, a run proceeds without waiting for a build", async () => {
+      const { executor } = await begun(
+        scripted({ unavailable: WATCHER_FAILED }),
+      );
+      expect(executor.runs).toStrictEqual(["a"]);
+    });
+
+    it("D2517: a run begins only once the dependency build at its settled revision has ended", async () => {
+      const held = new Deferred<BuildOutcome>();
+      const runs = await inTempDir(async (root) =>
+        thenStopped(
+          await begun(
+            rootedAt(root, {}, new ScriptedBuilds(() => held.promise)),
+          ),
+          async ({ executor }) => {
+            const whileBuilding = [...executor.runs];
+            held.resolve(BUILT);
+            await flush();
+            return { whileBuilding, after: executor.runs };
+          },
+        ),
+      );
+      expect(runs).toStrictEqual({ whileBuilding: [], after: ["a"] });
+    });
+
+    it("D2559: each run counts the discards from its own wait's start, so the next workspace waits after the first gave up", async () => {
+      const held = new Deferred<BuildOutcome>();
+      const runs = await inTempDir(async (root) =>
+        thenStopped(
+          await begun(
+            daemon(
+              { ...confirmed("a", "b"), consumerRoot: root },
+              new ScriptedExecutor({
+                ended: true,
+                value: discovery(discovered("a"), discovered("b")),
+              }),
+              new RecordingStore(),
+              { ...IDENTITY, consumerRoot: root },
+              new StandInInputs({
+                verdicts: [FINGERPRINTED, FINGERPRINTED, EDITED, EDITED],
+              }),
+              new ScriptedBuilds((index) => (index < 2 ? BUILT : held.promise)),
+            ),
+          ),
+          async ({ executor }) => [...executor.runs],
+        ),
+      );
+      expect(runs).toStrictEqual(["a"]);
+    });
+
+    it("D2518: a run keeps waiting through one discarded build", async () => {
+      const rebuild = new Deferred<BuildOutcome>();
+      const runs = await inTempDir(async (root) =>
+        thenStopped(
+          await begun(
+            rootedAt(
+              root,
+              { verdicts: [FINGERPRINTED, FINGERPRINTED, EDITED] },
+              new ScriptedBuilds((index) =>
+                index === 0 ? BUILT : rebuild.promise,
+              ),
+            ),
+          ),
+          async ({ executor }) => [...executor.runs],
+        ),
+      );
+      expect(runs).toStrictEqual([]);
+    });
+
+    it("D2519: a run whose build is discarded twice in a row while it waits proceeds, is stored not fingerprinted, and the log says why", async () => {
+      const held = new Deferred<BuildOutcome>();
+      const outcome = await inTempDir(async (root) =>
+        thenStopped(
+          await begun(
+            rootedAt(
+              root,
+              {
+                verdicts: [FINGERPRINTED, FINGERPRINTED, EDITED, EDITED],
+                fingerprintOf: failingWhileBuilding,
+              },
+              new ScriptedBuilds((index) => (index < 2 ? BUILT : held.promise)),
+            ),
+          ),
+          async ({ store, log }) => ({
+            runs: [...store.runFingerprints],
+            logged: log.entries.filter(
+              (entry) =>
+                entry.includes(PROCEEDS_WITHOUT_BUILD) &&
+                entry.includes(EDITED_REASON),
+            ).length,
+          }),
+        ),
+      );
+      expect(outcome).toStrictEqual({
+        runs: [{ kind: "not-fingerprinted" }],
+        logged: 1,
+      });
+    });
+
+    it("D2520: a stop while a run waits for its dependency build ends the stop and starts no run", async () => {
+      const held = new Deferred<BuildOutcome>();
+      const outcome = await inTempDir(async (root) => {
+        const { lifecycle, executor } = await begun(
+          rootedAt(root, {}, new ScriptedBuilds(() => held.promise)),
+        );
+        lifecycle.stop();
+        let stopped = false;
+        void lifecycle.stopped().then(() => {
+          stopped = true;
+        });
+        await flush();
+        return { stopped, runs: executor.runs };
+      });
+      expect(outcome).toStrictEqual({ stopped: true, runs: [] });
+    });
+
+    it("D2521: a query hands the builds the stored discovery a failed read at start kept from them", async () => {
+      const counts = await inTempDir(async (root) => {
+        const store = new FirstReadFailingStore();
+        store.discoveries.push(discovery(discovered("a")));
+        return thenStopped(
+          await begun(
+            rootedAt(
+              root,
+              {},
+              new ScriptedBuilds(),
+              store,
+              new ScriptedExecutor({
+                ended: false,
+                reason: BUILD_FAILED_REASON,
+              }),
+            ),
+          ),
+          async ({ lifecycle, builds }) => {
+            const before = builds.builds.length;
+            lifecycle.summary();
+            await flush();
+            return { before, after: builds.builds.length };
+          },
+        );
+      });
+      expect(counts).toStrictEqual({ before: 0, after: 1 });
+    });
+
+    it("D2522: a run is stored under the fingerprint of its narrowed inputs, as answers compare it", async () => {
+      const fingerprints = await inTempDir(async (root) =>
+        thenStopped(
+          await begun(
+            rootedAt(
+              root,
+              {
+                fingerprintOf: (path, narrowing) => ({
+                  ok: true,
+                  digest: `${path}-${narrowing === undefined ? "whole" : narrowingAt(narrowing, SETTLED_INPUTS.revision).kind}`,
+                }),
+              },
+              new ScriptedBuilds(),
+            ),
+          ),
+          async ({ store }) => [...store.runFingerprints],
+        ),
+      );
+      expect(fingerprints).toStrictEqual([
+        { kind: "digest", digest: "a-narrowed" },
+      ]);
+    });
+  },
+);

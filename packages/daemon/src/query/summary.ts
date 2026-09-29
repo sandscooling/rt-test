@@ -134,6 +134,9 @@ export function queryBasis(
       ...(inputs.nonInputsUnusable === undefined
         ? {}
         : { nonInputsUnusable: inputs.nonInputsUnusable }),
+      ...(inputs.inputsNotNarrowed === undefined
+        ? {}
+        : { inputsNotNarrowed: inputs.inputsNotNarrowed }),
       activity: daemon.activity,
       unstoredJobs: daemon.unstoredJobs,
     },

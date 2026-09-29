@@ -1,6 +1,6 @@
 import type { FingerprintResult } from "../inputs/fingerprint.js";
 import type { JobVerdict } from "../inputs/input-jobs.js";
-import type { TrackedInputs } from "../inputs/input-tracker.js";
+import type { CurrentInputs, TrackedInputs } from "../inputs/input-tracker.js";
 import type {
   NoAnswer,
   PathStatusAnswer,
@@ -10,7 +10,11 @@ import { pathStatusAnswer } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
 import type { LatestResults, RtTestStore } from "../store/open-store.js";
 import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "../store/schema.js";
-import type { StoreBindings, StoreScope } from "../store/stored-records.js";
+import type {
+  StoreBindings,
+  StoredDiscovery,
+  StoreScope,
+} from "../store/stored-records.js";
 import {
   confirmedEntry,
   type ConfirmedStart,
@@ -20,6 +24,7 @@ import type {
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import type { DaemonLog } from "./daemon-log.js";
+import { DependencyBuilds } from "./dependency-builds.js";
 import type { Executor } from "./executor.js";
 import type {
   DaemonActivity,
@@ -32,6 +37,8 @@ const DISCOVERY_STOPPED_REASON =
   "the stop arrived during the discovery, so it was not stored";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
+/** The build a run waited on and one rebuild; a run waits through no more discards than these. */
+const DISCARDS_A_RUN_WAITS_THROUGH = 2;
 const MOVED_DURING_RUN_REASON =
   "its workspace's input fingerprint at its end differs from the one at its start";
 
@@ -42,6 +49,8 @@ export interface LifecycleParts {
   readonly store: RtTestStore;
   readonly log: DaemonLog;
   readonly executor: Executor;
+  /** Takes the dependency builds, so a build never waits behind a run. */
+  readonly buildExecutor: Executor;
   /** Started with the start sequence and stopped before the store closes. */
   readonly inputs: TrackedInputs;
   /** Stops accepting connections and resolves once the endpoint is closed. */
@@ -51,12 +60,13 @@ export interface LifecycleParts {
 /**
  * Once the first reconciliation of the inputs has ended, discovers once, runs each confirmed workspace once, then
  * idles until a stop, answering status and queries throughout. Each job begins once the input events seen before
- * it are read, and is stored under the input fingerprint it started from, or not fingerprinted when its inputs
- * moved while it ran.
+ * it are read, and a run once the dependency build at that revision has ended or none can begin. Each is stored
+ * under the input fingerprint it started from, or not fingerprinted when its inputs moved while it ran.
  */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;
   readonly #parts: LifecycleParts;
+  readonly #builds: DependencyBuilds;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJob[] = [];
   #sequence: Promise<void> = Promise.resolve();
@@ -67,6 +77,13 @@ export class DaemonLifecycle implements DaemonHandlers {
   constructor(parts: LifecycleParts) {
     this.identity = parts.identity;
     this.#parts = parts;
+    this.#builds = new DependencyBuilds({
+      inputs: parts.inputs,
+      executor: parts.buildExecutor,
+      consumerRoot: parts.start.consumerRoot,
+      stateDirectory: parts.identity.stateDirectory,
+      log: parts.log,
+    });
     this.#whenStopped = new Promise((resolve) => {
       this.#markStopped = resolve;
     });
@@ -75,6 +92,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   begin(): void {
     this.#protectStoredDiscovery();
     this.#parts.inputs.start();
+    this.#builds.start();
     this.#sequence = this.#startSequence()
       .catch((error: unknown) => {
         this.#parts.log.error("the start sequence failed", error);
@@ -97,20 +115,30 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   summary(): SummaryAnswer | NoAnswer {
-    return summaryAnswer(
-      this.#latestResults(),
-      this.#view(),
-      this.#parts.inputs.current(),
-    );
+    const results = this.#latestResults();
+    return summaryAnswer(results, this.#view(), this.#queryInputs(results));
   }
 
   pathStatus(path: string): PathStatusAnswer | NoAnswer {
+    const results = this.#latestResults();
     return pathStatusAnswer(
       path,
-      this.#latestResults(),
+      results,
       this.#view(),
-      this.#parts.inputs.current(),
+      this.#queryInputs(results),
     );
+  }
+
+  /**
+   * The inputs narrowed by the builds only while they build over the stored discovery the answer reads, which becomes
+   * theirs when a failed read at start left them none.
+   */
+  #queryInputs(results: LatestResults): CurrentInputs {
+    if (results.discovery !== undefined) this.#builds.use(results.discovery);
+    return this.#parts.inputs.current({
+      discoveryId: results.discovery?.discoveryId,
+      state: this.#builds.narrowing().state,
+    });
   }
 
   isStopping(): boolean {
@@ -118,19 +146,20 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   /**
-   * The first reconciliation leaves out no file the store's latest discovery, from an earlier life, protects. A
-   * discovery that cannot be read gives none, so no declared pattern applies.
+   * The first reconciliation leaves out no file the store's latest discovery, from an earlier life, protects, and the
+   * dependency builds begin over it. A discovery that cannot be read gives none, so no declared pattern applies.
    */
   #protectStoredDiscovery(): void {
     const { inputs, log } = this.#parts;
-    let stored: TestDiscovery | undefined;
+    let stored: StoredDiscovery | undefined;
     try {
-      stored = this.#latestResults().discovery?.discovery;
+      stored = this.#latestResults().discovery;
     } catch (error) {
       log.error("reading the latest stored discovery", error);
       return;
     }
-    inputs.protectInputs(stored).catch((error: unknown) => {
+    this.#builds.use(stored);
+    inputs.protectInputs(stored?.discovery).catch((error: unknown) => {
       log.error("protecting the stored discovery's files", error);
     });
   }
@@ -177,7 +206,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       inputs.current().discoveryFingerprint(discovery),
     );
     this.#store("the discovery", undefined, () =>
-      this.#parts.store.writeDiscovery(bindings, discovery),
+      this.#builds.use(this.#parts.store.writeDiscovery(bindings, discovery)),
     );
     log.entry(`discovery ended: ${discoverySummary(discovery)}`);
     this.#logMissingConfirmed(discovery);
@@ -227,10 +256,11 @@ export class DaemonLifecycle implements DaemonHandlers {
     }
     this.#activity = { state: "running", workspacePath: workspace.path };
     await inputs.settled();
+    await this.#awaitBuild(workspace.path);
     if (this.isStopping()) return;
     log.entry(`run started: ${workspace.path}`);
     const mark = inputs.beginJob();
-    const started = inputs.current().workspaceFingerprint(entry);
+    const started = this.#runInputs().workspaceFingerprint(entry);
     const outcome = await executor.run(workspace, confirmed.configFile);
     const verdict = await inputs.endJob(mark);
     if (!outcome.ended) {
@@ -245,7 +275,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     const bindings = this.#bindings(
       `the run of ${workspace.path}`,
       verdict,
-      () => unmoved(started, inputs.current().workspaceFingerprint(entry)),
+      () => unmoved(started, this.#runInputs().workspaceFingerprint(entry)),
     );
     const stored = this.#store(
       `the run of ${workspace.path}`,
@@ -257,6 +287,35 @@ export class DaemonLifecycle implements DaemonHandlers {
         `run ended: ${workspace.path} ${run.status}${"execution" in run ? ` ${run.execution}` : ""}`,
       );
     }
+  }
+
+  /**
+   * Waits for the dependency build at the settled revision, through one rebuild: a second build discarded in a row
+   * while the run waits means its inputs keep moving, so the run proceeds and is stored not fingerprinted.
+   */
+  async #awaitBuild(workspacePath: string): Promise<void> {
+    const builds = this.#builds;
+    const waitedFrom = builds.discards().total;
+    while (builds.pending()) {
+      const discards = builds.discards();
+      const inARow = Math.min(
+        discards.total - waitedFrom,
+        discards.consecutive,
+      );
+      if (inARow >= DISCARDS_A_RUN_WAITS_THROUGH) {
+        this.#parts.log.entry(
+          `the run of ${workspacePath} proceeds without its dependency build, discarded ${inARow} times in a row while it waited: ${discards.reason}`,
+        );
+        return;
+      }
+      await builds.ended();
+      await this.#parts.inputs.settled();
+    }
+  }
+
+  /** A run is fingerprinted over the builds' narrowing for the discovery they build over, as answers compare it. */
+  #runInputs(): CurrentInputs {
+    return this.#parts.inputs.current(this.#builds.narrowing());
   }
 
   /** The job's record is bound to its fingerprint only when its inputs held still from its start to its end. */
@@ -318,12 +377,17 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   async #stopSequence(): Promise<void> {
-    const { log, executor, store, closeEndpoint, inputs } = this.#parts;
+    const { log, executor, buildExecutor, store, closeEndpoint, inputs } =
+      this.#parts;
     log.entry("stop requested");
+    // Before the tracker: its stop resolves every wait of the builds' rounds at once, which would spin them.
+    const buildsStopped = this.#builds.stop();
     executor.abort();
     await inputs.stop();
     await this.#sequence;
+    await buildsStopped;
     await executor.close();
+    await buildExecutor.close();
     try {
       store.close();
     } catch (error) {

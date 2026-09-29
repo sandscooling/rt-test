@@ -32,6 +32,7 @@ import {
 } from "../harness.js";
 import {
   manifest,
+  narrowedInTree,
   rootManifest,
   selectedPaths,
   selectFromDiscovery,
@@ -1373,5 +1374,102 @@ describe("selection's input, built from the discovery in effect", () => {
       built: false,
       reason: expect.stringContaining("at the consumer root"),
     });
+  });
+});
+
+const GUIDE = "docs/guide.md";
+/** Two Vitest workspaces that depend on nothing, and a declaration that makes `docs/**` non-inputs. */
+const TWO_APART: TreeCase = {
+  files: {
+    "package.json": rootManifest(),
+    [NON_INPUTS_FILE]: JSON.stringify({ nonInputs: ["docs/**"] }),
+    "packages/a/package.json": manifest({ name: "a" }),
+    "packages/a/src/a.ts": "export const a = 1;\n",
+    "packages/a/unit.test.ts": CONFIG,
+    "packages/b/package.json": manifest({ name: "b" }),
+    "packages/b/src/b.ts": "export const b = 1;\n",
+    "packages/b/unit.test.ts": CONFIG,
+    [GUIDE]: "# Guide\n",
+  },
+  workspaces: [{ path: "packages/a" }, { path: "packages/b" }],
+};
+/**
+ * The inputs the narrowing is given: every file but the declaration itself. The declared guide stands for a path the
+ * tracker holds while selection calls it declared, as when the two read the declaration at different moments.
+ */
+const TWO_APART_INPUTS = Object.keys(TWO_APART.files).filter(
+  (path) => path !== NON_INPUTS_FILE,
+);
+
+describe("each Vitest workspace's inputs, as Narrowing narrows them to what its selection includes", () => {
+  // Any package.json can move a dependency edge, so selection reaches every workspace from each one.
+  it("D2532: each workspace's inputs hold its own files and every package.json, and none of another workspace's sources or tests", async () => {
+    expect(await narrowedInTree(TWO_APART, TWO_APART_INPUTS)).toStrictEqual({
+      "packages/a": [
+        GUIDE,
+        "package.json",
+        "packages/a/package.json",
+        "packages/a/src/a.ts",
+        "packages/a/unit.test.ts",
+        "packages/b/package.json",
+      ],
+      "packages/b": [
+        GUIDE,
+        "package.json",
+        "packages/a/package.json",
+        "packages/b/package.json",
+        "packages/b/src/b.ts",
+        "packages/b/unit.test.ts",
+      ],
+    });
+  });
+
+  it("D2551: a dependency's source lies in its dependent's inputs, and a dependent's source never in its dependency's", async () => {
+    const tree = consumer({
+      vitest: { a: {}, b: {} },
+      deps: { a: ["b"] },
+      files: {
+        "packages/a/src/a.ts": "export const a = 1;\n",
+        "packages/b/src/b.ts": "export const b = 1;\n",
+      },
+    });
+    const sets = await narrowedInTree(tree, Object.keys(tree.files));
+    expect(
+      "refused" in sets || "thrown" in sets
+        ? sets
+        : {
+            bSourceInA: sets["packages/a"]?.includes("packages/b/src/b.ts"),
+            aSourceInB: sets["packages/b"]?.includes("packages/a/src/a.ts"),
+          },
+    ).toStrictEqual({ bSourceInA: true, aSourceInB: false });
+  });
+
+  it("D2552: a discovered workspace selection will not run covers every input of the project", async () => {
+    const tree = consumer({
+      vitest: { a: {}, c: { notRunnable: NOT_CONFIRMED } },
+      files: { "packages/c/src/c.ts": "export const c = 1;\n" },
+    });
+    const inputs = Object.keys(tree.files);
+    const sets = await narrowedInTree(tree, inputs);
+    expect(
+      "refused" in sets || "thrown" in sets ? sets : sets["packages/c"],
+    ).toStrictEqual([...inputs].sort());
+  });
+
+  it("D2553: an input path selection refuses is named as the refusal, so no workspace's inputs narrow", async () => {
+    // A legal Linux file name that Windows' path rules read as drive-relative.
+    const refused = "a:b.txt";
+    expect(
+      await narrowedInTree(TWO_APART, [...TWO_APART_INPUTS, refused]),
+    ).toStrictEqual({ refused: expect.stringContaining(refused) });
+  });
+
+  it("D2533: an input the tracker holds that selection calls a declared non-input lies in every workspace's inputs", async () => {
+    const sets = await narrowedInTree(TWO_APART, TWO_APART_INPUTS);
+    expect(
+      "refused" in sets || "thrown" in sets
+        ? sets
+        : Object.values(sets).map((paths) => paths.includes(GUIDE)),
+    ).toStrictEqual([true, true]);
   });
 });

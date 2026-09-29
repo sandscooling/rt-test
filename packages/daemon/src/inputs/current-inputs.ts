@@ -1,10 +1,13 @@
 import {
   RECONCILIATION_COMPLETE,
   RECONCILIATION_INCOMPLETE,
+  SELECTION_REFUSED,
   WATCHER_HEALTHY,
   WATCHER_UNHEALTHY,
   type InputFacts,
+  type InputsNotNarrowed,
 } from "../query/answer.js";
+import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import {
   discoveryFingerprint,
   protectedFileChangedSince,
@@ -14,6 +17,12 @@ import {
   type ProjectInputs,
 } from "./fingerprint.js";
 import type { CurrentInputs } from "./input-tracker.js";
+import {
+  NARROWING,
+  narrowingAt,
+  type QueryNarrowing,
+  type WorkspaceNarrowing,
+} from "./narrowed-inputs.js";
 
 const FIRST_RECONCILIATION_REASON = "the first reconciliation has not ended";
 const RECONCILING_REASON = "a reconciliation of the inputs is running";
@@ -92,22 +101,34 @@ export interface InputsMoment {
   readonly unavailable: string | undefined;
   /** Why `rt-test.json` cannot be used or its patterns do not apply; undefined otherwise. */
   readonly nonInputsUnusable: string | undefined;
+  /** The dependency builds' state for the discovery the query reads; undefined for every input of the project. */
+  readonly narrowing: QueryNarrowing | undefined;
   /** Read only when a fingerprint can be computed. */
   readonly project: () => ProjectInputs;
 }
 
-/** Every fingerprint the view gives is computed from one snapshot of the inputs and one `SnapshotReads`. */
+/**
+ * Every fingerprint the view gives is computed from one snapshot of the inputs, one `SnapshotReads` and one reading
+ * of the narrowing at the moment's revision.
+ */
 export function currentInputs({
   facts,
   unavailable,
   nonInputsUnusable,
+  narrowing,
   project,
 }: InputsMoment): CurrentInputs {
+  const workspaces =
+    narrowing === undefined
+      ? undefined
+      : narrowingAt(narrowing, facts.revision);
+  const notNarrowed = notNarrowedFact(workspaces);
   const declaration =
     nonInputsUnusable === undefined ? {} : { nonInputsUnusable };
   if (unavailable !== undefined) {
     const none: FingerprintResult = { ok: false, reason: unavailable };
     return {
+      ...notNarrowed,
       facts,
       ...declaration,
       unavailable,
@@ -118,13 +139,58 @@ export function currentInputs({
   }
   const inputs = project();
   const reads = new SnapshotReads(inputs.root);
+  const selected = unlessRefused(workspaces, inputs);
   return {
+    ...notNarrowedFact(selected),
     facts,
     ...declaration,
-    workspaceFingerprint: (entry) => workspaceFingerprint(inputs, entry, reads),
+    workspaceFingerprint: (entry) =>
+      narrowedFingerprint(selected, inputs, entry, reads),
     discoveryFingerprint: (discovery) =>
       discoveryFingerprint(inputs, discovery, reads),
     protectedFileChangedSince: (discovery, since) =>
       protectedFileChangedSince(inputs, discovery, since),
   };
+}
+
+/** A narrowing whose selection refuses the snapshot's paths widens every workspace and says why. */
+function unlessRefused(
+  workspaces: WorkspaceNarrowing | undefined,
+  project: ProjectInputs,
+): WorkspaceNarrowing | undefined {
+  if (workspaces?.kind !== NARROWING.narrowed) return workspaces;
+  const reason = workspaces.narrowing.refusal(project);
+  if (reason === undefined) return workspaces;
+  return {
+    kind: NARROWING.widened,
+    notNarrowed: { kind: SELECTION_REFUSED, reason },
+  };
+}
+
+/** Why no workspace's inputs are narrowed, which every answer carries until a later build succeeds. */
+function notNarrowedFact(workspaces: WorkspaceNarrowing | undefined): {
+  readonly inputsNotNarrowed?: InputsNotNarrowed;
+} {
+  if (workspaces === undefined || workspaces.kind === NARROWING.narrowed) {
+    return {};
+  }
+  const { notNarrowed } = workspaces;
+  return notNarrowed === undefined ? {} : { inputsNotNarrowed: notNarrowed };
+}
+
+/** While the build deciding the narrowing runs, the workspace has no fingerprint, and the reason names the build. */
+function narrowedFingerprint(
+  workspaces: WorkspaceNarrowing | undefined,
+  project: ProjectInputs,
+  entry: WorkspaceDiscovery,
+  reads: SnapshotReads,
+): FingerprintResult {
+  if (workspaces?.kind === NARROWING.building) {
+    return { ok: false, reason: workspaces.reason };
+  }
+  const narrowed =
+    workspaces?.kind === NARROWING.narrowed
+      ? workspaces.narrowing.workspaceInputs(project, entry.workspace.path)
+      : undefined;
+  return workspaceFingerprint(project, entry, reads, narrowed);
 }

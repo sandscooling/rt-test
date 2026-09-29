@@ -123,6 +123,7 @@ async function serve(
     store,
     log,
     executor: new Executor(log),
+    buildExecutor: new Executor(log),
     inputs,
     closeEndpoint: async () => {
       server.closeConnections();

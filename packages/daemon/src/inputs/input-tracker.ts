@@ -2,7 +2,7 @@ import type { WatchEventType } from "node:fs";
 import { realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { DaemonLog } from "../daemon/daemon-log.js";
-import type { InputFacts } from "../query/answer.js";
+import type { InputFacts, InputsNotNarrowed } from "../query/answer.js";
 import type {
   TestDiscovery,
   WorkspaceDiscovery,
@@ -24,9 +24,7 @@ import {
   liesInsideOnHost,
 } from "./input-filter.js";
 import {
-  readEntryDigest,
   takeInventory,
-  type InputRead,
   type InventoryResult,
   type InventoryScope,
 } from "./input-inventory.js";
@@ -38,13 +36,14 @@ import {
 } from "./input-jobs.js";
 import { InputState } from "./input-state.js";
 import { InputWatcher } from "./input-watcher.js";
-import { NON_INPUTS_FILE } from "./non-inputs.js";
+import type { QueryNarrowing } from "./narrowed-inputs.js";
+import { NON_INPUTS_FILE, type NonInputsDeclaration } from "./non-inputs.js";
 import { protection } from "./protection.js";
 import { keepReleasedFiles } from "./protection-walk.js";
+import { QueuedReads, RENAME_EVENT } from "./queued-reads.js";
 import { ReconcileSchedule } from "./reconcile-schedule.js";
 
 const IGNORE_FILE = ".gitignore";
-const RENAME_EVENT = "rename";
 const CHANGE_EVENT = "change";
 const NON_INPUTS_CHANGED_REASON = `${NON_INPUTS_FILE}, which declares the non-inputs, changed`;
 
@@ -62,6 +61,8 @@ export interface CurrentInputs {
   readonly unavailable?: string;
   /** Why every file stays an input, while `rt-test.json` cannot be used or its patterns do not apply; absent otherwise. */
   readonly nonInputsUnusable?: string;
+  /** Why no workspace's inputs are narrowed to those its selection includes; absent otherwise. */
+  readonly inputsNotNarrowed?: InputsNotNarrowed;
   workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
   discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
   /**
@@ -79,7 +80,18 @@ export interface TrackedInputs {
   start(): void;
   /** Resolves once the first reconciliation has ended, or the tracker has stopped. */
   firstReconciled(): Promise<void>;
-  current(): CurrentInputs;
+  /**
+   * With a narrowing, each workspace's inputs are those the dependency builds' state gives it at this moment's
+   * revision; without one, every input of the project.
+   */
+  current(narrowing?: QueryNarrowing): CurrentInputs;
+  /**
+   * Resolves at the next change a caller waiting to use the inputs can observe: the revision moving, a reconciliation
+   * ending or the pending reads draining; at once when the tracker has stopped.
+   */
+  changed(): Promise<void>;
+  /** The declaration in effect, which decides with the protection in effect which files are inputs. */
+  nonInputsDeclaration(): NonInputsDeclaration;
   /**
    * Resolves once every event seen before the call has been read and no reconciliation runs, or at once when the
    * tracker has stopped. Events arriving after the call do not hold it.
@@ -122,6 +134,8 @@ export class InputTracker implements TrackedInputs {
   /** `rt-test.json` at the consumer root, which is never an input and whose change reconciles every one. */
   readonly #declarationFile: string;
   readonly #git: GitFiles;
+  readonly #reads: QueuedReads;
+  #changeWaiters: (() => void)[] = [];
   readonly #schedule = new ReconcileSchedule((reason) =>
     this.#requestReconciliation(reason),
   );
@@ -160,6 +174,18 @@ export class InputTracker implements TrackedInputs {
       cannotWatch: (reason) => this.#cannotWatch(reason),
     });
     this.#git = new GitFiles(this.#root, this.#watcher, log);
+    this.#reads = new QueuedReads({
+      root: this.#root,
+      state: this.#state,
+      watcher: this.#watcher,
+      git: this.#git,
+      jobs: this.#jobs,
+      abort: this.#abort,
+      quiet: this.#quiet,
+      scope: (filter) => this.#scope(filter),
+      inputSetLost: (reason) => this.#inputSetLost(reason),
+      retryLostInputSet: () => this.#retryLostInputSet(),
+    });
   }
 
   start(): void {
@@ -180,13 +206,23 @@ export class InputTracker implements TrackedInputs {
     );
   }
 
-  current(): CurrentInputs {
+  current(narrowing?: QueryNarrowing): CurrentInputs {
     return currentInputs({
       unavailable: this.#unavailableReason(),
       facts: this.facts(),
       nonInputsUnusable: this.#declared.unusable,
+      narrowing,
       project: () => this.#state.project(),
     });
+  }
+
+  changed(): Promise<void> {
+    if (this.#stopped) return Promise.resolve();
+    return new Promise((resolve) => this.#changeWaiters.push(resolve));
+  }
+
+  nonInputsDeclaration(): NonInputsDeclaration {
+    return this.#declared.declaration;
   }
 
   settled(): Promise<void> {
@@ -245,6 +281,7 @@ export class InputTracker implements TrackedInputs {
       }))
       .finally(() => {
         this.#protecting -= 1;
+        this.#signalChange();
       });
     if (released.ok) return released.changed;
     if (this.#stopped) return unavailableReason(this.#condition());
@@ -272,6 +309,7 @@ export class InputTracker implements TrackedInputs {
     this.#abort.abort();
     this.#watcher.close();
     this.#ledger.releaseAll();
+    this.#signalChange();
     this.#markFirstReconciled();
     await Promise.allSettled([this.#reconciliation, this.#processing]);
   }
@@ -344,6 +382,7 @@ export class InputTracker implements TrackedInputs {
     this.#schedule.periodic();
     this.#processQueue();
     this.#ledger.notify();
+    this.#signalChange();
   }
 
   #retryLostInputSet(): void {
@@ -377,7 +416,7 @@ export class InputTracker implements TrackedInputs {
         inventory.directories,
         new Set([...this.#queue.keys()].map((path) => this.#label(path))),
       );
-      this.#state.commit();
+      this.#commit();
       for (const path of changed) this.#jobs.record(path);
       this.#establishFailure = undefined;
       this.#log.entry(
@@ -418,13 +457,14 @@ export class InputTracker implements TrackedInputs {
       this.#queue.clear();
       this.#inFlight = batch.length;
       try {
-        await this.#readBatch(batch);
+        await this.#reads.read(batch, this.#filter);
       } catch (error) {
         this.#readFailed(error);
       }
-      this.#state.commit();
+      this.#commit();
       this.#inFlight = 0;
       this.#ledger.readUpTo(through);
+      this.#signalChange();
     }
   }
 
@@ -432,110 +472,6 @@ export class InputTracker implements TrackedInputs {
     if (this.#stopped) return;
     this.#log.error("reading changed inputs", error);
     this.#inputSetLost(`reading changed inputs failed: ${errorText(error)}`);
-  }
-
-  async #readBatch(batch: readonly [string, WatchEventType][]): Promise<void> {
-    const filter = this.#filter;
-    if (filter === undefined || !this.#state.established) {
-      for (const [path] of batch) this.#jobs.record(this.#label(path));
-      this.#retryLostInputSet();
-      return;
-    }
-    const unknown = batch
-      .map(([path]) => path)
-      .filter((path) => !this.#isKnown(path) && filter.needsCheck(path));
-    if (unknown.length > 0) {
-      await filter.check(unknown, this.#abort.signal);
-      this.#git.report(filter);
-    }
-    for (const [path, kind] of batch) {
-      if (filter.excludes(path)) {
-        this.#quiet.delete(path);
-        continue;
-      }
-      await this.#readPath(filter, path, kind);
-    }
-  }
-
-  async #readPath(
-    filter: InputFilter,
-    path: string,
-    kind: WatchEventType,
-  ): Promise<void> {
-    const relative = relativePosixPath(this.#root, path);
-    const record = this.#quiet.delete(path)
-      ? () => undefined
-      : (changed: readonly string[]) => this.#recordAll(changed);
-    const entry = await readEntryDigest(path, this.#abort.signal);
-    switch (entry.kind) {
-      case "absent": {
-        const wasDirectory = this.#state.hasDirectory(path);
-        record(this.#state.remove(relative, path));
-        if (wasDirectory) this.#watcher.dropDirectory(path);
-        return;
-      }
-      case "input":
-        this.#readFile(filter, path, entry.read, record);
-        return;
-      case "directory":
-        if (this.#state.hasDirectory(path) && kind !== RENAME_EVENT) return;
-        await this.#readDirectory(filter, path, relative);
-        return;
-      case "unreadable":
-        this.#inputSetLost(`${relative} cannot be read: ${entry.reason}`);
-        return;
-    }
-  }
-
-  /**
-   * A file that replaced a directory drops what the directory held; a declared file is not an input. A read that
-   * rules out any write since the last one, such as one following a last-access event, marks no job.
-   */
-  #readFile(
-    filter: InputFilter,
-    path: string,
-    read: InputRead,
-    record: (changed: readonly string[]) => void,
-  ): void {
-    const relative = relativePosixPath(this.#root, path);
-    if (this.#state.hasDirectory(path)) {
-      this.#recordAll(this.#state.remove(relative, path));
-      this.#watcher.dropDirectory(path);
-    }
-    if (filter.declares(path) !== undefined) {
-      record(this.#state.remove(relative, path));
-      return;
-    }
-    if (this.#state.set(relative, read)) record([relative]);
-  }
-
-  /**
-   * A directory that appeared, or was replaced by a rename, is walked whole with fresh watches, since a watch left
-   * on a replaced directory reports nothing, and each path in it is asked about as a new one.
-   */
-  async #readDirectory(
-    filter: InputFilter,
-    path: string,
-    relative: string,
-  ): Promise<void> {
-    filter.distrust(path);
-    this.#watcher.dropDirectory(path);
-    const walked = await takeInventory(this.#scope(filter), path);
-    if (!walked.ok) {
-      this.#inputSetLost(walked.reason);
-      return;
-    }
-    for (const ignored of walked.ignoredDirectories) {
-      this.#watcher.dropDirectory(ignored);
-    }
-    this.#recordAll(
-      this.#state.replaceUnder(
-        relative,
-        path,
-        walked.inputs,
-        walked.directories,
-      ),
-    );
   }
 
   /** An input set that cannot be established leaves every result unknown until a reconciliation reads it whole. */
@@ -549,15 +485,17 @@ export class InputTracker implements TrackedInputs {
     if (!this.#reconciling) this.#requestReconciliation(reason);
   }
 
-  #isKnown(path: string): boolean {
-    return (
-      this.#state.hasDirectory(path) ||
-      this.#state.hasInput(relativePosixPath(this.#root, path))
-    );
+  /** Raises the revision when any read changed a digest, which a caller waiting for a change can observe. */
+  #commit(): void {
+    const before = this.#state.revision;
+    this.#state.commit();
+    if (this.#state.revision !== before) this.#signalChange();
   }
 
-  #recordAll(descriptions: readonly string[]): void {
-    for (const description of descriptions) this.#jobs.record(description);
+  #signalChange(): void {
+    const waiting = this.#changeWaiters;
+    this.#changeWaiters = [];
+    for (const resolve of waiting) resolve();
   }
 
   #unavailableReason(): string | undefined {

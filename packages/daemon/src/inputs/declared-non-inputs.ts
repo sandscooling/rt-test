@@ -4,6 +4,7 @@ import {
   declaredNonInputs,
   NON_INPUTS_ABSENT,
   NON_INPUTS_DECLARED,
+  NON_INPUTS_FILE,
   NON_INPUTS_UNUSABLE,
   readNonInputs,
   unusableReason,
@@ -13,6 +14,10 @@ import {
 import { liesUnderRoot, protection, type Protection } from "./protection.js";
 
 const LIST_SEPARATOR = ", ";
+const NO_DECLARATION: NonInputsDeclaration = {
+  file: NON_INPUTS_FILE,
+  state: NON_INPUTS_ABSENT,
+};
 
 /** What a change of protection moved: the paths whose declared state flipped, and whether only a walk finds the rest. */
 export interface ProtectionChange {
@@ -76,6 +81,11 @@ export class DeclaredNonInputs {
         ? this.#protection.reason
         : undefined)
     );
+  }
+
+  /** The declaration in effect; before the first read the absent one, since no pattern applies until then. */
+  get declaration(): NonInputsDeclaration {
+    return this.#declaration ?? NO_DECLARATION;
   }
 
   /** Reads `rt-test.json` again, which takes effect at once. */

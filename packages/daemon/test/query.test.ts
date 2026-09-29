@@ -1,8 +1,17 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { FingerprintResult } from "../src/inputs/fingerprint.js";
+import { currentInputs } from "../src/inputs/current-inputs.js";
+import {
+  ProjectInputs,
+  type FingerprintResult,
+} from "../src/inputs/fingerprint.js";
 import type { CurrentInputs } from "../src/inputs/input-tracker.js";
+import type {
+  Narrowing,
+  NarrowingState,
+  QueryNarrowing,
+} from "../src/inputs/narrowed-inputs.js";
 import type {
   InputFacts,
   NoAnswer,
@@ -756,6 +765,248 @@ describe("each test's freshness, beside its state", () => {
       storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
     );
     expect(summary.unfingerprintedWorkspaces).toStrictEqual([]);
+  });
+});
+
+const A_MODULE = `${WORKSPACE_A}/${MODULE}`;
+const A_SOURCE = `${WORKSPACE_A}/src/a.ts`;
+const B_MODULE = `${WORKSPACE_B}/${MODULE}`;
+const B_SOURCE = `${WORKSPACE_B}/src/b.ts`;
+/** Every input of the project, each path to its content digest. */
+const PROJECT_INPUTS: Readonly<Record<string, string>> = {
+  [A_MODULE]: "a-module",
+  [A_SOURCE]: "a-source",
+  [B_MODULE]: "b-module",
+  [B_SOURCE]: "b-source",
+};
+const NARROWED_SETS: Readonly<Record<string, readonly string[]>> = {
+  [WORKSPACE_A]: [A_MODULE, A_SOURCE],
+  [WORKSPACE_B]: [B_MODULE, B_SOURCE],
+};
+const DISCOVERY_ID = "discovery-1";
+const BUILD_FAILED =
+  "the executor process 7 exited during the job (exit code 1)";
+const REFUSAL = "../outside.ts leaves the consumer root";
+
+/**
+ * A narrowing that gives each workspace the inputs `NARROWED_SETS` lists for it, as a build's selection would, or,
+ * given a refusal, every input of the project, as `Narrowing` does once selection refuses.
+ */
+function narrowedTo(refusal?: string): Narrowing {
+  const standIn: Pick<Narrowing, "workspaceInputs" | "refusal"> = {
+    refusal: () => refusal,
+    workspaceInputs: (project, workspacePath) =>
+      refusal !== undefined
+        ? project
+        : new ProjectInputs(
+            project.root,
+            new Map(
+              [...project.digests].filter(([path]) =>
+                (NARROWED_SETS[workspacePath] ?? []).includes(path),
+              ),
+            ),
+          ),
+  };
+  return standIn as Narrowing;
+}
+
+/** The builds' state for the discovery the query reads, `DISCOVERY_ID`. */
+function narrowingOf(state: NarrowingState): QueryNarrowing {
+  return { discoveryId: DISCOVERY_ID, state };
+}
+
+function builtAt(
+  revision: number,
+  narrowing: Narrowing = narrowedTo(),
+  discoveryId = DISCOVERY_ID,
+): QueryNarrowing {
+  return narrowingOf({
+    discoveryId,
+    selectionInput: true,
+    latest: { revision, built: true, narrowing },
+    lastFailure: undefined,
+  });
+}
+
+function failedAt(revision: number): QueryNarrowing {
+  return narrowingOf({
+    discoveryId: DISCOVERY_ID,
+    selectionInput: true,
+    latest: { revision, built: false, reason: BUILD_FAILED },
+    lastFailure: BUILD_FAILED,
+  });
+}
+
+/**
+ * The tracker's view over `PROJECT_INPUTS`, with `edits` applied, at revision 3 under `narrowing`; undefined for every
+ * input of the project, as before any build.
+ */
+function viewOf(
+  narrowing: QueryNarrowing | undefined,
+  edits: Readonly<Record<string, string>> = {},
+): CurrentInputs {
+  return currentInputs({
+    facts: SETTLED_FACTS,
+    unavailable: undefined,
+    nonInputsUnusable: undefined,
+    narrowing,
+    project: () =>
+      new ProjectInputs(
+        ROOT,
+        new Map(Object.entries({ ...PROJECT_INPUTS, ...edits })),
+      ),
+  });
+}
+
+function asStored(fingerprint: FingerprintResult): InputFingerprint {
+  return fingerprint.ok
+    ? { kind: "digest", digest: fingerprint.digest }
+    : UNFINGERPRINTED;
+}
+
+const TEST_A = discovered("a");
+const ENTRY_A = discoveredWorkspace(WORKSPACE_A, [TEST_A]);
+const TWO_WORKSPACES = storedDiscovery([
+  ENTRY_A,
+  discoveredWorkspace(WORKSPACE_B, [
+    discovered("b", { workspacePath: WORKSPACE_B }),
+  ]),
+]);
+
+/** Workspace `a`'s one passing test, stored under `fingerprint`, read through `inputs`; the discovery lists `a` alone. */
+function freshnessOfA(
+  fingerprint: FingerprintResult,
+  inputs: CurrentInputs,
+): Record<string, number> {
+  return nonZero(
+    summaryOf(
+      storedDiscovery([ENTRY_A]),
+      [
+        storedRun(
+          ranRun([ranModule([finished(TEST_A, "passed")])]),
+          VITEST_ADAPTER_VERSION,
+          asStored(fingerprint),
+        ),
+      ],
+      inputs,
+    ).counts.freshness,
+  );
+}
+
+/** Each unfingerprinted workspace, and whether its reason names the dependency build. */
+function unfingerprintedIn(inputs: CurrentInputs): unknown {
+  return summaryOf(TWO_WORKSPACES, [], inputs).unfingerprintedWorkspaces.map(
+    ({ workspacePath, reason }) => ({
+      workspacePath,
+      namesBuild: reason.includes("dependency build"),
+    }),
+  );
+}
+
+const BOTH_BUILDING = [
+  { workspacePath: WORKSPACE_A, namesBuild: true },
+  { workspacePath: WORKSPACE_B, namesBuild: true },
+];
+
+describe("each workspace's inputs as the dependency builds narrow them", () => {
+  it("D2523: while the build at the current revision has not ended, each workspace is unfingerprinted naming the build, and the discovery's freshness is unaffected", () => {
+    const stored = asStored(
+      viewOf(undefined).discoveryFingerprint(TWO_WORKSPACES.discovery),
+    );
+    const building = viewOf(
+      narrowingOf({
+        discoveryId: DISCOVERY_ID,
+        selectionInput: true,
+        latest: undefined,
+        lastFailure: undefined,
+      }),
+    );
+    const summary = summaryOf(
+      { ...TWO_WORKSPACES, inputFingerprint: stored },
+      [],
+      building,
+    );
+    expect({
+      discovery: summary.discovery.freshness,
+      unfingerprinted: unfingerprintedIn(building),
+    }).toStrictEqual({ discovery: "current", unfingerprinted: BOTH_BUILDING });
+  });
+
+  it("D2524: a narrowing built at an earlier input revision is never used; each workspace reads as waiting for the build", () => {
+    expect(unfingerprintedIn(viewOf(builtAt(2)))).toStrictEqual(BOTH_BUILDING);
+  });
+
+  it("D2525: a narrowing built over another discovery than the one the answer reads is never used", () => {
+    expect(
+      unfingerprintedIn(viewOf(builtAt(3, narrowedTo(), "discovery-0"))),
+    ).toStrictEqual(BOTH_BUILDING);
+  });
+
+  it("D2526: after a failed build, a summary and a path status each carry why no workspace's inputs are narrowed", async () => {
+    const expected = { kind: "dependency-build-failed", reason: BUILD_FAILED };
+    const summary = summaryOf(TWO_WORKSPACES, [], viewOf(failedAt(3)));
+    const pathStatus = await statusIn(
+      WORKSPACE_A,
+      (answer) => ("noAnswer" in answer ? answer : answer.inputsNotNarrowed),
+      viewOf(failedAt(3)),
+    );
+    expect({
+      summary: summary.inputsNotNarrowed,
+      pathStatus,
+    }).toStrictEqual({ summary: expected, pathStatus: expected });
+  });
+
+  it("D2527: after a failed build, a result stored under the whole project's fingerprint reads current", () => {
+    const whole = viewOf(undefined).workspaceFingerprint(ENTRY_A);
+    expect(freshnessOfA(whole, viewOf(failedAt(3)))).toStrictEqual({
+      current: 1,
+    });
+  });
+
+  it("D2528: while the build after a failed one runs, answers still carry the failure", () => {
+    const rebuilding = narrowingOf({
+      discoveryId: DISCOVERY_ID,
+      selectionInput: true,
+      latest: { revision: 2, built: false, reason: BUILD_FAILED },
+      lastFailure: BUILD_FAILED,
+    });
+    expect(
+      summaryOf(TWO_WORKSPACES, [], viewOf(rebuilding)).inputsNotNarrowed,
+    ).toStrictEqual({ kind: "dependency-build-failed", reason: BUILD_FAILED });
+  });
+
+  it("D2529: a discovery that yields no selection input is named as the reason no workspace's inputs are narrowed", () => {
+    const reason =
+      "the discovery in effect does not report the setup files and aliases of the Vitest workspace packages/a";
+    const unreported = narrowingOf({
+      discoveryId: DISCOVERY_ID,
+      selectionInput: false,
+      reason,
+    });
+    expect(
+      summaryOf(TWO_WORKSPACES, [], viewOf(unreported)).inputsNotNarrowed,
+    ).toStrictEqual({ kind: "no-selection-input", reason });
+  });
+
+  it("D2530: a narrowing whose selection refuses an input's path is named as the reason no workspace's inputs are narrowed", () => {
+    expect(
+      summaryOf(TWO_WORKSPACES, [], viewOf(builtAt(3, narrowedTo(REFUSAL))))
+        .inputsNotNarrowed,
+    ).toStrictEqual({ kind: "selection-refused", reason: REFUSAL });
+  });
+
+  it("D2531: once narrowed, an edit to an input outside a workspace's set leaves its result current, and one inside makes it stale", () => {
+    const stored = viewOf(builtAt(3)).workspaceFingerprint(ENTRY_A);
+    expect({
+      outside: freshnessOfA(
+        stored,
+        viewOf(builtAt(3), { [B_SOURCE]: "b-edited" }),
+      ),
+      inside: freshnessOfA(
+        stored,
+        viewOf(builtAt(3), { [A_SOURCE]: "a-edited" }),
+      ),
+    }).toStrictEqual({ outside: { current: 1 }, inside: { stale: 1 } });
   });
 });
 

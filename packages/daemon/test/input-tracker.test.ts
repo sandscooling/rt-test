@@ -31,6 +31,7 @@ import { recordStarted } from "../../../test/scripts/run-cleanup.mjs";
 import { daemonEntryPoint } from "../src/daemon/entry-point.js";
 import {
   ProjectInputs,
+  SnapshotReads,
   workspaceFingerprint,
 } from "../src/inputs/fingerprint.js";
 import { gitSources } from "../src/inputs/git-sources.js";
@@ -1889,7 +1890,107 @@ describe("the fingerprint's parts", () => {
     });
     expect(changed).toBe(true);
   });
+
+  it("D2534: a listed test module the snapshot holds but the workspace's narrowed inputs leave out still changes its fingerprint", async () => {
+    const changed = await inTempDir((root) => {
+      const entry = workspaceAt(root, ["src/a.test.ts"]);
+      const narrowed = new ProjectInputs(root, new Map([["a.ts", "file:1"]]));
+      const digestWith = (module: string): string | undefined => {
+        const project = new ProjectInputs(
+          root,
+          new Map([
+            ["a.ts", "file:1"],
+            ["src/a.test.ts", module],
+          ]),
+        );
+        const print = workspaceFingerprint(
+          project,
+          entry,
+          new SnapshotReads(root),
+          narrowed,
+        );
+        return print.ok ? print.digest : undefined;
+      };
+      const before = digestWith("module:1");
+      return before !== undefined && before !== digestWith("module:2");
+    });
+    expect(changed).toBe(true);
+  });
 });
+
+/** Event-loop turns in which a tracker with nothing to read must leave its change signal pending. */
+const QUIET_TURNS = 20;
+const UNCHANGED_TEXT = "export {};\n";
+
+/** Takes the tracker's change signal now, and says later whether it has resolved. */
+function changeSignal(tracker: InputTracker): () => boolean {
+  let resolved = false;
+  void tracker.changed().then(() => {
+    resolved = true;
+  });
+  return () => resolved;
+}
+
+describe(
+  "the tracker's change signal",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D2538: the tracker's change signal resolves once an edit to an input has been read", async () => {
+      const signalled = await inTempDir((root) => {
+        writeTree(root, { "a.ts": UNCHANGED_TEXT });
+        return trackingOwnGitHome(root, async ({ tracker }) => {
+          const resolved = changeSignal(tracker);
+          appendFileSync(join(root, "a.ts"), "// an edit\n");
+          return eventually(resolved, SETTLE_MS);
+        });
+      });
+      expect(signalled).toBe(true);
+    });
+
+    it("D2555: the change signal stays pending while nothing changes, then resolves at the next edit", async () => {
+      const outcome = await inTempDir((root) => {
+        writeTree(root, { "a.ts": UNCHANGED_TEXT });
+        return trackingOwnGitHome(root, async ({ tracker }) => {
+          const resolved = changeSignal(tracker);
+          for (let turn = 0; turn < QUIET_TURNS; turn += 1) {
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          const quiet = !resolved();
+          appendFileSync(join(root, "a.ts"), "// an edit\n");
+          return { quiet, signalled: await eventually(resolved, SETTLE_MS) };
+        });
+      });
+      expect(outcome).toStrictEqual({ quiet: true, signalled: true });
+    });
+
+    it("D2556: the change signal resolves once pending reads drain, though they moved no digest", async () => {
+      const outcome = await inTempDir((root) => {
+        writeTree(root, { "a.ts": UNCHANGED_TEXT });
+        return trackingOwnGitHome(root, async ({ tracker }) => {
+          const revision = tracker.facts().revision;
+          const resolved = changeSignal(tracker);
+          writeFileSync(join(root, "a.ts"), UNCHANGED_TEXT);
+          const signalled = await eventually(resolved, SETTLE_MS);
+          return { signalled, moved: tracker.facts().revision - revision };
+        });
+      });
+      expect(outcome).toStrictEqual({ signalled: true, moved: 0 });
+    });
+
+    it("D2557: the change signal resolves once a protection walk ends", async () => {
+      const signalled = await inTempDir((root) => {
+        writeTree(root, DOCS_DECLARED);
+        return trackingOwnGitHome(root, async ({ tracker }) => {
+          const resolved = changeSignal(tracker);
+          // No discovery now protects the tests, so the patterns stop applying and only a walk finds docs/a.md.
+          await tracker.protectInputs(undefined);
+          return eventually(resolved, SETTLE_MS);
+        });
+      });
+      expect(signalled).toBe(true);
+    });
+  },
+);
 
 describe("each platform's watches", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
   it("D1916: with process.platform read as win32, the one watch of the root sees an edit two directories down", async () => {

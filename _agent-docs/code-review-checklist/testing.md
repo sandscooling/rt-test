@@ -70,6 +70,8 @@ C161. **Classify a child's end by its positive signature**: A test that tells th
 
 C162. **Prove a cache keeps its outcome on a hit**: A test of a cache or memo pairs its saved-work assertion with one proving a hit yields the same observable outcome as a miss, for a cached failure as well as a success, and that a hit returns the caller's own identity (path, label or key) rather than the entry's.
 
+C165. **Prove a wait waits**: A test of a promise-returning wait or change signal asserts it is still pending before its trigger, as well as settled after it. FAIL on a resolve-only test: a signal that resolves at once passes it, and its caller's loop becomes a microtask spin.
+
 ## Inputs, fixtures and mocks
 
 C93. **Call the production function**: A test drives the real function, script or CLI entry, never a reimplementation of its logic inside the test.

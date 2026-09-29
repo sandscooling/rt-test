@@ -2817,29 +2817,29 @@
     "id": "D1843",
     "defect": "A summary aborts the job in progress.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "  summary(): SummaryAnswer | NoAnswer {\n    return summaryAnswer(",
-    "new": "  summary(): SummaryAnswer | NoAnswer {\n    this.#parts.executor.abort();\n    return summaryAnswer("
+    "old": "  summary(): SummaryAnswer | NoAnswer {\n    const results = this.#latestResults();\n",
+    "new": "  summary(): SummaryAnswer | NoAnswer {\n    this.#parts.executor.abort();\n    const results = this.#latestResults();\n"
   },
   {
     "id": "D1871",
     "defect": "A summary resets the daemon's activity to idle while a run continues.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "  summary(): SummaryAnswer | NoAnswer {\n    return summaryAnswer(",
-    "new": "  summary(): SummaryAnswer | NoAnswer {\n    this.#activity = { state: \"idle\" };\n    return summaryAnswer("
+    "old": "  summary(): SummaryAnswer | NoAnswer {\n    const results = this.#latestResults();\n",
+    "new": "  summary(): SummaryAnswer | NoAnswer {\n    this.#activity = { state: \"idle\" };\n    const results = this.#latestResults();\n"
   },
   {
     "id": "D1872",
     "defect": "A path-status answer leaves out the jobs that ended with nothing stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      path,\n      this.#latestResults(),\n      this.#view(),",
-    "new": "      path,\n      this.#latestResults(),\n      { ...this.#view(), unstoredJobs: [] },"
+    "old": "      path,\n      results,\n      this.#view(),\n",
+    "new": "      path,\n      results,\n      { ...this.#view(), unstoredJobs: [] },\n"
   },
   {
     "id": "D1844",
     "defect": "A path status aborts the run in progress, so a query interrupts the workspace it was sent during.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    return pathStatusAnswer(",
-    "new": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    this.#parts.executor.abort();\n    return pathStatusAnswer("
+    "old": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    const results = this.#latestResults();\n",
+    "new": "  pathStatus(path: string): PathStatusAnswer | NoAnswer {\n    this.#parts.executor.abort();\n    const results = this.#latestResults();\n"
   },
   {
     "id": "D1845",
@@ -2949,7 +2949,7 @@
   {
     "id": "D1888",
     "defect": "An event naming an edited input is read but its new digest is never kept, so the fingerprint and the revision stay as they were.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "    if (this.#state.set(relative, read)) record([relative]);\n",
     "new": "    record([relative]);\n"
   },
@@ -3145,7 +3145,7 @@
   {
     "id": "D1918",
     "defect": "A directory re-read on a rename keeps its old Linux watch, which is bound to the deleted directory, so an edit in the directory now there goes unseen; proven over the test's inotify model, where a watch is bound to the directory it opened on, told apart by file id and birth time.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "    filter.distrust(path);\n    this.#watcher.dropDirectory(path);\n",
     "new": "    filter.distrust(path);\n"
   },
@@ -3292,14 +3292,14 @@
   {
     "id": "D1960",
     "defect": "A check-ignore that fails for a path created after a reconciliation is never named in git's unread reasons or the log, though the path counts as an input.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "      await filter.check(unknown, this.#abort.signal);\n      this.#git.report(filter);\n",
     "new": "      await filter.check(unknown, this.#abort.signal);\n"
   },
   {
     "id": "D1961",
     "defect": "After a reconciliation that could not establish the input set, an event reporting the cause fixed starts no reconciliation, so results read unknown until the periodic one 5 minutes later.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "      for (const [path] of batch) this.#jobs.record(this.#label(path));\n      this.#retryLostInputSet();\n",
     "new": "      for (const [path] of batch) this.#jobs.record(this.#label(path));\n"
   },
@@ -3362,14 +3362,14 @@
   {
     "id": "D1991",
     "defect": "Protection's own reads of the paths it moves into the inputs are recorded against every open job, so the discovery's guard window is never fingerprinted.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "    const record = this.#quiet.delete(path)\n      ? () => undefined\n",
     "new": "    const record = false\n      ? () => undefined\n"
   },
   {
     "id": "D1992",
     "defect": "A file read after it became a declared non-input is kept in the input set, so a test module the next discovery no longer lists stays an input.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "    if (filter.declares(path) !== undefined) {\n      record(this.#state.remove(relative, path));\n      return;\n    }\n",
     "new": ""
   },
@@ -3552,8 +3552,8 @@
     "id": "D2052",
     "defect": "A throwing read of the earlier life's stored discovery escapes begin, so the daemon never runs its start sequence.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    let stored: TestDiscovery | undefined;\n    try {\n      stored = this.#latestResults().discovery?.discovery;\n    } catch (error) {\n      log.error(\"reading the latest stored discovery\", error);\n      return;\n    }\n",
-    "new": "    const stored = this.#latestResults().discovery?.discovery;\n"
+    "old": "    let stored: StoredDiscovery | undefined;\n    try {\n      stored = this.#latestResults().discovery;\n    } catch (error) {\n      log.error(\"reading the latest stored discovery\", error);\n      return;\n    }\n",
+    "new": "    const stored = this.#latestResults().discovery;\n"
   },
   {
     "id": "D2055",
@@ -3565,7 +3565,7 @@
   {
     "id": "D2065",
     "defect": "Every event read of an input marks the running jobs, so a last-access event on a file untouched for an hour leaves a job not fingerprinted.",
-    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
     "old": "    if (this.#state.set(relative, read)) record([relative]);\n",
     "new": "    this.#state.set(relative, read);\n    record([relative]);\n"
   },
@@ -3685,8 +3685,8 @@
     "id": "D2082",
     "defect": "A run's job begins without waiting for the inputs to settle.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(`run started",
-    "new": "    if (this.isStopping()) return;\n    log.entry(`run started"
+    "old": "    await inputs.settled();\n    await this.#awaitBuild(workspace.path);\n",
+    "new": "    await this.#awaitBuild(workspace.path);\n"
   },
   {
     "id": "D2083",
@@ -3699,8 +3699,8 @@
     "id": "D2084",
     "defect": "A stop that arrives while a run waits for the inputs to settle is followed by the run.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping()) return;\n    log.entry(`run started",
-    "new": "    await inputs.settled();\n    log.entry(`run started"
+    "old": "    await this.#awaitBuild(workspace.path);\n    if (this.isStopping()) return;\n    log.entry(`run started",
+    "new": "    await this.#awaitBuild(workspace.path);\n    log.entry(`run started"
   },
   {
     "id": "D2085",
@@ -4533,6 +4533,272 @@
     "defect": "A heartbeat child does not announce its process id on connecting, so once it goes silent the test has no process id to wait on, and its first answer is taken as the announcement.",
     "file": "test/fixtures/daemon/daemon-lifecycle/packages/a/heartbeat.mjs",
     "old": "  socket.write(`${process.pid}\\n`);\n",
+    "new": ""
+  },
+  {
+    "id": "D2504",
+    "defect": "The dependency builds start before the first reconciliation has ended, so a build describes an input set the tracker has not established.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    await this.#parts.inputs.firstReconciled();\n    while (!this.#stopped)",
+    "new": "    while (!this.#stopped)"
+  },
+  {
+    "id": "D2505",
+    "defect": "A build during which an input event arrived is recorded anyway, so with the revision unmoved its narrowing is used for inputs it never read.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "  return verdict.fingerprinted ? undefined : verdict.reason;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D2506",
+    "defect": "A build over a discovery that a new one replaced while it ran is recorded, so the new discovery never gets a build of its own.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "  if (replaced) return DISCOVERY_REPLACED_REASON;\n",
+    "new": ""
+  },
+  {
+    "id": "D2507",
+    "defect": "A failed build is logged below warning level, so the widening it causes goes unnoticed in the log.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        : `warning: the dependency build at input revision",
+    "new": "        : `the dependency build at input revision"
+  },
+  {
+    "id": "D2508",
+    "defect": "A failed build counts as no build at its revision, so the builds retry the same revision back to back.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    return state.latest?.revision === revision;",
+    "new": "    return state.latest?.built === true && state.latest.revision === revision;"
+  },
+  {
+    "id": "D2509",
+    "defect": "After a build has ended at the current revision, the builds wait only for a new discovery or a stop, so a revision move after a failed build never builds again.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      await this.#nextChange(inputs.changed());",
+    "new": "      await this.#nextChange();"
+  },
+  {
+    "id": "D2510",
+    "defect": "A failed build's reason is dropped once the next build begins, so answers stop saying every workspace is widened before a later build succeeds.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      lastFailure: build.built ? undefined : build.reason,",
+    "new": "      lastFailure: undefined,"
+  },
+  {
+    "id": "D2511",
+    "defect": "A build starts while the tracker cannot vouch for its inputs, so its job mark is never fingerprinted and builds fork back to back.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (current.unavailable !== undefined || this.#endedAt(revision)) {",
+    "new": "    if (this.#endedAt(revision)) {"
+  },
+  {
+    "id": "D2512",
+    "defect": "A stop leaves the build in progress running and waits for it to end.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    this.#stopped = true;\n    this.#parts.executor.abort();\n",
+    "new": "    this.#stopped = true;\n"
+  },
+  {
+    "id": "D2513",
+    "defect": "A build counts as pending while the tracker cannot vouch for its inputs, though none can begin, so a waiting run never starts.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      current.unavailable === undefined &&\n      !this.#endedAt(current.facts.revision)",
+    "new": "      !this.#endedAt(current.facts.revision)"
+  },
+  {
+    "id": "D2514",
+    "defect": "A stop that arrives while a build waits for the inputs to settle is followed by the build.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    if (this.#stopped || this.#discovery !== discovery) return;",
+    "new": "    if (this.#discovery !== discovery) return;"
+  },
+  {
+    "id": "D2515",
+    "defect": "A throw from the executor's build call escapes the builds, ending them for the daemon's life with every workspace reading a false building reason and the job mark never closed.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      .catch((error: unknown): JobOutcome<DependencyInformation> => ({\n        ended: false,\n        reason: `${BUILD_THREW_REASON}: ${errorText(error)}`,\n      }));",
+    "new": "      ;"
+  },
+  {
+    "id": "D2516",
+    "defect": "A discovery that yields no selection input is recorded as a failed build, so answers give the wrong reason for the widening.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "      this.#noSelectionInput(discovery, selection.reason);\n",
+    "new": "      this.#record(discovery, { revision, built: false, reason: selection.reason });\n"
+  },
+  {
+    "id": "D2517",
+    "defect": "A run begins without waiting for the dependency build at its revision, so its fingerprint is taken from a view that has none.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await inputs.settled();\n    await this.#awaitBuild(workspace.path);\n",
+    "new": "    await inputs.settled();\n"
+  },
+  {
+    "id": "D2518",
+    "defect": "A run proceeds after one discarded build, so a single edit mid-build leaves the run unfingerprinted.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "const DISCARDS_A_RUN_WAITS_THROUGH = 2;",
+    "new": "const DISCARDS_A_RUN_WAITS_THROUGH = 1;"
+  },
+  {
+    "id": "D2519",
+    "defect": "A run waits for its build however many are discarded, so steady input churn holds the run for good.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      if (inARow >= DISCARDS_A_RUN_WAITS_THROUGH) {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D2520",
+    "defect": "The stop sequence never stops the dependency builds, so a run waiting for a build holds the stop for good.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const buildsStopped = this.#builds.stop();\n",
+    "new": "    const buildsStopped = Promise.resolve();\n"
+  },
+  {
+    "id": "D2521",
+    "defect": "A query never hands the builds the stored discovery it reads, so after a failed read at start every answer names a build that never begins.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (results.discovery !== undefined) this.#builds.use(results.discovery);\n",
+    "new": ""
+  },
+  {
+    "id": "D2522",
+    "defect": "A run is fingerprinted over every input of the project, so its stored digest never matches the narrowed one queries compare it against.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return this.#parts.inputs.current(this.#builds.narrowing());",
+    "new": "    return this.#parts.inputs.current();"
+  },
+  {
+    "id": "D2523",
+    "defect": "While the build that decides a workspace's inputs has not ended, the workspace is fingerprinted over every input, so a result from before the edit can read current.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "  if (workspaces?.kind === NARROWING.building) {\n    return { ok: false, reason: workspaces.reason };\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D2524",
+    "defect": "A narrowing built at an earlier input revision is used at the current one, so an edit that adds a dependency stales nothing it reaches.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "  if (latest === undefined || latest.revision !== revision) {",
+    "new": "  if (latest === undefined) {"
+  },
+  {
+    "id": "D2525",
+    "defect": "A narrowing built over another discovery is used for the one the answer reads, so workspaces are narrowed by a selection input that no longer holds.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "  if (state === undefined || state.discoveryId !== query.discoveryId) {",
+    "new": "  if (state === undefined) {"
+  },
+  {
+    "id": "D2526",
+    "defect": "An answer leaves out why no workspace's inputs are narrowed, so a widened answer reads like a narrowed one.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      ...(inputs.inputsNotNarrowed === undefined\n        ? {}\n        : { inputsNotNarrowed: inputs.inputsNotNarrowed }),\n",
+    "new": ""
+  },
+  {
+    "id": "D2527",
+    "defect": "A failed build at the current revision reads as a build still running, so every workspace stays unknown instead of widening to the whole project.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "  return {\n    kind: NARROWING.widened,\n    notNarrowed: { kind: DEPENDENCY_BUILD_FAILED, reason: latest.reason },\n  };\n",
+    "new": "  return building(revision, failed);\n"
+  },
+  {
+    "id": "D2528",
+    "defect": "While the build after a failed one runs, answers drop the failure's reason before any later build has succeeded.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    return building(revision, failed);",
+    "new": "    return building(revision, undefined);"
+  },
+  {
+    "id": "D2529",
+    "defect": "A discovery that yields no selection input is reported as a failed build, so the answer names the wrong cause of the widening.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "      notNarrowed: { kind: NO_SELECTION_INPUT, reason: state.reason },",
+    "new": "      notNarrowed: { kind: DEPENDENCY_BUILD_FAILED, reason: state.reason },"
+  },
+  {
+    "id": "D2530",
+    "defect": "A narrowing whose selection refuses an input's path is used as if it had selected, so the widening goes unreported.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "  if (reason === undefined) return workspaces;\n",
+    "new": "  return workspaces;\n"
+  },
+  {
+    "id": "D2531",
+    "defect": "A narrowed view still fingerprints each workspace over every input of the project, so an edit in one workspace stales every other workspace's results.",
+    "file": "packages/daemon/src/inputs/current-inputs.ts",
+    "old": "      ? workspaces.narrowing.workspaceInputs(project, entry.workspace.path)\n",
+    "new": "      ? undefined\n"
+  },
+  {
+    "id": "D2534",
+    "defect": "A listed test module the narrowed inputs leave out is digested from disk instead of the snapshot that holds it, so an edit the tracker has read leaves the workspace's fingerprint as it was.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    const read = heldDigest(inputs.project, path) ?? reads.moduleDigest(path);",
+    "new": "    const read = reads.moduleDigest(path);"
+  },
+  {
+    "id": "D2537",
+    "defect": "A stop never closes the build executor, so its process outlives the daemon.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await buildExecutor.close();\n",
+    "new": ""
+  },
+  {
+    "id": "D2538",
+    "defect": "The tracker's change signal never resolves while the tracker runs, so a failed build or a tracker that could not vouch is never followed by another build.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    if (this.#stopped) return Promise.resolve();\n    return new Promise((resolve) => this.#changeWaiters.push(resolve));",
+    "new": "    return new Promise(() => undefined);"
+  },
+  {
+    "id": "D2555",
+    "defect": "The tracker's change signal resolves at once, so the builds' rounds spin on microtasks while the tracker cannot vouch and starve the event loop that would end it.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    return new Promise((resolve) => this.#changeWaiters.push(resolve));",
+    "new": "    return Promise.resolve();"
+  },
+  {
+    "id": "D2556",
+    "defect": "Pending reads that drain without moving a digest never signal, so a build waiting on them sleeps until an unrelated event or the periodic reconciliation.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#ledger.readUpTo(through);\n      this.#signalChange();\n",
+    "new": "      this.#ledger.readUpTo(through);\n"
+  },
+  {
+    "id": "D2557",
+    "defect": "A protection walk's end never signals, so a build waiting on it sleeps though the walk's own commit moved the revision.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "        this.#protecting -= 1;\n        this.#signalChange();\n",
+    "new": "        this.#protecting -= 1;\n"
+  },
+  {
+    "id": "D2558",
+    "defect": "A recorded build leaves the count of discards in a row as it was, so a run proceeds after two discards a successful build separated.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "  #record(discovery: StoredDiscovery, build: EndedBuild): void {\n    this.#discards = { ...this.#discards, consecutive: 0 };\n",
+    "new": "  #record(discovery: StoredDiscovery, build: EndedBuild): void {\n"
+  },
+  {
+    "id": "D2559",
+    "defect": "A run counts every discard since the daemon started, so the next workspace's run proceeds at once after the first gave up waiting.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    const waitedFrom = builds.discards().total;",
+    "new": "    const waitedFrom = 0;"
+  },
+  {
+    "id": "D2560",
+    "defect": "A build a new discovery's replacement discarded counts toward the new discovery's discards in a row, so its run proceeds after one discard of its own build.",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "        consecutive: this.#discards.consecutive + (replaced ? 0 : 1),",
+    "new": "        consecutive: this.#discards.consecutive + 1,"
+  },
+  {
+    "id": "D2561",
+    "defect": "A selection refusal is never logged, so every workspace widens with nothing in the log saying why.",
+    "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
+    "old": "    if (this.#sets.refused) this.#refused(this.#sets.reason);\n",
     "new": ""
   }
 ]

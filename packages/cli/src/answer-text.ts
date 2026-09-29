@@ -1,10 +1,14 @@
 import {
   activityText,
+  DEPENDENCY_BUILD_FAILED,
   FRESHNESS_VALUES,
+  NO_SELECTION_INPUT,
   RECONCILIATION_INCOMPLETE,
+  SELECTION_REFUSED,
   TEST_STATES,
   WATCHER_UNHEALTHY,
   type InputFacts,
+  type InputsNotNarrowed,
   type NotDiscoveredEntry,
   type PathStatusResponse,
   type SummaryResponse,
@@ -26,6 +30,13 @@ const NOT_DISCOVERED_HEADING = "Not discovered:";
 const UNFINGERPRINTED_HEADING =
   "No current input fingerprint, so no result of these reads current:";
 const NOT_YET_RECONCILED = "none has ended yet";
+const NOT_NARROWED_WARNING =
+  "Warning: no workspace's inputs are narrowed to those its selection includes, since";
+const NOT_NARROWED_CAUSES: Record<InputsNotNarrowed["kind"], string> = {
+  [DEPENDENCY_BUILD_FAILED]: "the last dependency build failed",
+  [NO_SELECTION_INPUT]: "the discovery yields no selection input",
+  [SELECTION_REFUSED]: "selection refused an input's path",
+};
 
 /** The answer's fields for `--json`, without the daemon protocol's own. */
 export function answerFields(answer: Answer): Record<string, unknown> {
@@ -75,6 +86,11 @@ export function contextLines(answer: Answer): string[] {
     ...(answer.nonInputsUnusable === undefined
       ? []
       : [`Warning: ${firstLine(answer.nonInputsUnusable)}`]),
+    ...(answer.inputsNotNarrowed === undefined
+      ? []
+      : [
+          `${NOT_NARROWED_WARNING} ${NOT_NARROWED_CAUSES[answer.inputsNotNarrowed.kind]}: ${firstLine(answer.inputsNotNarrowed.reason)}`,
+        ]),
     ...(unfingerprinted.length === 0
       ? []
       : [UNFINGERPRINTED_HEADING, ...unfingerprinted]),

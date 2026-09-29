@@ -460,5 +460,40 @@
     "file": "packages/cli/src/trust-prompt.ts",
     "old": "        ? [`Non-inputs: none, since ${declaration.file} declares no pattern`]",
     "new": "        ? []"
+  },
+  {
+    "id": "D2535",
+    "defect": "A human answer's warning gives only the reason, saying neither that no workspace's inputs are narrowed nor the cause, so a failed build reads as a bare executor exit.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "          `${NOT_NARROWED_WARNING} ${NOT_NARROWED_CAUSES[answer.inputsNotNarrowed.kind]}: ${firstLine(answer.inputsNotNarrowed.reason)}`,",
+    "new": "          `Warning: ${firstLine(answer.inputsNotNarrowed.reason)}`,"
+  },
+  {
+    "id": "D2536",
+    "defect": "A daemon's queries read every workspace over the whole project's inputs, so an edit to one workspace stales every other workspace's results.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return this.#parts.inputs.current({\n      discoveryId: results.discovery?.discoveryId,\n      state: this.#builds.narrowing().state,\n    });",
+    "new": "    return this.#parts.inputs.current();"
+  },
+  {
+    "id": "D2562",
+    "defect": "A discovery with no selection input is named in the human warning as a failed build, so the answer gives the wrong cause.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  [NO_SELECTION_INPUT]: \"the discovery yields no selection input\",",
+    "new": "  [NO_SELECTION_INPUT]: \"the last dependency build failed\","
+  },
+  {
+    "id": "D2563",
+    "defect": "A selection refusal is named in the human warning as a failed build, so the answer gives the wrong cause.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  [SELECTION_REFUSED]: \"selection refused an input's path\",",
+    "new": "  [SELECTION_REFUSED]: \"the last dependency build failed\","
+  },
+  {
+    "id": "D2564",
+    "defect": "The --json answer leaves out inputsNotNarrowed, so a machine reader takes a widened answer for a narrowed one.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  delete fields[\"protocolVersion\"];\n",
+    "new": "  delete fields[\"protocolVersion\"];\n  delete fields[\"inputsNotNarrowed\"];\n"
   }
 ]
