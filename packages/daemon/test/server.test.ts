@@ -21,11 +21,13 @@ import {
   memoryLog,
   withConnection,
   withDaemonKey,
-  withTestEndpoint,
   type RawConnection,
 } from "./daemon-harness.js";
 import { inTempDir } from "./harness.js";
+import { testSocketPath, withTestEndpoint } from "./test-endpoint.js";
 
+/** The longest path `listen` accepts for a Unix socket: `sun_path` holds 108 bytes, the last for the terminating NUL. */
+const SOCKET_PATH_LIMIT_BYTES = 107;
 const DAEMON_PID = 4242;
 const LOG_FILE = "/state/daemon-log.log";
 const IDENTITY: DaemonIdentity = {
@@ -546,5 +548,13 @@ describe("the raw connection a test reads lines from", () => {
       connect.mockRestore();
     }
     expect(read).toBe(CLOSED);
+  });
+});
+
+describe("the socket a test endpoint listens on", () => {
+  it("D2608: has a path that fits the bytes a Unix socket path allows, under the run's long temp directory", () => {
+    expect(Buffer.byteLength(testSocketPath())).toBeLessThanOrEqual(
+      SOCKET_PATH_LIMIT_BYTES,
+    );
   });
 });

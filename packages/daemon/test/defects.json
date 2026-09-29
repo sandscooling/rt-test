@@ -4996,5 +4996,12 @@
     "file": "packages/daemon/src/daemon/dependency-builds.ts",
     "old": "    this.#parts.log.entry(\n      `the dependency build at input revision ${revision} timed out while its inputs moved, so it counts as discarded: ${verdict.reason}`,\n    );\n",
     "new": ""
+  },
+  {
+    "id": "D2608",
+    "defect": "A test endpoint's socket sits under the run's temp root, whose name carries the owner's start time, so its path passes the 107 bytes a Unix socket path allows and listen fails with EINVAL.",
+    "file": "packages/daemon/test/test-endpoint.ts",
+    "old": "    TEST_SOCKET_DIRECTORY,\n    `${TEST_SOCKET_PREFIX}",
+    "new": "    runTempRoot(),\n    `${TEST_SOCKET_PREFIX}"
   }
 ]

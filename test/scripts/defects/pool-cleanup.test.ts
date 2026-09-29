@@ -105,6 +105,8 @@ interface HeldScratch {
   readonly holds: typeof holdsWithin;
   /** Whether `removeDirectory` removes the folder. */
   readonly removed: boolean;
+  /** The code the removal of the held folder is refused with; EBUSY when absent. */
+  readonly refusedWith?: string;
 }
 
 /** A wait that answers at once, as though the orphans ended, after asking `checks` times. */
@@ -144,7 +146,7 @@ async function withHeldScratch(
   vi.mocked(holdsWithin).mockImplementation(held.holds);
   vi.mocked(removeDirectory).mockResolvedValue(held.removed);
   vi.mocked(rmSync).mockImplementation((path, options) => {
-    if (String(path) === dir) throw codedError("EBUSY");
+    if (String(path) === dir) throw codedError(held.refusedWith ?? "EBUSY");
     actualFs.rmSync(path, options);
   });
   try {
@@ -237,6 +239,14 @@ describe("removing a scratch folder that Windows holds", () => {
   it("D2573: removes the folder through removeDirectory once the processes ended", async () => {
     const { dir, removals } = await withHeldScratch(
       ORPHANS_ENDED,
+      async () => undefined,
+    );
+    expect(removals).toEqual([dir]);
+  });
+
+  it("D2578: removes the folder through removeDirectory when its removal is refused as not permitted", async () => {
+    const { dir, removals } = await withHeldScratch(
+      { ...ORPHANS_ENDED, refusedWith: "EPERM" },
       async () => undefined,
     );
     expect(removals).toEqual([dir]);

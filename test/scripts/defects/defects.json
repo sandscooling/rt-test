@@ -1181,5 +1181,12 @@
     "file": "test/scripts/defects/harness.ts",
     "old": "console.error(`after the failure below, ${String(cleanup)}`);",
     "new": "void cleanup;"
+  },
+  {
+    "id": "D2578",
+    "defect": "The scratch-folder cleanup treats only EBUSY as a held folder, so on EPERM, the code Windows usually gives for a folder some process has as its working directory, it rethrows at once instead of waiting on the run's orphans and removing through removeDirectory.",
+    "file": "test/scripts/defects/harness.ts",
+    "old": "new Set([\"EBUSY\", \"EPERM\"])",
+    "new": "new Set([\"EBUSY\"])"
   }
 ]
