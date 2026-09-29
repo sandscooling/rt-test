@@ -40,3 +40,12 @@ export class DaemonLog {
     this.entry(`error: ${context}: ${errorText(error)}`);
   }
 }
+
+/** The same log, each of whose entries first names `role`, so two components logging alike can be told apart. */
+export function roleLog(log: DaemonLog, role: string): DaemonLog {
+  return {
+    file: log.file,
+    entry: (message) => log.entry(`${role}: ${message}`),
+    error: (context, error) => log.error(`${role}: ${context}`, error),
+  };
+}

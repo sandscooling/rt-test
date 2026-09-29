@@ -280,6 +280,7 @@ export class InputTracker implements TrackedInputs {
         reason: errorText(error),
       }))
       .finally(() => {
+        this.#commit();
         this.#protecting -= 1;
         this.#signalChange();
       });

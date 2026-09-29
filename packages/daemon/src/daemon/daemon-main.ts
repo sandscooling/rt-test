@@ -5,7 +5,7 @@ import { consumerIdentity } from "../store/consumer-identity.js";
 import { openStore, type RtTestStore } from "../store/open-store.js";
 import type { StoreScope } from "../store/stored-records.js";
 import { errorText } from "../vitest/error-text.js";
-import { DaemonLog, daemonLogFile } from "./daemon-log.js";
+import { DaemonLog, daemonLogFile, roleLog } from "./daemon-log.js";
 import { createDaemonKey, type DaemonKey } from "./endpoint-proof.js";
 import { identityHash, listenOnEndpoint, type Listening } from "./endpoint.js";
 import { Executor } from "./executor.js";
@@ -28,6 +28,7 @@ const REFUSED_EXIT_CODE = 1;
 const STORE_LOCK_PREFIX = "daemon-";
 const STORE_LOCK_EXTENSION = ".lock";
 const STORE_LOCK_HOLDER = "a daemon serving this worktree's store";
+const BUILD_EXECUTOR_ROLE = "dependency builds";
 const STARTER_GONE_REASON =
   "the starter did not accept the start after the daemon reported serving, so nothing was run";
 
@@ -123,7 +124,7 @@ async function serve(
     store,
     log,
     executor: new Executor(log),
-    buildExecutor: new Executor(log),
+    buildExecutor: new Executor(roleLog(log, BUILD_EXECUTOR_ROLE)),
     inputs,
     closeEndpoint: async () => {
       server.closeConnections();

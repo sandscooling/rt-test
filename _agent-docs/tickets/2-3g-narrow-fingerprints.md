@@ -405,6 +405,19 @@ Test clarity, the tests session's call: D2538 sits under the describe "the finge
 
 Tests session's reply (19:55): G2 to G14 worked (D2551 to D2553, D2555 to D2564; D2535 re-anchored and strengthened; G14 through a never-created root under the temporary directory) and every clarity note taken. G1 is refuted as inert, and the review agrees: `Narrowing.workspaceInputs` answers every input of the project once its sets are refused, so fingerprinting through the unrefused narrowing still covers the whole project; it is recorded under § Deliberately Untested.
 
+Tech-debt pass against 5b0a006 (20:27 to 20:48; `list-open-issues.mjs`: 0 open issues, complete):
+
+- T1: no change, unreachable (measured by reading): after `#drainQueue`'s read `try`, `#commit`, `readUpTo`, `#signalChange` and `#readFailed` only assign, resolve, or log through `DaemonLog.entry`, which catches its own write failure.
+- T2: fixed. `keepReleasedFiles` leaves the commit to the caller, and `#walkReleased` commits through `#commit` in its `finally`, before the signal, so every revision move signals from one place. D2557's walk released a file, so `#commit`'s own signal now masks its mutation: gap D1 below.
+- T3: folded into 2.4d, whose AC1 and AC2 task adds named-path reads through the module this extraction made, re-authoring `QueuedReads`' interface and the queue; its signal and `#label` parts also sit on D1960's and D1961's anchors.
+- T4: fixed. `roleLog` (`daemon-log.ts`) names the role on each entry, and the build executor logs as "dependency builds: ...".
+- T5 and T7: folded into #43 (2.3f, now 2.3j), whose bounded build re-authors how a failed build is recorded in `NarrowingState`; T5 also moves D2510's anchor.
+- T6: kept (orchestrator ruling, asked by `session_wake` at 20:48, answered at 20:49; decider the orchestrator): a refused path widening every workspace is the safe direction, rare, Linux-only, and visible in the log and every answer; narrowing the accepted paths buys precision, not correctness, and is queued for after 2.5's corpus measures real consumers' names.
+
+Debt test gaps:
+
+- D1 (MEDIUM, 17:42 ruling) `packages/daemon/test/input-tracker.test.ts` D2557: its walk releases `docs/a.md`, so the revision moves and `#commit` signals, and dropping `#walkReleased`'s `finally` `#signalChange()` survives (verify-mine 20:48, 32/33, D2557 not detected). Expected: a walk that moves no revision (the patterns stop applying over no hidden file), so only the `finally`'s signal wakes the waiter. Worked by the tests session at 20:50: D2557 now walks over no hidden file and asserts the revision unmoved; the debt round's 33 records re-proved 33/33 at 20:55.
+
 ### Completion Notes
 
 Built by rt-t2-3g-dev, 17:38 to 18:07 on 2026-09-28, on main at 7612cb1.

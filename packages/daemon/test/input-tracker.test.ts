@@ -1977,17 +1977,22 @@ describe(
       expect(outcome).toStrictEqual({ signalled: true, moved: 0 });
     });
 
-    it("D2557: the change signal resolves once a protection walk ends", async () => {
-      const signalled = await inTempDir((root) => {
-        writeTree(root, DOCS_DECLARED);
+    it("D2557: the change signal resolves once a protection walk ends, though the walk released no file", async () => {
+      const outcome = await inTempDir((root) => {
+        writeTree(root, {
+          [DECLARATION_FILE]: JSON.stringify({ nonInputs: ["docs/**"] }),
+          "src/a.ts": "",
+        });
         return trackingOwnGitHome(root, async ({ tracker }) => {
+          const revision = tracker.facts().revision;
           const resolved = changeSignal(tracker);
-          // No discovery now protects the tests, so the patterns stop applying and only a walk finds docs/a.md.
+          // No discovery now protects the tests, so the patterns stop applying and a walk runs, over no hidden file.
           await tracker.protectInputs(undefined);
-          return eventually(resolved, SETTLE_MS);
+          const signalled = await eventually(resolved, SETTLE_MS);
+          return { signalled, moved: tracker.facts().revision - revision };
         });
       });
-      expect(signalled).toBe(true);
+      expect(outcome).toStrictEqual({ signalled: true, moved: 0 });
     });
   },
 );

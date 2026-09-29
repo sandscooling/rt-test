@@ -17,7 +17,7 @@ export type ReleasedFiles =
 /**
  * Walks the consumer root under the filter's current decision for the inputs `state` does not hold: files a
  * declared pattern hid until protection changed, which the tracker never read and no watch reported. Keeps each read
- * no queued path supersedes, marking no job. Call it only once that decision governs which events are dropped, so an
+ * no queued path supersedes, marking no job, and leaves the commit to the caller. Call it only once that decision governs which events are dropped, so an
  * edit to such a file either lands before the walk reads its time, or arrives as an event. `queued` takes an absolute
  * path; `since` is the job's start in ms, when a job relies on the inputs.
  */
@@ -33,7 +33,6 @@ export async function keepReleasedFiles(
   for (const [path, read] of released) {
     if (!queued(absoluteInputPath(scope.root, path))) state.set(path, read);
   }
-  state.commit();
   const changed =
     since === undefined
       ? undefined
