@@ -51,6 +51,13 @@ export type WorkspaceRun =
       /** The signal aborted before the run's turn came, so the workspace was never loaded. */
       readonly status: "interrupted-before-load";
       readonly workspace: VitestWorkspace;
+    }
+  | {
+      /** The run's executor process ended during the run with no stop asked of it, so the run left no result. */
+      readonly status: "crashed";
+      readonly workspace: VitestWorkspace;
+      /** How the process ended. */
+      readonly error: string;
     };
 
 /** A run that loaded nothing because its workspace no longer matched the start the user confirmed; it is never stored. */

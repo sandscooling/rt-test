@@ -10,6 +10,7 @@ export const MODULE_FAILED_TO_LOAD = "module-failed-to-load";
 export const RUN_FAILED = "run-failed";
 export const RUN_UNSUPPORTED_VITEST = "run-unsupported-vitest";
 export const RUN_INTERRUPTED_BEFORE_LOAD = "run-interrupted-before-load";
+export const RUN_CRASHED = "run-crashed";
 export const NOT_IN_LATEST_RUN = "not-in-latest-run";
 export const NEVER_RUN = "never-run";
 
@@ -23,6 +24,7 @@ export type TestState =
   | typeof RUN_FAILED
   | typeof RUN_UNSUPPORTED_VITEST
   | typeof RUN_INTERRUPTED_BEFORE_LOAD
+  | typeof RUN_CRASHED
   | typeof NOT_IN_LATEST_RUN
   | typeof NEVER_RUN;
 
@@ -38,6 +40,7 @@ const STATE_MEMBERS: Readonly<Record<TestState, true>> = {
   [RUN_FAILED]: true,
   [RUN_UNSUPPORTED_VITEST]: true,
   [RUN_INTERRUPTED_BEFORE_LOAD]: true,
+  [RUN_CRASHED]: true,
   [NOT_IN_LATEST_RUN]: true,
   [NEVER_RUN]: true,
 };
@@ -194,6 +197,7 @@ export type NotDiscoveredEntry = CutReason &
   );
 
 type RanStatus = Extract<WorkspaceRun, { status: "ran" }>["status"];
+type CrashedStatus = Extract<WorkspaceRun, { status: "crashed" }>["status"];
 
 export type LatestRunFacts = AdapterVersionFacts & {
   readonly runId: string;
@@ -207,7 +211,15 @@ export type LatestRunFacts = AdapterVersionFacts & {
         readonly unhandledErrors: number;
         readonly moduleErrors: number;
       }
-    | { readonly status: Exclude<WorkspaceRun["status"], RanStatus> }
+    | ({
+        readonly status: CrashedStatus;
+      } & CutReason)
+    | {
+        readonly status: Exclude<
+          WorkspaceRun["status"],
+          RanStatus | CrashedStatus
+        >;
+      }
   );
 
 export interface WorkspaceFacts {

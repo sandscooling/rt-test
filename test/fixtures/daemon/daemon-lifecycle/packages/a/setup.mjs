@@ -13,7 +13,8 @@ function atSetup(name, count) {
 }
 
 // Runs in the executor process at every discovery and run. The setup whose count `host-rejection` names leaks an
-// unhandled rejection on the executor's own thread. With `spawn-children` present it starts a heartbeat child. The
+// unhandled rejection on the executor's own thread, and the one `crash-at` names throws uncaught on the executor's
+// next event-loop turn, ending it. With `spawn-children` present it starts a heartbeat child. The
 // setup whose count `stick-at` names loops synchronously, where no abort reaches it, and writes `stuck` only once its
 // child has beaten, so a test acting at `stuck` finds that child running.
 export default async function setup() {
@@ -22,6 +23,11 @@ export default async function setup() {
   const count = readFileSync(here("setups"), "utf8").length;
   if (atSetup("host-rejection", count)) {
     void Promise.reject(new Error("host rejection from packages/a's setup"));
+  }
+  if (atSetup("crash-at", count)) {
+    setImmediate(() => {
+      throw new Error("uncaught from packages/a's setup");
+    });
   }
   if (spawnsChildren()) await startHeartbeat(`setup-${process.pid}`);
   if (!atSetup("stick-at", count)) return;

@@ -157,6 +157,8 @@ function runColumns(run: WorkspaceRun): RunColumns {
       };
     case "interrupted-before-load":
       return NO_RUN_COLUMNS;
+    case "crashed":
+      return { ...NO_RUN_COLUMNS, error: run.error };
   }
 }
 

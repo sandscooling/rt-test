@@ -20,6 +20,7 @@ import {
   MODULE_NOT_RUN,
   NEVER_RUN,
   NOT_IN_LATEST_RUN,
+  RUN_CRASHED,
   RUN_FAILED,
   RUN_INTERRUPTED_BEFORE_LOAD,
   RUN_UNSUPPORTED_VITEST,
@@ -59,6 +60,7 @@ const RUN_STATES = {
   failed: RUN_FAILED,
   unsupported: RUN_UNSUPPORTED_VITEST,
   "interrupted-before-load": RUN_INTERRUPTED_BEFORE_LOAD,
+  crashed: RUN_CRASHED,
 } as const;
 const MODULE_STATES = {
   "not-run": MODULE_NOT_RUN,

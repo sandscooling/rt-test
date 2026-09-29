@@ -9,6 +9,7 @@ import {
   SELECTION_REFUSED,
   TEST_STATES,
   WATCHER_UNHEALTHY,
+  type CutReason,
   type InputFacts,
   type InputsNotNarrowed,
   type NotDiscoveredEntry,
@@ -134,9 +135,14 @@ export function notDiscoveredLines(
     heading,
     ...entries.map(
       (entry) =>
-        `${INDENT}${entry.kind} ${oneLine(entryName(entry))}: ${firstLine(entry.reason)}${entry.omittedCharacters > 0 ? ` (${entry.omittedCharacters} more characters)` : ""}${errorCountText(entry)}`,
+        `${INDENT}${entry.kind} ${oneLine(entryName(entry))}: ${cutReasonText(entry)}${errorCountText(entry)}`,
     ),
   ];
+}
+
+/** A reason an answer cut, as its first line and a count of what the cut left out. */
+export function cutReasonText(cut: CutReason): string {
+  return `${firstLine(cut.reason)}${cut.omittedCharacters > 0 ? ` (${cut.omittedCharacters} more characters)` : ""}`;
 }
 
 function errorCountText(entry: NotDiscoveredEntry): string {

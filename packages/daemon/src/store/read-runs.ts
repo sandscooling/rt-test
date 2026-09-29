@@ -200,6 +200,8 @@ function workspaceRun(row: Row, children: RunChildren): WorkspaceRun {
       };
     case "interrupted-before-load":
       return { status, workspace };
+    case "crashed":
+      return { status, workspace, error: text(row, "error") };
     default:
       throw unreadable("runs.status", status);
   }

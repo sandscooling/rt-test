@@ -10,6 +10,7 @@ import {
   answerFields,
   contextLines,
   countLines,
+  cutReasonText,
   INDENT,
   joinLines,
   notDiscoveredLines,
@@ -24,12 +25,14 @@ import { oneLine, reported } from "../output.js";
 
 const NAME = "summary";
 const DETAIL_SEPARATOR = ", ";
+const REASON_SEPARATOR = ": ";
 const RUN_STATUS_PHRASES: Record<LatestRunFacts["status"], string> = {
   ran: "latest run loaded the workspace",
   failed: "latest run could not load the workspace",
   unsupported: "latest run found no supported Vitest",
   "interrupted-before-load":
     "latest run was interrupted before loading the workspace",
+  crashed: "latest run crashed",
 };
 
 export const summaryCommand: Command = {
@@ -77,6 +80,12 @@ function workspaceLine(workspace: WorkspaceFacts): string {
 
 function runFacts(run: LatestRunFacts): string[] {
   const version = `adapter version ${run.adapterVersion}${run.adapterVersionCurrent ? "" : " (not current)"}`;
+  if (run.status === "crashed") {
+    return [
+      `${RUN_STATUS_PHRASES[run.status]}${REASON_SEPARATOR}${cutReasonText(run)}`,
+      version,
+    ];
+  }
   if (!("execution" in run)) return [RUN_STATUS_PHRASES[run.status], version];
   return [
     `${RUN_STATUS_PHRASES[run.status]}${DETAIL_SEPARATOR}${run.execution}`,

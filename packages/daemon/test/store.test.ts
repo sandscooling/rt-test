@@ -255,6 +255,11 @@ const BEFORE_LOAD_RUN: WorkspaceRun = {
   status: "interrupted-before-load",
   workspace: WORKSPACE,
 };
+const CRASHED_RUN: WorkspaceRun = {
+  status: "crashed",
+  workspace: WORKSPACE,
+  error: "the executor process 7 exited during the job (exit code 1)",
+};
 
 const REGEXP_ALIAS: ReportedAlias = {
   find: "^~icons\\/(.*)$",
@@ -866,6 +871,14 @@ describe("storing a workspace run", () => {
     expect(runs).toStrictEqual([FAILED_RUN]);
   });
 
+  it("D2793: a crashed run reads back with the exit it stored", async () => {
+    const runs = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), CRASHED_RUN);
+      return runsOf(store, WORKTREE_A);
+    });
+    expect(runs).toStrictEqual([CRASHED_RUN]);
+  });
+
   it("D1223: a run interrupted before load reads back with the workspace it was for", async () => {
     const runs = await inStore((store) => {
       store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
@@ -1451,7 +1464,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 4 once opened", async () => {
+  it("D1280: the store is at schema version 5 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1459,7 +1472,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(4);
+    expect(version).toBe(5);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -1683,7 +1696,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 4 once opened", async () => {
+  it("D2097: the store is at schema version 5 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -1694,7 +1707,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(4);
+    expect(version).toBe(5);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -1754,6 +1767,59 @@ describe("opening a store written before each project's Vite root", () => {
       }),
     );
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
+  });
+});
+
+describe("opening a store written before crashed runs", () => {
+  it("D2791: a version 4 store opens at version 5, every run it held unchanged", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        withOpenStore(stateDirectory, (store) => {
+          store.writeRun(bound(WORKTREE_A), RAN_RUN);
+          store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+        });
+        const file = join(stateDirectory, STORE_FILE_NAME);
+        withRawDatabase(file, (database) => {
+          database.exec("PRAGMA user_version = 4");
+        });
+        const runs = withOpenStore(stateDirectory, (store) =>
+          runsOf(store, WORKTREE_A),
+        );
+        return { version: schemaVersionOf(file), runs };
+      }),
+    );
+    expect(outcome).toStrictEqual({ version: 5, runs: [RAN_RUN, FAILED_RUN] });
+  });
+
+  it("D2796: a version 4 store opens at version 5 with each discovery it held unchanged, selection facts included", async () => {
+    const discovery = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        withOpenStore(stateDirectory, (store) => {
+          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+        });
+        withRawDatabase(join(stateDirectory, STORE_FILE_NAME), (database) => {
+          database.exec("PRAGMA user_version = 4");
+        });
+        return withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+      }),
+    );
+    expect(discovery).toStrictEqual(DISCOVERY);
+  });
+
+  it("D2792: a new store is created at schema version 5", async () => {
+    const version = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        openStore(stateDirectory).close();
+        return schemaVersionOf(join(stateDirectory, STORE_FILE_NAME));
+      }),
+    );
+    expect(version).toBe(5);
   });
 });
 

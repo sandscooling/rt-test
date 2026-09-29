@@ -16,6 +16,7 @@ import {
   GROUP_REASON,
   orderQueue,
   queueGroup,
+  retryReason,
   staleReason,
   testModulesKey,
   type QueuedWorkspace,
@@ -262,7 +263,7 @@ export class Scheduler {
     this.#dirty = true;
   }
 
-  /** At most once per periodic reconciliation: what failed with no input change to blame is due again. */
+  /** At most once per periodic reconciliation: what failed or crashed with no input change to blame, or stored nothing while still due, is due again. */
   #armRetries(
     view: ScheduleView,
     eligible: readonly EligibleWorkspace[],
@@ -290,7 +291,7 @@ export class Scheduler {
       );
       const nothingStored =
         this.#attempts.get(path)?.nothingStored === true && stale !== undefined;
-      if (latest?.run.status === "failed" || nothingStored) {
+      if (retryReason(latest) !== undefined || nothingStored) {
         this.#retryWorkspaces.add(path);
       }
     }
@@ -341,7 +342,8 @@ export class Scheduler {
         staleReason(
           latest,
           fingerprintDigest(view.inputs.workspaceFingerprint(entry)),
-        ) ?? (retry ? DUE_REASON.failedRun : undefined);
+        ) ??
+        (retry ? (retryReason(latest) ?? DUE_REASON.nothingStored) : undefined);
       if (reason === undefined) continue;
       if (!retry && this.#ranAlready(path, revision, entry)) continue;
       due.push({ entry, latest, reason });

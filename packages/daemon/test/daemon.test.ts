@@ -918,7 +918,7 @@ describe("the executor process", () => {
   );
 
   it(
-    "D1495: an executor killed mid-run stores nothing for that run, is listed, and the next workspace still runs",
+    "D1495: an executor killed mid-run with no stop asked stores that run crashed, logged and not listed unstored, and the next workspace still runs",
     async () => {
       const outcome = await withDaemonConsumer(async (root, pids) => {
         holdAt(root, "hold");
@@ -934,11 +934,16 @@ describe("the executor process", () => {
               ? status
               : status.unstoredJobs.map((job) => job.workspacePath),
           runs: storedRuns(identity.stateDirectory, root),
+          logged: logged(identity.logFile, `run ended: ${WORKSPACE_A} crashed`),
         };
       });
       expect(outcome).toStrictEqual({
-        unstored: [WORKSPACE_A],
-        runs: [[WORKSPACE_B, "completed"]],
+        unstored: [],
+        runs: [
+          [WORKSPACE_A, "crashed"],
+          [WORKSPACE_B, "completed"],
+        ],
+        logged: true,
       });
     },
     DAEMON_TEST_TIMEOUT_MS,

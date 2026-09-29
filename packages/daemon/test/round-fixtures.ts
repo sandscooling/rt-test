@@ -70,6 +70,15 @@ export function failedRun(path: string): WorkspaceRun {
   };
 }
 
+/** A run of `path` whose executor process died during it, so it holds no test result. */
+export function crashedRun(path: string): WorkspaceRun {
+  return {
+    status: "crashed",
+    workspace: workspace(path),
+    error: "the executor process 7 exited during the job (exit code 1)",
+  };
+}
+
 /** A discovered workspace listing one test in each of `modulePaths`. */
 export function discoveredIn(
   path: string,

@@ -37,6 +37,7 @@ import {
   NO_BUILD_ENDED,
   StandInNarrowing,
   builtAt,
+  crashedRun,
   discoveredIn,
   failedAt,
   failedRun,
@@ -643,6 +644,103 @@ describe("retrying at a periodic reconciliation", () => {
       before: ["idle"],
       after: ["idle", "run:a@1", "idle"],
     });
+  });
+
+  it("D2786: a workspace whose latest run crashed is not retried until a periodic reconciliation ends, and then is", async () => {
+    const outcome = await running(
+      {
+        seed: (store) => {
+          currentResults("a")(store);
+          store.seedRun(crashedRun("a"), digestOf("a-digest"));
+        },
+      },
+      async (started) => {
+        await flush();
+        const before = [...started.calls];
+        started.inputs.endPeriodicReconciliation();
+        await flush();
+        return { before, after: [...started.calls] };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      before: ["idle"],
+      after: ["idle", "run:a@1", "idle"],
+    });
+  });
+
+  it("D2787: a crashed run's retry is logged with the crash's own reason, never as a failed run", async () => {
+    const due = await running(
+      {
+        seed: (store) => {
+          currentResults("a")(store);
+          store.seedRun(crashedRun("a"), digestOf("a-digest"));
+        },
+      },
+      async (started) => {
+        await flush();
+        started.inputs.endPeriodicReconciliation();
+        await flush();
+        return dueEntries(started.log);
+      },
+    );
+    expect(due).toStrictEqual([
+      "due: a, its latest run's executor process ended during the run with no input change to blame, so the periodic reconciliation retries it",
+    ]);
+  });
+
+  it("D2795: a failed run's retry is logged with the failed run's own reason, never as a crash", async () => {
+    const due = await running(
+      {
+        seed: (store) => {
+          currentResults("a")(store);
+          store.seedRun(failedRun("a"), digestOf("a-digest"));
+        },
+      },
+      async (started) => {
+        await flush();
+        started.inputs.endPeriodicReconciliation();
+        await flush();
+        return dueEntries(started.log);
+      },
+    );
+    expect(due).toStrictEqual([
+      "due: a, its latest run failed with no input change to blame, so the periodic reconciliation retries it",
+    ]);
+  });
+
+  it("D2788: a retry armed because the last attempt stored nothing, planned once the inputs read current again, is logged with that reason and never as a failed run", async () => {
+    let digest = "a-changed";
+    let moveRevision = (): void => undefined;
+    const due = await running(
+      {
+        seed: currentResults("a"),
+        script: {
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: path === "a" ? digest : `${path}-digest`,
+          }),
+        },
+        ran: (_path, call) => {
+          if (call === 0) return { stored: false };
+          if (call === 1) {
+            digest = "a-digest";
+            moveRevision();
+            return { notBegun: true };
+          }
+          return {};
+        },
+      },
+      async (started) => {
+        moveRevision = () => started.inputs.moveRevision();
+        await flush();
+        started.inputs.endPeriodicReconciliation();
+        await flush();
+        return dueEntries(started.log);
+      },
+    );
+    expect(due.at(-1)).toBe(
+      "due: a, its last attempt stored nothing, so the periodic reconciliation retries it",
+    );
   });
 
   it("D2661: a workspace whose retry fails again is retried once for each periodic reconciliation, not repeatedly", async () => {

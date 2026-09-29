@@ -309,6 +309,7 @@ const FIXTURE_MARKERS = [
     "spawn-children",
     "stick-at",
     "host-rejection",
+    "crash-at",
     "child-endpoint",
     "heartbeat-*",
     "failed-heartbeat-*",
@@ -388,7 +389,7 @@ export function fixtureFile(root: string, name: string): string {
 /** `packages/a`'s global setup count at a confirmed start's discovery, the first job to load it. */
 const DISCOVERY_SETUP = "1";
 /** `packages/a`'s global setup count at a confirmed start's first run, which follows its discovery's. */
-const FIRST_RUN_SETUP = "2";
+export const FIRST_RUN_SETUP = "2";
 
 /** Makes `packages/a`'s global setup leak one unhandled rejection on the executor's thread at the discovery alone. */
 export function leakAtDiscovery(root: string): void {

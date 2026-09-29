@@ -537,5 +537,26 @@
     "file": "packages/daemon/src/query/summary.ts",
     "old": "    ...(unhandledErrors.length === 0",
     "new": "    ...(unhandledErrors.length >= 0"
+  },
+  {
+    "id": "D2789",
+    "defect": "The human summary shows a crashed workspace's latest run as crashed with no reason, so the reader cannot tell how its executor ended.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "      `${RUN_STATUS_PHRASES[run.status]}${REASON_SEPARATOR}${cutReasonText(run)}`,",
+    "new": "      RUN_STATUS_PHRASES[run.status],"
+  },
+  {
+    "id": "D2790",
+    "defect": "A cut reason drops its count of the characters the cut left out, so a reader cannot tell the text was cut.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return `${firstLine(cut.reason)}${cut.omittedCharacters > 0 ? ` (${cut.omittedCharacters} more characters)` : \"\"}`;",
+    "new": "  return firstLine(cut.reason);"
+  },
+  {
+    "id": "D2798",
+    "defect": "The human summary prints a cut crash reason without its count of the characters the cut left out.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "${REASON_SEPARATOR}${cutReasonText(run)}",
+    "new": "${REASON_SEPARATOR}${oneLine(run.reason)}"
   }
 ]

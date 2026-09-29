@@ -52,9 +52,14 @@ export type JobOutcome<T> =
   | { readonly ended: true; readonly value: T }
   | { readonly ended: false; readonly reason: string };
 
-/** The executor's reply, or the reason the job ended without one. */
+/**
+ * The executor's reply, or the reason the job ended without one: its process exited with no stop asked of it, or the
+ * job was lost another way.
+ */
 type JobReply =
-  ExecutorReply | { readonly type: "lost"; readonly reason: string };
+  | ExecutorReply
+  | { readonly type: "exited"; readonly reason: string }
+  | { readonly type: "lost"; readonly reason: string };
 
 type Settle = (reply: JobReply) => void;
 
@@ -74,6 +79,8 @@ export class Executor {
   #buildStopped = false;
   /** An abort that arrived while the job's executor was being contained, before the job was sent to it. */
   #abortBeforeSend = false;
+  /** Whether the daemon asked the job in progress to stop, by an abort or a close, so its executor's exit is no crash. */
+  #stopAsked = false;
   readonly #containment: TreeContainment = treeContainment();
 
   constructor(log: DaemonLog) {
@@ -92,9 +99,14 @@ export class Executor {
     configFile: string,
   ): Promise<JobOutcome<WorkspaceRun | NotConfirmedRun>> {
     const reply = await this.#job({ type: "run", workspace, configFile });
-    return reply.type === "ran"
-      ? { ended: true, value: reply.run }
-      : { ended: false, reason: failureReason(reply) };
+    if (reply.type === "ran") return { ended: true, value: reply.run };
+    if (reply.type === "exited") {
+      return {
+        ended: true,
+        value: { status: "crashed", workspace, error: reply.reason },
+      };
+    }
+    return { ended: false, reason: failureReason(reply) };
   }
 
   /**
@@ -140,6 +152,7 @@ export class Executor {
       this.#abortBeforeSend = true;
       return;
     }
+    this.#stopAsked = true;
     if (this.#buildRecord !== undefined) {
       this.#buildStopped = true;
       endProcessTree(child);
@@ -159,6 +172,7 @@ export class Executor {
    * build's tree is ended at once, as a stop.
    */
   async close(): Promise<void> {
+    if (this.#settle !== undefined) this.#stopAsked = true;
     if (this.#buildRecord !== undefined) this.abort();
     await this.#childEnded();
     await this.#containment.close();
@@ -223,6 +237,7 @@ export class Executor {
         this.#boundPassed = false;
         this.#buildRecord = undefined;
         this.#buildStopped = false;
+        this.#stopAsked = false;
         if (this.#child === child) this.#child = undefined;
         void tree.end().then(() => exited.then(() => resolve(reply)));
       };
@@ -295,7 +310,7 @@ export class Executor {
     if (settle === undefined) return;
     const reason = this.#exitReason(child, code, signal);
     this.#log.entry(reason);
-    settle({ type: "lost", reason });
+    settle({ type: this.#stopAsked ? "lost" : "exited", reason });
   }
 
   #exitReason(
@@ -336,6 +351,7 @@ function neverStarted(child: ChildProcess): boolean {
 
 function failureReason(reply: JobReply): string {
   switch (reply.type) {
+    case "exited":
     case "lost":
       return reply.reason;
     case "job-failed":

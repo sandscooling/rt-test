@@ -69,6 +69,7 @@ export {
   SELECTION_REFUSED,
   TEST_STATES,
   WATCHER_UNHEALTHY,
+  type CutReason,
   type FileCounts,
   type InputFacts,
   type InputsNotNarrowed,

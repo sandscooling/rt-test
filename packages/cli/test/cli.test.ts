@@ -9,7 +9,23 @@ import {
 import { basename, dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+/** While set, the answer every `rt-test summary` receives in place of a daemon's. */
+const scripted = vi.hoisted(() => ({ summary: undefined as unknown }));
+
+vi.mock("@rt-test/daemon/client", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@rt-test/daemon/client")>();
+  return {
+    ...actual,
+    querySummary: (...args: Parameters<typeof actual.querySummary>) =>
+      scripted.summary === undefined
+        ? actual.querySummary(...args)
+        : Promise.resolve(scripted.summary),
+  };
+});
+
 import {
   crashError,
   listedModules,
@@ -40,6 +56,8 @@ import {
   atHoldPoint,
   confirmNothing,
   eventually,
+  FIRST_RUN_SETUP,
+  fixtureFile,
   holdAt,
   leakAtDiscovery,
   leakAtFirstRun,
@@ -56,6 +74,7 @@ import type { CliIo } from "../src/command.js";
 import {
   answerFields,
   contextLines,
+  cutReasonText,
   notDiscoveredLines,
 } from "../src/answer-text.js";
 import { main } from "../src/main.js";
@@ -1497,6 +1516,74 @@ describe("a query", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+
+  /** Makes `packages/a`'s global setup end its executor with an uncaught throw at the first run alone. */
+  function crashAtFirstRun(root: string): void {
+    writeFileSync(fixtureFile(root, "crash-at"), FIRST_RUN_SETUP);
+  }
+
+  it(
+    "D2789: a human summary shows a workspace whose latest run crashed as crashed, with how its executor ended",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        crashAtFirstRun(root);
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const run = await runCli(["summary"], { cwd: root });
+        return {
+          exit: run.exit,
+          line: run.stdout
+            .split("\n")
+            .find((text) => text.startsWith(`  ${WORKSPACE_A}:`))
+            ?.replace(/process \d+/, "process <pid>")
+            .replace(/adapter version \d+/, "adapter version <n>"),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        exit: 0,
+        line: `  ${WORKSPACE_A}: latest run crashed: the executor process <pid> exited during the job (exit code 1), adapter version <n>`,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it("D2798: a human summary shows a cut crash reason with its count of the characters the cut left out", async () => {
+    scripted.summary = humanAnswer({
+      workspaces: [
+        {
+          workspacePath: WORKSPACE_A,
+          latestRun: {
+            runId: "run-1",
+            adapterVersion: 3,
+            adapterVersionCurrent: true,
+            status: "crashed",
+            reason: "the executor process 7 exited",
+            omittedCharacters: 42,
+          },
+        },
+      ],
+    });
+    let stdout: string;
+    try {
+      stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
+    } finally {
+      scripted.summary = undefined;
+    }
+    expect(
+      stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
+    ).toBe(
+      `  ${WORKSPACE_A}: latest run crashed: the executor process 7 exited (42 more characters), adapter version 3`,
+    );
+  });
+
+  it("D2790: a cut reason reads as its text and a count of the characters the cut left out", () => {
+    expect(
+      cutReasonText({
+        reason: "the executor process 7 exited",
+        omittedCharacters: 42,
+      }),
+    ).toBe("the executor process 7 exited (42 more characters)");
+  });
 
   it(
     "D1851: a folder status's human text describes the folder and each file by counts, with no line of passing or failing for any",

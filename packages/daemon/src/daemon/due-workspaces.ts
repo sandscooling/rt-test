@@ -18,7 +18,23 @@ export const DUE_REASON = {
   inputsChanged: "its inputs differ from those of its latest run",
   failedRun:
     "its latest run failed with no input change to blame, so the periodic reconciliation retries it",
+  crashedRun:
+    "its latest run's executor process ended during the run with no input change to blame, so the periodic reconciliation retries it",
+  nothingStored:
+    "its last attempt stored nothing, so the periodic reconciliation retries it",
 } as const;
+
+/** Why the periodic reconciliation retries a workspace by its latest run: that run failed or crashed. Undefined for any other run. */
+export function retryReason(latest: StoredRun | undefined): string | undefined {
+  switch (latest?.run.status) {
+    case "failed":
+      return DUE_REASON.failedRun;
+    case "crashed":
+      return DUE_REASON.crashedRun;
+    default:
+      return undefined;
+  }
+}
 
 export const QUEUE_GROUP = {
   directTarget: "direct-target",
@@ -53,8 +69,8 @@ export interface QueuedWorkspace {
 }
 
 /**
- * Why the workspace's latest stored run is not bound to its current fingerprint, which is the rating every answer
- * gives it; undefined when it is bound to it.
+ * Why the workspace's latest stored run is not bound to its current fingerprint, compared as an answer rates a finished
+ * result; undefined when it is bound to it, even when its tests read unknown because the run finished none.
  */
 export function staleReason(
   latest: StoredRun | undefined,

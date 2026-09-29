@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -1181,6 +1181,216 @@ describe("the executor's guard against host unhandled rejections", () => {
       expect(loggedRejections(await driveGuard("record", "101")).length).toBe(
         100,
       );
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+const CRASH_FIXTURE = "executor-crash";
+/** Read by the executor-crash fixture's global setup: how it ends the executor process. */
+const CRASH_VARIABLE = "RT_EXECUTOR_CRASH";
+/** Read by the executor-crash fixture's first test: the directory holding its hold point. */
+const HOLD_VARIABLE = "RT_EXECUTOR_HOLD";
+const UNCAUGHT_EXIT =
+  "the executor process <pid> exited during the job (exit code 1)";
+const TEARDOWN_EXIT =
+  "the executor process <pid> exited during the job (exit code 3)";
+
+type CrashKind = "throw" | "exit-in-teardown" | "none";
+
+/** Runs `job` in a fresh executor over a copy of the executor-crash fixture set to `crash`, then closes it. */
+function inCrashingConsumer<T>(
+  install: VitestInstall,
+  crash: CrashKind,
+  job: (executor: Executor, root: string) => Promise<T>,
+): Promise<T> {
+  return inConsumerCopy(CRASH_FIXTURE, install, (root) =>
+    withEnvironment(CRASH_VARIABLE, crash, async () => {
+      next.containment = undefined;
+      const executor = new Executor(memoryLog());
+      try {
+        return await job(executor, root);
+      } finally {
+        await executor.close();
+      }
+    }),
+  );
+}
+
+function runIn(executor: Executor, root: string) {
+  return executor.run({ path: ".", directory: root }, FIXTURE_CONFIG);
+}
+
+/**
+ * Starts a run whose first test holds, waits until it holds, applies `stop`, releases the test, and hands back the
+ * run's outcome once `stop` has also settled.
+ */
+async function stoppedWhileHeld(
+  executor: Executor,
+  root: string,
+  stop: (executor: Executor) => Promise<void> | void,
+): Promise<JobOutcome<WorkspaceRun | NotConfirmedRun>> {
+  const hold = join(root, "hold-point");
+  mkdirSync(hold);
+  return withEnvironment(HOLD_VARIABLE, hold, async () => {
+    const job = runIn(executor, root);
+    await waitUntil(() => existsSync(join(hold, "holding")), job);
+    const stopped = stop(executor);
+    writeFileSync(join(hold, "release"), "");
+    const outcome = await job;
+    await stopped;
+    return outcome;
+  });
+}
+
+const pidless = (text: string): string =>
+  text.replace(/process \d+/g, "process <pid>");
+
+/** A job's outcome with each process id written as `<pid>`: a crashed run as its status, path and error, and any other result as its status. */
+function crashFacts(
+  outcome: JobOutcome<WorkspaceRun | NotConfirmedRun | TestDiscovery>,
+): unknown {
+  if (!outcome.ended) return { ended: false, reason: pidless(outcome.reason) };
+  const { value } = outcome;
+  if (!("status" in value)) return { ended: true, status: "discovered" };
+  if (value.status !== "crashed") return { ended: true, status: value.status };
+  return {
+    ended: true,
+    status: value.status,
+    workspacePath: value.workspace.path,
+    error: pidless(value.error),
+  };
+}
+
+function crashedWith(error: string): unknown {
+  return { ended: true, status: "crashed", workspacePath: ".", error };
+}
+
+describe("a run whose executor process dies with no stop asked of it", () => {
+  it(
+    "D2775: on Vitest 5, a run whose global setup throws uncaught is a crashed run naming the exit code",
+    async () => {
+      const outcome = await inCrashingConsumer("vitest", "throw", runIn);
+      expect(crashFacts(outcome)).toStrictEqual(crashedWith(UNCAUGHT_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2776: on Vitest 4.1, a run whose global setup throws uncaught is a crashed run naming the exit code",
+    async () => {
+      const outcome = await inCrashingConsumer("vitest-4", "throw", runIn);
+      expect(crashFacts(outcome)).toStrictEqual(crashedWith(UNCAUGHT_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2777: a run whose global setup's teardown calls process.exit is a crashed run naming that exit code",
+    async () => {
+      const outcome = await inCrashingConsumer(
+        "vitest",
+        "exit-in-teardown",
+        runIn,
+      );
+      expect(crashFacts(outcome)).toStrictEqual(crashedWith(TEARDOWN_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2797: a run whose executor dies settles once the process has exited, rather than never",
+    async () => {
+      const outcome = await inConsumerCopy(CRASH_FIXTURE, "vitest", (root) =>
+        withEnvironment(CRASH_VARIABLE, "throw", async () => {
+          recording();
+          const executor = new Executor(memoryLog());
+          try {
+            return await withinBound(runIn(executor, root));
+          } finally {
+            await executor.close();
+          }
+        }),
+      );
+      expect(
+        outcome === "never settled" ? outcome : crashFacts(outcome),
+      ).toStrictEqual(crashedWith(UNCAUGHT_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2780: after a job that was stopped, the next job's unasked death is still a crashed run",
+    async () => {
+      const outcome = await inCrashingConsumer(
+        "vitest",
+        "none",
+        async (executor, root) => {
+          await stoppedWhileHeld(executor, root, (stopping) =>
+            stopping.abort(),
+          );
+          return withEnvironment(CRASH_VARIABLE, "throw", () =>
+            runIn(executor, root),
+          );
+        },
+      );
+      expect(crashFacts(outcome)).toStrictEqual(crashedWith(UNCAUGHT_EXIT));
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("an executor process that dies after a stop, or during a job that is not a run", () => {
+  it(
+    "D2778: a run whose executor exits after an abort stores nothing, ending with the exit's reason",
+    async () => {
+      const outcome = await inCrashingConsumer(
+        "vitest",
+        "exit-in-teardown",
+        (executor, root) =>
+          stoppedWhileHeld(executor, root, (stopping) => stopping.abort()),
+      );
+      expect(crashFacts(outcome)).toStrictEqual({
+        ended: false,
+        reason: TEARDOWN_EXIT,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2779: a run whose executor exits after the executor is closed stores nothing, ending with the exit's reason",
+    async () => {
+      const outcome = await inCrashingConsumer(
+        "vitest",
+        "exit-in-teardown",
+        (executor, root) =>
+          stoppedWhileHeld(executor, root, (stopping) => stopping.close()),
+      );
+      expect(crashFacts(outcome)).toStrictEqual({
+        ended: false,
+        reason: TEARDOWN_EXIT,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D2781: a discovery whose executor dies stores nothing, ending with the exit's reason as before",
+    async () => {
+      const outcome = await inCrashingConsumer(
+        "vitest",
+        "throw",
+        (executor, root) =>
+          executor.discover({
+            consumerRoot: root,
+            workspaces: [{ path: ".", configFile: FIXTURE_CONFIG }],
+          }),
+      );
+      expect(crashFacts(outcome)).toStrictEqual({
+        ended: false,
+        reason: UNCAUGHT_EXIT,
+      });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

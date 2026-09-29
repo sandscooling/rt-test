@@ -50,10 +50,16 @@ const WORKSPACE_A = "packages/a";
 const WORKSPACE_B = "packages/b";
 const MODULE = "src/a.test.ts";
 const UNFINGERPRINTED: InputFingerprint = { kind: "not-fingerprinted" };
-const DIGEST: InputFingerprint = {
+const CRASH_EXIT = "the executor process 7 exited during the job (exit code 1)";
+const CRASHED_RUN: WorkspaceRun = {
+  status: "crashed",
+  workspace: { path: WORKSPACE_A, directory: `${ROOT}/${WORKSPACE_A}` },
+  error: CRASH_EXIT,
+};
+const DIGEST = {
   kind: "digest",
   digest: "sha256:9F86D081884C7D65",
-};
+} as const satisfies InputFingerprint;
 /** Any adapter version but the daemon's current one. */
 const OTHER_ADAPTER_VERSION = VITEST_ADAPTER_VERSION + 1;
 const IDLE: DaemonView = {
@@ -252,6 +258,17 @@ function nonZero(counts: Readonly<Record<string, number>>) {
   );
 }
 
+/** A summary of two tests of workspace A whose latest run crashed, under settled inputs whose fingerprint is the run's. */
+function crashedUnderCurrentInputs(): SummaryAnswer {
+  return summaryOf(
+    storedDiscovery([
+      discoveredWorkspace(WORKSPACE_A, [discovered("a"), discovered("b")]),
+    ]),
+    [storedRun(CRASHED_RUN, VITEST_ADAPTER_VERSION, DIGEST)],
+    settled({ [WORKSPACE_A]: { ok: true, digest: DIGEST.digest } }),
+  );
+}
+
 /** The states of one test of workspace A, answered by `run`. */
 function statesOf(test: DiscoveredTest, run: WorkspaceRun) {
   const summary = summaryOf(
@@ -429,11 +446,63 @@ describe("each discovered test's one state", () => {
       "never-run",
       "not-in-latest-run",
       "passed",
+      "run-crashed",
       "run-failed",
       "run-interrupted-before-load",
       "run-unsupported-vitest",
       "skipped",
     ]);
+  });
+
+  it("D2782: every test of a workspace whose latest run crashed reads run-crashed, with freshness unknown", () => {
+    expect(nonZeroCounts(crashedUnderCurrentInputs().counts)).toStrictEqual({
+      states: { "run-crashed": 2 },
+      freshness: { unknown: 2 },
+    });
+  });
+
+  it("D2794: a test of a workspace whose latest run crashed never reads current, even with the run's inputs unchanged", () => {
+    expect(nonZero(crashedUnderCurrentInputs().counts.freshness)).toStrictEqual(
+      { unknown: 2 },
+    );
+  });
+
+  it("D2785: an answer counts run-crashed at zero when no test is in it", () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+    );
+    expect(summary.counts.states["run-crashed"]).toBe(0);
+  });
+
+  it("D2783: a workspace whose latest run crashed has a latest run reading crashed, with the exit as its reason", () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+      [storedRun(CRASHED_RUN)],
+    );
+    expect(summary.workspaces[0]?.latestRun).toStrictEqual({
+      runId: `run-${WORKSPACE_A}`,
+      adapterVersion: VITEST_ADAPTER_VERSION,
+      adapterVersionCurrent: true,
+      status: "crashed",
+      reason: CRASH_EXIT,
+      omittedCharacters: 0,
+    });
+  });
+
+  it("D2784: a crashed run's reason past 1,000 characters is cut to 1,000, counting the rest", () => {
+    const summary = summaryOf(
+      storedDiscovery([discoveredWorkspace(WORKSPACE_A, [discovered("a")])]),
+      [storedRun({ ...CRASHED_RUN, error: "x".repeat(1500) })],
+    );
+    const latestRun = summary.workspaces[0]?.latestRun;
+    expect(
+      latestRun !== null && latestRun !== undefined && "reason" in latestRun
+        ? {
+            kept: latestRun.reason.length,
+            omitted: latestRun.omittedCharacters,
+          }
+        : latestRun,
+    ).toStrictEqual({ kept: 1000, omitted: 500 });
   });
 
   it("D1803: a run's result for a same-named test of another project never answers the discovered test", () => {

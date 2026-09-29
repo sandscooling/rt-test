@@ -274,6 +274,9 @@ function latestRunFacts(stored: StoredRun | undefined): LatestRunFacts | null {
     ...adapterVersionFacts(stored.adapterVersion),
   };
   const run = stored.run;
+  if (run.status === "crashed") {
+    return { ...base, status: run.status, ...cutReason(run.error) };
+  }
   if (run.status !== "ran") return { ...base, status: run.status };
   return {
     ...base,

@@ -1884,10 +1884,10 @@
   },
   {
     "id": "D1495",
-    "defect": "An executor that exits during a job never settles it, so the killed run is never listed as unstored and the next workspace never runs.",
+    "defect": "A run whose executor is killed mid-run with no stop asked stores nothing and is listed unstored, so the daemon's answers keep the earlier run's outcomes or read every test never run.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "    this.#child = undefined;\n    const settle = this.#settle;\n    if (settle === undefined) return;",
-    "new": "    this.#child = undefined;\n    const settle = undefined;\n    if (settle === undefined) return;"
+    "old": "    settle({ type: this.#stopAsked ? \"lost\" : \"exited\", reason });",
+    "new": "    settle({ type: \"lost\", reason });"
   },
   {
     "id": "D1496",
@@ -5126,9 +5126,9 @@
   {
     "id": "D2660",
     "defect": "A workspace whose latest run failed is not retried when a periodic reconciliation ends, so a cause outside the inputs leaves it failed until an unrelated edit.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      if (latest?.run.status === \"failed\" || nothingStored) {",
-    "new": "      if (nothingStored) {"
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "    case \"failed\":\n      return DUE_REASON.failedRun;",
+    "new": "    case \"failed\":\n      return undefined;"
   },
   {
     "id": "D2661",
@@ -5668,5 +5668,152 @@
     "file": "packages/daemon/src/query/path-status.ts",
     "old": "  return entry.kind === FAILED_MODULE || entry.kind === TYPECHECK_MODULE;",
     "new": "  return entry.kind === FAILED_MODULE || entry.kind === TYPECHECK_MODULE || entry.kind === WORKSPACE_UNHANDLED_ERRORS;"
+  },
+  {
+    "id": "D2775",
+    "defect": "On Vitest 5, a run whose executor dies with no stop asked of it stores nothing, so its tests keep the earlier run's outcomes or read never run.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    settle({ type: this.#stopAsked ? \"lost\" : \"exited\", reason });",
+    "new": "    settle({ type: \"lost\", reason });"
+  },
+  {
+    "id": "D2776",
+    "defect": "On Vitest 4.1, a run whose executor dies with no stop asked of it stores nothing, so its tests keep the earlier run's outcomes or read never run.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    settle({ type: this.#stopAsked ? \"lost\" : \"exited\", reason });",
+    "new": "    settle({ type: \"lost\", reason });"
+  },
+  {
+    "id": "D2777",
+    "defect": "A run whose project code calls process.exit stores nothing, so its tests keep the earlier run's outcomes or read never run.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    settle({ type: this.#stopAsked ? \"lost\" : \"exited\", reason });",
+    "new": "    settle({ type: \"lost\", reason });"
+  },
+  {
+    "id": "D2778",
+    "defect": "An executor that exits after an abort is stored as a crashed run, so a stop reads as a crash.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    this.#stopAsked = true;\n    if (this.#buildRecord !== undefined) {",
+    "new": "    if (this.#buildRecord !== undefined) {"
+  },
+  {
+    "id": "D2779",
+    "defect": "An executor that exits after the executor is closed is stored as a crashed run, so every daemon stop mid-run stores a false crash.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    if (this.#settle !== undefined) this.#stopAsked = true;\n",
+    "new": ""
+  },
+  {
+    "id": "D2780",
+    "defect": "A stop asked of one job outlives it, so a later job's unasked death stores nothing.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "        this.#stopAsked = false;\n",
+    "new": ""
+  },
+  {
+    "id": "D2781",
+    "defect": "A discovery whose executor dies ends with a reason naming a reply of another kind of job instead of how the process ended.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    case \"exited\":\n    case \"lost\":",
+    "new": "    case \"lost\":"
+  },
+  {
+    "id": "D2782",
+    "defect": "A test of a workspace whose latest run crashed reads run-failed, so a crash reads as a config that did not load.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  crashed: RUN_CRASHED,",
+    "new": "  crashed: RUN_FAILED,"
+  },
+  {
+    "id": "D2783",
+    "defect": "A crashed latest run carries no reason, so an answer no longer says how the executor ended.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    return { ...base, status: run.status, ...cutReason(run.error) };",
+    "new": "    return { ...base, status: run.status };"
+  },
+  {
+    "id": "D2784",
+    "defect": "A crashed run's reason is passed on uncut, so a long exit text makes an answer unbounded.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    return { ...base, status: run.status, ...cutReason(run.error) };",
+    "new": "    return { ...base, status: run.status, reason: run.error, omittedCharacters: 0 };"
+  },
+  {
+    "id": "D2785",
+    "defect": "An answer leaves run-crashed out of its state counts when no test is in it, so a reader cannot tell a zero from a state it does not report.",
+    "file": "packages/daemon/src/query/answer.ts",
+    "old": "  [RUN_CRASHED]: true,\n",
+    "new": ""
+  },
+  {
+    "id": "D2786",
+    "defect": "A workspace whose latest run crashed is never retried, so a crash from a cause outside the inputs stands until an unrelated edit.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "    case \"crashed\":\n      return DUE_REASON.crashedRun;",
+    "new": "    case \"crashed\":\n      return undefined;"
+  },
+  {
+    "id": "D2787",
+    "defect": "A crashed run's retry is logged as a failed run's.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "    case \"crashed\":\n      return DUE_REASON.crashedRun;",
+    "new": "    case \"crashed\":\n      return DUE_REASON.failedRun;"
+  },
+  {
+    "id": "D2788",
+    "defect": "A retry armed because the last attempt stored nothing is logged as a failed run's.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "(retry ? (retryReason(latest) ?? DUE_REASON.nothingStored) : undefined);",
+    "new": "(retry ? (retryReason(latest) ?? DUE_REASON.failedRun) : undefined);"
+  },
+  {
+    "id": "D2791",
+    "defect": "A version 4 store has no migration to version 5, so every existing store is refused once the daemon is upgraded.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "  [CRASH_UNAWARE_SCHEMA_VERSION, SET_SCHEMA_VERSION],\n",
+    "new": ""
+  },
+  {
+    "id": "D2792",
+    "defect": "A store that may hold a crashed run stays at schema version 4, so a daemon from before this change opens it and fails reading that run.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "export const STORE_SCHEMA_VERSION = 5;",
+    "new": "export const STORE_SCHEMA_VERSION = 4;"
+  },
+  {
+    "id": "D2793",
+    "defect": "A crashed run reads back with another column's text as its error, so the exit it stored is lost.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "      return { status, workspace, error: text(row, \"error\") };",
+    "new": "      return { status, workspace, error: text(row, \"status\") };"
+  },
+  {
+    "id": "D2794",
+    "defect": "A test of a workspace whose latest run crashed is rated current while the run's inputs are unchanged, so a crash reads as a current result.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "      : { test, state: found.state, freshness: UNKNOWN };",
+    "new": "      : { test, state: found.state, freshness: recordFreshness(stored, currentFingerprint) };"
+  },
+  {
+    "id": "D2795",
+    "defect": "A failed run's retry is logged with the crashed run's due reason.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "      return DUE_REASON.failedRun;",
+    "new": "      return DUE_REASON.crashedRun;"
+  },
+  {
+    "id": "D2796",
+    "defect": "The version 4 migration changes a record the store held, dropping each discovery's selection facts.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "  [CRASH_UNAWARE_SCHEMA_VERSION, SET_SCHEMA_VERSION],",
+    "new": "  [CRASH_UNAWARE_SCHEMA_VERSION, `${DROP_VITE_ROOTLESS_FACTS}${SET_SCHEMA_VERSION}`],"
+  },
+  {
+    "id": "D2797",
+    "defect": "A job whose executor exits during it never settles, so the daemon hangs and the next workspace never runs.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    const settle = this.#settle;",
+    "new": "    const settle = undefined;"
   }
 ]
