@@ -33,6 +33,8 @@ const OVER_PICOMATCH_LIMIT = 70_000;
 const RUNAWAY_WALK_TIMEOUT_MS = 60_000;
 /** One more directory link than a crawl's walk follows before its links are not known. */
 const OVER_LINK_BOUND = 1_001;
+/** Making and walking `OVER_LINK_BOUND` links takes over a quarter of Vitest's default 5 s alone, and past it under a loaded suite. */
+const OVER_LINK_BOUND_TIMEOUT_MS = 60_000;
 /** Vitest's default exclude. */
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/.git/**"];
 
@@ -576,26 +578,30 @@ describe("when the crawl's links cannot be known", () => {
     expect(outcome).toBe(reason);
   });
 
-  it("D2897: a crawl that follows more than 1000 directory links leaves the project's links not known, with the reason, never known without the links past the bound", async () => {
-    const outcome = await inTempDir(async (dir) => {
-      const root = writeLayout(
-        dir,
-        {
-          directories: ["root/src", "root/other"],
-          links: siblingLinks("root/src", "root/other", OVER_LINK_BOUND),
-        },
-        JUNCTION,
-      );
-      return {
-        walked: await walk(root, { include: ["src/**/*.test.ts"] }),
-        base: `${slashed(root)}/src`,
-      };
-    });
-    expect(outcome.walked).toStrictEqual({
-      complete: false,
-      reason: `the walk below ${outcome.base} follows more than 1000 directory links`,
-    });
-  });
+  it(
+    "D2897: a crawl that follows more than 1000 directory links leaves the project's links not known, with the reason, never known without the links past the bound",
+    async () => {
+      const outcome = await inTempDir(async (dir) => {
+        const root = writeLayout(
+          dir,
+          {
+            directories: ["root/src", "root/other"],
+            links: siblingLinks("root/src", "root/other", OVER_LINK_BOUND),
+          },
+          JUNCTION,
+        );
+        return {
+          walked: await walk(root, { include: ["src/**/*.test.ts"] }),
+          base: `${slashed(root)}/src`,
+        };
+      });
+      expect(outcome.walked).toStrictEqual({
+        complete: false,
+        reason: `the walk below ${outcome.base} follows more than 1000 directory links`,
+      });
+    },
+    OVER_LINK_BOUND_TIMEOUT_MS,
+  );
 });
 
 describe("what the crawl prunes", () => {

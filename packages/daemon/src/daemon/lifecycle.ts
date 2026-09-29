@@ -265,7 +265,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     const stored = this.#store("the discovery", undefined, () =>
       this.#builds.use(this.#parts.store.writeDiscovery(bindings, discovery)),
     );
-    log.entry(`discovery ended: ${discoverySummary(discovery)}`);
+    if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);
     this.#logMissingConfirmed(discovery);
     return { stored };
   }
