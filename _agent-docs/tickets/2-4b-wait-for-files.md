@@ -64,6 +64,7 @@ Check this list before creating any constant, helper or type, and import what ex
 
 - `selectTests` (`selection/select-tests.ts`) and its `ChangedPathReport` (`selection/selection-types.ts`): each named file's covering workspaces and reasons, the decision 2.3g narrows fingerprints by (AC2, C8).
 - 2.3g's dependency builds and narrowing state (`daemon/dependency-builds.ts`, `inputs/narrowed-inputs.ts`, `inputs/current-inputs.ts`): the dependency information at a revision, whether its build has ended, and each workspace's narrowed inputs (AC2, AC4).
+- `Narrowing.placement` (`BuildPlacement`, 2.3h, `inputs/narrowed-inputs.ts`): places given paths by one build, and serves only a view whose inputs selection took (`inputsNotNarrowed` unset), since a refusal of a revision's inputs widens every workspace.
 - 2.3e's `buildSelectionInput` (`selection/selection-input.ts`): selection's input for the discovery in effect.
 - 2.3i's schedule (`daemon/scheduler.ts`, `query/answer.ts`): each workspace's execution state and why an idle one has no run coming (AC3, AC5, AC6).
 - `queryBasis`, `countStandings`, `cutReason` (`query/summary.ts`, `query/test-states.ts`): the context, standings and counts every answer shares, and how a reason is cut.
