@@ -199,6 +199,11 @@ export interface ChangesRequest {
   readonly paths: readonly string[];
   /** The cursor an earlier changes answer returned; absent for a baseline. */
   readonly since?: string;
+  /**
+   * The files among `paths` the caller edited, whose changes the daemon counts as edits, never as changes its own runs
+   * or discoveries made; absent when none.
+   */
+  readonly edited?: readonly string[];
 }
 
 /** Whether `value` is a cursor a changes request may carry: a non-empty string of at most `MAX_CURSOR_CHARACTERS`. */

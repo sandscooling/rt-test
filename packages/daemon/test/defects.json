@@ -8459,8 +8459,8 @@
     "id": "D3184",
     "defect": "A retried workspace the lifecycle refuses at its planned revision keeps its retry, so each plan runs it into another refusal at the same revision with no periodic reconciliation between.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      if (refusedAtPlan) return;\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
-    "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) return;\n      begun.notBegun();\n"
+    "old": "      if (refusedAtPlan) {\n        begun.refused();\n        return;\n      }\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
+    "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) {\n        begun.refused();\n        return;\n      }\n      begun.notBegun();\n"
   },
   {
     "id": "D3187",
@@ -9866,8 +9866,8 @@
     "id": "D3438",
     "defect": "A wait naming a refused path beside acceptable ones waits on the acceptable ones rather than being refused whole.",
     "file": "packages/daemon/src/daemon/waits.ts",
-    "old": "  if (refusals.length === 0) return { paths: [...paths] };",
-    "new": "  if (paths.size > 0) return { paths: [...paths] };"
+    "old": "  if (refusals.length === 0) {\n    return { paths: [...new Set(byGiven.values())], byGiven };\n  }",
+    "new": "  if (byGiven.size > 0) {\n    return { paths: [...new Set(byGiven.values())], byGiven };\n  }"
   },
   {
     "id": "D3439",
@@ -9943,8 +9943,8 @@
     "id": "D3449",
     "defect": "A wait naming a directory is taken as a file rather than refused naming it.",
     "file": "packages/daemon/src/daemon/waits.ts",
-    "old": "    else if (isDirectory(path)) {\n      refusals.push(`${path} is a directory, and a ${query} names only files`);\n    } else paths.add(target.path);",
-    "new": "    else paths.add(target.path);"
+    "old": "    else if (isDirectory(path)) {\n      refusals.push(`${path} is a directory, and a ${query} names only files`);\n    } else byGiven.set(path, target.path);",
+    "new": "    else byGiven.set(path, target.path);"
   },
   {
     "id": "D3456",
@@ -9977,7 +9977,7 @@
   {
     "id": "D3460",
     "defect": "A wait request whose paths are an empty list is taken, and settles over no file, a zero-test answer read as settled.",
-    "file": "packages/daemon/src/daemon/server.ts",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
     "old": "if (!Array.isArray(paths) || paths.length === 0) {",
     "new": "if (!Array.isArray(paths)) {"
   },
@@ -9999,15 +9999,15 @@
     "id": "D3476",
     "defect": "A changes query naming a refused path beside acceptable ones answers for the acceptable ones rather than being refused whole.",
     "file": "packages/daemon/src/daemon/changes.ts",
-    "old": "    if (\"refused\" in resolved) return resolved;\n    const { paths } = resolved;",
-    "new": "    const paths = \"refused\" in resolved ? [] : resolved.paths;"
+    "old": "    if (\"refused\" in resolved) return resolved;\n    const { paths, byGiven } = resolved;",
+    "new": "    const { paths, byGiven } =\n      \"refused\" in resolved\n        ? { paths: [], byGiven: new Map<string, string>() }\n        : resolved;"
   },
   {
     "id": "D3477",
     "defect": "A changes answer takes the daemon's moment before its named read, so a file saved just before the call is answered from its pre-edit result as current.",
     "file": "packages/daemon/src/daemon/changes.ts",
-    "old": "    await inputs.readNamed(paths);\n    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };\n    const moment = this.#parts.moment();",
-    "new": "    const moment = this.#parts.moment();\n    await inputs.readNamed(paths);\n    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };"
+    "old": "    try {\n      await inputs.readNamed(paths);\n    } finally {\n      report?.read();\n    }\n    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };\n    const moment = this.#parts.moment();",
+    "new": "    const moment = this.#parts.moment();\n    try {\n      await inputs.readNamed(paths);\n    } finally {\n      report?.read();\n    }\n    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };"
   },
   {
     "id": "D3478",
@@ -10288,5 +10288,173 @@
     "file": "packages/daemon/src/query-client.ts",
     "old": "  const answer = await query(targetOf(consumerRoot, \"query\"), request, {\n    deadline,\n  });",
     "new": "  const answer = await query(targetOf(consumerRoot, \"query\"), request, {\n    deadline,\n    requestMs: boundMs,\n  });"
+  },
+  {
+    "id": "D3573",
+    "defect": "A changes query hands over its edited files only once its named read has resolved, so a job that began while the read ran records the agent's change as its own.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    const report = this.#reportEdits(query.edited, byGiven);\n    try {\n      await inputs.readNamed(paths);\n    } finally {",
+    "new": "    let report: EditReport | undefined;\n    try {\n      await inputs.readNamed(paths);\n      report = this.#reportEdits(query.edited, byGiven);\n    } finally {"
+  },
+  {
+    "id": "D3574",
+    "defect": "A changes query never closes its report of edited files, so every job that begins later holds them and the daemon's own later changes to those files count as edits.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    } finally {\n      report?.read();\n    }",
+    "new": "    } finally {\n      void report;\n    }"
+  },
+  {
+    "id": "D3575",
+    "defect": "A changes query reports every file it names as edited, not only the ones named as edited, so a daemon job's change to a file the agent did not save counts as an edit.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    const report = this.#reportEdits(query.edited, byGiven);",
+    "new": "    const report = this.#reportEdits(query.paths, byGiven);"
+  },
+  {
+    "id": "D3576",
+    "defect": "A changes query reports the edited files as the caller spelled them, absolute, which match no key the tracker records, so the agent's change still counts as the job's.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "      edited.flatMap((given) => byGiven.get(given) ?? []),",
+    "new": "      edited,"
+  },
+  {
+    "id": "D3584",
+    "defect": "A changes request whose edited is not a list is taken as naming none rather than refused, so a malformed report is silently dropped.",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
+    "old": "  if (edited === undefined) return [];",
+    "new": "  if (!Array.isArray(edited)) return [];"
+  },
+  {
+    "id": "D3585",
+    "defect": "A changes request naming as edited a file it does not name among its paths is taken, so a file no named read reads is counted as edited.",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
+    "old": "    (path) => typeof path !== \"string\" || !named.has(path),",
+    "new": "    (path) => typeof path !== \"string\","
+  },
+  {
+    "id": "D3586",
+    "defect": "The daemon drops a changes request's edited files before its query, so the agent's reported edits are never counted as edits.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  const query: ChangesQuery = { paths, since, edited };",
+    "new": "  const query: ChangesQuery = { paths, since, edited: [] };"
+  },
+  {
+    "id": "D3587",
+    "defect": "A changes request naming no edited file is refused as invalid, so every client that names none, and every daemon client from before, gets no answer.",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
+    "old": "  if (edited === undefined) return [];\n",
+    "new": ""
+  },
+  {
+    "id": "D3588",
+    "defect": "A report of edited keys never reaches the jobs running at it, so a change the running job then records to a reported key counts as the job's own.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    for (const held of this.#running.values()) {\n      for (const key of keys) held.add(key);\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D3589",
+    "defect": "A job that begins while a report's named read is still open holds none of its keys, so the change that read records inside the job counts as the job's own.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    this.#running.set(subject, new Set([...this.#unread].flat()));",
+    "new": "    this.#running.set(subject, new Set());"
+  },
+  {
+    "id": "D3590",
+    "defect": "A report stays open after its named read resolved, so every job beginning later holds its keys and the daemon's own later changes to them count as edits.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    return { read: () => this.#unread.delete(report) };",
+    "new": "    return { read: () => undefined };"
+  },
+  {
+    "id": "D3591",
+    "defect": "A job that held any report counts every path it changed as an edit, so the daemon's own change to a file the agent did not report never counts toward a hold.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "      const edits = paths.filter((path) => reported?.has(path) === true);",
+    "new": "      const edits = reported === undefined ? [] : paths;"
+  },
+  {
+    "id": "D3592",
+    "defect": "The run history never tells the change record that a run began, so an agent's reported edit during the run counts as the run's own change and its own saves hold the workspace.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    this.#changes.jobBegan(path);\n",
+    "new": ""
+  },
+  {
+    "id": "D3593",
+    "defect": "The discovery history never tells the change record that a discovery began, so an agent's reported edit during the discovery counts as the discovery's own change and its own saves hold the discovery.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    this.#changes.discoveryBegan();\n",
+    "new": ""
+  },
+  {
+    "id": "D3594",
+    "defect": "A report arriving after the job that changed the file ended leaves the change as the job's, so the agent's save still counts toward a hold of the workspace.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    for (const sets of this.#subjects.values()) sets.moveToEdits(keys);\n",
+    "new": ""
+  },
+  {
+    "id": "D3595",
+    "defect": "A report of a file a job changed drops the change rather than counting it as an edit, so it never releases a workspace held as self-changing.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "      if (this.byJobs.delete(path)) this.edits.add(path);",
+    "new": "      this.byJobs.delete(path);"
+  },
+  {
+    "id": "D3596",
+    "defect": "A report moves a job's change to the workspaces' edits but never the discovery's, so an agent's save never releases a held discovery.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    for (const sets of this.#subjects.values()) sets.moveToEdits(keys);",
+    "new": "    for (const [subject, sets] of this.#subjects) {\n      if (subject !== undefined) sets.moveToEdits(keys);\n    }"
+  },
+  {
+    "id": "D3597",
+    "defect": "A report counts a named file as an edit though no change reached it, so a request naming an unchanged file releases a held workspace.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "      if (this.byJobs.delete(path)) this.edits.add(path);",
+    "new": "      this.byJobs.delete(path);\n      this.edits.add(path);"
+  },
+  {
+    "id": "D3598",
+    "defect": "The lifecycle never hands a changes request's edited files to the scheduler, so an agent's saves during a run count as the run's own changes and hold its workspace.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      reportEdits: (keys) => this.#scheduler.reportEdits(keys),",
+    "new": "      reportEdits: () => ({ read: () => undefined }),"
+  },
+  {
+    "id": "D3599",
+    "defect": "queryChanges never sends the files named as edited, so the daemon never hears of the agent's saves.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    ...(edited === undefined ? {} : { edited }),\n",
+    "new": ""
+  },
+  {
+    "id": "D3600",
+    "defect": "queryChanges sends every file it asks about as edited, not only the ones given as edited, so the daemon counts its own runs' changes to every file asked about as edits and releases holds wrongly.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    ...(edited === undefined ? {} : { edited }),",
+    "new": "    ...(edited === undefined ? {} : { edited: paths }),"
+  },
+  {
+    "id": "D3601",
+    "defect": "A job that held a report counts the reported paths it changed as edits only for its own subject and as its own changes for every other, so a discovery's change to a file the agent saved during it still adds to a workspace's count.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "      for (const sets of this.#subjects.values()) {\n        sets.addJob(caused, job);\n        sets.addEdits(edits);\n      }",
+    "new": "      for (const [subject, sets] of this.#subjects) {\n        sets.addJob(subject === job ? caused : paths, job);\n        if (subject === job) sets.addEdits(edits);\n      }"
+  },
+  {
+    "id": "D3602",
+    "defect": "A changes query closes its report only after a named read that resolves, so a rejected read leaves the report open for the daemon's life, and every later job's own changes to those files count as edits.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    try {\n      await inputs.readNamed(paths);\n    } finally {\n      report?.read();\n    }",
+    "new": "    await inputs.readNamed(paths);\n    report?.read();"
+  },
+  {
+    "id": "D3603",
+    "defect": "A changes request whose edited is an empty list is refused as invalid, so a queryChanges caller that passes edited: [] gets no answer.",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
+    "old": "  if (!Array.isArray(edited)) {",
+    "new": "  if (!Array.isArray(edited) || edited.length === 0) {"
   }
 ]

@@ -1334,17 +1334,17 @@ function changesRequest(paths: readonly string[], more: object = {}): object {
 
 /**
  * Sends each request after a hello to a server whose changes query records what reached it, and resolves with each
- * answer by its kind and each query the handler was given, by its path count and cursor.
+ * answer by its kind and each query the handler was given.
  */
-async function changesAnswered(
+async function changesQueried(
   ...requests: object[]
-): Promise<{ kinds: unknown[]; asked: [number, string | undefined][] }> {
-  const asked: ChangesQuery[] = [];
+): Promise<{ kinds: unknown[]; queries: ChangesQuery[] }> {
+  const queries: ChangesQuery[] = [];
   const server = connectionServer(
     {
       ...handlers(false),
       changes: (query) => {
-        asked.push(query);
+        queries.push(query);
         return NO_STAND_IN_ANSWER;
       },
     },
@@ -1357,11 +1357,30 @@ async function changesAnswered(
       return answerKinds(connection, requests.length + 1);
     }),
   );
+  return { kinds: kinds.slice(1), queries };
+}
+
+/** Each answer by its kind, and each query the handler was given by its path count and cursor. */
+async function changesAnswered(
+  ...requests: object[]
+): Promise<{ kinds: unknown[]; asked: [number, string | undefined][] }> {
+  const { kinds, queries } = await changesQueried(...requests);
   return {
-    kinds: kinds.slice(1),
-    asked: asked.map((query) => [query.paths.length, query.since]),
+    kinds,
+    asked: queries.map((query) => [query.paths.length, query.since]),
   };
 }
+
+/** Each answer by its kind, and the edited files of each query the handler was given. */
+async function editedAnswered(
+  ...requests: object[]
+): Promise<{ kinds: unknown[]; edited: (readonly string[])[] }> {
+  const { kinds, queries } = await changesQueried(...requests);
+  return { kinds, edited: queries.map((query) => query.edited) };
+}
+
+/** A file beside `WAITED_FILE` under the hand-built root. */
+const OTHER_FILE = join(HAND_BUILT_ROOT, "other.ts");
 
 describe("a changes request", () => {
   it("D3498: one naming 1001 paths is refused, while one naming 1000 reaches the query", async () => {
@@ -1403,5 +1422,50 @@ describe("a changes request", () => {
         [1, undefined],
       ],
     });
+  });
+});
+
+const INVALID = { type: "error", code: "invalid-request" };
+const REACHED = { type: "error", code: "nothing-to-answer" };
+
+describe("the files a changes request names as edited", () => {
+  it("D3584: one whose edited is a string or null rather than a list is refused as invalid, and never reaches the query", async () => {
+    expect(
+      await editedAnswered(
+        changesRequest([WAITED_FILE], { edited: WAITED_FILE }),
+        changesRequest([WAITED_FILE], { edited: null }),
+      ),
+    ).toStrictEqual({ kinds: [INVALID, INVALID], edited: [] });
+  });
+
+  it("D3585: one naming as edited a file it does not name among its paths is refused whole as invalid, and never reaches the query", async () => {
+    expect(
+      await editedAnswered(
+        changesRequest([WAITED_FILE], { edited: [WAITED_FILE, OTHER_FILE] }),
+      ),
+    ).toStrictEqual({ kinds: [INVALID], edited: [] });
+  });
+
+  it("D3586: one's edited files among its paths reach the query as given", async () => {
+    expect(
+      await editedAnswered(
+        changesRequest([WAITED_FILE, OTHER_FILE], { edited: [OTHER_FILE] }),
+      ),
+    ).toStrictEqual({ kinds: [REACHED], edited: [[OTHER_FILE]] });
+  });
+
+  it("D3587: one naming no edited file reaches the query with none, as it did before edited files could be named", async () => {
+    expect(await editedAnswered(changesRequest([WAITED_FILE]))).toStrictEqual({
+      kinds: [REACHED],
+      edited: [[]],
+    });
+  });
+});
+
+describe("an empty list of edited files", () => {
+  it("D3603: a changes request whose edited is an empty list reaches the query naming none, never refused", async () => {
+    expect(
+      await editedAnswered(changesRequest([WAITED_FILE], { edited: [] })),
+    ).toStrictEqual({ kinds: [REACHED], edited: [[]] });
   });
 });

@@ -9,7 +9,7 @@ sprint-1: done
 1-3c-start-stop-cli: done
 1-4-query-cli: done
 
-sprint-2: in-progress
+sprint-2: done
 2-1-track-inputs: done
 2-1b-declared-non-inputs: done
 2-2-workspace-selection: done
@@ -38,10 +38,10 @@ sprint-2: in-progress
 2-5-edit-corpus: done
 2-6-changes-query: done
 2-7-agent-hook: done
-2-7b-agent-edits-never-hold: ready-for-dev
+2-7b-agent-edits-never-hold: done
 
 sprint-3: in-progress
-3-1-defect-definitions: backlog
+3-1-defect-definitions: ready-for-dev
 3-2-transform-experiments: review
 3-3-verdicts-from-facts: backlog
 3-4-defect-evidence: backlog

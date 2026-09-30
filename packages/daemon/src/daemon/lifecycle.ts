@@ -143,7 +143,11 @@ export class DaemonLifecycle implements DaemonHandlers {
       moment: () => this.#moment(),
     };
     this.#waits = new Waits({ ...reading, schedule: this.#scheduler.schedule });
-    this.#changes = new Changes({ ...reading, log: parts.log });
+    this.#changes = new Changes({
+      ...reading,
+      log: parts.log,
+      reportEdits: (keys) => this.#scheduler.reportEdits(keys),
+    });
     this.#whenStopped = new Promise((resolve) => {
       this.#markStopped = resolve;
     });

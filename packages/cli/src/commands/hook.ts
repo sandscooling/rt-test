@@ -1,5 +1,4 @@
 import { statSync } from "node:fs";
-import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   errorText,
@@ -17,6 +16,7 @@ import {
   type Command,
   type CommandRun,
 } from "../command.js";
+import { batchEdits } from "../hook-edits.js";
 import {
   agentWriter,
   PROMPTS_WRITER,
@@ -50,13 +50,9 @@ const EVENT = {
   stop: "Stop",
   userPromptSubmit: "UserPromptSubmit",
 } as const;
-/** The tools that edit one file by path, each with the input naming it. */
-const FILE_PATH_INPUTS: ReadonlyMap<string, string> = new Map([
-  ["Write", "file_path"],
-  ["Edit", "file_path"],
-  ["NotebookEdit", "notebook_path"],
-]);
 const NOTHING = {};
+/** A turn end or a prompt edits no file, so its request names none as edited. */
+const NONE_EDITED: readonly string[] = [];
 const UTF8 = "utf8";
 
 interface Payload {
@@ -291,17 +287,17 @@ const HANDLERS: ReadonlyMap<string, (run: HookRun) => Promise<HookResult>> =
 async function onBatch(run: HookRun): Promise<HookResult> {
   const { memory, payload } = run;
   const agent = agentWriter(payload.agentId);
-  const edited = editedFiles(payload.toolCalls, run.cwd, run.root);
+  const edits = batchEdits(payload.toolCalls, run.cwd, run.root);
   const remembered =
-    edited.length === 0
+    edits.named.length === 0
       ? said(NOTHING)
       : saved(
           run,
           agent,
           said(NOTHING),
-          withEdits(memory.of(agent), edited, Date.now()),
+          withEdits(memory.of(agent), edits.named, Date.now()),
         );
-  const asked = await askSession(run, memory.of(agent).cursor);
+  const asked = await askSession(run, memory.of(agent).cursor, edits.saved);
   if (asked.kind === "nothing") return remembered;
   if (asked.kind === "answer") {
     const text = batchText(asked.answer, asked.paths);
@@ -339,7 +335,7 @@ async function onStanding(
   writer: Writer,
   shape: (line: string) => object,
 ): Promise<HookResult> {
-  const asked = await askSession(run, undefined);
+  const asked = await askSession(run, undefined, NONE_EDITED);
   if (asked.kind === "nothing") return said(NOTHING);
   if (asked.kind === "answer") {
     const line = standingLine(asked.answer);
@@ -378,17 +374,19 @@ function lossResult(
 }
 
 /**
- * Asks about the session's edited files. When the daemon gives no answer and some of them no longer name an existing
- * file under the root, asks once more without those, which the daemon may refuse the whole request for; they count
- * as unusable only when that answer came. With no answer, the first attempt's reason stands.
+ * Asks about the session's edited files, naming as edited each of the `batch`'s own files a request sends. When the
+ * daemon gives no answer and some of them no longer name an existing file under the root, asks once more without
+ * those, which the daemon may refuse the whole request for; they count as unusable only when that answer came. With no
+ * answer, the first attempt's reason stands.
  */
 async function askSession(
   run: HookRun,
   since: string | undefined,
+  batch: readonly string[],
 ): Promise<Asked> {
   const { paths, leftOut } = run.memory.editedPaths();
   if (paths.length === 0) return { kind: "nothing" };
-  const first = await attempt(run, paths, since);
+  const first = await attempt(run, paths, since, batch);
   if (first.ok) {
     return answered(first.answer, { asked: paths.length, leftOut }, []);
   }
@@ -396,7 +394,7 @@ async function askSession(
   const unusable = new Set(paths.filter((path) => !usableFile(path, run.root)));
   const rest = paths.filter((path) => !unusable.has(path));
   if (unusable.size === 0 || rest.length === 0) return none;
-  const second = await attempt(run, rest, since);
+  const second = await attempt(run, rest, since, batch);
   return second.ok
     ? answered(second.answer, { asked: rest.length, leftOut }, [...unusable])
     : none;
@@ -410,11 +408,15 @@ function answered(
   return { kind: "answer", answer, paths, unusable };
 }
 
-/** The daemon's answer within what is left of the deadline, less the reserve for writing and printing. */
+/**
+ * The daemon's answer within what is left of the deadline, less the reserve for writing and printing; `batch` holds
+ * the files the batch being reported edited.
+ */
 async function attempt(
   run: HookRun,
   paths: readonly string[],
   since: string | undefined,
+  batch: readonly string[],
 ): Promise<Attempt> {
   const boundMs = run.deadline - WRITE_RESERVE_MS - Date.now();
   if (boundMs <= 0) {
@@ -423,8 +425,13 @@ async function attempt(
       reason: `no time was left of the hook's ${HOOK_BOUND_MS} ms to ask the daemon`,
     };
   }
-  const options: ChangesOptions =
-    since === undefined ? { boundMs } : { since, boundMs };
+  const batchFiles = new Set(batch);
+  const edited = paths.filter((path) => batchFiles.has(path));
+  const options: ChangesOptions = {
+    ...(since === undefined ? {} : { since }),
+    boundMs,
+    ...(edited.length === 0 ? {} : { edited }),
+  };
   try {
     return { ok: true, answer: await queryChanges(run.root, paths, options) };
   } catch (error) {
@@ -439,38 +446,6 @@ function usableFile(path: string, root: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** Each file a `Write`, `Edit` or `NotebookEdit` call named that lies under the root, judged as the daemon judges it. */
-function editedFiles(
-  toolCalls: readonly unknown[],
-  cwd: string,
-  root: string,
-): string[] {
-  const files: string[] = [];
-  for (const call of toolCalls) {
-    const path = editedPath(call);
-    if (path === undefined) continue;
-    const file = resolve(cwd, path);
-    if (resolveCallerPath(file, root).ok) files.push(file);
-  }
-  return files;
-}
-
-function editedPath(call: unknown): string | undefined {
-  if (typeof call !== "object" || call === null) return undefined;
-  const { tool_name: tool, tool_input: input } = call as Record<
-    string,
-    unknown
-  >;
-  const key = typeof tool === "string" ? FILE_PATH_INPUTS.get(tool) : undefined;
-  if (key === undefined || typeof input !== "object" || input === null) {
-    return undefined;
-  }
-  const path = Object.hasOwn(input, key)
-    ? (input as Record<string, unknown>)[key]
-    : undefined;
-  return typeof path === "string" && path !== "" ? path : undefined;
 }
 
 /**

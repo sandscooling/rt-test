@@ -187,6 +187,8 @@ class ChangesWorld {
   results: LatestResults = resultsWith({});
   /** Whether a dependency build is still to end, as the builds report it. */
   building = false;
+  /** Each report of edited input keys the answers made, as `reported <keys>`, and each close of one, in order. */
+  readonly reports: string[] = [];
   readonly #digests = new Map<string, string>();
   #buildEnds: (() => void)[] = [];
   readonly #stop = new AbortController();
@@ -222,13 +224,22 @@ class ChangesWorld {
           narrowing: narrowingAt(this.query, inputs.facts.revision),
         };
       },
+      reportEdits: (keys) => {
+        this.reports.push(`reported ${keys.join(", ")}`);
+        return { read: () => this.reports.push("closed") };
+      },
     });
   }
 
-  /** Asks for the changes of the root-relative `paths` since `since`. */
-  ask(paths: readonly string[], since?: string): Promise<Answered> {
+  /** Asks for the changes of the root-relative `paths` since `since`, naming the root-relative `edited` as edited. */
+  ask(
+    paths: readonly string[],
+    since?: string,
+    edited: readonly string[] = [],
+  ): Promise<Answered> {
+    const absolute = (path: string): string => join(this.root, path);
     return this.changes.answer(
-      { paths: paths.map((path) => join(this.root, path)), since },
+      { paths: paths.map(absolute), since, edited: edited.map(absolute) },
       new AbortController().signal,
     );
   }
@@ -311,6 +322,7 @@ describe("refusing a changes query", () => {
         {
           paths: [directory, outside, join(world.root, A_SOURCE)],
           since: undefined,
+          edited: [],
         },
         new AbortController().signal,
       );
@@ -383,6 +395,54 @@ describe("what a changes answer reads", () => {
     expect(answer).toStrictEqual({
       kind: "inputs-unavailable",
       reason: { reason: RECONCILING, omittedCharacters: 0 },
+    });
+  });
+
+  it("D3573: a changes query hands over the files it names as edited before its named read begins, so a job beginning while that read runs holds them", async () => {
+    const whileReading = await inWorld(
+      async (world) => {
+        const asked = world.ask([A_SOURCE], undefined, [A_SOURCE]);
+        await flush();
+        const seen = {
+          reports: [...world.reports],
+          reads: world.inputs.namedReads.length,
+        };
+        world.inputs.namedReadHeld.resolve();
+        await asked;
+        return seen;
+      },
+      { heldNamedRead: true },
+    );
+    expect(whileReading).toStrictEqual({
+      reports: [`reported ${A_SOURCE}`],
+      reads: 1,
+    });
+  });
+
+  it("D3574: a changes query closes its report of edited files once its named read has resolved, so no job beginning later holds them", async () => {
+    const reports = await inWorld(async (world) => {
+      await world.ask([A_SOURCE], undefined, [A_SOURCE]);
+      return world.reports;
+    });
+    expect(reports).toStrictEqual([`reported ${A_SOURCE}`, "closed"]);
+  });
+
+  it("D3575: a changes query reports as edited only the files it names as edited, never the other files it names", async () => {
+    const reports = await inWorld(async (world) => {
+      await world.ask([A_SOURCE, B_SOURCE], undefined, [A_SOURCE]);
+      return world.reports;
+    });
+    expect(reports).toStrictEqual([`reported ${A_SOURCE}`, "closed"]);
+  });
+
+  it("D3576: a changes query reports each edited file by the root-relative key its named read reads, never as the caller spelled it", async () => {
+    const outcome = await inWorld(async (world) => {
+      await world.ask([A_SOURCE], undefined, [A_SOURCE]);
+      return { reports: world.reports, reads: world.inputs.namedReads };
+    });
+    expect(outcome).toStrictEqual({
+      reports: [`reported ${A_SOURCE}`, "closed"],
+      reads: [[A_SOURCE]],
     });
   });
 });
@@ -1029,5 +1089,23 @@ describe("the kinds of the other states and entries", () => {
         },
       ],
     ]);
+  });
+});
+
+describe("a report whose named read fails", () => {
+  it("D3602: a changes query whose named read rejects still closes its report of edited files", async () => {
+    const outcome = await inWorld(async (world) => {
+      world.inputs.readNamed = () =>
+        Promise.reject(new Error("the input tracker has stopped"));
+      const rejected = await world.ask([A_SOURCE], undefined, [A_SOURCE]).then(
+        () => false,
+        () => true,
+      );
+      return { rejected, reports: world.reports };
+    });
+    expect(outcome).toStrictEqual({
+      rejected: true,
+      reports: [`reported ${A_SOURCE}`, "closed"],
+    });
   });
 });
