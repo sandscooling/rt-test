@@ -20,6 +20,8 @@ export const RUN_FAILED = "run-failed";
 export const RUN_UNSUPPORTED_VITEST = "run-unsupported-vitest";
 export const RUN_INTERRUPTED_BEFORE_LOAD = "run-interrupted-before-load";
 export const RUN_CRASHED = "run-crashed";
+/** Its workspace's latest stored run was refused as unreadable. */
+export const RUN_REFUSED = "run-refused";
 export const NOT_IN_LATEST_RUN = "not-in-latest-run";
 export const NEVER_RUN = "never-run";
 
@@ -34,6 +36,7 @@ export type TestState =
   | typeof RUN_UNSUPPORTED_VITEST
   | typeof RUN_INTERRUPTED_BEFORE_LOAD
   | typeof RUN_CRASHED
+  | typeof RUN_REFUSED
   | typeof NOT_IN_LATEST_RUN
   | typeof NEVER_RUN;
 
@@ -50,6 +53,7 @@ const STATE_MEMBERS: Readonly<Record<TestState, true>> = {
   [RUN_UNSUPPORTED_VITEST]: true,
   [RUN_INTERRUPTED_BEFORE_LOAD]: true,
   [RUN_CRASHED]: true,
+  [RUN_REFUSED]: true,
   [NOT_IN_LATEST_RUN]: true,
   [NEVER_RUN]: true,
 };
@@ -264,11 +268,15 @@ export type LatestRunFacts = AdapterVersionFacts & {
       }
   );
 
-export interface WorkspaceFacts {
-  readonly workspacePath: string;
-  /** Null when no run of the workspace is stored. */
-  readonly latestRun: LatestRunFacts | null;
-}
+export type WorkspaceFacts = { readonly workspacePath: string } & (
+  | { readonly latestRun: LatestRunFacts; readonly refusedRun?: never }
+  | {
+      /** No run of the workspace is stored, or the one stored last was refused. */
+      readonly latestRun: null;
+      /** Why the run stored last was refused as unreadable, present only then. */
+      readonly refusedRun?: CutReason;
+    }
+);
 
 /** Up to a bound of a list's items, and how many it leaves out. */
 export interface NamedList<T> {

@@ -41,6 +41,7 @@ import type {
   DaemonIdentity,
   UnstoredJob,
 } from "./protocol.js";
+import { RefusalNotes } from "./refusal-notes.js";
 import {
   changedWhileRunning,
   keptAlthoughChanged,
@@ -58,8 +59,6 @@ const NOT_INTERRUPTED =
   "will not be interrupted by a change, so it runs to its end, and a change inside its inputs while it runs leaves the run it stores invalidated";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
-const DISCOVERY_REFUSED_ENTRY =
-  "warning: the latest stored discovery was refused as unreadable, so a discovery is due as if none were stored, and no workspace runs until it is stored";
 
 export interface LifecycleParts {
   readonly identity: DaemonIdentity;
@@ -94,7 +93,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #scheduler: Scheduler;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJobs;
-  #loggedRefusal: string | undefined;
+  readonly #refusals: RefusalNotes;
   #sequence: Promise<void> = Promise.resolve();
   readonly #stopBegun = new AbortController();
   readonly stopSignal: AbortSignal = this.#stopBegun.signal;
@@ -105,6 +104,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     this.identity = parts.identity;
     this.#parts = parts;
     this.#unstored = new UnstoredJobs(parts.log);
+    this.#refusals = new RefusalNotes(parts.log);
     this.#builds = new DependencyBuilds({
       inputs: parts.inputs,
       executor: parts.buildExecutor,
@@ -212,20 +212,11 @@ export class DaemonLifecycle implements DaemonHandlers {
     });
   }
 
-  /** Every read notes a refused discovery, so the log holds it whole before an answer quotes it cut. */
+  /** Every read notes each refusal it holds, so the log holds it whole before an answer quotes it cut. */
   #latestResults(): LatestResults {
     const results = this.#parts.store.readLatestResults(this.#parts.scope);
-    this.#noteRefusal(results.discoveryRefusal);
+    this.#refusals.note(results);
     return results;
-  }
-
-  /** Logs each refusal of the latest discovery once, as the reason a discovery is due. */
-  #noteRefusal(refusal: string | undefined): void {
-    if (refusal === this.#loggedRefusal) return;
-    this.#loggedRefusal = refusal;
-    if (refusal !== undefined) {
-      this.#parts.log.entry(`${DISCOVERY_REFUSED_ENTRY}: ${refusal}`);
-    }
   }
 
   #view(): DaemonView {
