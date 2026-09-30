@@ -1,7 +1,6 @@
 import { parseArgs } from "node:util";
 import {
   COVERAGE,
-  errorText,
   MAX_WAIT_LIMIT_MS,
   queryWait,
   ROUND,
@@ -11,7 +10,6 @@ import {
   type WaitResponse,
 } from "@rt-test/daemon/client";
 import {
-  answerFields,
   contextLines,
   countLines,
   coverageLine,
@@ -25,14 +23,14 @@ import {
   testText,
 } from "../answer-text.js";
 import {
-  absolutePath,
   JSON_OPTION,
   nonEmptyPath,
   requiredFiles,
   UsageError,
   type Command,
 } from "../command.js";
-import { oneLine, reported } from "../output.js";
+import { fileQueryRun } from "../file-query.js";
+import { oneLine } from "../output.js";
 
 const NAME = "wait";
 const OPTIONS = {
@@ -62,21 +60,14 @@ export const waitCommand: Command = {
     const fileArguments = requiredFiles(positionals);
     const rootArgument = nonEmptyPath(values.root, "--root");
     const options = waitOptions(values.limit);
-    return (io) =>
-      reported(io, NAME, values.json === true, async (output) => {
-        const root = absolutePath(io, rootArgument);
-        const files = fileArguments.map((file) => absolutePath(io, file));
-        let answer: WaitResponse;
-        try {
-          answer = await queryWait(root, files, options);
-        } catch (error) {
-          return output.fail(errorText(error), {
-            consumerRoot: root,
-            requestedPaths: files,
-          });
-        }
-        return output.succeed(answerFields(answer), waitText(answer));
-      });
+    return fileQueryRun({
+      name: NAME,
+      json: values.json === true,
+      rootArgument,
+      fileArguments,
+      query: (root, files) => queryWait(root, files, options),
+      text: waitText,
+    });
   },
 };
 

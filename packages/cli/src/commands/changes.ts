@@ -3,7 +3,6 @@ import {
   CHANGE_KIND,
   CHANGE_KINDS,
   CURSOR_USE,
-  errorText,
   NOT_DETERMINED,
   queryChanges,
   type ChangeCounts,
@@ -17,7 +16,6 @@ import {
   type TestChange,
 } from "@rt-test/daemon/client";
 import {
-  answerFields,
   contextLines,
   countLines,
   coverageLine,
@@ -32,14 +30,14 @@ import {
   testText,
 } from "../answer-text.js";
 import {
-  absolutePath,
   JSON_OPTION,
   nonEmptyPath,
   requiredFiles,
   UsageError,
   type Command,
 } from "../command.js";
-import { oneLine, reported } from "../output.js";
+import { fileQueryRun } from "../file-query.js";
+import { oneLine } from "../output.js";
 
 const NAME = "changes";
 const OPTIONS = {
@@ -99,21 +97,14 @@ export const changesCommand: Command = {
     const fileArguments = requiredFiles(positionals);
     const rootArgument = nonEmptyPath(values.root, "--root");
     const options = changesOptions(values.since);
-    return (io) =>
-      reported(io, NAME, values.json === true, async (output) => {
-        const root = absolutePath(io, rootArgument);
-        const files = fileArguments.map((file) => absolutePath(io, file));
-        let answer: ChangesResponse;
-        try {
-          answer = await queryChanges(root, files, options);
-        } catch (error) {
-          return output.fail(errorText(error), {
-            consumerRoot: root,
-            requestedPaths: files,
-          });
-        }
-        return output.succeed(answerFields(answer), changesText(answer));
-      });
+    return fileQueryRun({
+      name: NAME,
+      json: values.json === true,
+      rootArgument,
+      fileArguments,
+      query: (root, files) => queryChanges(root, files, options),
+      text: changesText,
+    });
   },
 };
 

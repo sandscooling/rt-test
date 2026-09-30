@@ -361,6 +361,8 @@ Re-anchored to the same defect at the code the build moved: D2536 (`lifecycle.ts
 
 Review round (12:07 on 2026-09-30): D3507 was stale, since the review's fix heads a used cursor's answer "N changes in scope since the given cursor", adding "; no test is in scope" when none is; its first fixture now has tests in scope and its record's `new` text mirrors the new phrase, still naming the not-determined headline that reads as an all-clear. D3501 now also asserts that the first call was not determined (G11), so its title's claim is what it proves. G8's suggested mutation (`atCursor ?? now`) is not observable, since an entry is listed at the cursor or now and never both; D3516 takes `atCursor` alone. G10 is a test of its own, D3518, rather than a second assertion in D3483, since each record names one mutation. Proof of the round, by `--ids` over 101 records (the 10 new ones, D3507, the 48 whose mutated file the review's fix round edits, and the 73 in `changes-command.test.ts` and `daemon.test.ts`, edited other than add-only; `changes.test.ts` only gained imports and tests): Windows, Node 24.19.0, 12:16 to 12:25 on 2026-09-30, 101/101 detected, exit 0; WSL Ubuntu, Node 24.19.0, in `~/rt-test-t2-6-tests` at fed3c93 with the fix round and these tests applied, 12:29 to 12:34, 101/101 detected, exit 0.
 
+Debt round (12:49 on 2026-09-30): the review moved the wait's and the changes' shared run body into `packages/cli/src/file-query.ts`, so D3452, D3461, D3505 and D3506 are re-anchored there, each to the same defect; D3452's mutation fails only an answer carrying a wait's `outcome` other than settled, as it did in `wait.ts`. Proof by `--ids` over the 16 records mutating `wait.ts`, `changes.ts` or `file-query.ts`: Windows, Node 24.19.0, 12:50, 16/16 detected, exit 0; WSL Ubuntu, Node 24.19.0, at 2d6bb90 with the round applied, 12:50 to 12:51, 16/16 detected, exit 0.
+
 The handoff's Tests Owed test, as it was worded (a changes call with the cursor from before lists the new discovery's `failed-module` entry), passes without the fix it guards, since a determined answer records its own moment before it compares. D3483 pins the fix itself: the store wakes the build-end loop, so the build's end is recorded and a later answer not determined has a cursor to hand back.
 
 #### Deliberately Untested
@@ -394,6 +396,13 @@ Tech debt, for triage once committed:
 - `server.ts` `namedPaths` echoes every non-absolute path with `JSON.stringify`, and `resolveFiles` names each refused path with its reason, with no size bound on an error response, so about 1,000 long refused paths can exceed the 1 MiB line and the client reports a too-long line rather than the refusal (exit 1 either way; the wait had it first).
 - `cli/src/answer-text.ts` `coveringText` decides "covered by no test" by `named.length` where `selectedText` uses `isEmpty(selection.selected)`, two checks of one fact (moved unchanged from `wait.ts`).
 - `cli/src/answer-text.ts` `testText` omits a test's `occurrence`, so two tests sharing a name path print identically in the wait's failures and the changes list.
+
+Tech debt dispositions, against 2d6bb90 (12:47 to 12:50 on 2026-09-30; `node scripts/list-open-issues.mjs`: 0 open issues):
+
+- Fixed: the two command bodies are one `fileQueryRun` in `cli/src/file-query.ts`, called by `wait` and `changes`; D3452, D3461, D3505 and D3506 re-anchored there by the tests session.
+- No change, class: `coveringText`'s `named.length` and `isEmpty` agree by construction, since a bounded list names at least one item whenever it holds any; no defect.
+- No change, direction: `resolveFiles` and `firstLineOf` stay in the wait's modules, since the changes query reuses the wait's resolution, refusal and coverage by the ticket's design and also imports `coverageAt`, `NOT_AWAITED_REASON` and `WaitMoment` from them, so moving two helpers decouples nothing.
+- Recorded under the owner's 03:25 ruling, not fixed: a refusal naming about 1,000 long refused paths can pass the 1 MiB line (exit 1 either way, no result read as current); `testText` omits `occurrence`, so two tests sharing a name path print alike in the text (the JSON carries it).
 
 #### Test Coverage Gaps
 

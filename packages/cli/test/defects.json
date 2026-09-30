@@ -828,9 +828,9 @@
   {
     "id": "D3452",
     "defect": "rt-test wait exits 1 for a superseded or unsettled answer, as though RT Test had not answered.",
-    "file": "packages/cli/src/commands/wait.ts",
-    "old": "        return output.succeed(answerFields(answer), waitText(answer));",
-    "new": "        return answer.outcome === WAIT_OUTCOME.settled\n          ? output.succeed(answerFields(answer), waitText(answer))\n          : output.fail(answer.outcome);"
+    "file": "packages/cli/src/file-query.ts",
+    "old": "      return output.succeed(answerFields(answer), text(answer));",
+    "new": "      return \"outcome\" in answer && answer.outcome !== \"settled\"\n        ? output.fail(answer.outcome)\n        : output.succeed(answerFields(answer), text(answer));"
   },
   {
     "id": "D3453",
@@ -856,7 +856,7 @@
   {
     "id": "D3461",
     "defect": "rt-test wait sends only its first file, so it answers settled while the other files' covering workspaces are queued.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/file-query.ts",
     "old": "const files = fileArguments.map((file) => absolutePath(io, file));",
     "new": "const files = fileArguments.slice(0, 1).map((file) => absolutePath(io, file));"
   },
@@ -891,16 +891,16 @@
   {
     "id": "D3505",
     "defect": "rt-test changes --json prints a document without the answer's fields, so a hook reading it finds no cursor and no change.",
-    "file": "packages/cli/src/commands/changes.ts",
-    "old": "        return output.succeed(answerFields(answer), changesText(answer));",
-    "new": "        return output.succeed({}, changesText(answer));"
+    "file": "packages/cli/src/file-query.ts",
+    "old": "      return output.succeed(answerFields(answer), text(answer));",
+    "new": "      return output.succeed({}, text(answer));"
   },
   {
     "id": "D3506",
     "defect": "rt-test changes that gets no answer exits 0 as though it had one, so a hook reads a daemon that is not there as nothing having changed.",
-    "file": "packages/cli/src/commands/changes.ts",
-    "old": "          return output.fail(errorText(error), {",
-    "new": "          return output.succeed({ reason: errorText(error) }, errorText(error), {"
+    "file": "packages/cli/src/file-query.ts",
+    "old": "        return output.fail(errorText(error), {",
+    "new": "        return output.succeed({ reason: errorText(error) }, errorText(error), {"
   },
   {
     "id": "D3507",
