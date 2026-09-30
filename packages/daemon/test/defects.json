@@ -8223,5 +8223,12 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "      stored,\n      window: mark.window,",
     "new": "      stored,\n      window: { ...mark.window, paths: new Set<string>() },"
+  },
+  {
+    "id": "D3184",
+    "defect": "A retried workspace the lifecycle refuses at its planned revision keeps its retry, so each plan runs it into another refusal at the same revision until the revision moves.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (refusedAtPlan) return;\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
+    "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) return;\n      begun.notBegun();\n"
   }
 ]
