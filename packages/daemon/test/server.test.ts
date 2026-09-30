@@ -26,14 +26,17 @@ import {
   CLOSED,
   DAEMON_TEST_TIMEOUT_MS,
   eventually,
-  keyedEndpoint,
   memoryLog,
   RawConnection,
   settled,
   until,
   withConnection,
-  withDaemonKey,
 } from "./daemon-harness.js";
+import {
+  KEY_TEST_OPTIONS,
+  keyedEndpoint,
+  withDaemonKey,
+} from "./daemon-key.js";
 import { inTempDir, WAITING, within } from "./harness.js";
 import { Deferred } from "./scheduling-harness.js";
 import { testSocketPath, withTestEndpoint } from "./test-endpoint.js";
@@ -1119,7 +1122,7 @@ describe("closing the connections at the stop", () => {
   );
 });
 
-describe("proving each answer to a challenge", () => {
+describe("proving each answer to a challenge", KEY_TEST_OPTIONS, () => {
   it("D1566: a hello whose challenge is 257 characters, one past the frozen limit, is answered with no proof field", async () => {
     const answer = await onProvingServer((connection) => {
       connection.sendLine({ ...HELLO, challenge: OVERLONG_CHALLENGE });
