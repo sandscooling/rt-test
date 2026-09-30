@@ -374,6 +374,11 @@ From the review's gaps, in `input-tracker.test.ts` and, for G6, `lifecycle.test.
 
 D2867 is re-anchored again to the review's case-folded filter.
 
+From the debt round:
+
+- D3265 (G9, `env-files.test.ts`): a listed setup file whose read fails with ENOTDIR, as Linux reports a path below a file, is taken as unreadable, so its workspace has no fingerprint (AC5). The read is failed through the suite's `node:fs` mock, so the proof holds on Windows, where that path gives ENOENT.
+- G8 repaired `discover-tests.test.ts`' `envFilesOf` over `workspaceListing(entry).envFiles` and `workspaceEnvFilesKnown`, every expectation kept; D3076 and D1900 are re-anchored to the renamed guard and the missing codes.
+
 Re-anchored to the same defect in the code this change reshaped: D1909, D1951 (`input-watcher.ts`), D2867, D3181 (`run-judgment.ts`), D2894 (`queued-reads.ts`), D3081, D3071 (`protection.ts`), D2160, D3067 (`fingerprint.ts`, since the fingerprints now take a workspace's env files from the listing and the end check its test modules from it), D3173 (`input-tracker.ts`), and D2128, D2129 (`protection.ts`, in `packages/daemon/test/selection/defects.json`).
 
 Repaired for the reworded end check (C48): the stand-in strings of D1879, D3030 and D2090 and the titles of D3030, D3100, D3077 and D3079, and the record sentences of D1879, D1898, D1988 and D3030. The rig's and the stand-in's window edges read `comparedDigests`, as the tracker's do. The inotify model now carries a watch along when an ancestor is renamed within its own parent, and reports no content change for a directory entry, as inotify reports neither; both disagreed with real inotify, which D3231's Linux proof showed.
@@ -422,6 +427,13 @@ Tech debt, for triage once this change is committed:
 Every row is covered (rt-t2-3p-tests, 01:20): G1 D3257, G2 D3258, G3 D3259, G4 D3260, G5 D3261, G6 D3262 with D2867 re-anchored, G7 D3263, each passing against the fix round. Proof by `--ids` of 174 records (the seven, D2867, and every record mutating the eight production files the fix round edited): 174 detected on Windows (01:09 to 01:17) and on Linux Node 24.19.0 (01:17 to 01:20).
 
 Validation of the fix round: `bun x oxlint`, `bun x prettier --check` and `bun run --filter @rt-test/daemon typecheck` exit 0 (01:03) over the eight production files; `bun x vitest related` over them, through the run lease, 25 of 132 test files, 1652 of 1652 tests passed, exit 0 (01:21 to 01:25); `check-line-citations` clean; `check-sprint-keys` and `check-requirement-markers` exit 0 (01:25).
+
+Debt round over cd67905 and 3cda5f2 (orchestrator's go at 01:30, both FIX; `list-open-issues`: 0 open issues, complete). TD1: `workspaceEnvFiles` and `discoveryEnvFiles` became `workspaceEnvFilesKnown` and `discoveryEnvFilesKnown`, answering only whether the env files are known (`EnvFilesKnown`), so `workspaceListing` is the one answer to which env files a workspace lists; 2.4b's line names the new function (granted). TD2: `moduleDigest` digests ENOTDIR as absent beside ENOENT (probe: on Linux Node 24.13.1 a read of `file/below.js` throws ENOTDIR, on Windows ENOENT; `statSync` with `throwIfNoEntry: false` gives undefined on both). Rows for the tests session, ids D3264 and D3265:
+
+- G8 (MEDIUM, `packages/daemon/test/discover-tests.test.ts`, `envFilesOf`): it imports the removed `workspaceEnvFiles` and reads its `files`, so the daemon typecheck fails. Compose `workspaceListing(entry).envFiles` (sorted) with `workspaceEnvFilesKnown(entry)`'s answer, keeping every expectation. Re-anchor D3076 (`old`: `  if (entry.status !== "discovered") return KNOWN;`) and D1900 (`old`: `    if (MISSING_CODES.has((error as NodeJS.ErrnoException).code ?? "")) {` followed by `      return { ok: true, digest: ABSENT_FILE };`), and re-prove them with D3074, D3075 and D3124.
+- G9 (MEDIUM, `packages/daemon/src/inputs/fingerprint.ts`, `moduleDigest`): on Linux a listed setup file whose path runs through a file (ENOTDIR) refuses the workspace's fingerprint as unreadable, where AC5 digests nothing at its path as absent and Windows (ENOENT) already does. Expected: the workspace is fingerprinted with the setup file digested as absent; the proof needs Linux.
+
+Both rows are covered (rt-t2-3p-tests, 01:48): G8 repaired `envFilesOf` with every expectation kept and re-anchored D3076 and D1900; G9 is D3265 in `env-files.test.ts`, which injects ENOTDIR through its `node:fs` mock so the defect shows on Windows too. Proof by `--ids` of 199 records (every record mutating `env-files.ts` or `fingerprint.ts`, every record in `discover-tests.test.ts`, and D3265): 199 detected on Windows (01:33 to 01:45) and on Linux Node 24.19.0 (01:46 to 01:48). Debt-round validation: oxlint and prettier exit 0 (01:30); the daemon typecheck exit 0 (01:33, after G8); `vitest related` over `env-files.ts` and `fingerprint.ts`, through the run lease, 15 of 132 test files, 1315 of 1315 tests passed, exit 0 (01:51 to 01:52); `check-line-citations` clean. No debt item remains.
 
 ### Completion Notes
 

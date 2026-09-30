@@ -24,8 +24,10 @@ Companion files, read only when their trigger fires:
 
 ## One-ticket size limits
 
-One ticket is at most **20 estimated files** and **15 code units**. Every workflow that sizes work against a
-ticket uses these two limits.
+One ticket is at most **25 estimated files**, or up to **30** when the work needs them and splitting would cut
+one behavior or contract in two, and **15 code units**. Every workflow that sizes work against a ticket uses
+these limits. They keep each member's round inside one session's context; a session that nears its window
+hands off rather than compacting, so the limits bound the work, not the risk of losing it.
 
 - **Code units** (`sizing_ac_count`): the acceptance criteria that need a code change, plus one for
   validation. Rewording or splitting a criterion for clarity adds none; the count measures scope.
@@ -34,10 +36,10 @@ ticket uses these two limits.
   counting tests on both sides, once a sprint's worth exist.
 - **The raw file count already includes test files**: every file to modify or create, every existing test
   file the change breaks, and every file a sweep criterion touches. Never apply a second multiplier for tests.
-- **Repetition moves the file limit.** A mechanical sweep (the same edit at every site) may run past 20
-  files; name the one repeated edit and size the ticket on its decision-bearing files alone, reporting the
+- **Repetition moves the file limit.** A mechanical sweep (the same edit at every site) may run past the file
+  limit; name the one repeated edit and size the ticket on its decision-bearing files alone, reporting the
   sweep as a separate figure.
-- **The file limit assumes decomposition.** 20 applies when the work splits into task groups touching
+- **The file limit assumes decomposition.** 25 applies when the work splits into task groups touching
   disjoint files; a single dependency chain through one subsystem wants 10 whatever the count says.
 
 ## Operating rules
@@ -171,7 +173,9 @@ Show the owner both the raw and the estimated count.
 
 - **Estimated files above 10**: report both counts and say the implementation will be delegated to
   implementer agents. A report, not a question.
-- **Estimated files above 20, or code units above 15**: name which limit was crossed and ask via
+- **Estimated files above 25, up to 30**: report both counts and name the behavior or contract a split would
+  cut in two. A report, not a question; with no such behavior, treat it as the next case.
+- **Estimated files above 30, or code units above 15**: name which limit was crossed and ask via
   `AskUserQuestion` (header `Sizing`): **Proceed as-is** or **Split**. On a split, read `GATES.md` § Split.
 - **Over the file limit with no decomposition**: say so, since the limit's price assumed disjoint groups.
 

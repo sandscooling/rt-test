@@ -77,7 +77,7 @@ could catch only in the criteria themselves; create-tests decides which tests ea
 
 #### Where this sits
 
-The second of the four tickets the original 2.4 (wait for files) became: 2.4 lets the daemon answer late; this ticket reads the paths a query names before it answers, and resolves a caller's paths with the Windows refusals; 2.4b is the wait, which reads its files and resolves its paths through this ticket; 2.4c is the `rt-test wait` command. Build order: 2.3g, 2.3f, 2.3h, 2.3i, 2.4, 2.4d, 2.4b, 2.4c (orchestrator, 2026-09-28 13:26). `status <path>` is this ticket's production caller, and the first production caller of 2.4's late answer.
+The second of the four tickets the original 2.4 (wait for files) became: 2.4 lets the daemon answer late; this ticket reads the paths a query names before it answers, and resolves a caller's paths with the Windows refusals; 2.4b is the wait and the `rt-test wait` command, which read its files and resolve its paths through this ticket. Build order: 2.3g, 2.3f, 2.3h, 2.3i, 2.4, 2.4d, 2.4b (orchestrator, 2026-09-28 13:26; the command, once 2.4c, folded into 2.4b at 01:55 on 2026-09-30). `status <path>` is this ticket's production caller, and the first production caller of 2.4's late answer.
 
 Requirements this ticket serves (`docs/requirements.md`):
 

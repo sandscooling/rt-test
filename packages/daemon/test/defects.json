@@ -3013,7 +3013,7 @@
     "id": "D1900",
     "defect": "A listed test module that cannot be read is taken as deleted, so its workspace gets a fingerprint from an input set it could not establish.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
-    "old": "    if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {\n      return { ok: true, digest: ABSENT_FILE };",
+    "old": "    if (MISSING_CODES.has((error as NodeJS.ErrnoException).code ?? \"\")) {\n      return { ok: true, digest: ABSENT_FILE };",
     "new": "    if (true) {\n      return { ok: true, digest: ABSENT_FILE };"
   },
   {
@@ -7675,8 +7675,8 @@
     "id": "D3076",
     "defect": "A workspace whose discovery failed reads as one whose env files are not known, so it loses the fingerprint it had and every run of it is stored not fingerprinted.",
     "file": "packages/daemon/src/inputs/env-files.ts",
-    "old": "  if (entry.status !== \"discovered\") return { known: true, files: [] };",
-    "new": "  if (entry.status !== \"discovered\") return { known: false, unreportedWorkspace: entry.workspace.path };"
+    "old": "  if (entry.status !== \"discovered\") return KNOWN;",
+    "new": "  if (entry.status !== \"discovered\") return { known: false, workspace: entry.workspace.path };"
   },
   {
     "id": "D3077",
@@ -8895,5 +8895,12 @@
     "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "this.#loggedRunRefusals.get(workspacePath) === reason",
     "new": "[...this.#loggedRunRefusals.values()].includes(reason)"
+  },
+  {
+    "id": "D3265",
+    "defect": "A listed setup file whose path runs through a file, which Linux reads as ENOTDIR, is taken as unreadable, so its workspace has no fingerprint where nothing at the path should digest as absent.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "const MISSING_CODES: ReadonlySet<string> = new Set([\"ENOENT\", \"ENOTDIR\"]);",
+    "new": "const MISSING_CODES: ReadonlySet<string> = new Set([\"ENOENT\"]);"
   }
 ]
