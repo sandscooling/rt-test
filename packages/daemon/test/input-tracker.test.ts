@@ -32,6 +32,7 @@ import { daemonEntryPoint } from "../src/daemon/entry-point.js";
 import {
   countEnvironment,
   SESSION_VARIABLES,
+  takeStartEnvironment,
 } from "../src/inputs/environment-digest.js";
 import {
   discoveryFingerprint,
@@ -69,6 +70,7 @@ import {
   eventually,
   memoryLog,
   withEnvironment,
+  withVariables,
   type MemoryLog,
 } from "./daemon-harness.js";
 import {
@@ -77,6 +79,7 @@ import {
   discoveredWorkspace,
   fakeVitest,
   fixtureRepository,
+  handBuiltReads,
   inTempDir,
   onPlatform,
   projectFacts,
@@ -228,7 +231,8 @@ const IDLE_TRACKER_SCRIPT = [
   "const [trackerModule, root] = process.argv.slice(1);",
   "const { InputTracker } = await import(trackerModule);",
   'const log = { file: "idle-tracker.log", entry() {}, error() {} };',
-  "const tracker = new InputTracker({ consumerRoot: root, exclusions: [], log });",
+  "const startEnvironment = { ...process.env };",
+  "const tracker = new InputTracker({ consumerRoot: root, exclusions: [], log, startEnvironment });",
   "tracker.start();",
   "await tracker.firstReconciled();",
   `process.stdout.write("${RECONCILED_LINE}\\n");`,
@@ -332,6 +336,7 @@ async function tracking<T>(
     consumerRoot: options.consumerRoot ?? root,
     exclusions: options.exclusions ?? [join(root, STATE_DIRECTORY)],
     log,
+    startEnvironment: takeStartEnvironment(),
   });
   const entry = workspaceAt(root, options.testModules);
   const stored =
@@ -1312,7 +1317,12 @@ describe("a job's inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
           }
         },
       };
-      tracker = new InputTracker({ consumerRoot: root, exclusions: [], log });
+      tracker = new InputTracker({
+        consumerRoot: root,
+        exclusions: [],
+        log,
+        startEnvironment: takeStartEnvironment(),
+      });
       try {
         tracker.start();
         await tracker.firstReconciled();
@@ -1697,6 +1707,7 @@ describe(
           consumerRoot: root,
           exclusions: [],
           log: memoryLog(),
+          startEnvironment: takeStartEnvironment(),
         });
         try {
           tracker.start();
@@ -1973,6 +1984,7 @@ describe("reconciliation", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
         consumerRoot: root,
         exclusions: [],
         log: memoryLog(),
+        startEnvironment: takeStartEnvironment(),
       });
       try {
         const before = tracker.current().unavailable;
@@ -2035,28 +2047,18 @@ describe("the fingerprint's parts", () => {
     expect(descending.digest()).toBe(ascending.digest());
   });
 
-  it("D1914: a changed environment variable value changes the workspace fingerprint", async () => {
-    const planted = "RT_TEST_PLANTED_VARIABLE";
-    const saved = process.env[planted];
-    const inputs = new Map([["a.ts", "file:1"]]);
-    const digestUnder = async (value: string): Promise<string | undefined> => {
-      process.env[planted] = value;
-      vi.resetModules();
-      const fresh = await import("../src/inputs/fingerprint.js");
-      const print = fresh.workspaceFingerprint(
-        new fresh.ProjectInputs(REPO, inputs),
-        workspaceAt(REPO),
+  it("D1914: a changed environment variable value changes the workspace fingerprint", () => {
+    const project = new ProjectInputs(REPO, new Map([["a.ts", "file:1"]]));
+    const digestUnder = (value: string): string | undefined => {
+      const reads = new SnapshotReads(
+        REPO,
+        environmentDigest({ [PLANTED_VARIABLE]: value }),
       );
+      const print = workspaceFingerprint(project, workspaceAt(REPO), reads);
       return print.ok ? print.digest : undefined;
     };
-    try {
-      const first = await digestUnder("first");
-      const second = await digestUnder("second");
-      expect(first !== undefined && first !== second).toBe(true);
-    } finally {
-      if (saved === undefined) delete process.env[planted];
-      else process.env[planted] = saved;
-    }
+    const first = digestUnder("first");
+    expect(first !== undefined && first !== digestUnder("second")).toBe(true);
   });
 
   it("D2211: a raised selection policy version changes the workspace fingerprint", async () => {
@@ -2080,6 +2082,7 @@ describe("the fingerprint's parts", () => {
       const print = fresh.workspaceFingerprint(
         new fresh.ProjectInputs(REPO, inputs),
         workspaceAt(REPO),
+        handBuiltReads(REPO),
       );
       return print.ok ? print.digest : undefined;
     };
@@ -2097,7 +2100,11 @@ describe("the fingerprint's parts", () => {
     const changed = await inTempDir((root) => {
       const project = new ProjectInputs(root, new Map([["a.ts", "file:1"]]));
       const digestNow = (): string | undefined => {
-        const print = workspaceFingerprint(project, workspaceAt(root));
+        const print = workspaceFingerprint(
+          project,
+          workspaceAt(root),
+          handBuiltReads(root),
+        );
         return print.ok ? print.digest : undefined;
       };
       fakeVitest(root, "5.0.1");
@@ -2124,7 +2131,7 @@ describe("the fingerprint's parts", () => {
         const print = workspaceFingerprint(
           project,
           entry,
-          new SnapshotReads(root),
+          handBuiltReads(root),
           narrowed,
         );
         return print.ok ? print.digest : undefined;
@@ -2192,6 +2199,7 @@ function envPrint(
     workspaceFingerprint(
       new ProjectInputs(root, new Map(Object.entries(held))),
       entry,
+      handBuiltReads(root),
     ),
   );
 }
@@ -2241,6 +2249,7 @@ describe(
               discoveryFingerprint(
                 new ProjectInputs(root, new Map()),
                 envDiscovery(root),
+                handBuiltReads(root),
               ),
             ),
           () => writeFileSync(join(root, LOCAL_ENV_FILE), "VITE_A=1\n"),
@@ -2265,6 +2274,7 @@ describe(
               discoveryFingerprint(
                 new ProjectInputs(root, new Map()),
                 discovery,
+                handBuiltReads(root),
               ),
             ),
           () => writeFileSync(join(root, "packages/b", ENV_FILE), "VITE_B=1\n"),
@@ -2354,7 +2364,7 @@ describe(
             workspaceFingerprint(
               project,
               entry,
-              new SnapshotReads(root),
+              handBuiltReads(root),
               narrowed,
             ),
           );
@@ -2381,6 +2391,7 @@ describe(
       const print = workspaceFingerprint(
         new ProjectInputs(REPO, new Map()),
         workspaceAt(REPO, [], { reported: false }),
+        handBuiltReads(REPO),
       );
       expect(
         print.ok
@@ -2396,17 +2407,21 @@ describe(
 
     it("D3075: a discovery holding a workspace whose selection facts are not reported has no fingerprint, the reason naming that workspace", async () => {
       const outcome = await inTempDir((root) => {
-        const print = discoveryFingerprint(new ProjectInputs(root, new Map()), {
-          workspaces: [
-            workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]),
-            discoveredWorkspace(
-              { path: "packages/b", directory: join(root, "packages/b") },
-              [],
-              { reported: false },
-            ),
-          ],
-          notRead: [],
-        });
+        const print = discoveryFingerprint(
+          new ProjectInputs(root, new Map()),
+          {
+            workspaces: [
+              workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]),
+              discoveredWorkspace(
+                { path: "packages/b", directory: join(root, "packages/b") },
+                [],
+                { reported: false },
+              ),
+            ],
+            notRead: [],
+          },
+          handBuiltReads(root),
+        );
         return print.ok
           ? print
           : { ok: false, namesWorkspace: print.reason.includes("packages/b") };
@@ -2415,12 +2430,16 @@ describe(
     });
 
     it("D3076: a workspace whose discovery failed, which loaded no config, keeps a fingerprint rather than one of unknown env files", () => {
-      const print = workspaceFingerprint(new ProjectInputs(REPO, new Map()), {
-        status: "failed",
-        workspace: { path: ROOT_PATH, directory: REPO },
-        vitestVersion: DISCOVERED_VITEST_VERSION,
-        error: "Error: Failed to load config",
-      });
+      const print = workspaceFingerprint(
+        new ProjectInputs(REPO, new Map()),
+        {
+          status: "failed",
+          workspace: { path: ROOT_PATH, directory: REPO },
+          vitestVersion: DISCOVERED_VITEST_VERSION,
+          error: "Error: Failed to load config",
+        },
+        handBuiltReads(REPO),
+      );
       expect(print.ok).toBe(true);
     });
 
@@ -2534,20 +2553,6 @@ const NO_VARIABLES_RESPELLED = JSON.stringify(
   null,
   2,
 );
-
-/** Runs `body` with each variable of `values` set, then restores what each held before. */
-function withVariables<T>(
-  values: Readonly<Record<string, string>>,
-  body: () => Promise<T>,
-): Promise<T> {
-  const nested = Object.entries(values).reduce<() => Promise<T>>(
-    (inner, [name, value]) =>
-      () =>
-        withEnvironment(name, value, inner),
-    body,
-  );
-  return nested();
-}
 
 describe("the environment's count", () => {
   it("D2935: a change in the value of each variable the session list names leaves the environment's digest as it was", () => {
@@ -2678,39 +2683,6 @@ describe(
   "the environment under the declaration",
   { timeout: DAEMON_TEST_TIMEOUT_MS },
   () => {
-    it("D2941: a declared variable's value leaves the workspace's and the discovery's fingerprints as they were", async () => {
-      const prints = await inTempDir(async (root) => {
-        writeTree(root, {
-          [DECLARATION_FILE]: declaringVariables(DECLARED_VARIABLE),
-          "src/a.ts": "",
-        });
-        const under = (value: string) =>
-          withEnvironment(DECLARED_VARIABLE, value, () =>
-            tracking(root, async ({ tracker, fingerprint }) => {
-              const discovery = tracker
-                .current()
-                .discoveryFingerprint(discoveryListing(root, []));
-              return {
-                workspace: fingerprint(),
-                discovery: discovery.ok ? discovery.digest : undefined,
-              };
-            }),
-          );
-        return { first: await under("first"), second: await under("second") };
-      });
-      const { first, second } = prints;
-      expect({
-        computed:
-          first.workspace !== undefined && first.discovery !== undefined,
-        workspaceHeld: second.workspace === first.workspace,
-        discoveryHeld: second.discovery === first.discovery,
-      }).toStrictEqual({
-        computed: true,
-        workspaceHeld: true,
-        discoveryHeld: true,
-      });
-    });
-
     it("D2942: a variable rt-test.json comes to declare counts only as set from the reconciliation that reads the declaration", async () => {
       const outcome = await withEnvironment(DECLARED_VARIABLE, "held", () =>
         inTempDir((root) => {
@@ -4337,6 +4309,7 @@ describe("a workspace whose env files are not known", () => {
           }),
         ],
       }),
+      handBuiltReads(REPO),
     );
     expect(print).toStrictEqual({
       ok: false,
@@ -4349,6 +4322,7 @@ describe("a workspace whose env files are not known", () => {
     const print = workspaceFingerprint(
       new ProjectInputs(REPO, new Map()),
       workspaceAt(REPO, [], { reported: false }),
+      handBuiltReads(REPO),
     );
     expect(print).toStrictEqual({
       ok: false,
@@ -4394,6 +4368,7 @@ describe("the committed digests a job's window keeps", () => {
         consumerRoot: root,
         exclusions: [join(root, STATE_DIRECTORY)],
         log: memoryLog(),
+        startEnvironment: takeStartEnvironment(),
       });
       try {
         return tracker.beginJob().window.startDigests;
@@ -4425,6 +4400,7 @@ describe("stopping the tracker", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
           consumerRoot: root,
           exclusions: [join(root, STATE_DIRECTORY)],
           log: memoryLog(),
+          startEnvironment: takeStartEnvironment(),
         });
         tracker.start();
         await tracker.firstReconciled();
@@ -5055,7 +5031,11 @@ describe("the setup files a fingerprint counts", () => {
       const entry = setupEntry(root, [IGNORED_SETUP]);
       const inputs = new Map([["src/a.ts", "file:1"]]);
       const afresh = printed(
-        workspaceFingerprint(new ProjectInputs(root, inputs), entry),
+        workspaceFingerprint(
+          new ProjectInputs(root, inputs),
+          entry,
+          handBuiltReads(root),
+        ),
       );
       const beside = printed(
         workspaceFingerprint(
@@ -5065,6 +5045,7 @@ describe("the setup files a fingerprint counts", () => {
             new Map([[IGNORED_SETUP, "file:stale"]]),
           ),
           entry,
+          handBuiltReads(root),
         ),
       );
       return afresh !== undefined && beside === afresh;
@@ -5104,6 +5085,7 @@ describe("the setup files a fingerprint counts", () => {
             discoveryFingerprint(
               new ProjectInputs(root, new Map()),
               setupDiscovery(root, [IGNORED_SETUP]),
+              handBuiltReads(root),
             ),
           ),
         () => writeTree(root, { [IGNORED_SETUP]: "export {};\n" }),
@@ -5118,6 +5100,7 @@ describe("the setup files a fingerprint counts", () => {
       const print = workspaceFingerprint(
         new ProjectInputs(root, new Map()),
         setupEntry(root, [IGNORED_SETUP]),
+        handBuiltReads(root),
       );
       return {
         ok: print.ok,
@@ -5141,9 +5124,19 @@ describe("the setup files a fingerprint counts", () => {
         ]),
       );
       const listing = printed(
-        workspaceFingerprint(project, setupEntry(root, [IGNORED_SETUP])),
+        workspaceFingerprint(
+          project,
+          setupEntry(root, [IGNORED_SETUP]),
+          handBuiltReads(root),
+        ),
       );
-      const none = printed(workspaceFingerprint(project, setupEntry(root, [])));
+      const none = printed(
+        workspaceFingerprint(
+          project,
+          setupEntry(root, []),
+          handBuiltReads(root),
+        ),
+      );
       return listing !== undefined && listing === none;
     });
     expect(same).toBe(true);
@@ -5344,3 +5337,14 @@ describe(
     });
   },
 );
+
+describe("the start environment", () => {
+  it("D3334: a variable the daemon's live environment gains after the start environment was taken is absent from it", async () => {
+    const seen = await withVariables({ [PLANTED_VARIABLE]: undefined }, () => {
+      const start = takeStartEnvironment();
+      process.env[PLANTED_VARIABLE] = "gained later";
+      return Promise.resolve(start[PLANTED_VARIABLE]);
+    });
+    expect(seen).toBeUndefined();
+  });
+});

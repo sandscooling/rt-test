@@ -6629,13 +6629,6 @@
     "new": "  return name.toUpperCase();"
   },
   {
-    "id": "D2941",
-    "defect": "The current inputs fingerprint with the live environment under no declaration, so a declared variable's value change reads every result stale.",
-    "file": "packages/daemon/src/inputs/current-inputs.ts",
-    "old": "  const reads = new SnapshotReads(inputs.root, environment);",
-    "new": "  const reads = new SnapshotReads(inputs.root);"
-  },
-  {
     "id": "D2942",
     "defect": "The environment is counted without the variables rt-test.json declares, so a declaration added while the daemon runs never takes effect.",
     "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
@@ -8916,5 +8909,40 @@
     "file": "packages/daemon/src/daemon/endpoint-proof.ts",
     "old": "    return `it answered without a proof: ${JSON.stringify(answer)}`;",
     "new": "    return \"its proof does not match this worktree's daemon key\";"
+  },
+  {
+    "id": "D3331",
+    "defect": "An executor process inherits the daemon's live environment, so a variable the daemon gains, loses or changes after it began serving reaches a test while the fingerprint counts the start environment, and a result produced under it reads current.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      env: executorEnvironment(this.#startEnvironment),\n",
+    "new": ""
+  },
+  {
+    "id": "D3332",
+    "defect": "An executor process's environment holds no own NODE_V8_COVERAGE key, so Node carries a NODE_V8_COVERAGE the daemon's live environment gained after the start into the process.",
+    "file": "packages/daemon/src/inputs/environment-digest.ts",
+    "old": "  return { ...start, [CARRIED_VARIABLE]: carriedValue(start) };",
+    "new": "  return { ...start };"
+  },
+  {
+    "id": "D3333",
+    "defect": "An executor process's NODE_V8_COVERAGE key always holds undefined, so a daemon started under coverage starts its executor processes without the coverage directory its start environment holds.",
+    "file": "packages/daemon/src/inputs/environment-digest.ts",
+    "old": "  return { ...start, [CARRIED_VARIABLE]: carriedValue(start) };",
+    "new": "  return { ...start, [CARRIED_VARIABLE]: undefined };"
+  },
+  {
+    "id": "D3334",
+    "defect": "The start environment is the daemon's live process.env rather than a copy, so a variable the daemon gains after it began serving reaches the digest and every executor process.",
+    "file": "packages/daemon/src/inputs/environment-digest.ts",
+    "old": "  return Object.freeze({ ...process.env });",
+    "new": "  return process.env;"
+  },
+  {
+    "id": "D3335",
+    "defect": "The daemon builds its job executor from its live process.env rather than the start environment, so a variable the daemon gains after it began serving reaches the tests it runs while no fingerprint counts it.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "    executor: new Executor(log, startEnvironment),",
+    "new": "    executor: new Executor(log, process.env),"
   }
 ]

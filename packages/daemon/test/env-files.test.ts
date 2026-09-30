@@ -28,6 +28,7 @@ import { ROOT_PATH } from "../src/vitest/find-workspaces.js";
 import type { EnvSource } from "../src/vitest/selection-facts.js";
 import {
   discoveredWorkspace,
+  handBuiltReads,
   inTempDir,
   projectFacts,
   settle,
@@ -81,6 +82,7 @@ function rootFingerprint(root: string): Settled<FingerprintResult> {
     workspaceFingerprint(
       new ProjectInputs(root, new Map()),
       workspaceWithSources(root, [ROOT_SOURCE]),
+      handBuiltReads(root),
     ),
   );
 }
@@ -435,6 +437,7 @@ describe("a listed setup file whose path runs through a file", () => {
         const print = workspaceFingerprint(
           new ProjectInputs(root, new Map()),
           entry,
+          handBuiltReads(root),
         );
         return print.ok ? print.digest : undefined;
       };

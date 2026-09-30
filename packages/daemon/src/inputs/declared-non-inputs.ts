@@ -3,6 +3,7 @@ import type { DaemonLog } from "../daemon/daemon-log.js";
 import {
   countEnvironment,
   type EnvironmentCount,
+  type StartEnvironment,
 } from "./environment-digest.js";
 import {
   declaredNonInputs,
@@ -46,18 +47,24 @@ export class DeclaredNonInputs {
   #loggedEnvironment: string | undefined;
   #protection: Protection;
   #match: NonInputMatch = () => undefined;
-  /** The daemon's environment as it started, which every executor process inherits. */
-  readonly #startEnvironment: NodeJS.ProcessEnv = { ...process.env };
-  #environment: EnvironmentCount = countEnvironment(
-    this.#startEnvironment,
-    declaredVariables(NO_DECLARATION),
-  );
+  /** The daemon's environment as it began serving, which every executor process starts with. */
+  readonly #startEnvironment: StartEnvironment;
+  #environment: EnvironmentCount;
 
   /** `root` is the consumer root's real path. */
-  constructor(root: string, log: DaemonLog) {
+  constructor(
+    root: string,
+    log: DaemonLog,
+    startEnvironment: StartEnvironment,
+  ) {
     this.#root = root;
     this.#log = log;
     this.#protection = protection(undefined, root);
+    this.#startEnvironment = startEnvironment;
+    this.#environment = countEnvironment(
+      startEnvironment,
+      declaredVariables(NO_DECLARATION),
+    );
   }
 
   /** The pattern that makes a root-relative path a declared non-input, or undefined when it is an input. */
