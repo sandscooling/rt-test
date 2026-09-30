@@ -1,7 +1,10 @@
 import type { IdentifiedTest } from "@rt-test/core";
 import type { SQLInputValue, SQLOutputValue } from "node:sqlite";
 import { isRecord, isStringArray } from "../json-guards.js";
-import type { UnreadWorkspaceSource } from "../vitest/find-workspaces.js";
+import type {
+  NotCoveredWorkspace,
+  UnreadWorkspaceSource,
+} from "../vitest/find-workspaces.js";
 import type { FailedModule, ModuleReport } from "../vitest/module-tests.js";
 import {
   REGEXP_FIND,
@@ -182,6 +185,13 @@ export function unsupportedProject(value: unknown): UnsupportedProject {
 export function unreadWorkspaceSource(value: unknown): UnreadWorkspaceSource {
   return {
     source: jsonText(value, "source"),
+    reason: jsonText(value, "reason"),
+  };
+}
+
+export function notCoveredWorkspace(value: unknown): NotCoveredWorkspace {
+  return {
+    path: jsonText(value, "path"),
     reason: jsonText(value, "reason"),
   };
 }

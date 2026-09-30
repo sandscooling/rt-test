@@ -52,6 +52,7 @@ import {
 import { daemonEntryPoint } from "../../daemon/src/daemon/entry-point.js";
 import { isRunning } from "../../daemon/src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../../daemon/src/store/consumer-identity.js";
+import { STORE_FILE_NAME } from "../../daemon/src/store/schema.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
   DAEMON_WAIT_MS,
@@ -2917,4 +2918,117 @@ describe("the human answer for a workspace whose latest stored run was refused",
       `  ${WORKSPACE_A}: queued: its latest stored run was refused as unreadable`,
     );
   });
+});
+
+describe("a daemon whose state directory lies outside the consumer root", () => {
+  it(
+    "D3358: a start given a state directory outside the root keeps its store and log there and nothing under the root, and summary and stop reach it by the root alone",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const cwd = dirname(root);
+        const stateDirectory = join(cwd, "outside-state");
+        const start = tracked(
+          await runCli(
+            ["start", root, "--state-dir", stateDirectory, "--trust", "--json"],
+            { cwd },
+          ),
+          pids,
+        );
+        const daemon = daemonOf(start);
+        const logFile = String(daemon["logFile"]);
+        const idle = await eventually(() => logged(logFile, IDLE_ENTRY));
+        const summary = await runCli(["summary", root, "--json"], { cwd });
+        const stop = await runCli(["stop", root, "--json"], { cwd });
+        return {
+          start: start.exit,
+          idle,
+          storeInStateDirectory: existsSync(
+            join(stateDirectory, STORE_FILE_NAME),
+          ),
+          logInStateDirectory: logFile.startsWith(stateDirectory),
+          stateUnderRoot: existsSync(join(root, ".rt-test")),
+          summary: summary.exit,
+          summaryRoot: documentOf(summary)["consumerRoot"],
+          stop: stop.exit,
+          stoppedPid: documentOf(stop)["pid"] === daemon["pid"],
+          root,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        start: 0,
+        idle: true,
+        storeInStateDirectory: true,
+        logInStateDirectory: true,
+        stateUnderRoot: false,
+        summary: 0,
+        summaryRoot: outcome.root,
+        stop: 0,
+        stoppedPid: true,
+        root: outcome.root,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+const NOT_VITEST_WORKSPACE = "packages/tooling";
+/** How the human output indents each entry under a heading. */
+const INDENT_TEXT = "  ";
+/** The human line naming the fixture's added workspace, up to the end of the quoted script its reason begins with. */
+const NOT_VITEST_LINE = `  workspace-not-vitest ${NOT_VITEST_WORKSPACE}: has a test script, "node run-tests.js"`;
+
+/** The indented lines under `heading` in human output. */
+function linesUnder(output: string, heading: string): string[] {
+  const lines = output.split("\n");
+  const start = lines.indexOf(heading);
+  if (start === -1) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => !line.startsWith(INDENT_TEXT));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+describe("the human answers for a package workspace with a test script that is not a Vitest workspace", () => {
+  it(
+    "D3359: the summary and status for the workspace print it under Not discovered, and status for a path inside it fails naming the workspace it lies in",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const workspace = join(root, NOT_VITEST_WORKSPACE);
+        mkdirSync(join(workspace, "src"), { recursive: true });
+        writeFileSync(
+          join(workspace, "package.json"),
+          JSON.stringify({ scripts: { test: "node run-tests.js" } }),
+        );
+        writeFileSync(join(workspace, "src/lint.js"), "");
+        const identity = await idleDaemon(root, pids, confirmNothing(root));
+        if ("thrown" in identity) return identity;
+        const summary = await runCli(["summary"], { cwd: root });
+        const at = await runCli(["status", NOT_VITEST_WORKSPACE], {
+          cwd: root,
+        });
+        const inside = await runCli(
+          ["status", `${NOT_VITEST_WORKSPACE}/src/lint.js`],
+          { cwd: root },
+        );
+        const listed = (run: CliRun) =>
+          linesUnder(run.stdout, "Not discovered:").some((line) =>
+            line.startsWith(NOT_VITEST_LINE),
+          );
+        return {
+          summary: listed(summary),
+          atWorkspace: listed(at),
+          inside: inside.exit,
+          insideNamesWorkspace: inside.stderr.includes(
+            `it lies in workspace-not-vitest ${NOT_VITEST_WORKSPACE}`,
+          ),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        summary: true,
+        atWorkspace: true,
+        inside: 1,
+        insideNamesWorkspace: true,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
 });

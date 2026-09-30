@@ -18,6 +18,8 @@ export const VITE_CONFIG_FILES = CONFIG_EXTENSIONS.map(
 );
 const VITEST_PACKAGE = "vitest";
 const VITEST_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"];
+const SCRIPTS_FIELD = "scripts";
+const TEST_SCRIPT = "test";
 const WORKSPACES_FIELD = "workspaces";
 const WORKSPACE_PACKAGES_FIELD = "packages";
 export const POSIX_SEPARATOR = "/";
@@ -60,6 +62,18 @@ export interface WorkspaceListing {
   readonly notRead: readonly UnreadWorkspaceSource[];
 }
 
+/** A listed package workspace other than the root whose tests RT Test does not run, since it is not a Vitest workspace. */
+export interface NotCoveredWorkspace {
+  /** Relative to the consumer root, `/`-separated. */
+  readonly path: string;
+  readonly reason: string;
+}
+
+export interface VitestWorkspaceListing extends WorkspaceListing {
+  /** Candidates only: a discovery drops each one it finds a test module in. */
+  readonly notCovered: readonly NotCoveredWorkspace[];
+}
+
 type RealPath =
   | { readonly ok: true; readonly path: string }
   | { readonly ok: false; readonly reason: string };
@@ -68,8 +82,14 @@ type JsonRead =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly reason: string };
 
-export function findVitestWorkspaces(consumerRoot: string): WorkspaceListing {
-  return listWorkspaces(consumerRoot, holdsVitestConfig);
+export function findVitestWorkspaces(
+  consumerRoot: string,
+): VitestWorkspaceListing {
+  const notCovered: NotCoveredWorkspace[] = [];
+  const listing = listWorkspaces(consumerRoot, (directory, path, notRead) =>
+    holdsVitestConfig(directory, path, notRead, notCovered),
+  );
+  return { ...listing, notCovered };
 }
 
 export function findPackageWorkspaces(consumerRoot: string): WorkspaceListing {
@@ -99,9 +119,11 @@ function listWorkspaces(
   ];
   const workspaces = new Map<string, VitestWorkspace>();
   const listedByRealPath = new Map<string, string>();
+  const visited = new Set<string>();
   for (const directory of candidates) {
     const path = workspacePath(consumerRoot, directory);
-    if (workspaces.has(path)) continue;
+    if (visited.has(path)) continue;
+    visited.add(path);
     if (!keep(directory, path, notRead)) continue;
     const duplicate = duplicateReason(listedByRealPath, directory, path);
     if (duplicate !== undefined) {
@@ -267,6 +289,7 @@ function holdsVitestConfig(
   directory: string,
   path: string,
   notRead: UnreadWorkspaceSource[],
+  notCovered: NotCoveredWorkspace[],
 ): boolean {
   const listing = listDirectory(directory);
   if (!listing.ok) {
@@ -284,7 +307,11 @@ function holdsVitestConfig(
     });
     return false;
   }
-  if (!dependsOnVitest(manifest.value)) return false;
+  if (!dependsOnVitest(manifest.value)) {
+    const notVitest = notCoveredCandidate(path, manifest.value);
+    if (notVitest !== undefined) notCovered.push(notVitest);
+    return false;
+  }
   if (VITE_CONFIG_FILES.some((file) => files.has(file))) return true;
   notRead.push({
     source: path,
@@ -292,6 +319,19 @@ function holdsVitestConfig(
       "depends on Vitest but holds no Vitest or Vite config file, so it is not a Vitest workspace and its tests were not discovered",
   });
   return false;
+}
+
+/** The root is left out: a root with no Vitest workspace is refused at start, and a monorepo root's test script runs its workspaces'. */
+function notCoveredCandidate(
+  path: string,
+  manifest: unknown,
+): NotCoveredWorkspace | undefined {
+  const script = objectField(objectField(manifest, SCRIPTS_FIELD), TEST_SCRIPT);
+  if (path === ROOT_PATH || typeof script !== "string") return undefined;
+  return {
+    path,
+    reason: `has a test script, ${JSON.stringify(script)}, but is not a Vitest workspace: it holds no Vitest config file and lists no Vitest in its dependencies or devDependencies, so RT Test does not discover or run its tests`,
+  };
 }
 
 function dependsOnVitest(manifest: unknown): boolean {

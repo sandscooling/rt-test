@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { workspaceConfig } from "../src/vitest/config-loader.js";
 import {
   findVitestWorkspaces,
+  type VitestWorkspaceListing,
   type WorkspaceListing,
 } from "../src/vitest/find-workspaces.js";
 import { copyFixture, inTempDir, settle } from "./harness.js";
@@ -234,6 +235,7 @@ describe("finding a consumer's Vitest workspaces", () => {
         expect.objectContaining({ path: "apps/web" }),
       ],
       notRead: [],
+      notCovered: [],
     });
   });
 
@@ -330,6 +332,7 @@ describe("workspaces outside the consumer root", () => {
     expect(listing).toEqual({
       workspaces: [expect.objectContaining({ path: "inner" })],
       notRead: [],
+      notCovered: [],
     });
   });
 });
@@ -374,6 +377,142 @@ describe("workspaces reached twice", () => {
       listed: [".", "links/in", "packages/a"],
       duplicates: ["links/root", "tools/real"],
     });
+  });
+});
+
+type CoverageListing = VitestWorkspaceListing | { thrown: string };
+
+const RUN_TESTS_SCRIPT = "node run-tests.js";
+
+/**
+ * A consumer root with a test script and no Vitest of its own, whose `packages/*` holds a workspace with a test script and
+ * no Vitest, one with a Vitest config whose Vitest the root installs, one depending on Vitest, one with no test script
+ * and one whose test script is not a string.
+ */
+const COVERAGE_TREE: Readonly<Record<string, string>> = {
+  "package.json": JSON.stringify({
+    workspaces: ["packages/*"],
+    scripts: { test: "npm run test --workspaces" },
+  }),
+  "packages/scripted/package.json": JSON.stringify({
+    scripts: { test: RUN_TESTS_SCRIPT },
+  }),
+  "packages/configured/package.json": JSON.stringify({
+    scripts: { test: "vitest run" },
+  }),
+  "packages/configured/vitest.config.mjs": CONFIG,
+  "packages/depends/package.json": JSON.stringify({
+    scripts: { test: "vitest run" },
+    devDependencies: { vitest: "5.0.1" },
+  }),
+  "packages/depends/vite.config.mjs": CONFIG,
+  "packages/unscripted/package.json": JSON.stringify({
+    scripts: { build: "tsc" },
+  }),
+  "packages/numeric/package.json": JSON.stringify({ scripts: { test: 5 } }),
+};
+
+function listTree(
+  files: Readonly<Record<string, string>>,
+): Promise<CoverageListing> {
+  return inTempDir((dir) => {
+    writeTree(dir, files);
+    return settle(() => findVitestWorkspaces(dir));
+  });
+}
+
+/** Whether the listing names `path` as not covered, or why no listing was made. */
+function notCoveredAt(
+  listing: CoverageListing,
+  path: string,
+): boolean | string {
+  if ("thrown" in listing) return listing.thrown;
+  return listing.notCovered.some((entry) => entry.path === path);
+}
+
+function notCoveredPaths(listing: CoverageListing): string[] | string {
+  if ("thrown" in listing) return listing.thrown;
+  return listing.notCovered.map((entry) => entry.path);
+}
+
+describe("package workspaces with a test script that are not Vitest workspaces", () => {
+  it("D3337: a listed package workspace with a string test script, no Vitest config file and no Vitest dependency is listed as not covered", async () => {
+    expect(
+      notCoveredAt(await listTree(COVERAGE_TREE), "packages/scripted"),
+    ).toBe(true);
+  });
+
+  it("D3338: a not-covered workspace's reason quotes its test script", async () => {
+    const listing = await listTree(COVERAGE_TREE);
+    expect(
+      "thrown" in listing
+        ? listing.thrown
+        : listing.notCovered.find((entry) => entry.path === "packages/scripted")
+            ?.reason,
+    ).toContain(JSON.stringify(RUN_TESTS_SCRIPT));
+  });
+
+  it("D3339: a workspace holding a Vitest config file is never listed as not covered, though its package does not depend on Vitest", async () => {
+    expect(
+      notCoveredAt(await listTree(COVERAGE_TREE), "packages/configured"),
+    ).toBe(false);
+  });
+
+  it("D3340: a workspace depending on Vitest is never listed as not covered", async () => {
+    expect(
+      notCoveredAt(await listTree(COVERAGE_TREE), "packages/depends"),
+    ).toBe(false);
+  });
+
+  it("D3341: a workspace with no test script is never listed as not covered", async () => {
+    expect(
+      notCoveredAt(await listTree(COVERAGE_TREE), "packages/unscripted"),
+    ).toBe(false);
+  });
+
+  it("D3342: a workspace whose test script is not a string is never listed as not covered", async () => {
+    expect(
+      notCoveredAt(await listTree(COVERAGE_TREE), "packages/numeric"),
+    ).toBe(false);
+  });
+
+  it("D3343: the consumer root is never listed as not covered, though it has a test script and no Vitest", async () => {
+    expect(notCoveredAt(await listTree(COVERAGE_TREE), ".")).toBe(false);
+  });
+
+  it("D3344: a not-covered workspace adds nothing to the sources not read", async () => {
+    const listing = await listTree(COVERAGE_TREE);
+    expect(
+      "thrown" in listing ? listing.thrown : listing.notRead,
+    ).toStrictEqual([]);
+  });
+
+  it("D3345: a not-covered workspace listed by two patterns is listed once", async () => {
+    expect(
+      notCoveredPaths(
+        await listTree({
+          ...COVERAGE_TREE,
+          "package.json": JSON.stringify({
+            workspaces: ["packages/*", "packages/scripted"],
+          }),
+        }),
+      ),
+    ).toStrictEqual(["packages/scripted"]);
+  });
+
+  it("D3346: a workspace depending on Vitest with no config file, listed by two patterns, is reported as not read once", async () => {
+    expect(
+      unreadSources(
+        await listTree({
+          "package.json": JSON.stringify({
+            workspaces: ["packages/*", "packages/dep-only"],
+          }),
+          "packages/dep-only/package.json": JSON.stringify({
+            devDependencies: { vitest: "5.0.1" },
+          }),
+        }),
+      ),
+    ).toStrictEqual(["packages/dep-only"]);
   });
 });
 

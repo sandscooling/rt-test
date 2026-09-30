@@ -501,6 +501,12 @@ function withRawDatabase<T>(
   }
 }
 
+/** Takes a current store's header back to `userVersion`, dropping the not-covered column every older version lacks. */
+function lowerSchemaVersion(database: DatabaseSync, userVersion: number): void {
+  database.exec("ALTER TABLE discoveries DROP COLUMN not_covered");
+  database.exec(`PRAGMA user_version = ${userVersion}`);
+}
+
 function countRows(file: string, table: "runs" | "discoveries"): unknown {
   return withRawDatabase(
     file,
@@ -641,7 +647,7 @@ function writeForceStopUnawareStore(
     database.exec(
       "ALTER TABLE discovery_workspaces DROP COLUMN selection_facts",
     );
-    database.exec(`PRAGMA user_version = ${userVersion}`);
+    lowerSchemaVersion(database, userVersion);
   });
   return file;
 }
@@ -663,7 +669,7 @@ function writeSelectionFactsUnawareStore(
     database.exec(
       "ALTER TABLE discovery_workspaces DROP COLUMN selection_facts",
     );
-    database.exec(`PRAGMA user_version = ${SELECTION_FACTS_UNAWARE_VERSION}`);
+    lowerSchemaVersion(database, SELECTION_FACTS_UNAWARE_VERSION);
   });
   return file;
 }
@@ -696,7 +702,7 @@ function writeViteRootUnawareStore(
       const rootless = projects.map(({ viteRoot: _dropped, ...rest }) => rest);
       update.run(JSON.stringify(rootless), Number(row["rowid"]));
     }
-    database.exec(`PRAGMA user_version = ${VITE_ROOT_UNAWARE_VERSION}`);
+    lowerSchemaVersion(database, VITE_ROOT_UNAWARE_VERSION);
   });
   return file;
 }
@@ -749,7 +755,7 @@ function writeFactsUnawareStore(
       ) as ProjectSelectionFacts[];
       update.run(JSON.stringify(projects.map(strip)), Number(row["rowid"]));
     }
-    database.exec(`PRAGMA user_version = ${userVersion}`);
+    lowerSchemaVersion(database, userVersion);
   });
   return file;
 }
@@ -1594,7 +1600,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 9 once opened", async () => {
+  it("D1280: the store is at schema version 10 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1602,7 +1608,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(9);
+    expect(version).toBe(10);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -2018,7 +2024,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 9 once opened", async () => {
+  it("D2097: the store is at schema version 10 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2029,7 +2035,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(9);
+    expect(version).toBe(10);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -2091,7 +2097,7 @@ describe("opening a store written before each project's Vite root", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2846: a version 3 store opens at version 9, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
+  it("D2846: a version 3 store opens at version 10, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2105,12 +2111,12 @@ describe("opening a store written before each project's Vite root", () => {
         };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 9, facts: [SELECTION_FACTS] });
+    expect(outcome).toStrictEqual({ version: 10, facts: [SELECTION_FACTS] });
   });
 });
 
 describe("opening a store written before crashed runs", () => {
-  it("D2791: a version 4 store opens at version 9, every run it held unchanged", async () => {
+  it("D2791: a version 4 store opens at version 10, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2120,7 +2126,7 @@ describe("opening a store written before crashed runs", () => {
         });
         const file = join(stateDirectory, STORE_FILE_NAME);
         withRawDatabase(file, (database) => {
-          database.exec("PRAGMA user_version = 4");
+          lowerSchemaVersion(database, 4);
         });
         const runs = withOpenStore(stateDirectory, (store) =>
           runsOf(store, WORKTREE_A),
@@ -2128,7 +2134,7 @@ describe("opening a store written before crashed runs", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 9, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
   });
 
   it("D2829: each discovered workspace of a version 4 store reads back as not reporting selection facts, and the rest of the discovery unchanged", async () => {
@@ -2136,7 +2142,7 @@ describe("opening a store written before crashed runs", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2792: a new store is created at schema version 9", async () => {
+  it("D2792: a new store is created at schema version 10", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2144,7 +2150,7 @@ describe("opening a store written before crashed runs", () => {
         return schemaVersionOf(join(stateDirectory, STORE_FILE_NAME));
       }),
     );
-    expect(version).toBe(9);
+    expect(version).toBe(10);
   });
 });
 
@@ -2156,7 +2162,7 @@ describe("opening a store written before Vitest's spellings of the pattern direc
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2831: a version 5 store opens at version 9, every run it held unchanged", async () => {
+  it("D2831: a version 5 store opens at version 10, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2172,12 +2178,12 @@ describe("opening a store written before Vitest's spellings of the pattern direc
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 9, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
 describe("opening a store written before the directory links Vitest's crawl follows", () => {
-  it("D2859: a version 6 store opens at version 9, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
+  it("D2859: a version 6 store opens at version 10, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2194,14 +2200,14 @@ describe("opening a store written before the directory links Vitest's crawl foll
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 9,
+      version: 10,
       discovery: withoutReportedFacts(DISCOVERY),
     });
   });
 });
 
 describe("opening a store written before each project's env sources", () => {
-  it("D3040: a version 7 store opens at version 9, each discovered workspace reading back as not reporting selection facts rather than its report without env sources being read", async () => {
+  it("D3040: a version 7 store opens at version 10, each discovered workspace reading back as not reporting selection facts rather than its report without env sources being read", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2218,12 +2224,12 @@ describe("opening a store written before each project's env sources", () => {
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 9,
+      version: 10,
       discovery: withoutReportedFacts(DISCOVERY),
     });
   });
 
-  it("D3041: a version 7 store opens at version 9, every run it held unchanged", async () => {
+  it("D3041: a version 7 store opens at version 10, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2239,7 +2245,7 @@ describe("opening a store written before each project's env sources", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 9, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
@@ -2293,7 +2299,7 @@ describe("storing env sources that are not known", () => {
 });
 
 describe("opening a store written before env sources could be not known", () => {
-  it("D3128: a version 8 store opens at version 9, each discovered workspace reading back as not reporting selection facts rather than its report being read as complete", async () => {
+  it("D3128: a version 8 store opens at version 10, each discovered workspace reading back as not reporting selection facts rather than its report being read as complete", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2310,12 +2316,12 @@ describe("opening a store written before env sources could be not known", () => 
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 9,
+      version: 10,
       discovery: withoutReportedFacts(DISCOVERY),
     });
   });
 
-  it("D3129: a version 8 store opens at version 9, every run it held unchanged", async () => {
+  it("D3129: a version 8 store opens at version 10, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2331,7 +2337,101 @@ describe("opening a store written before env sources could be not known", () => 
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 9, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
+  });
+});
+
+/** The schema version before a discovery's not-covered workspaces were stored. */
+const NOT_COVERED_UNAWARE_VERSION = 9;
+const NOT_COVERED: NonNullable<TestDiscovery["notCovered"]> = [
+  {
+    path: "packages/eslint-plugin",
+    reason:
+      'has a test script, "node run-tests.js", but is not a Vitest workspace',
+  },
+];
+
+/** The latest discovery after `discovery` is written and the store reopened. */
+function reopenedDiscovery(
+  discovery: TestDiscovery,
+): Promise<Settled<TestDiscovery | undefined>> {
+  return acrossReopen(
+    (store) => {
+      store.writeDiscovery(bound(WORKTREE_A), discovery);
+    },
+    (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+  );
+}
+
+function holdsNotCovered(
+  discovery: Settled<TestDiscovery | undefined>,
+): Settled<boolean> | undefined {
+  if (discovery === undefined || "thrown" in discovery) return discovery;
+  return Object.hasOwn(discovery, "notCovered");
+}
+
+describe("storing a discovery's workspaces with a test script that are not Vitest workspaces", () => {
+  it("D3347: a discovery's not-covered workspaces read back after the store is reopened", async () => {
+    const discovery = await reopenedDiscovery({
+      ...DISCOVERY,
+      notCovered: NOT_COVERED,
+    });
+    expect(
+      discovery !== undefined && !("thrown" in discovery)
+        ? discovery.notCovered
+        : discovery,
+    ).toStrictEqual(NOT_COVERED);
+  });
+
+  it("D3348: a discovery that found no not-covered workspace reads back with an empty list, never as not reporting them", async () => {
+    const discovery = await reopenedDiscovery({
+      ...DISCOVERY,
+      notCovered: [],
+    });
+    expect(
+      discovery !== undefined && !("thrown" in discovery)
+        ? discovery.notCovered
+        : discovery,
+    ).toStrictEqual([]);
+  });
+
+  it("D3349: a discovery written without a not-covered list reads back without one, never as an empty list", async () => {
+    expect(holdsNotCovered(await reopenedDiscovery(DISCOVERY))).toBe(false);
+  });
+});
+
+describe("opening a store written before not-covered workspaces", () => {
+  it("D3350: a version 9 store opens at version 10, its discovery reading back unchanged and not reporting not-covered workspaces", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeFactsUnawareStore(
+          stateDirectory,
+          NOT_COVERED_UNAWARE_VERSION,
+          unchangedProject,
+        );
+        const discovery = withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+        return { version: schemaVersionOf(file), discovery };
+      }),
+    );
+    expect(outcome).toStrictEqual({ version: 10, discovery: DISCOVERY });
+  });
+
+  it("D3351: a version 2 store's discovery reads back once migrated, not reporting not-covered workspaces", async () => {
+    const discovery = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        writeSelectionFactsUnawareStore(stateDirectory, [DISCOVERY]);
+        return withOpenStore(
+          stateDirectory,
+          (store) => store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        );
+      }),
+    );
+    expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 });
 

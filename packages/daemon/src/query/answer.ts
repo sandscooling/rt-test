@@ -178,6 +178,7 @@ export type NoRoundSelection =
 export const WORKSPACE_UNSUPPORTED_VITEST = "workspace-unsupported-vitest";
 export const WORKSPACE_DISCOVERY_FAILED = "workspace-discovery-failed";
 export const WORKSPACE_NOT_CONFIRMED = "workspace-not-confirmed";
+export const WORKSPACE_NOT_VITEST = "workspace-not-vitest";
 export const WORKSPACE_UNHANDLED_ERRORS = "workspace-unhandled-errors";
 export const FAILED_MODULE = "failed-module";
 export const TYPECHECK_MODULE = "typecheck-module";
@@ -212,6 +213,11 @@ export type NotDiscoveredEntry = CutReason &
           | typeof WORKSPACE_UNSUPPORTED_VITEST
           | typeof WORKSPACE_DISCOVERY_FAILED
           | typeof WORKSPACE_NOT_CONFIRMED;
+        readonly workspacePath: string;
+      }
+    | {
+        /** A package workspace with a test script that is not a Vitest workspace, so RT Test runs none of its tests. */
+        readonly kind: typeof WORKSPACE_NOT_VITEST;
         readonly workspacePath: string;
       }
     | {
