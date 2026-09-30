@@ -36,7 +36,12 @@ import {
   type StatusResponse,
 } from "./daemon/protocol.js";
 
-export { queryPathStatus, querySummary } from "./query-client.js";
+export {
+  queryPathStatus,
+  querySummary,
+  queryWait,
+  type WaitOptions,
+} from "./query-client.js";
 export { startPlan, type StartPlan } from "./start-plan.js";
 export {
   NON_INPUTS_ABSENT,
@@ -50,6 +55,7 @@ export type {
 export type { UnreadWorkspaceSource } from "./vitest/find-workspaces.js";
 export { errorText } from "./vitest/error-text.js";
 export {
+  MAX_WAIT_LIMIT_MS,
   PROTOCOL_VERSION,
   type DaemonActivity,
   type DaemonIdentity,
@@ -57,9 +63,11 @@ export {
   type StatusResponse,
   type SummaryResponse,
   type UnstoredJob,
+  type WaitResponse,
 } from "./daemon/protocol.js";
 export {
   activityText,
+  COVERAGE,
   DEPENDENCY_BUILD_FAILED,
   DEPENDENCY_BUILD_TIMED_OUT,
   DEPENDENCY_BUILDS_ENDED,
@@ -79,6 +87,7 @@ export {
   roundText,
   SELECTION_REFUSED,
   TEST_STATES,
+  WAIT_OUTCOME,
   WATCHER_UNHEALTHY,
   type ChoosingReason,
   type CutReason,
@@ -90,6 +99,8 @@ export {
   type InputFacts,
   type InputsNotNarrowed,
   type LatestRunFacts,
+  type ListedCoverage,
+  type NamedFailure,
   type NamedList,
   type NoRoundSelection,
   type NotDiscoveredEntry,
@@ -97,6 +108,7 @@ export {
   type SelectionExplanation,
   type SelfChangedPath,
   type TestCounts,
+  type WaitFile,
   type WorkspaceExecution,
   type WorkspaceFacts,
 } from "./query/answer.js";

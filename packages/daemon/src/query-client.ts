@@ -6,17 +6,23 @@ import {
 } from "./daemon/proven-connection.js";
 import {
   ERROR_TYPE,
+  isWaitLimit,
   NOTHING_TO_ANSWER_CODE,
   PATH_STATUS_TYPE,
   PROTOCOL_VERSION,
+  RESPONSE_BOUND_MS,
   STOPPING_CODE,
   SUMMARY_TYPE,
   UNKNOWN_REQUEST_CODE,
+  WAIT_LIMIT_MS,
+  WAIT_TYPE,
   type PathStatusRequest,
   type PathStatusResponse,
   type ProtocolMessage,
   type SummaryRequest,
   type SummaryResponse,
+  type WaitRequest,
+  type WaitResponse,
 } from "./daemon/protocol.js";
 import { errorText } from "./vitest/error-text.js";
 
@@ -56,13 +62,44 @@ export async function queryPathStatus(
   return answer as unknown as PathStatusResponse;
 }
 
+export interface WaitOptions {
+  /** A whole number of ms from 1 to `MAX_WAIT_LIMIT_MS`; the daemon's default when absent. */
+  readonly limitMs?: number;
+}
+
+/**
+ * Waits for the tests covering the files at the absolute `paths` to have current results or none coming, and answers
+ * settled, superseded when an input they read moves, or unsettled at the limit; it starts nothing.
+ */
+export async function queryWait(
+  consumerRoot: string,
+  paths: readonly string[],
+  options: WaitOptions = {},
+): Promise<WaitResponse> {
+  const { limitMs } = options;
+  const request: WaitRequest = {
+    type: WAIT_TYPE,
+    protocolVersion: PROTOCOL_VERSION,
+    paths,
+    ...(limitMs === undefined ? {} : { limitMs }),
+  };
+  // A limit the daemon refuses is answered at once, so the bound need not cover it.
+  const waitsMs = isWaitLimit(limitMs) ? limitMs : WAIT_LIMIT_MS;
+  const answer = await query(
+    targetOf(consumerRoot, "query"),
+    request,
+    waitsMs + RESPONSE_BOUND_MS,
+  );
+  return answer as unknown as WaitResponse;
+}
+
 /**
  * The daemon's answer to a query, or a rejection saying why it has none; `boundMs` is how long it may take, the
  * connection's default when absent.
  */
 async function query(
   target: DaemonTarget,
-  request: SummaryRequest | PathStatusRequest,
+  request: SummaryRequest | PathStatusRequest | WaitRequest,
   boundMs?: number,
 ): Promise<ProtocolMessage> {
   const { consumerRoot } = target;

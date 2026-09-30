@@ -124,6 +124,11 @@ export interface TrackedInputs {
    * loses, as for an event. Resolves with each path whose read found an entry it could not read.
    */
   readNamed(paths: readonly string[]): Promise<readonly UnreadPath[]>;
+  /**
+   * Each of the root-relative paths whose latest read found an entry it could not read. A named read a reconciliation
+   * holds has not run when `readNamed` resolves, so a caller that must know what it read asks here once `settled()` has.
+   */
+  unreadNamed(paths: readonly string[]): readonly UnreadPath[];
   beginJob(): JobMark;
   endJob(mark: JobMark): Promise<JobVerdict>;
   /**
@@ -285,6 +290,12 @@ export class InputTracker implements TrackedInputs {
     }
     await this.#ledger.waitForReadOrReconciliation();
     return this.#reads.unreadNamed(named);
+  }
+
+  unreadNamed(paths: readonly string[]): readonly UnreadPath[] {
+    return this.#reads.unreadNamed(
+      paths.flatMap((path) => this.#reads.namedPaths(path)),
+    );
   }
 
   /** Each edge of a job reads the digests a round's view compares, only while the view can vouch for them. */

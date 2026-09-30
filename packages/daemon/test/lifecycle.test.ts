@@ -80,7 +80,7 @@ import {
   memoryLog,
   type MemoryLog,
 } from "./daemon-harness.js";
-import { inTempDir, projectFacts, settle } from "./harness.js";
+import { inTempDir, projectFacts, settle, WAITING } from "./harness.js";
 import { onPlatform } from "./on-platform.js";
 import {
   builtAt,
@@ -4650,6 +4650,54 @@ describe("placing a listed file by the spelling on disk", () => {
     expect(judgment).toStrictEqual({
       kind: "changed-inside",
       paths: [onDisk],
+    });
+  });
+});
+
+describe("a wait the lifecycle answers", () => {
+  it("D3445: a wait on a file its running workspace covers settles once that run has ended, with no further change of the inputs", async () => {
+    const outcome = await inTempDir(async (root) => {
+      const held = new Deferred<RunOutcome>();
+      const request = new AbortController();
+      const { lifecycle } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor(
+            { ended: true, value: discovery(discoveredWithTest("a")) },
+            () => held.promise,
+          ),
+          new RecordingStore(),
+          { ...IDENTITY, consumerRoot: root },
+          new StandInInputs({ snapshot: () => inputsOf({ "a/a.ts": "a" }) }),
+        ),
+      );
+      try {
+        let answer: unknown = WAITING;
+        void lifecycle
+          .wait(
+            { paths: [join(root, "a", "a.ts")], limitMs: 60_000 },
+            request.signal,
+          )
+          .then((done) => {
+            answer =
+              "outcome" in done
+                ? { outcome: done.outcome, givenAt: done.inputs.revision }
+                : done;
+          });
+        await flush();
+        const whileRunning = answer;
+        held.resolve({ ended: true, value: ranWorkspace("a") });
+        await flush();
+        return { whileRunning, afterRun: answer };
+      } finally {
+        request.abort();
+        lifecycle.stop();
+        await lifecycle.stopped();
+      }
+    });
+    expect(outcome).toStrictEqual({
+      whileRunning: WAITING,
+      afterRun: { outcome: "settled", givenAt: 1 },
     });
   });
 });

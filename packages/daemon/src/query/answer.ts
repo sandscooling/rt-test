@@ -464,7 +464,8 @@ export interface AnswerContext {
   readonly inputs: InputFacts;
   /**
    * Each discovered workspace with no fingerprint while one can be computed for the project: its own inputs could not
-   * be read, or the dependency build its inputs wait for has not ended. `inputs` says when none can be computed.
+   * be read, its env files are not known, or the dependency build its inputs wait for has not ended. `inputs` says when
+   * none can be computed.
    */
   readonly unfingerprintedWorkspaces: readonly UnfingerprintedWorkspace[];
   /** Why every file stays an input, present only while the daemon's `rt-test.json` cannot be used. */
@@ -509,6 +510,102 @@ export interface PathStatusAnswer extends AnswerContext {
   readonly enclosingNotDiscovered: readonly NotDiscoveredEntry[];
 }
 
+export const WAIT_OUTCOME = {
+  settled: "settled",
+  superseded: "superseded",
+  unsettled: "unsettled",
+} as const;
+
+/** How the files a wait names were given their covering workspaces. */
+export const COVERAGE = {
+  /** Selection at the revision, with the workspaces whose fingerprints list a file. */
+  selected: "selected",
+  /** Every discovered workspace, since there is no dependency information at the revision. */
+  widened: "widened",
+  /** No revision the wait judged had its dependency build ended, so every test counts as covering. */
+  notYetKnown: "not-yet-known",
+} as const;
+
+/** Which listing of a workspace's fingerprint names a file, or that its env files, which are not known, may. */
+export const LISTED_AS = {
+  testModule: "test-module",
+  setupFile: "setup-file",
+  envFile: "env-file",
+  envFilesNotKnown: "env-files-not-known",
+} as const;
+
+export interface ListedCoverage {
+  readonly workspacePath: string;
+  readonly listedAs: (typeof LISTED_AS)[keyof typeof LISTED_AS];
+}
+
+export type WaitCoverage =
+  | { readonly state: typeof COVERAGE.selected; readonly revision: number }
+  | {
+      readonly state: typeof COVERAGE.widened;
+      readonly revision: number;
+      readonly widenedBy: InputsNotNarrowed["kind"];
+      readonly reason: CutReason;
+    }
+  | { readonly state: typeof COVERAGE.notYetKnown };
+
+export interface WaitFile {
+  /** Relative to the consumer root, `/`-separated. */
+  readonly path: string;
+  /** Why the wait's read could not read what is there, which keeps the wait from settling. */
+  readonly unread?: CutReason;
+  /** Selection's report for a change of the file; present while the coverage is selected. */
+  readonly selection?: ExplainedPath;
+  /** The workspaces whose fingerprints list the file, beside selection; present while the coverage is selected. */
+  readonly listed?: NamedList<ListedCoverage>;
+}
+
+export type FailureState = Extract<
+  TestState,
+  "failed" | "error" | typeof MODULE_FAILED_TO_LOAD | typeof MODULE_CRASHED
+>;
+
+/** A covering test that failed or errored, or a covering module that failed to load or crashed, in its latest run. */
+export interface NamedFailure {
+  readonly workspacePath: string;
+  readonly projectName: string;
+  readonly modulePath: string;
+  /** Absent for a module. */
+  readonly testName?: readonly string[];
+  readonly state: FailureState;
+  /** A failed test's, as its counts rate it; a module's failure has no finished result, so it is unknown. */
+  readonly freshness: Freshness;
+  /** The first line of its first recorded error; null when it recorded none, as a crashed module never does. */
+  readonly firstError: CutReason | null;
+}
+
+export type WaitOutcomeFacts =
+  | {
+      readonly outcome:
+        typeof WAIT_OUTCOME.settled | typeof WAIT_OUTCOME.unsettled;
+    }
+  | {
+      readonly outcome: typeof WAIT_OUTCOME.superseded;
+      /** The later input revision at which a covering workspace's inputs differ from the bound revision's. */
+      readonly supersededAt: number;
+      readonly changedPaths: NamedList<string>;
+    };
+
+export type WaitAnswer = AnswerContext &
+  WaitOutcomeFacts & {
+    /** Null when the limit passed before the wait bound. */
+    readonly boundRevision: number | null;
+    readonly coverage: WaitCoverage;
+    readonly files: readonly WaitFile[];
+    /** Every covering test, counted once however many named files it covers. */
+    readonly counts: TestCounts;
+    /** What the discovery did not turn into tests in a covering workspace, and each source it did not read. */
+    readonly notDiscovered: readonly NotDiscoveredEntry[];
+    /** Each covering workspace's execution state. */
+    readonly workspaces: readonly WorkspaceExecution[];
+    readonly namedFailures: NamedList<NamedFailure>;
+  };
+
 export function activityText(activity: DaemonActivity): string {
   switch (activity.state) {
     case "discovering":
@@ -552,4 +649,9 @@ export function omittedText(omittedCharacters: number): string {
 /** Why a query has no answer; the daemon sends it as its nothing-to-answer error. */
 export interface NoAnswer {
   readonly noAnswer: string;
+}
+
+/** Why the daemon refuses what a query asks; it sends it as its invalid-request error. */
+export interface RefusedQuery {
+  readonly refused: string;
 }

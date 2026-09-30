@@ -21,6 +21,7 @@ import {
   connectionServer,
   type DaemonHandlers,
   type Prover,
+  type WaitQuery,
 } from "../src/daemon/server.js";
 import {
   CLOSED,
@@ -37,7 +38,8 @@ import {
   keyedEndpoint,
   withDaemonKey,
 } from "./daemon-key.js";
-import { inTempDir, WAITING, within } from "./harness.js";
+import { HAND_BUILT_ROOT, inTempDir, WAITING, within } from "./harness.js";
+import { join } from "node:path";
 import { Deferred } from "./scheduling-harness.js";
 import { testSocketPath, withTestEndpoint } from "./test-endpoint.js";
 import { unhandledRejectionsDuring } from "./unhandled-rejections.js";
@@ -84,6 +86,7 @@ function handlers(
     }),
     summary: () => NO_STAND_IN_ANSWER,
     pathStatus: () => NO_STAND_IN_ANSWER,
+    wait: () => NO_STAND_IN_ANSWER,
     ...queries,
     stop: () => stop.abort(),
     isStopping: () => stop.signal.aborted,
@@ -1227,5 +1230,97 @@ describe("the socket a test endpoint listens on", () => {
     expect(Buffer.byteLength(testSocketPath())).toBeLessThanOrEqual(
       SOCKET_PATH_LIMIT_BYTES,
     );
+  });
+});
+
+/** An absolute path a wait may name, on either host. */
+const WAITED_FILE = join(HAND_BUILT_ROOT, "a.ts");
+
+/** A wait request naming `paths`, with `more` beside them. */
+function waitRequest(paths: readonly string[], more: object = {}): object {
+  return { type: "wait", protocolVersion: PROTOCOL_VERSION, paths, ...more };
+}
+
+/**
+ * Sends each request after a hello to a server whose wait records what reached it, and resolves with each answer by
+ * its kind and each wait the handler was given, by its path count and limit.
+ */
+async function waitsAnswered(
+  ...requests: object[]
+): Promise<{ kinds: unknown[]; asked: [number, number][] }> {
+  const asked: WaitQuery[] = [];
+  const server = connectionServer(
+    {
+      ...handlers(false),
+      wait: (query) => {
+        asked.push(query);
+        return NO_STAND_IN_ANSWER;
+      },
+    },
+    memoryLog(),
+    NO_PROOF,
+  );
+  const kinds = await withTestEndpoint(server.onConnection, (path) =>
+    withConnection(path, (connection) => {
+      connection.send(linesOf(HELLO, ...requests));
+      return answerKinds(connection, requests.length + 1);
+    }),
+  );
+  return {
+    kinds: kinds.slice(1),
+    asked: asked.map((query) => [query.paths.length, query.limitMs]),
+  };
+}
+
+describe("a wait request", () => {
+  it("D3424: one carrying no limit reaches the wait with a limit of 100000 ms", async () => {
+    expect(await waitsAnswered(waitRequest([WAITED_FILE]))).toStrictEqual({
+      kinds: [{ type: "error", code: "nothing-to-answer" }],
+      asked: [[1, 100_000]],
+    });
+  });
+
+  it("D3425: one whose limit is null, as a limit that is not a number serializes, is refused as invalid rather than given the default", async () => {
+    expect(
+      await waitsAnswered(waitRequest([WAITED_FILE], { limitMs: null })),
+    ).toStrictEqual({
+      kinds: [{ type: "error", code: "invalid-request" }],
+      asked: [],
+    });
+  });
+
+  it("D3426: one naming 1001 paths or a limit of 3600001 ms is refused, while 1000 paths and a limit of 3600000 ms reach the wait", async () => {
+    const paths = (count: number): string[] =>
+      Array.from({ length: count }, (_, index) =>
+        join(HAND_BUILT_ROOT, `${index}.ts`),
+      );
+    expect(
+      await waitsAnswered(
+        waitRequest(paths(1001)),
+        waitRequest(paths(1000)),
+        waitRequest([WAITED_FILE], { limitMs: 3_600_001 }),
+        waitRequest([WAITED_FILE], { limitMs: 3_600_000 }),
+      ),
+    ).toStrictEqual({
+      kinds: [
+        { type: "error", code: "invalid-request" },
+        { type: "error", code: "nothing-to-answer" },
+        { type: "error", code: "invalid-request" },
+        { type: "error", code: "nothing-to-answer" },
+      ],
+      asked: [
+        [1000, 100_000],
+        [1, 3_600_000],
+      ],
+    });
+  });
+});
+
+describe("a wait request naming no path", () => {
+  it("D3460: one whose paths are an empty list is refused as invalid, and never reaches the wait", async () => {
+    expect(await waitsAnswered(waitRequest([]))).toStrictEqual({
+      kinds: [{ type: "error", code: "invalid-request" }],
+      asked: [],
+    });
   });
 });

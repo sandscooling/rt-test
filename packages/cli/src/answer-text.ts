@@ -37,11 +37,12 @@ import {
   type SelfChangedPath,
   type SummaryResponse,
   type TestCounts,
+  type WaitResponse,
   type WorkspaceExecution,
 } from "@rt-test/daemon/client";
 import { oneLine } from "./output.js";
 
-type Answer = SummaryResponse | PathStatusResponse;
+type Answer = SummaryResponse | PathStatusResponse | WaitResponse;
 type NotRunning = NonNullable<
   Extract<
     WorkspaceExecution,
@@ -191,6 +192,11 @@ export function contextLines(answer: Answer): string[] {
   ];
 }
 
+/** Why no workspace's inputs are narrowed, as every answer's warning phrases it. */
+export function notNarrowedCause(kind: InputsNotNarrowed["kind"]): string {
+  return NOT_NARROWED_CAUSES[kind];
+}
+
 /** The held discovery's line, only while the answer carries its hold. */
 function selfChangingDiscoveryLines(schedule: Answer["schedule"]): string[] {
   const held = schedule.selfChangingDiscovery;
@@ -204,13 +210,15 @@ function selfChangingDiscoveryLines(schedule: Answer["schedule"]): string[] {
   ];
 }
 
-function executionLines(
+/** Each workspace's execution state, and why it is not current when it says; nothing for no workspace. */
+export function executionLines(
   workspaces: readonly WorkspaceExecution[],
   roundHeld: boolean,
+  heading = EXECUTION_HEADING,
 ): string[] {
   if (workspaces.length === 0) return [];
   return [
-    EXECUTION_HEADING,
+    heading,
     ...workspaces.map(
       (workspace) =>
         `${INDENT}${oneLine(workspace.workspacePath)}: ${executionText(workspace, roundHeld)}`,
@@ -298,7 +306,10 @@ function isEmpty<T>(list: NamedList<T>): boolean {
 }
 
 /** The items an answer named, then how many it left out. */
-function namedText<T>(list: NamedList<T>, text: (item: T) => string): string {
+export function namedText<T>(
+  list: NamedList<T>,
+  text: (item: T) => string,
+): string {
   const named = list.named.map(text).join(LIST_SEPARATOR);
   return list.more === 0 ? named : `${named} and ${list.more} more`;
 }
@@ -346,13 +357,20 @@ function moreLines(more: number, what: string): string[] {
   return more === 0 ? [] : [`${INDENT}and ${more} more ${what}`];
 }
 
-/** The workspaces the path reached that cannot run, bounded and counted, whether or not it selected any. */
 function pathText(path: ExplainedPath): string {
+  return `changed path ${oneLine(path.path)}, ${pathSelectionText(path)}`;
+}
+
+/**
+ * The path's owner and what selection selected for it, then the workspaces it reached that cannot run, bounded and
+ * counted, whether or not it selected any.
+ */
+export function pathSelectionText(path: ExplainedPath): string {
   const owner = path.owner === undefined ? NO_OWNER : oneLine(path.owner);
   const notRunnable = isEmpty(path.notRunnable)
     ? ""
     : `; not runnable: ${namedText(path.notRunnable, (excluded) => `${oneLine(excluded.workspace.path)} (${cutReasonText(excluded)})`)}`;
-  return `changed path ${oneLine(path.path)}, owned by ${owner}, ${selectedText(path)}${notRunnable}`;
+  return `owned by ${owner}, ${selectedText(path)}${notRunnable}`;
 }
 
 /** A path that selected none only because its workspaces cannot run gives its kind; the not-runnable list says the rest. */
@@ -446,7 +464,7 @@ function entryName(entry: NotDiscoveredEntry): string {
 }
 
 /** The first line of a reason, marked when more of it is in the `--json` answer or the store. */
-function firstLine(reason: string): string {
+export function firstLine(reason: string): string {
   const [first = "", ...rest] = reason
     .replace(TRAILING_LINE_BREAKS, "")
     .split(REASON_LINE_BREAK);

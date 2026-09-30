@@ -271,6 +271,37 @@ export function selectionOf(
 }
 
 /**
+ * A dependency build's narrowing whose selection selects, for each changed path, the workspaces `selects` lists for it
+ * and none for a path it leaves out, and which narrows each workspace's inputs to the paths `inputs` lists for it.
+ */
+export function narrowingSelecting(
+  selects: Readonly<Record<string, readonly string[]>>,
+  inputs: Readonly<Record<string, readonly string[]>>,
+): Narrowing {
+  const standIn: Pick<Narrowing, "refusal" | "select" | "workspaceInputs"> = {
+    refusal: () => undefined,
+    select: (paths) => {
+      const reports = paths.map((path) =>
+        pathReport(path, undefined, selects[path] ?? []),
+      );
+      return selectionOf(reports, [
+        ...new Set(paths.flatMap((path) => selects[path] ?? [])),
+      ]);
+    },
+    workspaceInputs: (project, workspacePath) =>
+      new ProjectInputs(
+        project.root,
+        new Map(
+          [...project.digests].filter(([path]) =>
+            (inputs[workspacePath] ?? []).includes(path),
+          ),
+        ),
+      ),
+  };
+  return standIn as Narrowing;
+}
+
+/**
  * The committed inputs at `root` holding each path with the given digest, beside the held reads of `listed`, listed
  * files the inputs leave out.
  */

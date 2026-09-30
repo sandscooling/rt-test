@@ -34,6 +34,7 @@ import {
   daemonStatus,
   queryPathStatus,
   querySummary,
+  queryWait,
   startDaemon,
   stopDaemon,
   type DaemonIdentity,
@@ -53,12 +54,14 @@ import {
   PATH_STATUS_TYPE,
   STOPPING_CODE,
   SUMMARY_TYPE,
+  WAIT_TYPE,
   type ProtocolMessage,
 } from "../src/daemon/protocol.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
+  DAEMON_WAIT_MS,
   atHoldPoint,
   DAEMON_FIXTURE,
   IDLE_ENTRY,
@@ -165,7 +168,7 @@ async function currentTestsAt(
 }
 
 /**
- * The bound each summary or path-status request `ask` sends is given, answered by a keyed stand-in as a stopping
+ * The bound each summary, path-status or wait request `ask` sends is given, answered by a keyed stand-in as a stopping
  * daemon; undefined for one given none, which waits the connection's default.
  */
 function queryBounds(
@@ -179,7 +182,8 @@ function queryBounds(
         root,
         (context) => (request, standIn, connectionClosed) =>
           request["type"] === SUMMARY_TYPE ||
-          request["type"] === PATH_STATUS_TYPE
+          request["type"] === PATH_STATUS_TYPE ||
+          request["type"] === WAIT_TYPE
             ? {
                 type: ERROR_TYPE,
                 code: STOPPING_CODE,
@@ -1788,6 +1792,126 @@ describe("the environment a daemon's executor processes start with", () => {
         forkedHoldingIt: true,
         gained: 0,
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+/** Long enough for a wait sent earlier to have read its files and bound, short enough to answer while a run is held. */
+const WITNESS_LIMIT_MS = 1_000;
+/** A limit a wait refused before it began never reaches, and one it would pass soon were it taken. */
+const REFUSED_WAIT_LIMIT_MS = 1_000;
+
+describe("a wait for files", () => {
+  it(
+    "D3446: a wait naming a test file saved before the watcher reports the save settles only after that file's workspace has run again",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await withPreload(SILENT_WATCH, () =>
+          started(root, pids, confirmEvery(root)),
+        );
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        const file = join(root, WORKSPACE_B, "passes.test.mjs");
+        appendFileSync(file, "// an edit\n");
+        const answer = await settled(
+          queryWait(root, [file], { limitMs: DAEMON_WAIT_MS }),
+        );
+        return {
+          idle,
+          outcome: "thrown" in answer ? answer : answer.outcome,
+          runsOfB: storedRuns(identity.stateDirectory, root).filter(
+            ([path]) => path === WORKSPACE_B,
+          ).length,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        outcome: "settled",
+        runsOfB: 2,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3447: a wait on a running workspace's test file answers superseded by a newer revision, naming the file, once the file is edited",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        holdAt(root, "hold");
+        try {
+          const identity = await started(root, pids, confirmEvery(root));
+          if ("thrown" in identity) return identity;
+          await atHoldPoint(root, "holding");
+          const file = join(root, WORKSPACE_A, "held.test.mjs");
+          const waiting = settled(
+            queryWait(root, [file], { limitMs: DAEMON_WAIT_MS }),
+          );
+          const witness = await settled(
+            queryWait(root, [file], { limitMs: WITNESS_LIMIT_MS }),
+          );
+          appendFileSync(file, "// an edit\n");
+          const answer = await waiting;
+          if ("thrown" in answer) return answer;
+          return {
+            witnessBound:
+              !("thrown" in witness) && witness.boundRevision !== null,
+            outcome: answer.outcome,
+            ...(answer.outcome === "superseded"
+              ? {
+                  newer:
+                    answer.boundRevision !== null &&
+                    answer.supersededAt > answer.boundRevision,
+                  changedPaths: answer.changedPaths,
+                }
+              : {}),
+          };
+        } finally {
+          holdAt(root, "release");
+        }
+      });
+      expect(outcome).toStrictEqual({
+        witnessBound: true,
+        outcome: "superseded",
+        newer: true,
+        changedPaths: { named: [`${WORKSPACE_A}/held.test.mjs`], more: 0 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3448: a wait waits for its answer up to its limit plus 10000 ms, and up to 110000 ms when it names no limit",
+    async () => {
+      expect(
+        await queryBounds(async (root) => {
+          await settled(queryWait(root, [join(root, "a")], { limitMs: 5_000 }));
+          return settled(queryWait(root, [join(root, "a")]));
+        }),
+      ).toStrictEqual([15_000, 110_000]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3449: a running daemon refuses a wait naming a directory, and the caller's rejection names the directory and why",
+    async () => {
+      const { answer, refusal } = await withDaemonConsumer(
+        async (root, pids) => {
+          const identity = await started(root, pids);
+          if ("thrown" in identity) throw new Error(identity.thrown);
+          const directory = join(root, WORKSPACE_A);
+          return {
+            answer: await settled(
+              queryWait(root, [directory], { limitMs: REFUSED_WAIT_LIMIT_MS }),
+            ),
+            refusal: `The daemon serving ${root} could not answer: the wait refuses the paths it cannot take: ${directory} is a directory, and a wait names only files.`,
+          };
+        },
+      );
+      expect(answer).toStrictEqual({ thrown: refusal });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

@@ -8,7 +8,11 @@
  * versioned and may change with `PROTOCOL_VERSION`.
  */
 
-import type { PathStatusAnswer, SummaryAnswer } from "../query/answer.js";
+import type {
+  PathStatusAnswer,
+  SummaryAnswer,
+  WaitAnswer,
+} from "../query/answer.js";
 import { BUSY_TIMEOUT_MS } from "../store/schema.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText } from "../vitest/error-text.js";
@@ -25,6 +29,15 @@ const STORE_WAITS_PER_RESPONSE = 2;
 /** The longest a daemon takes to answer a status or stop request, even while a job holds Vitest open. */
 export const RESPONSE_BOUND_MS = STORE_WAITS_PER_RESPONSE * BUSY_TIMEOUT_MS;
 
+/**
+ * A target until measured: a wait's limit when its caller gives none, which with `RESPONSE_BOUND_MS` stays under the
+ * two minutes a coding agent's shell tool commonly allows a command.
+ */
+export const WAIT_LIMIT_MS = 100_000;
+export const MAX_WAIT_LIMIT_MS = 3_600_000;
+const MIN_WAIT_LIMIT_MS = 1;
+export const MAX_WAIT_PATHS = 1_000;
+
 /** Frozen. */
 export const STOP_TYPE = "stop";
 /** Frozen. */
@@ -40,6 +53,7 @@ export const STATUS_TYPE = "status";
 
 export const SUMMARY_TYPE = "summary";
 export const PATH_STATUS_TYPE = "path-status";
+export const WAIT_TYPE = "wait";
 
 export const START_TYPE = "start";
 export const SERVING_TYPE = "serving";
@@ -164,6 +178,25 @@ export interface PathStatusRequest {
   readonly path: string;
 }
 
+export interface WaitRequest {
+  readonly type: typeof WAIT_TYPE;
+  readonly protocolVersion: number;
+  /** Absolute, from one to `MAX_WAIT_PATHS`. */
+  readonly paths: readonly string[];
+  /** `WAIT_LIMIT_MS` when absent. */
+  readonly limitMs?: number;
+}
+
+/** Whether `value` is a limit a wait takes: a whole number of ms from 1 to `MAX_WAIT_LIMIT_MS`. */
+export function isWaitLimit(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_WAIT_LIMIT_MS &&
+    value <= MAX_WAIT_LIMIT_MS
+  );
+}
+
 export type SummaryResponse = SummaryAnswer & {
   readonly type: typeof SUMMARY_TYPE;
   readonly protocolVersion: number;
@@ -171,6 +204,11 @@ export type SummaryResponse = SummaryAnswer & {
 
 export type PathStatusResponse = PathStatusAnswer & {
   readonly type: typeof PATH_STATUS_TYPE;
+  readonly protocolVersion: number;
+};
+
+export type WaitResponse = WaitAnswer & {
+  readonly type: typeof WAIT_TYPE;
   readonly protocolVersion: number;
 };
 
