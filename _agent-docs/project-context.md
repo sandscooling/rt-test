@@ -102,4 +102,4 @@ P39. **Leave mutation choice and survivor diagnosis to the author**: RT Test run
 
 P40. **Keep defect definitions in the consumer's repository and evidence local**: Defect definitions are committed at a configurable location in the consumer repository; evidence stays in the local state directory, attributed by stable test id including each `it.each` arm.
 
-P41. **Keep consumer state under `.rt-test/`**: Write runtime state and logs only under the configured local state directory, `.rt-test/` by default, never elsewhere in the consumer's tree. The consumer excludes that directory from version control.
+P41. **Keep consumer state under `.rt-test/`**: Write runtime state and logs only under the configured local state directory, `.rt-test/` by default, never elsewhere in the consumer's tree. Only per-user files a client needs before it can reach a daemon, such as the daemon's key and the agent hook's session memory, go in the user's own RT Test directory, which only that user can enter. The consumer excludes `.rt-test/` from version control.
