@@ -976,8 +976,8 @@
     "id": "D3529",
     "defect": "A turn end and a prompt ask from the main agent's cursor, so their line is built from an answer scoped to that cursor rather than asked afresh.",
     "file": "packages/cli/src/commands/hook.ts",
-    "old": "  const asked = await askSession(run, undefined);",
-    "new": "  const asked = await askSession(run, run.memory.of(agentWriter(undefined)).cursor);"
+    "old": "  const asked = await askSession(run, undefined, NONE_EDITED);",
+    "new": "  const asked = await askSession(\n    run,\n    run.memory.of(agentWriter(undefined)).cursor,\n    NONE_EDITED,\n  );"
   },
   {
     "id": "D3530",
@@ -1123,8 +1123,8 @@
     "id": "D3550",
     "defect": "The hook gives the daemon's query no bound, so a daemon that does not answer holds the query past the hook's deadline and the no-answer line is never told.",
     "file": "packages/cli/src/commands/hook.ts",
-    "old": "    since === undefined ? { boundMs } : { since, boundMs };",
-    "new": "    since === undefined ? {} : { since };"
+    "old": "    ...(since === undefined ? {} : { since }),\n    boundMs,\n",
+    "new": "    ...(since === undefined ? {} : { since }),\n"
   },
   {
     "id": "D3551",
@@ -1150,9 +1150,9 @@
   {
     "id": "D3554",
     "defect": "A file an agent edited outside the consumer root is remembered and asked about, which the daemon refuses.",
-    "file": "packages/cli/src/commands/hook.ts",
-    "old": "    if (resolveCallerPath(file, root).ok) files.push(file);",
-    "new": "    files.push(file);"
+    "file": "packages/cli/src/hook-edits.ts",
+    "old": "    if (!resolveCallerPath(file, root).ok) continue;\n",
+    "new": ""
   },
   {
     "id": "D3555",
@@ -1165,8 +1165,8 @@
     "id": "D3556",
     "defect": "A batch's edited files are written to memory only with what the daemon's reply leads the run to write, an answer or the first telling of a loss, so a batch the deadline ends forgets them.",
     "file": "packages/cli/src/commands/hook.ts",
-    "old": "      : saved(\n          run,\n          agent,\n          said(NOTHING),\n          withEdits(memory.of(agent), edited, Date.now()),\n        );",
-    "new": "      : (memory.set(agent, withEdits(memory.of(agent), edited, Date.now())),\n        said(NOTHING));"
+    "old": "      : saved(\n          run,\n          agent,\n          said(NOTHING),\n          withEdits(memory.of(agent), edits.named, Date.now()),\n        );",
+    "new": "      : (memory.set(agent, withEdits(memory.of(agent), edits.named, Date.now())),\n        said(NOTHING));"
   },
   {
     "id": "D3557",
@@ -1193,8 +1193,8 @@
     "id": "D3564",
     "defect": "Each batch asks the real daemon with no cursor, so after an agent's edit breaks a covering test the next batch gives a baseline count rather than naming the test that failed and its first error.",
     "file": "packages/cli/src/commands/hook.ts",
-    "old": "  const asked = await askSession(run, memory.of(agent).cursor);",
-    "new": "  const asked = await askSession(run, undefined);"
+    "old": "  const asked = await askSession(run, memory.of(agent).cursor, edits.saved);",
+    "new": "  const asked = await askSession(run, undefined, edits.saved);"
   },
   {
     "id": "D3565",
@@ -1223,5 +1223,54 @@
     "file": "packages/cli/src/commands/hook.ts",
     "old": "  if (unusable.size === 0 || rest.length === 0) return none;",
     "new": "  if (unusable.size === 0) return none;"
+  },
+  {
+    "id": "D3577",
+    "defect": "Every request names every file the session edited as edited, so a daemon job's later change to a file an earlier batch saved counts as the agent's edit.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const edited = paths.filter((path) => batchFiles.has(path));",
+    "new": "  const edited = [...paths];"
+  },
+  {
+    "id": "D3578",
+    "defect": "The hook no longer recognizes Claude Code's <tool_use_error> result, so a call that failed and saved nothing is named as edited.",
+    "file": "packages/cli/src/hook-edits.ts",
+    "old": "  \"<tool_use_error>\",",
+    "new": "  \"<tool_use_error >\","
+  },
+  {
+    "id": "D3579",
+    "defect": "The hook no longer recognizes Claude Code's rejection result, so a call the user rejected, which saved nothing, is named as edited.",
+    "file": "packages/cli/src/hook-edits.ts",
+    "old": "  \"The user doesn't want to proceed with this tool use\",",
+    "new": "  \"The user does not want to proceed with this tool use\","
+  },
+  {
+    "id": "D3580",
+    "defect": "A result given as a list of text blocks is never read, so a failed call reported that way is named as edited.",
+    "file": "packages/cli/src/hook-edits.ts",
+    "old": "  const [first] = response as unknown[];",
+    "new": "  const first: unknown = response;"
+  },
+  {
+    "id": "D3581",
+    "defect": "A call with no result counts as having saved nothing, so the agent's real save goes unnamed and its change is judged by timing.",
+    "file": "packages/cli/src/hook-edits.ts",
+    "old": "    text !== undefined &&\n    UNSAVED_RESULT_STARTS",
+    "new": "    text === undefined ||\n    UNSAVED_RESULT_STARTS"
+  },
+  {
+    "id": "D3582",
+    "defect": "A turn end's and a prompt's requests name the session's files as edited, though no call saved them then, so a daemon job's change to them counts as an edit.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const asked = await askSession(run, undefined, NONE_EDITED);",
+    "new": "  const asked = await askSession(\n    run,\n    undefined,\n    run.memory.editedPaths().paths,\n  );"
+  },
+  {
+    "id": "D3583",
+    "defect": "The request asked again without a vanished file still names that file as edited, which the daemon refuses whole, so the retry never gets an answer.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const edited = paths.filter((path) => batchFiles.has(path));",
+    "new": "  const edited = [...batchFiles];"
   }
 ]

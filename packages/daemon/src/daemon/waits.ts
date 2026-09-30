@@ -416,26 +416,36 @@ function differing(
   }
 }
 
+/** The files a query named, resolved inside the consumer root. */
+interface ResolvedFiles {
+  /** Root-relative, each once. */
+  readonly paths: string[];
+  /** By each absolute path as given, its root-relative path. */
+  readonly byGiven: ReadonlyMap<string, string>;
+}
+
 /**
- * Each of the absolute `given` paths root-relative, each once, or the refusal of them all naming why each refused path
- * cannot be taken: it lies outside the consumer root, is a directory, or is a missing name the Windows host may read as
- * another. `query` names the query that takes only files.
+ * Each of the absolute `given` paths root-relative, or the refusal of them all naming why each refused path cannot be
+ * taken: it lies outside the consumer root, is a directory, or is a missing name the Windows host may read as another.
+ * `query` names the query that takes only files.
  */
 export function resolveFiles(
   given: readonly string[],
   consumerRoot: string,
   query: string,
-): { readonly paths: string[] } | RefusedQuery {
-  const paths = new Set<string>();
+): ResolvedFiles | RefusedQuery {
+  const byGiven = new Map<string, string>();
   const refusals: string[] = [];
   for (const path of given) {
     const target = resolveCallerPath(path, consumerRoot);
     if (!target.ok) refusals.push(target.reason);
     else if (isDirectory(path)) {
       refusals.push(`${path} is a directory, and a ${query} names only files`);
-    } else paths.add(target.path);
+    } else byGiven.set(path, target.path);
   }
-  if (refusals.length === 0) return { paths: [...paths] };
+  if (refusals.length === 0) {
+    return { paths: [...new Set(byGiven.values())], byGiven };
+  }
   return {
     refused: `the ${query} refuses the paths it cannot take: ${refusals.join(REFUSAL_SEPARATOR)}`,
   };

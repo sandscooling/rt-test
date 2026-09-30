@@ -168,6 +168,13 @@ function askedPaths(): unknown[] {
   return scripted.calls.map(([, paths]) => paths);
 }
 
+/** The files each query so far named as edited, undefined for none. */
+function editedSent(): (readonly string[] | undefined)[] {
+  return scripted.calls.map(
+    ([, , options]) => (options as ChangesOptions).edited,
+  );
+}
+
 /** A determined answer to a query that gave no cursor, counting `counts` in scope. */
 function withoutCursor(more: Partial<Determined> = {}): Determined {
   return determined({
@@ -805,7 +812,7 @@ describe("a loss of the daemon's answer", () => {
         options.boundMs !== undefined &&
         options.boundMs > 0 &&
         options.boundMs < HOOK_BOUND_MS,
-    }).toStrictEqual({ keys: ["boundMs"], within: true });
+    }).toStrictEqual({ keys: ["boundMs", "edited"], within: true });
   });
 });
 
@@ -977,6 +984,120 @@ describe("the files a session edited", () => {
       first: { exit: 1, stdout: "{}\n" },
       asked: [[outcome.file], [outcome.file]],
     });
+  });
+});
+
+/** How Claude Code 2.1.286 words the result of an edit it refused because the file changed since it was read. */
+const FAILED_RESULT =
+  "<tool_use_error>File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.</tool_use_error>";
+/** How Claude Code words the result of a call the user rejected. */
+const REJECTED_RESULT =
+  "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+
+/** A `PostToolBatch` call as Claude Code gives it once the call has returned `response`. */
+function withResult(call: object, response: unknown): object {
+  return { ...call, tool_response: response };
+}
+
+/** The files the first query named and those it named as edited, once one batch made `toolCalls` over `a.ts` and `b.ts`. */
+function firstBatchSent(
+  toolCalls: (a: string, b: string) => readonly unknown[],
+): Promise<{ a: string; b: string; asked: unknown; edited: unknown }> {
+  return inHookSession(async ({ root, run }) => {
+    const [a, b] = [join(root, "a.ts"), join(root, "b.ts")];
+    await run(BATCH, [withoutCursor()], { toolCalls: toolCalls(a, b) });
+    return { a, b, asked: askedPaths()[0], edited: editedSent()[0] };
+  });
+}
+
+describe("the files a request names as edited", () => {
+  it("D3577: each batch names as edited only the files its own calls saved, never a file an earlier batch edited, and a batch of shell calls names none", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const [a, b] = [join(root, "a.ts"), join(root, "b.ts")];
+      await run(BATCH, [withoutCursor()], { toolCalls: [write(a)] });
+      await run(BATCH, [determined()], { toolCalls: [edit(b)] });
+      await run(BATCH, [determined()], { toolCalls: [bash()] });
+      return { a, b, edited: editedSent() };
+    });
+    expect(outcome.edited).toStrictEqual([[outcome.a], [outcome.b], undefined]);
+  });
+
+  it("D3578: a call whose result begins <tool_use_error> is asked about but never named as edited", async () => {
+    const sent = await firstBatchSent((a, b) => [
+      withResult(write(a), FAILED_RESULT),
+      write(b),
+    ]);
+    expect(sent).toStrictEqual({
+      a: sent.a,
+      b: sent.b,
+      asked: [sent.a, sent.b],
+      edited: [sent.b],
+    });
+  });
+
+  it("D3579: a call whose result begins with Claude Code's rejection of the tool use is asked about but never named as edited", async () => {
+    const sent = await firstBatchSent((a, b) => [
+      withResult(edit(a), REJECTED_RESULT),
+      edit(b),
+    ]);
+    expect(sent).toStrictEqual({
+      a: sent.a,
+      b: sent.b,
+      asked: [sent.a, sent.b],
+      edited: [sent.b],
+    });
+  });
+
+  it("D3580: a failed call whose result is a list of text blocks, the first beginning <tool_use_error>, is never named as edited", async () => {
+    const sent = await firstBatchSent((a, b) => [
+      withResult(write(a), [{ type: "text", text: FAILED_RESULT }]),
+      write(b),
+    ]);
+    expect(sent.edited).toStrictEqual([sent.b]);
+  });
+
+  it("D3581: a call with no result, and one whose result says it saved, are each named as edited", async () => {
+    const sent = await firstBatchSent((a, b) => [
+      write(a),
+      withResult(
+        edit(b),
+        `The file ${b} has been updated. Here's the result of running \`cat -n\` on a snippet of the edited file:`,
+      ),
+    ]);
+    expect(sent.edited).toStrictEqual([sent.a, sent.b]);
+  });
+
+  it("D3582: a turn end's and a prompt's requests name no file as edited, though the session edited one", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const file = join(root, "a.ts");
+      await run(BATCH, [withoutCursor()], { toolCalls: [write(file)] });
+      await run(STOP, [withoutCursor()]);
+      await run(PROMPT, [withoutCursor()]);
+      return { file, edited: editedSent() };
+    });
+    expect(outcome.edited).toStrictEqual([
+      [outcome.file],
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("D3583: the request asked again without a file that has vanished names as edited only the batch's files it still asks about", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const kept = join(root, "a.ts");
+      const vanished = join(root, "b.ts");
+      writeFileSync(kept, "");
+      await run(
+        BATCH,
+        [new Error(`${vanished} names nothing that exists`), determined()],
+        { toolCalls: [write(kept), write(vanished)] },
+      );
+      return { kept, vanished, edited: editedSent() };
+    });
+    expect(outcome.edited).toStrictEqual([
+      [outcome.kept, outcome.vanished],
+      [outcome.kept],
+    ]);
   });
 });
 

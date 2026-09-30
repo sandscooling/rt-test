@@ -4701,3 +4701,51 @@ describe("a wait the lifecycle answers", () => {
     });
   });
 });
+
+/**
+ * The runs of `a` by a daemon over narrowed builds each of whose first `REWRITING_RUNS` runs changes `INSIDE` as it
+ * runs, moving the input revision, while the agent, having saved that file, names it as edited in a changes request
+ * the lifecycle answers during the run.
+ */
+function runsWhileTheAgentReports(): Promise<number> {
+  return inTempDir(async (root) => {
+    const file = join(root, INSIDE);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "");
+    const digests: Record<string, string> = { [INSIDE]: "0", [OUTSIDE]: "0" };
+    const inputs = new StandInInputs({ snapshot: () => inputsOf(digests) });
+    const at: { daemon?: Daemon } = {};
+    const answers: Promise<unknown>[] = [];
+    const executor = new RewritingExecutor(
+      (run) => {
+        if (run > REWRITING_RUNS || at.daemon === undefined) return;
+        answers.push(
+          at.daemon.lifecycle.changes(
+            { paths: [file], since: undefined, edited: [file] },
+            new AbortController().signal,
+          ),
+        );
+        inputs.recordPath(INSIDE);
+        digests[INSIDE] = `run-${run}`;
+        inputs.moveRevision();
+      },
+      discovery(discoveredIn("a", [])),
+      () => undefined,
+    );
+    at.daemon = narrowedDaemon(root, inputs, executor);
+    const started = await begun(at.daemon);
+    await untilRunsEnd(started, executor);
+    await Promise.all(answers);
+    return thenStopped(started, async () => executor.runs.length);
+  });
+}
+
+describe(
+  "an agent's edits reported through the lifecycle",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3598: a workspace each of whose runs changes an input the agent names as edited in a changes request during the run is never held", async () => {
+      expect(await runsWhileTheAgentReports()).toBe(REWRITING_RUNS + 1);
+    });
+  },
+);
