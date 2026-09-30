@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, sep } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -17,7 +17,11 @@ import {
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
 import { column, UnreadableRecordError } from "../src/store/columns.js";
-import { openStore, type RtTestStore } from "../src/store/open-store.js";
+import {
+  openStore,
+  type LatestResults,
+  type RtTestStore,
+} from "../src/store/open-store.js";
 import {
   STORE_APPLICATION_ID,
   STORE_FILE_NAME,
@@ -2568,6 +2572,130 @@ describe("a latest discovery the store refuses as unreadable", () => {
       discovery: DISCOVERY,
       runs: [BEFORE_LOAD_RUN],
     });
+  });
+});
+
+describe("a latest run the store refuses as unreadable", () => {
+  const LEGACY_RUN: WorkspaceRun = {
+    status: "interrupted-before-load",
+    workspace: OTHER_WORKSPACE,
+  };
+  const LATER_LEGACY_RUN: WorkspaceRun = {
+    status: "crashed",
+    workspace: OTHER_WORKSPACE,
+    error: "the executor process 9 exited during the job (exit code 1)",
+  };
+  /** Gives the latest stored run of the legacy workspace a status no reader knows. */
+  const LEGACY_MADE_UNREADABLE = `PRAGMA ignore_check_constraints = ON;
+    UPDATE runs SET status = 'bogus' WHERE sequence =
+      (SELECT max(sequence) FROM runs WHERE workspace_path = '${OTHER_WORKSPACE.path}')`;
+  const LEGACY_REFUSAL = 'The store holds an unreadable runs.status: "bogus"';
+
+  interface LatestRunsRead {
+    readonly runs: readonly WorkspaceRun[];
+    readonly runRefusals: LatestResults["runRefusals"];
+  }
+
+  /** What a query reads once `written` is stored in order and `corrupt` has run through a second connection. */
+  function latestAfter(
+    written: readonly WorkspaceRun[],
+    corrupt: string,
+  ): Promise<Settled<LatestRunsRead>> {
+    return inStore((store) => {
+      for (const run of written) store.writeRun(bound(WORKTREE_A), run);
+      withRawDatabase(store.file, (database) => {
+        database.exec(corrupt);
+      });
+      const { latestRuns, runRefusals } = store.readLatestResults(WORKTREE_A);
+      return { runs: latestRuns.map((stored) => stored.run), runRefusals };
+    });
+  }
+
+  function runsOfRead(read: Settled<LatestRunsRead>) {
+    return "thrown" in read ? read : read.runs;
+  }
+
+  function refusalsOfRead(read: Settled<LatestRunsRead>) {
+    return "thrown" in read ? read : read.runRefusals;
+  }
+
+  it("D3266: a refused latest run leaves every other workspace's latest run read, one stored after it included", async () => {
+    expect(
+      runsOfRead(
+        await latestAfter([LEGACY_RUN, FAILED_RUN], LEGACY_MADE_UNREADABLE),
+      ),
+    ).toStrictEqual([FAILED_RUN]);
+  });
+
+  it("D3267: the refused workspace is named among the refusals with the reason its run was refused, and no readable one is", async () => {
+    expect(
+      refusalsOfRead(
+        await latestAfter([LEGACY_RUN, FAILED_RUN], LEGACY_MADE_UNREADABLE),
+      ),
+    ).toStrictEqual([
+      { workspacePath: OTHER_WORKSPACE.path, reason: LEGACY_REFUSAL },
+    ]);
+  });
+
+  it("D3268: a refused run's reason carries its cause chain", async () => {
+    const read = await latestAfter(
+      [RAN_RUN],
+      "PRAGMA ignore_check_constraints = ON; UPDATE runs SET unhandled_errors = 'not json'",
+    );
+    const refusals = refusalsOfRead(read);
+    expect(
+      Array.isArray(refusals)
+        ? refusals.map(({ workspacePath, reason }) => {
+            const [head, cause] = reason.split("\n");
+            return {
+              workspacePath,
+              head,
+              causedBy: cause?.startsWith("  caused by: ") ?? false,
+            };
+          })
+        : refusals,
+    ).toStrictEqual([
+      {
+        workspacePath: WORKSPACE.path,
+        head: 'The store holds an unreadable unhandled_errors: "not json"',
+        causedBy: true,
+      },
+    ]);
+  });
+
+  it("D3269: an older readable run of a refused workspace never stands in for its refused latest run", async () => {
+    expect(
+      runsOfRead(
+        await latestAfter(
+          [LEGACY_RUN, FAILED_RUN, LATER_LEGACY_RUN],
+          LEGACY_MADE_UNREADABLE,
+        ),
+      ),
+    ).toStrictEqual([FAILED_RUN]);
+  });
+
+  it("D3270: a store failure reading a latest run's rows still throws, never read as a refused run", async () => {
+    const read = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      const all = StatementSync.prototype.all;
+      const failingTestRows = vi
+        .spyOn(StatementSync.prototype, "all")
+        .mockImplementation(function (
+          this: StatementSync,
+          ...parameters: Parameters<StatementSync["all"]>
+        ) {
+          if (this.sourceSQL.includes("FROM run_tests")) {
+            throw new Error("disk I/O error");
+          }
+          return all.apply(this, parameters);
+        });
+      try {
+        return store.readLatestResults(WORKTREE_A).runRefusals;
+      } finally {
+        failingTestRows.mockRestore();
+      }
+    });
+    expect(rejection(read)).toContain("disk I/O error");
   });
 });
 

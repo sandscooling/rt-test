@@ -26,6 +26,8 @@ import { oneLine, reported } from "../output.js";
 const NAME = "summary";
 const DETAIL_SEPARATOR = ", ";
 const REASON_SEPARATOR = ": ";
+const NO_RUN_PHRASE = "no run stored";
+const RUN_REFUSED_PHRASE = "latest run refused as unreadable";
 const RUN_STATUS_PHRASES: Record<LatestRunFacts["status"], string> = {
   ran: "latest run loaded the workspace",
   failed: "latest run could not load the workspace",
@@ -73,9 +75,15 @@ function summaryText(answer: SummaryResponse): string {
 }
 
 function workspaceLine(workspace: WorkspaceFacts): string {
+  return `${INDENT}${oneLine(workspace.workspacePath)}: ${workspaceFacts(workspace).join(DETAIL_SEPARATOR)}`;
+}
+
+function workspaceFacts(workspace: WorkspaceFacts): string[] {
   const run = workspace.latestRun;
-  const facts = run === null ? ["no run stored"] : labelledRunFacts(run);
-  return `${INDENT}${oneLine(workspace.workspacePath)}: ${facts.join(DETAIL_SEPARATOR)}`;
+  if (run !== null) return labelledRunFacts(run);
+  const refusal = workspace.refusedRun;
+  if (refusal === undefined) return [NO_RUN_PHRASE];
+  return [`${RUN_REFUSED_PHRASE}${REASON_SEPARATOR}${cutReasonText(refusal)}`];
 }
 
 /** The run's status, then its invalidated label when it has one, then the rest of its facts. */

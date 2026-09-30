@@ -23,6 +23,7 @@ import {
   RUN_CRASHED,
   RUN_FAILED,
   RUN_INTERRUPTED_BEFORE_LOAD,
+  RUN_REFUSED,
   RUN_UNSUPPORTED_VITEST,
   STALE,
   TEST_STATES,
@@ -69,26 +70,36 @@ const MODULE_STATES = {
 } as const;
 
 /**
- * Every test of every discovered workspace of the discovery, each answered only by its workspace's latest run. A
- * test the discovery or the run marks duplicate is matched to its result by its position, which only a current
- * discovery vouches for.
+ * Every test of every discovered workspace of the discovery, each answered only by its workspace's latest run, or
+ * `run-refused` when `refusedRuns` holds that workspace's path. A test the discovery or the run marks duplicate is
+ * matched to its result by its position, which only a current discovery vouches for.
  */
 export function testStandings(
   discovery: StoredDiscovery,
   latestRuns: ReadonlyMap<string, StoredRun>,
+  refusedRuns: ReadonlyMap<string, string>,
   current: CurrentFingerprints,
   discoveryIsCurrent: boolean,
 ): TestStanding[] {
-  return discovery.discovery.workspaces.flatMap((entry) =>
-    entry.status === "discovered"
-      ? workspaceStandings(
-          entry.tests,
-          latestRuns.get(entry.workspace.path),
-          current(entry.workspace.path),
-          discoveryIsCurrent,
-        )
-      : [],
-  );
+  return discovery.discovery.workspaces.flatMap((entry) => {
+    if (entry.status !== "discovered") return [];
+    const path = entry.workspace.path;
+    if (refusedRuns.has(path)) return unanswered(entry.tests, RUN_REFUSED);
+    return workspaceStandings(
+      entry.tests,
+      latestRuns.get(path),
+      current(path),
+      discoveryIsCurrent,
+    );
+  });
+}
+
+/** Tests no stored run answers, each in the one state that says why. */
+function unanswered(
+  tests: readonly DiscoveredTest[],
+  state: typeof NEVER_RUN | typeof RUN_REFUSED,
+): TestStanding[] {
+  return tests.map((test) => ({ test, state, freshness: UNKNOWN }));
 }
 
 function workspaceStandings(
@@ -97,13 +108,7 @@ function workspaceStandings(
   currentFingerprint: string | undefined,
   discoveryIsCurrent: boolean,
 ): TestStanding[] {
-  if (stored === undefined) {
-    return tests.map((test) => ({
-      test,
-      state: NEVER_RUN,
-      freshness: UNKNOWN,
-    }));
-  }
+  if (stored === undefined) return unanswered(tests, NEVER_RUN);
   const answer = runAnswerer(stored);
   return tests.map((test) => {
     const found = answer(test.identity);

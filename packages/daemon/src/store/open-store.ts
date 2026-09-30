@@ -9,7 +9,12 @@ import {
   readLatestDiscovery,
   selectLatestDiscovery,
 } from "./read-discovery.js";
-import { readRun, readRuns, selectLatestRuns } from "./read-runs.js";
+import {
+  readRun,
+  readRuns,
+  selectLatestRuns,
+  type LatestRuns,
+} from "./read-runs.js";
 import {
   BUSY_TIMEOUT_MS,
   STORE_APPLICATION_ID,
@@ -35,13 +40,11 @@ import { writeDiscovery } from "./write-discovery.js";
 import { writeRun } from "./write-run.js";
 
 /** What a query counts from, read from one snapshot. */
-export interface LatestResults {
+export interface LatestResults extends LatestRuns {
   /** Undefined when none was stored, or when the one stored last was refused. */
   readonly discovery: StoredDiscovery | undefined;
   /** Why the discovery stored last was refused as unreadable. */
   readonly discoveryRefusal: string | undefined;
-  /** The run stored last for each workspace path, in stored order. */
-  readonly latestRuns: readonly StoredRun[];
 }
 
 export interface RtTestStore {
@@ -201,7 +204,7 @@ function readLatestResults(
   requireScope(scope);
   return inRecordRead(database, () => ({
     ...latestDiscovery(database, scope),
-    latestRuns: selectLatestRuns(database, scope),
+    ...selectLatestRuns(database, scope),
   }));
 }
 

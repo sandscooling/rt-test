@@ -1401,6 +1401,162 @@ describe(
         stored: { storingErrors: 0, ended: ["discovery ended: a discovered"] },
       });
     });
+
+    describe("a latest run the store refuses as unreadable", () => {
+      const RUN_REFUSED_BEFORE = "warning: the latest stored run of ";
+      const RUN_REFUSED_AFTER =
+        " was refused as unreadable, so the daemon plans for it as if no run of it were stored: ";
+      const READABLE_STATUS = "interrupted-before-load";
+
+      /** Gives the latest stored run of `path` the status `status`, through a second connection. */
+      function setLatestRunStatus(
+        file: string,
+        path: string,
+        status: string,
+      ): void {
+        alterStore(
+          file,
+          `PRAGMA ignore_check_constraints = ON;
+            UPDATE runs SET status = '${status}' WHERE sequence =
+              (SELECT max(sequence) FROM runs WHERE workspace_path = '${path}')`,
+        );
+      }
+
+      /** The whole entry the daemon logs for `path`'s latest run refused for its status `status`. */
+      function refusalEntry(path: string, status: string): string {
+        return `${RUN_REFUSED_BEFORE}${path}${RUN_REFUSED_AFTER}The store holds an unreadable runs.status: "${status}"`;
+      }
+
+      /**
+       * Runs a daemon over a readable store and confirmed workspaces `paths` to idle, so it has stored a run of each,
+       * then runs `after` against the store's file and the daemon, and returns the log's run refusal entries.
+       */
+      function afterRunsIdle(
+        paths: readonly string[],
+        after: (file: string, lifecycle: DaemonLifecycle) => void,
+      ): Promise<string[]> {
+        return inTempDir((dir) => {
+          const store = openStore(join(dir, "state"));
+          const started = daemon(
+            confirmed(...paths),
+            new ScriptedExecutor({
+              ended: true,
+              value: discovery(...paths.map((path) => discovered(path))),
+            }),
+            store,
+          );
+          return begunThenStopped(started, ({ lifecycle, log }) => {
+            after(store.file, lifecycle);
+            return log.entries.filter((entry) =>
+              entry.startsWith(RUN_REFUSED_BEFORE),
+            );
+          });
+        });
+      }
+
+      it("D3279: a workspace whose latest run is refused runs, though that run was stored current, and the run it stores replaces the refused one as its latest", async () => {
+        const outcome = await inTempDir((dir) => {
+          const store = openStore(join(dir, "state"));
+          store.writeDiscovery(
+            {
+              ...SCOPE,
+              inputFingerprint: { kind: "digest", digest: DISCOVERY_DIGEST },
+            },
+            discovery(discovered("a")),
+          );
+          store.writeRun(
+            {
+              ...SCOPE,
+              inputFingerprint: { kind: "digest", digest: "a-digest" },
+            },
+            ranWorkspace("a"),
+          );
+          setLatestRunStatus(store.file, "a", "bogus");
+          const started = daemon(
+            confirmed("a"),
+            new ScriptedExecutor({
+              ended: true,
+              value: discovery(discovered("a")),
+            }),
+            store,
+          );
+          return begunThenStopped(started, ({ executor }) => ({
+            runs: executor.runs,
+            latest: settle(() => {
+              const latest = store.readLatestResults(SCOPE);
+              return {
+                runs: latest.latestRuns.map((stored) => stored.run),
+                runRefusals: latest.runRefusals,
+              };
+            }),
+          }));
+        });
+        expect(outcome).toStrictEqual({
+          runs: ["a"],
+          latest: { runs: [interrupted("a")], runRefusals: [] },
+        });
+      });
+
+      it("D3280: a run refusal a summary reads is logged, naming its workspace, with its whole text", async () => {
+        const status = "x".repeat(1500);
+        const entries = await afterRunsIdle(["a"], (file, lifecycle) => {
+          setLatestRunStatus(file, "a", status);
+          lifecycle.summary();
+        });
+        expect(entries).toStrictEqual([refusalEntry("a", status)]);
+      });
+
+      it("D3281: a run refusal read again is logged once", async () => {
+        const entries = await afterRunsIdle(["a"], (file, lifecycle) => {
+          setLatestRunStatus(file, "a", "bogus");
+          lifecycle.summary();
+          lifecycle.summary();
+        });
+        expect(entries).toStrictEqual([refusalEntry("a", "bogus")]);
+      });
+
+      it("D3282: a run refusal that returns after a read that did not refuse it is logged again", async () => {
+        const entries = await afterRunsIdle(["a"], (file, lifecycle) => {
+          setLatestRunStatus(file, "a", "bogus");
+          lifecycle.summary();
+          setLatestRunStatus(file, "a", READABLE_STATUS);
+          lifecycle.summary();
+          setLatestRunStatus(file, "a", "bogus");
+          lifecycle.summary();
+        });
+        expect(entries).toStrictEqual([
+          refusalEntry("a", "bogus"),
+          refusalEntry("a", "bogus"),
+        ]);
+      });
+
+      it("D3283: a different refusal of a workspace's latest run is logged too, once each", async () => {
+        const entries = await afterRunsIdle(["a"], (file, lifecycle) => {
+          setLatestRunStatus(file, "a", "bogus");
+          lifecycle.summary();
+          lifecycle.summary();
+          setLatestRunStatus(file, "a", "mangled");
+          lifecycle.summary();
+        });
+        expect(entries).toStrictEqual([
+          refusalEntry("a", "bogus"),
+          refusalEntry("a", "mangled"),
+        ]);
+      });
+
+      it("D3284: a second workspace's run refused for the reason already logged for another is logged too", async () => {
+        const entries = await afterRunsIdle(["a", "b"], (file, lifecycle) => {
+          setLatestRunStatus(file, "a", "bogus");
+          lifecycle.summary();
+          setLatestRunStatus(file, "b", "bogus");
+          lifecycle.summary();
+        });
+        expect(entries).toStrictEqual([
+          refusalEntry("a", "bogus"),
+          refusalEntry("b", "bogus"),
+        ]);
+      });
+    });
   },
 );
 

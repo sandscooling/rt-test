@@ -1842,6 +1842,32 @@ describe("a query", () => {
     ).toBe("the executor process 7 exited (42 more characters)");
   });
 
+  it("D3278: a human summary shows a workspace whose latest run was refused as refused, with its cut reason, in place of no run stored", async () => {
+    scripted.summary = humanAnswer({
+      workspaces: [
+        {
+          workspacePath: WORKSPACE_A,
+          latestRun: null,
+          refusedRun: {
+            reason: 'The store holds an unreadable runs.status: "bogus"',
+            omittedCharacters: 42,
+          },
+        },
+      ],
+    });
+    let stdout: string;
+    try {
+      stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
+    } finally {
+      scripted.summary = undefined;
+    }
+    expect(
+      stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
+    ).toBe(
+      `  ${WORKSPACE_A}: latest run refused as unreadable: The store holds an unreadable runs.status: "bogus" (42 more characters)`,
+    );
+  });
+
   it(
     "D1851: a folder status's human text describes the folder and each file by counts, with no line of passing or failing for any",
     async () => {

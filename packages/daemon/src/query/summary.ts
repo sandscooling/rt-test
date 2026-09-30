@@ -52,6 +52,8 @@ export interface QueryBasis {
   readonly discovery: StoredDiscovery;
   /** Each workspace's latest stored run, by workspace path. */
   readonly latestRuns: ReadonlyMap<string, StoredRun>;
+  /** Why each workspace's latest stored run was refused as unreadable, by workspace path. */
+  readonly refusedRuns: ReadonlyMap<string, string>;
   readonly standings: readonly TestStanding[];
   readonly notDiscovered: readonly NotDiscoveredEntry[];
   readonly context: AnswerContext;
@@ -73,13 +75,7 @@ export function summaryAnswer(
 ): SummaryAnswer | NoAnswer {
   const basis = queryBasis(results, daemon, inputs);
   if ("noAnswer" in basis) return basis;
-  const {
-    discovery,
-    latestRuns: runs,
-    standings,
-    notDiscovered,
-    context,
-  } = basis;
+  const { discovery, standings, notDiscovered, context } = basis;
   if (standings.length === 0 && notDiscovered.length === 0) {
     return {
       noAnswer: `the latest discovery stored for ${daemon.consumerRoot} holds no test and nothing RT Test could not discover`,
@@ -91,13 +87,27 @@ export function summaryAnswer(
     duplicateTests: standings.filter((standing) => standing.test.isDuplicate)
       .length,
     notDiscovered,
-    workspaces: discovery.discovery.workspaces.map((entry): WorkspaceFacts => ({
-      workspacePath: entry.workspace.path,
-      latestRun: latestRunFacts(
-        runs.get(entry.workspace.path),
-        daemon.schedule,
-      ),
-    })),
+    workspaces: discovery.discovery.workspaces.map((entry) =>
+      workspaceFacts(entry.workspace.path, basis, daemon.schedule),
+    ),
+  };
+}
+
+function workspaceFacts(
+  workspacePath: string,
+  basis: QueryBasis,
+  schedule: ScheduleReader,
+): WorkspaceFacts {
+  const latestRun = latestRunFacts(
+    basis.latestRuns.get(workspacePath),
+    schedule,
+  );
+  if (latestRun !== null) return { workspacePath, latestRun };
+  const refusal = basis.refusedRuns.get(workspacePath);
+  return {
+    workspacePath,
+    latestRun,
+    ...(refusal === undefined ? {} : { refusedRun: cutReason(refusal) }),
   };
 }
 
@@ -120,6 +130,12 @@ export function queryBasis(
   const latestRuns = new Map(
     results.latestRuns.map((run) => [run.run.workspace.path, run]),
   );
+  const refusedRuns = new Map(
+    results.runRefusals.map((refusal) => [
+      refusal.workspacePath,
+      refusal.reason,
+    ]),
+  );
   const fingerprints = workspaceFingerprints(discovery.discovery, inputs);
   const freshness = recordFreshness(
     discovery,
@@ -137,9 +153,11 @@ export function queryBasis(
   return {
     discovery,
     latestRuns,
+    refusedRuns,
     standings: testStandings(
       discovery,
       latestRuns,
+      refusedRuns,
       (path) => fingerprintDigest(fingerprints.get(path)),
       freshness === CURRENT,
     ),

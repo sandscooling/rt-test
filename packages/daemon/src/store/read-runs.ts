@@ -1,5 +1,6 @@
 import type { TestOutcome } from "@rt-test/core";
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { errorText } from "../vitest/error-text.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import type {
   NothingRanReason,
@@ -23,6 +24,7 @@ import {
   stringArray,
   text,
   unreadable,
+  UnreadableRecordError,
   unsupportedProject,
   unsupportedVitest,
   type Members,
@@ -39,10 +41,29 @@ import { inRecordRead } from "./transaction.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 
+/** A workspace whose run stored last was refused as unreadable, and why. */
+export interface RunRefusal {
+  readonly workspacePath: string;
+  readonly reason: string;
+}
+
+export interface LatestRuns {
+  /** The run stored last for each workspace path, in stored order, less each refused one. */
+  readonly latestRuns: readonly StoredRun[];
+  /** Each workspace whose run stored last was refused as unreadable; none of its older runs stands in. */
+  readonly runRefusals: readonly RunRefusal[];
+}
+
 /** One run's module rows and test rows, each in stored order. */
 interface RunChildren {
   readonly modules: readonly Row[];
   readonly tests: readonly Row[];
+}
+
+/** Each selects one run's children by its sequence. */
+interface ChildStatements {
+  readonly modules: StatementSync;
+  readonly tests: StatementSync;
 }
 
 const TEST_OUTCOMES: Members<TestOutcome> = {
@@ -82,7 +103,7 @@ const SELECT_SCOPE_TESTS = `SELECT ${TEST_COLUMNS} FROM run_tests t
   JOIN runs r ON r.sequence = t.run_sequence WHERE ${IN_SCOPE}
   ORDER BY t.run_sequence, t.module_index, t.test_index`;
 const SELECT_RUN = `SELECT ${RUN_COLUMNS} FROM runs r WHERE ${IN_SCOPE} AND run_id = ?`;
-const SELECT_LATEST_RUN_IDS = `SELECT r.run_id FROM runs r WHERE ${IN_SCOPE}
+const SELECT_LATEST_RUNS = `SELECT ${RUN_COLUMNS} FROM runs r WHERE ${IN_SCOPE}
   AND r.sequence = (SELECT max(l.sequence) FROM runs l WHERE l.project_identity = r.project_identity
     AND l.worktree_identity = r.worktree_identity AND l.workspace_path = r.workspace_path)
   ORDER BY r.sequence`;
@@ -136,28 +157,50 @@ export function selectRun(
   const row = database
     .prepare(SELECT_RUN)
     .get(scope.projectIdentity, scope.worktreeIdentity, runId);
-  if (row === undefined) return undefined;
-  const sequence = integer(row, "sequence");
-  return storedRun(row, {
-    modules: database.prepare(SELECT_MODULES).all(sequence),
-    tests: database.prepare(SELECT_TESTS).all(sequence),
-  });
+  return row === undefined
+    ? undefined
+    : runWithChildren(childStatements(database), row);
 }
 
-/** The run stored last for each workspace path, in stored order; reads inside the caller's transaction. */
+/**
+ * The run stored last for each workspace path, in stored order, and each such run refused as unreadable, by its
+ * workspace path; reads inside the caller's transaction. A failure of the store itself still throws.
+ */
 export function selectLatestRuns(
   database: DatabaseSync,
   scope: StoreScope,
-): StoredRun[] {
-  return database
-    .prepare(SELECT_LATEST_RUN_IDS)
-    .all(scope.projectIdentity, scope.worktreeIdentity)
-    .map((row) => {
-      const runId = text(row, "run_id");
-      const run = selectRun(database, scope, runId);
-      if (run === undefined) throw unreadable("runs.run_id", runId);
-      return run;
-    });
+): LatestRuns {
+  const latestRuns: StoredRun[] = [];
+  const runRefusals: RunRefusal[] = [];
+  const rows = database
+    .prepare(SELECT_LATEST_RUNS)
+    .all(scope.projectIdentity, scope.worktreeIdentity);
+  const children = childStatements(database);
+  for (const row of rows) {
+    try {
+      latestRuns.push(runWithChildren(children, row));
+    } catch (error) {
+      if (!(error instanceof UnreadableRecordError)) throw error;
+      const workspacePath = text(row, "workspace_path");
+      runRefusals.push({ workspacePath, reason: errorText(error) });
+    }
+  }
+  return { latestRuns, runRefusals };
+}
+
+function childStatements(database: DatabaseSync): ChildStatements {
+  return {
+    modules: database.prepare(SELECT_MODULES),
+    tests: database.prepare(SELECT_TESTS),
+  };
+}
+
+function runWithChildren(children: ChildStatements, row: Row): StoredRun {
+  const sequence = integer(row, "sequence");
+  return storedRun(row, {
+    modules: children.modules.all(sequence),
+    tests: children.tests.all(sequence),
+  });
 }
 
 function storedRun(row: Row, children: RunChildren): StoredRun {

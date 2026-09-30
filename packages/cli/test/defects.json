@@ -768,5 +768,12 @@
     "file": "packages/cli/src/answer-text.ts",
     "old": "    : `${RUN_JOB} ${oneLine(workspacePath)}`;",
     "new": "    : `${RUN_JOB} ${workspacePath}`;"
+  },
+  {
+    "id": "D3278",
+    "defect": "A human summary shows a workspace whose latest run was refused as one with no run stored, hiding the refusal and its reason.",
+    "file": "packages/cli/src/commands/summary.ts",
+    "old": "  if (refusal === undefined) return [NO_RUN_PHRASE];",
+    "new": "  return [NO_RUN_PHRASE];"
   }
 ]
