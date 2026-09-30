@@ -2,28 +2,46 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   writeFileSync,
   type Stats,
 } from "node:fs";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   clientEndpoint,
   holderAfterConnectError,
   listenOnEndpoint,
+  userDirectory,
 } from "../src/daemon/endpoint.js";
 import {
   runtimeDirectoryRefusal,
   takeLock,
 } from "../src/daemon/runtime-directory.js";
+import { protectDirectory } from "../src/daemon/windows-acl.js";
 import { inTempDir } from "./harness.js";
+import { onPlatform } from "./on-platform.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
     lstatSync: vi.fn<typeof actual.lstatSync>(actual.lstatSync),
+    mkdirSync: vi.fn<typeof actual.mkdirSync>(actual.mkdirSync),
+    existsSync: vi.fn<typeof actual.existsSync>(actual.existsSync),
+  };
+});
+
+vi.mock("../src/daemon/windows-acl.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/daemon/windows-acl.js")>();
+  return {
+    ...actual,
+    protectDirectory: vi.fn<typeof actual.protectDirectory>(
+      actual.protectDirectory,
+    ),
   };
 });
 
@@ -166,6 +184,87 @@ describe("where the runtime directory is and what it holds", () => {
     expect(refusalFor({ permissions: 0o700, file: true })).toBe(
       `${RUNTIME_DIRECTORY} is not a directory`,
     );
+  });
+});
+
+/** Runs `body` with `mkdirSync` recording each call in `made` and making nothing, and hands back its result and those calls. */
+function withMkdirRecorded<T>(body: (made: readonly unknown[][]) => T): {
+  readonly result: T;
+  readonly made: unknown[][];
+} {
+  const mkdir = vi.mocked(mkdirSync);
+  const actual = mkdir.getMockImplementation();
+  const made: unknown[][] = [];
+  mkdir.mockImplementation(((...args: unknown[]) => {
+    made.push(args);
+    return undefined;
+  }) as typeof mkdirSync);
+  try {
+    return { result: body(made), made };
+  } finally {
+    if (actual !== undefined) mkdir.mockImplementation(actual);
+  }
+}
+
+describe("the user's own RT Test directory", () => {
+  it("D3561: on Linux, a user directory other users can enter is refused", () => {
+    const { result } = withMkdirRecorded(() =>
+      asLinuxUser(() => userDirectory(), { permissions: 0o755 }),
+    );
+    expect(result.ok ? result : posix(result.reason)).toBe(
+      `other users can enter the runtime directory ${SHARED_RUNTIME_DIRECTORY} (mode 755, 700 required)`,
+    );
+  });
+
+  it("D3562: on Linux, a missing user directory is created /tmp/rt-test-<uid>, only its owner able to enter it", () => {
+    const outcome = withMkdirRecorded((made) =>
+      asLinuxUser(() => {
+        vi.mocked(lstatSync).mockImplementation((() =>
+          made.length === 0
+            ? undefined
+            : fakeStats({
+                permissions: 0o700,
+              })) as unknown as typeof lstatSync);
+        return userDirectory();
+      }),
+    );
+    expect({
+      result: outcome.result.ok
+        ? posix(outcome.result.directory)
+        : outcome.result.reason,
+      made: outcome.made.map(([path, options]) => [
+        posix(String(path)),
+        options,
+      ]),
+    }).toStrictEqual({
+      result: SHARED_RUNTIME_DIRECTORY,
+      made: [[SHARED_RUNTIME_DIRECTORY, { recursive: true, mode: 0o700 }]],
+    });
+  });
+
+  it("D3563: on Windows, a missing user directory ~/AppData/Local/rt-test is created protected before it is used", async () => {
+    const exists = vi.mocked(existsSync);
+    const protect = vi.mocked(protectDirectory);
+    const actualExists = exists.getMockImplementation();
+    const actualProtect = protect.getMockImplementation();
+    const protectedDirectories: string[] = [];
+    exists.mockImplementation(() => false);
+    protect.mockImplementation((directory) => {
+      protectedDirectories.push(directory);
+      return undefined;
+    });
+    const result = await onPlatform("win32", () =>
+      Promise.resolve(userDirectory()),
+    ).finally(() => {
+      if (actualExists !== undefined) exists.mockImplementation(actualExists);
+      if (actualProtect !== undefined)
+        protect.mockImplementation(actualProtect);
+    });
+    const expected = join(userInfo().homedir, "AppData", "Local", "rt-test");
+    expect({ result, protectedDirectories }).toStrictEqual({
+      result: { ok: true, directory: expected },
+      protectedDirectories: [expected],
+    });
   });
 });
 

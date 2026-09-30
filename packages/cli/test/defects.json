@@ -950,5 +950,250 @@
     "file": "packages/cli/src/commands/changes.ts",
     "old": "  const entry = now ?? atCursor;",
     "new": "  const entry = atCursor;"
+  },
+  {
+    "id": "D3526",
+    "defect": "The hook never keeps the cursor a determined answer returns, so every batch asks for a baseline and the agent never hears what changed since its last report.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const cursor = answer.determined ? answer.cursor : memory.cursor;",
+    "new": "  const cursor = memory.cursor;"
+  },
+  {
+    "id": "D3527",
+    "defect": "The hook keeps the cursor a not-determined answer hands back, the daemon's latest, so the next determined answer lists changes since then instead of the baseline that counts the tests already failing.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const cursor = answer.determined ? answer.cursor : memory.cursor;",
+    "new": "  const cursor = answer.cursor;"
+  },
+  {
+    "id": "D3528",
+    "defect": "Every agent of a session shares the main agent's memory file, so a subagent's report consumes the changes since the main agent's cursor, which the main agent then never hears.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "? [writer.kind, writer.agentId]",
+    "new": "? [writer.kind]"
+  },
+  {
+    "id": "D3529",
+    "defect": "A turn end and a prompt ask from the main agent's cursor, so their line is built from an answer scoped to that cursor rather than asked afresh.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const asked = await askSession(run, undefined);",
+    "new": "  const asked = await askSession(run, run.memory.of(agentWriter(undefined)).cursor);"
+  },
+  {
+    "id": "D3530",
+    "defect": "A not-determined answer at a turn's end says nothing, so the person is not told that RT Test has not decided the tests covering the session's edits.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "    return `${LEAD} ${NOT_DECIDED} ${SCOPE}, since ${undecidedText(answer.notDetermined).replace(FINAL_PERIOD, \"\")}.`;",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D3531",
+    "defect": "A failing change is reported without its first error line.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "    change.kind === CHANGE_KIND.failing",
+    "new": "    change.kind !== change.kind"
+  },
+  {
+    "id": "D3532",
+    "defect": "A report names six changes rather than at most five.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "const NAMED_CHANGES = 5;",
+    "new": "const NAMED_CHANGES = 6;"
+  },
+  {
+    "id": "D3533",
+    "defect": "A failing change's first error of 201 characters is printed whole rather than cut to 200.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "const ERROR_LINE_CHARS = 200;",
+    "new": "const ERROR_LINE_CHARS = 201;"
+  },
+  {
+    "id": "D3534",
+    "defect": "The hook reports only when a covering test newly fails, so an agent whose fix made a test recover hears nothing.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "  if (total === 0) return undefined;",
+    "new": "  if (!answer.changes.some((change) => change.kind === CHANGE_KIND.failing)) return undefined;"
+  },
+  {
+    "id": "D3535",
+    "defect": "An answer from the agent's cursor that lists no change still adds a report of zero changes, so the hook speaks when no covering test changed.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "  if (total === 0) return undefined;",
+    "new": "  if (total < 0) return undefined;"
+  },
+  {
+    "id": "D3536",
+    "defect": "A report leaves out the count of failing tests outside the edited files' scope.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "    ...(outsideFailing === 0",
+    "new": "    ...(outsideFailing >= 0"
+  },
+  {
+    "id": "D3537",
+    "defect": "The no-answer line leaves out why the daemon gave no answer.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": ": ${cut(oneLine(reason.replace(FINAL_PERIOD, \"\")), REASON_CHARS)}. ${LOSS_TAIL}",
+    "new": ". ${LOSS_TAIL}"
+  },
+  {
+    "id": "D3538",
+    "defect": "A baseline for a cursor from another daemon life or one expired is read as a list of changes, which is empty, so after a daemon restart the agent hears nothing of the covering tests already failing.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "  return answer.cursorUse === CURSOR_USE.used",
+    "new": "  return answer.cursorUse !== CURSOR_USE.noneGiven"
+  },
+  {
+    "id": "D3539",
+    "defect": "Only stale tests count as not current, so a test in scope whose freshness is unknown reads as current.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "  const notCurrent = counts.tests - counts.freshness[CURRENT];",
+    "new": "  const notCurrent = counts.freshness.stale;"
+  },
+  {
+    "id": "D3540",
+    "defect": "The standing line is given while every test in scope passes and is current, so the hook speaks when nothing is failing or stale.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "  if (failing === 0 && notCurrent === 0) return undefined;",
+    "new": "  if (failing < 0) return undefined;"
+  },
+  {
+    "id": "D3541",
+    "defect": "Only a test that failed an assertion counts as failing, so a covering test whose module crashed or failed to load, or whose run failed, reads as not failing.",
+    "file": "packages/cli/src/hook-report.ts",
+    "old": "  return TEST_STATES.filter((state) => FAILING_STATES[state]).reduce(",
+    "new": "  return TEST_STATES.filter((state) => state === \"failed\").reduce("
+  },
+  {
+    "id": "D3542",
+    "defect": "The turn-end line is added to the agent's context on Stop, which makes Claude Code take another model turn, rather than shown to the person as a system message.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "        onStanding(run, TURN_ENDS_WRITER, (line) => ({ systemMessage: line })),",
+    "new": "        onStanding(run, TURN_ENDS_WRITER, (line) => addedContext(EVENT.stop, line)),"
+  },
+  {
+    "id": "D3543",
+    "defect": "The no-answer line is repeated at every batch during a loss rather than told once.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  if (run.memory.toldLoss(writer)) return failed(problem);",
+    "new": "  if (run.memory.toldLoss(writer) && false) return failed(problem);"
+  },
+  {
+    "id": "D3544",
+    "defect": "A loss told once is never told again, even after an answer arrived and the daemon was then lost a second time.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "    return Math.max(Number.NEGATIVE_INFINITY, ...told) > latestAnswer;",
+    "new": "    return Math.max(Number.NEGATIVE_INFINITY, ...told) > Number.NEGATIVE_INFINITY;"
+  },
+  {
+    "id": "D3545",
+    "defect": "A turn end counts the main agent's telling of a loss as its own, so the person is never told that no daemon answers.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "    return isMainAgent || writer.kind === PROMPTS",
+    "new": "    return isMainAgent || writer.kind !== AGENT"
+  },
+  {
+    "id": "D3546",
+    "defect": "A loss told to the main agent with a prompt is told again at its next batch, since the main agent counts only its batches' telling.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "      ? [MAIN_AGENT, PROMPTS_WRITER]\n      : [writer];",
+    "new": "      ? [writer]\n      : [writer];"
+  },
+  {
+    "id": "D3547",
+    "defect": "A subagent counts the main agent's telling of a loss as its own, so the subagent is never told that no daemon answers.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "      ? [MAIN_AGENT, PROMPTS_WRITER]\n      : [writer];",
+    "new": "      ? [MAIN_AGENT, PROMPTS_WRITER]\n      : [MAIN_AGENT, PROMPTS_WRITER];"
+  },
+  {
+    "id": "D3548",
+    "defect": "A request refused for a remembered file that has since vanished is never asked again without it, so every later batch of the session gets no answer.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  if (unusable.size === 0 || rest.length === 0) return none;",
+    "new": "  return none;"
+  },
+  {
+    "id": "D3549",
+    "defect": "When the retry without a vanished file also gets no answer, the retry's reason is told rather than the first request's.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "    : none;",
+    "new": "    : { kind: \"none\", reason: second.reason };"
+  },
+  {
+    "id": "D3550",
+    "defect": "The hook gives the daemon's query no bound, so a daemon that does not answer holds the query past the hook's deadline and the no-answer line is never told.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "    since === undefined ? { boundMs } : { since, boundMs };",
+    "new": "    since === undefined ? {} : { since };"
+  },
+  {
+    "id": "D3551",
+    "defect": "A run waits for its work with no deadline, so a payload that never ends holds the agent's next model request indefinitely.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "    return await Promise.race([work, expiry]);",
+    "new": "    return await work;"
+  },
+  {
+    "id": "D3552",
+    "defect": "Arguments the hook cannot parse throw a usage error, which main turns into exit 2, and Claude Code reads exit 2 as blocking.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "      return refusedRun(`Cannot run rt-test ${NAME}: ${errorText(error)}`);",
+    "new": "      throw error;"
+  },
+  {
+    "id": "D3553",
+    "defect": "An event the hook does not answer is handled as a batch, so it queries the daemon and may add context.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const handler = HANDLERS.get(payload.event);",
+    "new": "  const handler = HANDLERS.get(payload.event) ?? onBatch;"
+  },
+  {
+    "id": "D3554",
+    "defect": "A file an agent edited outside the consumer root is remembered and asked about, which the daemon refuses.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "    if (resolveCallerPath(file, root).ok) files.push(file);",
+    "new": "    files.push(file);"
+  },
+  {
+    "id": "D3555",
+    "defect": "A session that has edited no file still asks the daemon, about no paths, and speaks from its answer.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  if (paths.length === 0) return { kind: \"nothing\" };",
+    "new": "  if (paths.length < 0) return { kind: \"nothing\" };"
+  },
+  {
+    "id": "D3556",
+    "defect": "A batch's edited files are written to memory only with the daemon's answer, so a batch the deadline ends forgets them.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "      : saved(\n          run,\n          agent,\n          said(NOTHING),\n          withEdits(memory.of(agent), edited, Date.now()),\n        );",
+    "new": "      : (memory.set(agent, withEdits(memory.of(agent), edited, Date.now())),\n        said(NOTHING));"
+  },
+  {
+    "id": "D3557",
+    "defect": "A memory file that cannot be parsed fails the run rather than counting as none, so every later run of the session fails and the file is never rewritten.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "      if (typeof read === \"string\") problems.push(read);",
+    "new": "      if (typeof read === \"string\") throw new Error(read);"
+  },
+  {
+    "id": "D3558",
+    "defect": "An agent's memory is kept for 8 days rather than 7, so its edited files stay in the session's memory a day too long.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "export const MEMORY_AGE_MS = 7 * 24 * 60 * 60 * 1000;",
+    "new": "export const MEMORY_AGE_MS = 8 * 24 * 60 * 60 * 1000;"
+  },
+  {
+    "id": "D3559",
+    "defect": "The hook ignores --root and asks about the directory it runs in, which Claude Code may start in a subdirectory where no daemon serves.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const root = absolutePath(io, rootArgument);",
+    "new": "  const root = absolutePath(io, undefined);"
+  },
+  {
+    "id": "D3564",
+    "defect": "Each batch asks the real daemon with no cursor, so after an agent's edit breaks a covering test the next batch gives a baseline count rather than naming the test that failed and its first error.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  const asked = await askSession(run, memory.of(agent).cursor);",
+    "new": "  const asked = await askSession(run, undefined);"
   }
 ]

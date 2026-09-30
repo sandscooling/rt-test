@@ -2054,8 +2054,8 @@
     "id": "D1580",
     "defect": "The Linux runtime directory follows TMPDIR, so a client in a session with another TMPDIR misses a running daemon and can start a second one.",
     "file": "packages/daemon/src/daemon/endpoint.ts",
-    "old": "  const runtimeDirectory = join(\n    SHARED_TEMPORARY_DIRECTORY,",
-    "new": "  const runtimeDirectory = join(\n    process.env[\"TMPDIR\"] ?? SHARED_TEMPORARY_DIRECTORY,"
+    "old": "  return join(\n    SHARED_TEMPORARY_DIRECTORY,",
+    "new": "  return join(\n    process.env[\"TMPDIR\"] ?? SHARED_TEMPORARY_DIRECTORY,"
   },
   {
     "id": "D1562",
@@ -2180,8 +2180,8 @@
     "id": "D1571",
     "defect": "The client reads the daemon key after the answer arrives, when a stopping daemon has already removed it, so every stop of the client's own daemon fails.",
     "file": "packages/daemon/src/daemon/proven-connection.ts",
-    "old": "  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);\n  const challenge = newChallenge();\n  const answer = await connection.request(request(challenge));",
-    "new": "  const challenge = newChallenge();\n  const answer = await connection.request(request(challenge));\n  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);"
+    "old": "  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);\n  const challenge = newChallenge();\n  const answer = await connection.request(\n    request(challenge),\n    deadline === undefined\n      ? undefined\n      : boundUntil(deadline, RESPONSE_BOUND_MS),\n  );",
+    "new": "  const challenge = newChallenge();\n  const answer = await connection.request(\n    request(challenge),\n    deadline === undefined\n      ? undefined\n      : boundUntil(deadline, RESPONSE_BOUND_MS),\n  );\n  const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);\n  if (!verifier.ok) throw notTheDaemon(target, verifier.reason);"
   },
   {
     "id": "D1572",
@@ -9677,15 +9677,15 @@
     "id": "D3380",
     "defect": "A path status waits only the connection's default 10000 ms, so a folder's reads fail it before the daemon can answer.",
     "file": "packages/daemon/src/query-client.ts",
-    "old": "    request,\n    READ_FIRST_BOUND_MS,\n  );\n  return answer as unknown as PathStatusResponse;",
-    "new": "    request,\n  );\n  return answer as unknown as PathStatusResponse;"
+    "old": "  const answer = await query(targetOf(consumerRoot, \"query\"), request, {\n    requestMs: READ_FIRST_BOUND_MS,\n  });\n  return answer as unknown as PathStatusResponse;",
+    "new": "  const answer = await query(targetOf(consumerRoot, \"query\"), request);\n  return answer as unknown as PathStatusResponse;"
   },
   {
     "id": "D3381",
     "defect": "A summary, which reads nothing, waits the path status bound instead of the connection's default.",
     "file": "packages/daemon/src/query-client.ts",
-    "old": "    connection.request(request, boundMs).catch((failure: unknown) => {",
-    "new": "    connection.request(request, boundMs ?? PATH_STATUS_BOUND_MS).catch((failure: unknown) => {"
+    "old": "        return await connection.request(request, requestBoundMs(bound));",
+    "new": "        return await connection.request(request, requestBoundMs(bound) ?? READ_FIRST_BOUND_MS);"
   },
   {
     "id": "D3382",
@@ -9936,8 +9936,8 @@
     "id": "D3448",
     "defect": "queryWait waits for its answer only up to the wait's limit, so a daemon answering unsettled at that limit, with a store wait before it, is abandoned just before its answer.",
     "file": "packages/daemon/src/query-client.ts",
-    "old": "    waitsMs + RESPONSE_BOUND_MS,",
-    "new": "    waitsMs,"
+    "old": "    requestMs: waitsMs + RESPONSE_BOUND_MS,",
+    "new": "    requestMs: waitsMs,"
   },
   {
     "id": "D3449",
@@ -10253,5 +10253,33 @@
     "file": "packages/daemon/test/edit-corpus-findings.ts",
     "old": ".filter(([, count]) => count > 1)",
     "new": ".filter(([, count]) => count > 2)"
+  },
+  {
+    "id": "D3560",
+    "defect": "A changes query's bound does not reach the proof of the daemon's hello, which waits the connection's default 10000 ms, so a daemon that never proves its hello holds the hook past its deadline without the no-answer line.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    },\n    deadline,\n  );",
+    "new": "    },\n  );"
+  },
+  {
+    "id": "D3561",
+    "defect": "On Linux the user's RT Test directory is used even when other users can enter it, so the hook's session memory is written where they can read it.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "      : runtimeDirectoryRefusal(directory, true);",
+    "new": "      : undefined;"
+  },
+  {
+    "id": "D3562",
+    "defect": "On Linux a missing user directory is not created, so on a machine where no daemon has started the hook cannot keep its memory and never tells the agent that no daemon answers.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "      : runtimeDirectoryRefusal(directory, true);",
+    "new": "      : runtimeDirectoryRefusal(directory, false);"
+  },
+  {
+    "id": "D3563",
+    "defect": "On Windows a missing user directory is not created, so on a machine where no daemon has started the hook cannot keep its memory and never tells the agent that no daemon answers.",
+    "file": "packages/daemon/src/daemon/endpoint.ts",
+    "old": "  return existsSync(directory) ? undefined : protectDirectory(directory);",
+    "new": "  return undefined;"
   }
 ]

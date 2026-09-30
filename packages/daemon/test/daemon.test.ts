@@ -2070,4 +2070,42 @@ describe("the changes for files", () => {
     },
     KEY_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3560: a changes query given boundMs gives the daemon's proof of its hello no longer than that bound, as well as the changes request",
+    async () => {
+      const boundMs = 8_000;
+      const bounds = await inTempDir(async (root) => {
+        const daemon = answerAs(exitedPid(), "key");
+        const sent = vi.spyOn(DaemonConnection.prototype, "request");
+        try {
+          await withKeyedStandIn(
+            root,
+            (context) => (request, standIn, connectionClosed) =>
+              request["type"] === CHANGES_TYPE
+                ? {
+                    type: ERROR_TYPE,
+                    code: STOPPING_CODE,
+                    message: "the daemon is stopping",
+                  }
+                : daemon(context)(request, standIn, connectionClosed),
+            () =>
+              settled(queryChanges(root, [join(root, "a.ts")], { boundMs })),
+          );
+          return sent.mock.calls.map(([request, bound]) => ({
+            type: (request as ProtocolMessage)["type"],
+            withinBound:
+              typeof bound === "number" && bound > 0 && bound <= boundMs,
+          }));
+        } finally {
+          sent.mockRestore();
+        }
+      });
+      expect(bounds).toStrictEqual([
+        { type: "hello", withinBound: true },
+        { type: CHANGES_TYPE, withinBound: true },
+      ]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
 });

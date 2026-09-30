@@ -316,15 +316,69 @@ The hook is driven in process through `main` with a fake `CliIo` (no `exit` memb
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId c1ac8621-1384-4db4-aa2b-6369bbbc2826
 
 #### Named Defects
 
-None.
+- D3526: The hook never keeps the cursor a determined answer returns, so every batch asks for a baseline. (AC3)
+- D3527: The hook keeps the cursor a not-determined answer hands back, so the next determined answer is no longer the baseline that counts the tests already failing; pinned for an agent with no cursor and for one whose cursor expired. (AC3)
+- D3528: Every agent shares the main agent's memory file, so a subagent's report consumes the main agent's changes. (AC3)
+- D3529: A turn end and a prompt ask from the main agent's cursor. (AC5)
+- D3530: A not-determined answer at a turn's end says nothing to the person. (AC5)
+- D3531: A failing change is reported without its first error line. (AC4)
+- D3532: A report names six changes rather than at most five; the boundary pair is five named with no count line, and eight changes as five named and "and 3 more" by kind. (AC4)
+- D3533: A first error of 201 characters is printed whole rather than cut to 200; 200 stays whole. (AC4)
+- D3534: The hook reports only newly failing tests, so a recovery is never told. (AC3, AC4)
+- D3535: An answer from the agent's cursor that lists no change still adds a report. (AC3)
+- D3536: A report leaves out the count of failing tests outside scope. (AC4)
+- D3537: The no-answer line leaves out the reason. (AC6)
+- D3538: A baseline for a cursor from another daemon life or one expired is read as an empty list of changes, so a restart hides the tests already failing. (AC3)
+- D3539: A test whose freshness is unknown counts as current. (AC5)
+- D3540: The standing line is given while every test in scope passes and is current. (AC3, AC5)
+- D3541: Only a failed assertion counts as failing, so a crashed module, a module that failed to load or a failed run reads as not failing. (AC5)
+- D3542: The turn-end line goes into the agent's context on Stop, forcing another model turn, rather than to the person as a system message. (AC5)
+- D3543: The no-answer line is repeated at every batch during a loss. (AC6)
+- D3544: A loss told once is never told again after an answer and a second loss. (AC6)
+- D3545: A turn end counts the main agent's telling as its own, so the person is never told. (AC6)
+- D3546: A loss told with a prompt is told again at the main agent's next batch. (AC6)
+- D3547: A subagent counts the main agent's telling as its own, so it is never told. (AC6)
+- D3548: A request refused for a vanished remembered file is never retried without it, so every later batch gets no answer; the file leaves the agent's memory once the retry answered. (AC6)
+- D3549: When the retry also gets no answer, its reason is told instead of the first, and nothing is dropped. (AC6)
+- D3550: The hook gives the daemon's query no bound within its own. (AC6, AC7)
+- D3551: A run whose payload never ends has no deadline; pinned still running at 1,999 ms and ended at 2,000 ms with `{}` and exit 1. (AC7)
+- D3552: Arguments the hook cannot parse exit 2 through `main`'s usage error instead of 1 with `{}`. (AC7)
+- D3553: An event the hook does not answer is handled as a batch. (AC1)
+- D3554: A file edited outside the root is remembered; the same test pins Write, Edit and NotebookEdit paths taken and a Bash call adding none. (AC2)
+- D3555: A session that has edited no file still asks the daemon on a batch, a turn end or a prompt. (AC2)
+- D3556: A batch's edited files are written only with the answer, so a batch the deadline ends forgets them. (AC2)
+- D3557: A memory file that cannot be parsed fails the run instead of counting as none with the reason on stderr. (AC7, AC8)
+- D3558: An agent's memory is kept 8 days rather than 7; the boundary pair is one file a minute past 7 days, read as none and removed, and one a minute short, kept. (AC8)
+- D3559: The hook ignores `--root`; the same test pins the default root as the directory the hook runs in. (AC1)
+- D3560: A changes query's bound does not reach the proof of the daemon's hello. (AC7)
+- D3561: On Linux a user directory other users can enter is used. (AC8)
+- D3562: On Linux a missing user directory is not created owner-only. (AC8)
+- D3563: On Windows a missing user directory is not created protected. (AC8)
+- D3564: Against a started daemon with the real user directory, each batch asks with no cursor, so an edit that breaks a covering test is not named with its first error; the same run pins the turn-end line. (AC3, AC4, AC5)
+- Re-anchored, the defect unchanged, since this build moved the code each mutates: D1571 (`proven-connection.ts`), D1580 (`endpoint.ts`), D3380, D3381 and D3448 (`query-client.ts`).
 
 #### Deliberately Untested
 
-None.
+- packages/cli/src/hook-report.ts: the line counting edited files left out past `MAX_CHANGES_PATHS` (1,000): no realistic session edits that many (owner, 03:25 on 2026-09-30), and the line reports no result as current.
+- packages/cli/src/hook-report.ts: the 10,000-character cap on added context: the named per-value bounds keep the worst case near 4,300 code points, and approaching the cap needs names of hundreds of characters.
+- packages/cli/src/hook-memory.ts: the write through a temporary file and a rename: a torn read shows only after a crash mid-write.
+- packages/cli/src/hook-memory.ts: the memory file's mode 0o600: it lives in the owner-only directory D3561 to D3563 pin.
+- packages/cli/src/bin.ts: the `exit` member: it guards a connect that stalls, which a test cannot build cheaply, and a spawned hook whose stdin was released ends without it, so its mutation is unobservable.
+- packages/cli/src/command.ts: `CliIo.exit`: a type-only member.
+- packages/daemon/src/query-client.ts: the refusal of a `boundMs` that is not a whole number above 0: its one caller computes a positive whole number and asks nothing when none is left.
+- packages/daemon/src/daemon/endpoint.ts: an existing Windows user directory used without `protectDirectory`: it saves an `icacls` run for AC9's target and changes no observable result.
+- packages/cli/src/commands/hook.ts: exit 1 on an unreadable payload, an unusable user directory or an unwritable memory: exit-code-only paths through `failed` and `saved`, whose shape D3543 and D3552 pin, reached by no realistic consumer.
+- packages/cli/src/commands/hook.ts: a refused request's retry on `Stop` and `UserPromptSubmit` dropping no path: no code path of those events writes a path.
+- packages/daemon/src/client.ts, packages/daemon/src/query/changes-answer.ts, packages/cli/src/main.ts: exports and the command's registration, which every hook test reaches through `main`.
+- AC9: a measured target, not a gate (orchestrator's dispatch).
+
+#### Questions
+
+- Id request (asked by `session_wake` at 16:07 on 2026-09-30): 39 named defects against D3526-D3560. Answered by the orchestrator at 16:08: D3561-D3565 added; the range is D3526-D3565. D3565 is unused and returned.
 
 ### Review Record
 
