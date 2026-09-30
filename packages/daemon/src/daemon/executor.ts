@@ -1,5 +1,9 @@
 import { fork, type ChildProcess } from "node:child_process";
 import type {
+  DefectExperiment,
+  FalsificationJob,
+} from "../falsify/experiment-record.js";
+import type {
   DependencyInformation,
   SelectableWorkspace,
 } from "../selection/selection-types.js";
@@ -86,7 +90,7 @@ type JobReply =
 type Settle = (reply: JobReply) => void;
 
 /**
- * Runs each job, a Vitest discovery or run or a dependency build, in a child process of its own, so Vitest's signal
+ * Runs each job, a Vitest discovery, run or falsification or a dependency build, in a child process of its own, so Vitest's signal
  * handlers, env writes and stuck code and a parser's native crash stay out of the daemon, and nothing a job started
  * outlives it.
  */
@@ -131,6 +135,26 @@ export class Executor {
       };
     }
     return { ended: false, reason: failureReason(reply) };
+  }
+
+  /**
+   * Falsifies `experiments` in one Vitest instance over the workspace. A job whose executor process ends before it
+   * replies has nothing to store, since none of its experiments can be judged without its restored baseline.
+   */
+  async falsify(
+    workspace: VitestWorkspace,
+    configFile: string,
+    experiments: readonly DefectExperiment[],
+  ): Promise<JobOutcome<FalsificationJob>> {
+    const reply = await this.#job({
+      type: "falsify",
+      workspace,
+      configFile,
+      experiments,
+    });
+    return reply.type === "falsified"
+      ? { ended: true, value: reply.job }
+      : { ended: false, reason: failureReason(reply) };
   }
 
   /**

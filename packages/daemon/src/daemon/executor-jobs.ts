@@ -1,3 +1,7 @@
+import type {
+  DefectExperiment,
+  FalsificationJob,
+} from "../falsify/experiment-record.js";
 import { FORCE_STOP_GRACE_MS } from "../vitest/force-stop.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
@@ -29,6 +33,12 @@ export type ExecutorRequest =
       /** Absolute; the build keeps the root-relative label of the file it is parsing there. */
       readonly parseRecord: string;
     }
+  | {
+      readonly type: "falsify";
+      readonly workspace: VitestWorkspace;
+      readonly configFile: string;
+      readonly experiments: readonly DefectExperiment[];
+    }
   | { readonly type: "abort" };
 
 export type ExecutorJob = Exclude<ExecutorRequest, { type: "abort" }>;
@@ -41,12 +51,14 @@ export type ExecutorReply =
       readonly type: "dependencies-built";
       readonly dependencies: DependencyInformation;
     }
+  | { readonly type: "falsified"; readonly job: FalsificationJob }
   | { readonly type: "job-failed"; readonly error: string };
 
 const REPLY_TYPES: Readonly<Record<ExecutorReply["type"], true>> = {
   discovered: true,
   ran: true,
   "dependencies-built": true,
+  falsified: true,
   "job-failed": true,
 };
 

@@ -79,7 +79,7 @@ const SNAPSHOT_UPDATE_NONE = "none";
 const RESULTS_CACHE_OFF = false;
 const MODULE_CACHE_OFF = false;
 /** From this major Vitest reads the module cache flag at the top level and deprecates the `experimental` spelling 4.1 reads. */
-const TOP_LEVEL_MODULE_CACHE_MAJOR = 5;
+export const TOP_LEVEL_MODULE_CACHE_MAJOR = 5;
 /** Built beside this module, so it shares its extension: `.ts` run from source, `.js` from `dist`. */
 export const SNAPSHOT_GUARD_FILE = fileURLToPath(
   new URL(
