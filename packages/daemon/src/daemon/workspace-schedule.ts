@@ -40,7 +40,7 @@ import type { RoundExplanation } from "./round-selection.js";
 import { labelsInvalidated, type NotKeptVerdict } from "./run-judgment.js";
 
 /** How many changed paths and broad fallbacks an answer names, and how many workspaces within each. */
-const MAX_EXPLAINED = 20;
+export const MAX_EXPLAINED = 20;
 /** How many of the reasons the latest round's selection chose it a queued workspace names. */
 const MAX_CHOOSING_REASONS = 3;
 
@@ -93,6 +93,8 @@ export interface ScheduleReader {
   round(revision: number): RoundFacts;
   /** The invalidated label's reason, only for the very run this daemon stored and held the verdict for. */
   invalidation(run: StoredRun): CutReason | undefined;
+  /** Resolves at the next change of the record: a round begins, is planned or held, or a job begins or ends. */
+  moved(): Promise<void>;
 }
 
 export interface ScheduleParts {
@@ -123,19 +125,32 @@ export class WorkspaceSchedule implements ScheduleReader {
   readonly #interruptions = new Map<string, readonly string[]>();
   /** Each workspace's latest run stored in this daemon life. */
   readonly #stored = new Map<string, StoredVerdict>();
+  #movedWaiters: (() => void)[] = [];
 
   constructor(parts: ScheduleParts) {
     this.#parts = parts;
   }
 
+  moved(): Promise<void> {
+    return new Promise((resolve) => this.#movedWaiters.push(resolve));
+  }
+
+  #move(): void {
+    const waiting = this.#movedWaiters;
+    this.#movedWaiters = [];
+    for (const resolve of waiting) resolve();
+  }
+
   pending(waitsFor: RoundWait): void {
     this.#wait = waitsFor;
     this.#round = { state: ROUND.pending };
+    this.#move();
   }
 
   /** A wait at the revision the latest plan read leaves that plan in effect, so its workspaces stay queued. */
   waiting(waitsFor: RoundWait, revision: number): void {
     const round = this.#round;
+    this.#move();
     if (round.state === ROUND.planned && round.revision === revision) {
       this.#wait = waitsFor;
       return;
@@ -147,25 +162,30 @@ export class WorkspaceSchedule implements ScheduleReader {
   planned(revision: number, due: ReadonlyMap<string, DueReason>): void {
     this.#round = { state: ROUND.planned, revision, due: new Map(due) };
     this.#interrupted.clear();
+    this.#move();
   }
 
   /** A step failed, so no round comes until the next input change. */
   held(failure: string): void {
     this.#round = { state: ROUND.held, failure };
+    this.#move();
   }
 
   selected(explanation: RoundExplanation): void {
     this.#explanation = explanation;
     this.#chosen = choosingIndex(explanation);
+    this.#move();
   }
 
   /** Marks a job planned at `revision` in progress until it settles, begun or not. */
   async during<T>(job: Promise<T>, revision: number): Promise<T> {
     this.#jobRevision = revision;
+    this.#move();
     try {
       return await job;
     } finally {
       this.#jobRevision = undefined;
+      this.#move();
     }
   }
 
@@ -182,6 +202,7 @@ export class WorkspaceSchedule implements ScheduleReader {
     if (run.runId !== undefined) {
       this.#stored.set(path, { runId: run.runId, notKept: run.notKept });
     }
+    this.#move();
     this.#interruptions.delete(path);
     if (run.interruptedBy === undefined) return;
     this.#interruptions.set(path, run.interruptedBy);
@@ -192,6 +213,7 @@ export class WorkspaceSchedule implements ScheduleReader {
   runThrew(path: string): void {
     this.#leaveDue(path);
     this.#interruptions.delete(path);
+    this.#move();
   }
 
   #leaveDue(path: string): void {
@@ -411,7 +433,11 @@ function selfChangedList(held: JobsByPath): NamedList<SelfChangedPath> {
   }));
 }
 
-function boundedList<T>(items: readonly T[], bound: number): NamedList<T> {
+/** Up to `bound` of `items`, counting the rest. */
+export function boundedList<T>(
+  items: readonly T[],
+  bound: number,
+): NamedList<T> {
   return {
     named: items.slice(0, bound),
     more: Math.max(0, items.length - bound),
@@ -429,7 +455,7 @@ function mappedList<T, U>(
 }
 
 /** Every free-text reason and detail is cut, so the bound on each list bounds its bytes but for each chain's length. */
-function explainedPath(report: ChangedPathReport): ExplainedPath {
+export function explainedPath(report: ChangedPathReport): ExplainedPath {
   const { nothingSelected } = report;
   return {
     ...report,

@@ -3,7 +3,9 @@ import { isAbsolute } from "node:path";
 import type {
   NoAnswer,
   PathStatusAnswer,
+  RefusedQuery,
   SummaryAnswer,
+  WaitAnswer,
 } from "../query/answer.js";
 import { errorText } from "../vitest/error-text.js";
 import type { DaemonLog } from "./daemon-log.js";
@@ -12,8 +14,11 @@ import {
   ERROR_TYPE,
   HELLO_TYPE,
   isStopRequest,
+  isWaitLimit,
   LineDecoder,
   MAX_LINE_BYTES,
+  MAX_WAIT_LIMIT_MS,
+  MAX_WAIT_PATHS,
   NOTHING_TO_ANSWER_CODE,
   parseLine,
   PATH_STATUS_TYPE,
@@ -25,6 +30,8 @@ import {
   SUMMARY_TYPE,
   UNKNOWN_REQUEST_CODE,
   VERSION_MISMATCH_CODE,
+  WAIT_LIMIT_MS,
+  WAIT_TYPE,
   type DaemonIdentity,
   type DecodedLine,
   type ErrorCode,
@@ -36,10 +43,25 @@ import {
   type StopAcknowledgement,
   type SummaryResponse,
   type VersionMismatchError,
+  type WaitResponse,
 } from "./protocol.js";
 
+type Answered<A> = A | NoAnswer | RefusedQuery;
 /** A query's answer, or a promise of it when its work is still to come. */
-type QueryAnswer<A> = A | NoAnswer | Promise<A | NoAnswer>;
+type QueryAnswer<A> = Answered<A> | Promise<Answered<A>>;
+
+/** A wait request the server has checked. */
+export interface WaitQuery {
+  /** Absolute. */
+  readonly paths: readonly string[];
+  readonly limitMs: number;
+}
+
+/** What a too-large answer's error asks for instead: fewer files for a wait, a narrower path for the other queries. */
+const NARROWER_REQUEST = {
+  path: "ask status for a narrower path",
+  files: "wait on fewer files",
+} as const;
 
 /**
  * What the daemon's lifecycle answers a connection with. A query that answers with a promise has its `signal` aborted
@@ -55,6 +77,8 @@ export interface DaemonHandlers {
   summary(signal: AbortSignal): QueryAnswer<SummaryAnswer>;
   /** Reads only; `path` is absolute. */
   pathStatus(path: string, signal: AbortSignal): QueryAnswer<PathStatusAnswer>;
+  /** Reads only: starts no job; answers once the files' covering tests settle, their inputs move, or the limit passes. */
+  wait(query: WaitQuery, signal: AbortSignal): QueryAnswer<WaitAnswer>;
   /** Begins the stop, or joins the one under way. */
   stop(): void;
   isStopping(): boolean;
@@ -317,7 +341,11 @@ function hello(
 }
 
 type VersionedAnswer =
-  StatusResponse | SummaryResponse | PathStatusResponse | ErrorResponse;
+  | StatusResponse
+  | SummaryResponse
+  | PathStatusResponse
+  | WaitResponse
+  | ErrorResponse;
 
 function versionedAnswer(
   message: ProtocolMessage,
@@ -342,6 +370,9 @@ function versionedAnswer(
   if (message["type"] === PATH_STATUS_TYPE) {
     return pathStatusResponse(message["path"], handlers, signal);
   }
+  if (message["type"] === WAIT_TYPE) {
+    return waitResponse(message, handlers, signal);
+  }
   return error(
     UNKNOWN_REQUEST_CODE,
     `unknown request type ${JSON.stringify(message["type"] ?? null)}`,
@@ -364,12 +395,51 @@ function pathStatusResponse(
   );
 }
 
+/** Refuses a wait whose paths or limit it cannot take before any of its work begins. */
+function waitResponse(
+  message: ProtocolMessage,
+  handlers: DaemonHandlers,
+  signal: AbortSignal,
+): Queried<WaitResponse> | Promise<Queried<WaitResponse>> {
+  const paths = message["paths"];
+  const limitMs = "limitMs" in message ? message["limitMs"] : WAIT_LIMIT_MS;
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return error(
+      "invalid-request",
+      `a ${WAIT_TYPE} request must carry a non-empty array of absolute paths`,
+    );
+  }
+  if (paths.length > MAX_WAIT_PATHS) {
+    return error(
+      "invalid-request",
+      `a ${WAIT_TYPE} request names ${paths.length} files, more than the ${MAX_WAIT_PATHS} a wait allows`,
+    );
+  }
+  const notAbsolute = (paths as unknown[]).filter(
+    (path) => typeof path !== "string" || !isAbsolute(path),
+  );
+  if (notAbsolute.length > 0) {
+    return error(
+      "invalid-request",
+      `a ${WAIT_TYPE} request's paths must be absolute; got ${notAbsolute.map((path) => JSON.stringify(path)).join(", ")}`,
+    );
+  }
+  if (!isWaitLimit(limitMs)) {
+    return error(
+      "invalid-request",
+      `a ${WAIT_TYPE} request's limitMs must be a whole number of ms from 1 to ${MAX_WAIT_LIMIT_MS}; got ${JSON.stringify(limitMs)}`,
+    );
+  }
+  const query: WaitQuery = { paths: paths as string[], limitMs };
+  return queryResponse(WAIT_TYPE, () => handlers.wait(query, signal));
+}
+
 type Typed<T extends string, A> = A & { type: T; protocolVersion: number };
 type Queried<R> = R | ErrorResponse;
 
 /**
- * A query that throws or rejects, has nothing to answer, or would pass the line limit is answered with an error
- * saying why, whether its answer came at once or late.
+ * A query that throws or rejects, is refused, has nothing to answer, or would pass the line limit is answered with an
+ * error saying why, whether its answer came at once or late.
  */
 function queryResponse<T extends string, A extends object>(
   type: T,
@@ -387,8 +457,13 @@ function queryResponse<T extends string, A extends object>(
 
 function checkedAnswer<T extends string, A extends object>(
   type: T,
-  response: A | NoAnswer,
+  response: Answered<A>,
 ): Queried<Typed<T, A>> {
+  const narrower =
+    type === WAIT_TYPE ? NARROWER_REQUEST.files : NARROWER_REQUEST.path;
+  if ("refused" in response) {
+    return error("invalid-request", response.refused);
+  }
   if ("noAnswer" in response) {
     return error(NOTHING_TO_ANSWER_CODE, response.noAnswer);
   }
@@ -397,7 +472,7 @@ function checkedAnswer<T extends string, A extends object>(
   if (size > MAX_LINE_BYTES) {
     return error(
       NOTHING_TO_ANSWER_CODE,
-      `the answer is ${size} bytes, longer than the protocol's line limit of ${MAX_LINE_BYTES} bytes; ask status for a narrower path`,
+      `the answer is ${size} bytes, longer than the protocol's line limit of ${MAX_LINE_BYTES} bytes; ${narrower}`,
     );
   }
   return typed;

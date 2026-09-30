@@ -4,7 +4,9 @@ import type { CurrentInputs, TrackedInputs } from "../inputs/input-tracker.js";
 import type {
   NoAnswer,
   PathStatusAnswer,
+  RefusedQuery,
   SummaryAnswer,
+  WaitAnswer,
 } from "../query/answer.js";
 import { resolveCallerPath } from "../query/caller-paths.js";
 import { pathStatusAnswer, withoutFingerprints } from "../query/path-status.js";
@@ -52,7 +54,9 @@ import {
 } from "./run-judgment.js";
 import type { DiscoverReport } from "./discovery-history.js";
 import { Scheduler, type RunReport } from "./scheduler.js";
-import type { DaemonHandlers } from "./server.js";
+import type { DaemonHandlers, WaitQuery } from "./server.js";
+import { StopSequence } from "./stop-sequence.js";
+import { NOT_AWAITED_REASON, Waits } from "./waits.js";
 import type { EndedRun } from "./workspace-schedule.js";
 
 const DISCOVERY_STOPPED_REASON =
@@ -61,7 +65,6 @@ const NOT_INTERRUPTED =
   "will not be interrupted by a change, so it runs to its end, and a change inside its inputs while it runs leaves the run it stores invalidated";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
-const NOT_AWAITED_REASON = "nobody waits for the answer any more";
 
 export interface LifecycleParts {
   readonly identity: DaemonIdentity;
@@ -94,6 +97,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #parts: LifecycleParts;
   readonly #builds: DependencyBuilds;
   readonly #scheduler: Scheduler;
+  readonly #waits: Waits;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJobs;
   readonly #refusals: RefusalNotes;
@@ -132,6 +136,18 @@ export class DaemonLifecycle implements DaemonHandlers {
         this.#idleAfter(this.#run(entry, revision, uninterruptible)),
       idle: () => {
         this.#activity = { state: "idle" };
+      },
+    });
+    this.#waits = new Waits({
+      consumerRoot: parts.identity.consumerRoot,
+      inputs: parts.inputs,
+      builds: this.#builds,
+      schedule: this.#scheduler.schedule,
+      stopSignal: this.stopSignal,
+      moment: () => {
+        const results = this.#latestResults();
+        const inputs = this.#queryInputs(results);
+        return { results, view: this.#view(), inputs };
       },
     });
     this.#whenStopped = new Promise((resolve) => {
@@ -191,6 +207,13 @@ export class DaemonLifecycle implements DaemonHandlers {
     );
   }
 
+  wait(
+    query: WaitQuery,
+    signal: AbortSignal,
+  ): Promise<WaitAnswer | NoAnswer | RefusedQuery> {
+    return this.#waits.wait(query, signal);
+  }
+
   /**
    * The inputs narrowed by the builds only while they build over the stored discovery the answer reads, which becomes
    * theirs when a failed read at start left them none.
@@ -248,6 +271,15 @@ export class DaemonLifecycle implements DaemonHandlers {
         this.#parts.log.error("the stop sequence failed", error);
       })
       .finally(() => this.#markStopped());
+  }
+
+  #stopSequence(): Promise<void> {
+    return new StopSequence(
+      this.#parts,
+      this.#scheduler,
+      this.#builds,
+      this.#sequence,
+    ).run();
   }
 
   /** Resolves once a stop has run to its end. */
@@ -520,6 +552,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     try {
       write();
       this.#unstored.unlist(workspacePath);
+      this.#waits.moved();
       return true;
     } catch (error) {
       this.#parts.log.error(`storing ${what}`, error);
@@ -530,54 +563,6 @@ export class DaemonLifecycle implements DaemonHandlers {
 
   #nothingStored(workspacePath: string | undefined, reason: string): void {
     this.#unstored.list(workspacePath, reason);
-  }
-
-  /**
-   * A failed step skips none after it, and the store closes only once the job in progress and the builds have ended. A
-   * step failing before the closings fails the stop once they have run.
-   */
-  async #stopSequence(): Promise<void> {
-    const { log, executor, buildExecutor, store, closeEndpoint, inputs } =
-      this.#parts;
-    log.entry("stop requested");
-    const failures: unknown[] = [];
-    void this.#halting(failures, () => this.#scheduler.stop());
-    // Before the tracker: its stop resolves every wait of the builds' rounds at once, which would spin them.
-    const buildsStopped = this.#halting(failures, () => this.#builds.stop());
-    void this.#halting(failures, () => executor.abort());
-    await this.#halting(failures, () => inputs.stop());
-    await this.#sequence;
-    await buildsStopped;
-    await this.#closing("the executor", () => executor.close());
-    await this.#closing("the dependency build executor", () =>
-      buildExecutor.close(),
-    );
-    await this.#closing("the store", () => store.close());
-    await this.#closing("the endpoint", closeEndpoint);
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "a step before the closings failed");
-    }
-    log.entry("stopped");
-  }
-
-  /** Runs a step whether or not it throws at once, so a failure it gives cannot skip the steps after it. */
-  async #halting(failures: unknown[], step: () => unknown): Promise<void> {
-    try {
-      await step();
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-
-  /** Each closer runs whatever an earlier one did, so no release is skipped. */
-  async #closing(
-    what: string,
-    close: () => Promise<void> | void,
-  ): Promise<void> {
-    try {
-      await close();
-    } catch (error) {
-      this.#parts.log.error(`closing ${what}`, error);
-    }
+    this.#waits.moved();
   }
 }
