@@ -719,5 +719,54 @@
     "file": "packages/cli/src/answer-text.ts",
     "old": "  return chosenBy.named.length === 0",
     "new": "  return false"
+  },
+  {
+    "id": "D3174",
+    "defect": "The CLI's line for a held workspace names none of the paths its runs changed or the jobs that changed them.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  if (selfChanged === undefined) return text;",
+    "new": "  return text;"
+  },
+  {
+    "id": "D3175",
+    "defect": "The CLI's line for a held workspace names the discovery as a run.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    ? DISCOVERY_JOB",
+    "new": "    ? RUN_JOB"
+  },
+  {
+    "id": "D3176",
+    "defect": "The CLI prints a held workspace's path as the consumer's tree spells it, so a line break in it breaks the answer's line.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  return `${oneLine(path)} (during ${namedText(jobs, jobText)})`;",
+    "new": "  return `${path} (during ${namedText(jobs, jobText)})`;"
+  },
+  {
+    "id": "D3177",
+    "defect": "While the round is held after a failed step, the CLI's line for a held workspace does not say the held round's next try may release it.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    roundHeld && why === IDLE_REASON.selfChanging",
+    "new": "    false && why === IDLE_REASON.selfChanging"
+  },
+  {
+    "id": "D3178",
+    "defect": "The CLI's line for a held workspace names the held round's try whatever the round's state, though only a held round is tried again.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    roundHeld && why === IDLE_REASON.selfChanging",
+    "new": "    why === IDLE_REASON.selfChanging"
+  },
+  {
+    "id": "D3179",
+    "defect": "While the round is held, the CLI gives every idle workspace the held workspace's phrase, whatever its own reason.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    roundHeld && why === IDLE_REASON.selfChanging",
+    "new": "    roundHeld"
+  },
+  {
+    "id": "D3183",
+    "defect": "The CLI prints the workspace of a run that changed a held workspace's path as the consumer's tree spells it, so a line break in it breaks the answer's line.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    : `${RUN_JOB} ${oneLine(workspacePath)}`;",
+    "new": "    : `${RUN_JOB} ${workspacePath}`;"
   }
 ]

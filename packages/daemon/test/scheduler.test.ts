@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  MAX_COUNTED_CHANGES,
+  type JobsByPath,
+} from "../src/daemon/change-record.js";
 import type { DaemonActivity } from "../src/daemon/protocol.js";
 import type { RoundExplanation } from "../src/daemon/round-selection.js";
+import { SELF_CHANGE_HOLD_COUNT } from "../src/daemon/run-history.js";
 import type { NotKeptVerdict } from "../src/daemon/run-judgment.js";
 import {
   QUIET_WINDOW_MS,
@@ -62,6 +67,8 @@ import {
   selectionOf,
   unbuiltAfter,
 } from "./round-fixtures.js";
+import type { JobWindow } from "../src/inputs/input-jobs.js";
+import type { InputDigests } from "../src/inputs/input-inventory.js";
 import type { QueryNarrowing } from "../src/inputs/narrowed-inputs.js";
 
 /** What one run job the test scripts leaves. */
@@ -74,9 +81,15 @@ interface RunResult {
   readonly changedWhileRunning?: boolean;
   /** Makes the job throw this text instead of ending. */
   readonly throws?: string;
-  /** Makes the job end without having begun, as a stop or a moved revision does. */
+  /**
+   * Makes the job end without having begun: with `movesRevision`, as a moved revision does; alone, as the lifecycle's
+   * refusal at the planned revision does, which keeps the attempt the run marked.
+   */
   readonly notBegun?: boolean;
-  /** Moves the input revision once the job has stored its record, as an edit during the job would. */
+  /**
+   * Moves the input revision once the job has stored its record, as an edit during the job would, or as a job that did
+   * not begin returns.
+   */
   readonly movesRevision?: boolean;
   /** Why the run was stored not fingerprinted, as the lifecycle reports its verdict. */
   readonly notKept?: NotKeptVerdict;
@@ -86,6 +99,12 @@ interface RunResult {
   readonly held?: Promise<void>;
   /** Holds the job, begun and not ended, once it has stored its record. */
   readonly heldAfterStore?: Promise<void>;
+  /** The paths the tracker recorded changing while the run ran. */
+  readonly changed?: readonly string[];
+  /** The causes naming no path the tracker recorded while the run ran, as a watcher failure is. */
+  readonly causes?: readonly string[];
+  /** Runs once the job's end digests are taken, before `movesRevision`, as a change after the job does. */
+  readonly afterEnd?: () => void;
 }
 
 interface RigOptions {
@@ -105,8 +124,17 @@ interface RigOptions {
   readonly discoveryBegins?: (call: number) => boolean;
   /** Holds each discovery, begun and not ended, until it settles. */
   readonly discoveryHeld?: Promise<void>;
-  /** What each run leaves, given the workspace and the run's index for it from 0. */
-  readonly ran?: (path: string, call: number) => RunResult;
+  /**
+   * What each run leaves, given the workspace, the run's index for it from 0, and why no change may interrupt it when
+   * the scheduler says none may.
+   */
+  readonly ran?: (
+    path: string,
+    call: number,
+    uninterruptible: string | undefined,
+  ) => RunResult;
+  /** The paths the tracker recorded changing while each discovery ran, given its index from 0. */
+  readonly discoveryChanged?: (call: number) => readonly string[];
 }
 
 interface Rig {
@@ -137,6 +165,18 @@ function rig(options: RigOptions = {}): Rig {
   const runsOf = new Map<string, number>();
   let discoveries = 0;
   let stopping = false;
+  const digests = (): InputDigests | undefined =>
+    options.script?.snapshot?.()?.digests;
+  const windowOf = (
+    startDigests: InputDigests | undefined,
+    changed: readonly string[] = [],
+    causes: readonly string[] = [],
+  ): JobWindow => ({
+    paths: new Set(changed),
+    causes: new Set(causes),
+    startDigests,
+    endDigests: digests(),
+  });
   const scheduler = new Scheduler({
     inputs,
     log,
@@ -153,6 +193,7 @@ function rig(options: RigOptions = {}): Rig {
       const call = discoveries;
       discoveries += 1;
       calls.push(`discover@${revision}`);
+      const startDigests = digests();
       await nextTurn();
       await options.discoveryHeld;
       if (options.discoveryBegins?.(call) === false) return undefined;
@@ -163,19 +204,30 @@ function rig(options: RigOptions = {}): Rig {
           options.listed?.(call) ?? discovery(...paths.map(discovered)),
         );
       }
-      return { stored };
+      return {
+        stored,
+        window: windowOf(startDigests, options.discoveryChanged?.(call)),
+      };
     },
-    run: async (entry, revision): Promise<RunReport | undefined> => {
+    run: async (
+      entry,
+      revision,
+      uninterruptible,
+    ): Promise<RunReport | undefined> => {
       const path = entry.workspace.path;
       const call = runsOf.get(path) ?? 0;
       runsOf.set(path, call + 1);
       calls.push(`run:${path}@${revision}`);
       const began = inputs.revision;
-      const result = options.ran?.(path, call) ?? {};
+      const result = options.ran?.(path, call, uninterruptible) ?? {};
+      const startDigests = digests();
       await nextTurn();
       await result.held;
       if (result.throws !== undefined) throw new Error(result.throws);
-      if (result.notBegun === true) return undefined;
+      if (result.notBegun === true) {
+        if (result.movesRevision === true) inputs.moveRevision();
+        return undefined;
+      }
       const changedWhileRunning = result.changedWhileRunning ?? false;
       const stored = result.stored ?? true;
       const print = inputs.current().workspaceFingerprint(entry);
@@ -191,6 +243,8 @@ function rig(options: RigOptions = {}): Rig {
             result.run ?? ranWorkspace(path),
           )
         : undefined;
+      const window = windowOf(startDigests, result.changed, result.causes);
+      result.afterEnd?.();
       if (result.movesRevision === true) inputs.moveRevision();
       await result.heldAfterStore;
       const { notKept, interruptedBy } = result;
@@ -198,6 +252,7 @@ function rig(options: RigOptions = {}): Rig {
         revision: began,
         stored,
         changedWhileRunning,
+        window,
         ...(written === undefined ? {} : { runId: written.runId }),
         ...(notKept === undefined ? {} : { notKept }),
         ...(interruptedBy === undefined ? {} : { interruptedBy }),
@@ -2300,6 +2355,7 @@ function readAfter(
   const schedule = new WorkspaceSchedule({
     confirmed: () => true,
     storedNothing: () => false,
+    heldBy: () => undefined,
   });
   schedule.planned(
     2,
@@ -2767,6 +2823,557 @@ describe("the bounds on the latest selection's explanation", () => {
     }).toStrictEqual({
       over: { reason: kept, omittedCharacters: 5 },
       atLimit: { reason: kept, omittedCharacters: 0 },
+    });
+  });
+});
+
+const FIXTURE = "a/fixture.json";
+const SOURCE = "a/src/a.ts";
+const OTHER = "a/other.json";
+const WATCHER_FAILED = "the watcher failed: ENOSPC";
+/** How many runs of `a` do what a test gives them before its runs change nothing, so a loop never held still ends. */
+const REWRITES = 6;
+/** The runs of `a` when no count holds it: each run a test gives, then one that changes nothing. */
+const NEVER_HELD_RUNS = REWRITES + 1;
+/** Flushes a loop of rounds may take before the test reads it anyway. */
+const QUIET_FLUSHES = 50;
+
+function changedInside(paths: readonly string[]): NotKeptVerdict {
+  return {
+    kind: "changed-inside",
+    reason: `its inputs changed while it ran: ${paths.join(", ")}`,
+  };
+}
+
+/**
+ * A run that rewrote `paths` while it ran, moving the input revision: interrupted by them, or, when no change may
+ * interrupt it, stored invalidated by them, as the lifecycle reports each.
+ */
+function rewrote(
+  uninterruptible: string | undefined,
+  paths: readonly string[] = [FIXTURE],
+): RunResult {
+  const job = {
+    changed: paths,
+    changedWhileRunning: true,
+    movesRevision: true,
+  };
+  return uninterruptible === undefined
+    ? { ...job, stored: false, interruptedBy: paths }
+    : { ...job, notKept: changedInside(paths) };
+}
+
+/** Committed digests that hold still until the test edits one or makes them unreadable. */
+class SteadyDigests {
+  unreadable = false;
+  #digests: Readonly<Record<string, string>> = {
+    [FIXTURE]: "1",
+    [SOURCE]: "1",
+  };
+
+  readonly script: InputsScript = {
+    snapshot: () => (this.unreadable ? undefined : inputsOf(this.#digests)),
+  };
+
+  /** Changes `path`'s digest, as an edit does. */
+  edit(path: string): void {
+    this.#digests = { ...this.#digests, [path]: "edited" };
+  }
+}
+
+interface Rewriting {
+  /** What each run of `a` leaves, given its index from 0 and why no change may interrupt it; `rewrote` when absent. */
+  readonly ran?: (
+    call: number,
+    uninterruptible: string | undefined,
+  ) => RunResult;
+  readonly options?: RigOptions;
+  readonly digests?: SteadyDigests;
+  /** Runs once the rounds have run out; the outcome is read once the rounds it starts have too. */
+  readonly afterRuns?: (started: Rig) => void | Promise<void>;
+}
+
+interface Rewritten {
+  readonly runs: readonly string[];
+  readonly entries: readonly string[];
+  readonly execution: WorkspaceExecution | undefined;
+  /** Why no change could interrupt each run of `a`, undefined for a run a change could. */
+  readonly uninterruptible: readonly (string | undefined)[];
+}
+
+/** Flushes until a flush begins no job, so a loop of rounds has run out. */
+async function untilQuiet(started: Rig): Promise<void> {
+  for (let flushes = 0; flushes < QUIET_FLUSHES; flushes += 1) {
+    const before = started.calls.length;
+    await flush();
+    if (started.calls.length === before) return;
+  }
+}
+
+/** Workspace `a` over digests that hold still, whose first `REWRITES` runs each do what `ran` gives them. */
+function rewriting(setup: Rewriting = {}): Promise<Rewritten> {
+  const digests = setup.digests ?? new SteadyDigests();
+  const ran = setup.ran ?? ((_call, reason) => rewrote(reason));
+  const options = setup.options ?? {};
+  const uninterruptible: (string | undefined)[] = [];
+  return running(
+    {
+      ...options,
+      script: { ...digests.script, ...options.script },
+      ran: (path, call, reason) => {
+        if (path !== "a") return options.ran?.(path, call, reason) ?? {};
+        uninterruptible.push(reason);
+        return call < REWRITES ? ran(call, reason) : {};
+      },
+    },
+    async (started) => {
+      await untilQuiet(started);
+      await setup.afterRuns?.(started);
+      await untilQuiet(started);
+      return {
+        runs: runsIn(started.calls),
+        entries: [...started.log.entries],
+        execution: executionOf(started, "a"),
+        uninterruptible,
+      };
+    },
+  );
+}
+
+async function runsOfA(setup: Rewriting): Promise<number> {
+  return (await rewriting(setup)).runs.length;
+}
+
+function selfChangedOf(execution: WorkspaceExecution | undefined): unknown {
+  return execution?.state === "idle"
+    ? execution.notRunning?.selfChanged
+    : execution;
+}
+
+/** Each discovery's fingerprint differs from the one it is stored under, so each input revision rediscovers. */
+const REDISCOVERED: InputsScript = {
+  discoveryFingerprintOf: () => ({ ok: true, digest: "moved" }),
+};
+
+describe("holding a workspace whose runs keep changing its inputs", () => {
+  it("D3138: a workspace is held once it became due 3 times in a row through its jobs' changes", () => {
+    expect(SELF_CHANGE_HOLD_COUNT).toBe(3);
+  });
+
+  it("D3139: a workspace each of whose runs rewrites one of its own inputs runs three times and no more", async () => {
+    expect((await rewriting()).runs).toStrictEqual([
+      "run:a@1",
+      "run:a@2",
+      "run:a@3",
+    ]);
+  });
+
+  it("D3140: the log says once, as the hold begins, that the workspace is held, naming the path and the job that changed it", async () => {
+    const { entries } = await rewriting();
+    expect(
+      entries
+        .filter((entry) => entry.startsWith("held: a "))
+        .map((entry) => ({
+          path: entry.includes(FIXTURE),
+          job: entry.includes("during the run of a"),
+        })),
+    ).toStrictEqual([{ path: true, job: true }]);
+  });
+
+  it("D3141: only the run begun at a count of 2 is told no change may interrupt it, and why, naming the path", async () => {
+    const { uninterruptible } = await rewriting();
+    expect(
+      uninterruptible.map((reason) =>
+        reason === undefined ? "interruptible" : reason.includes(FIXTURE),
+      ),
+    ).toStrictEqual(["interruptible", "interruptible", true]);
+  });
+
+  it("D3142: an edit inside a workspace's inputs between two of its runs starts its count again from 0", async () => {
+    const digests = new SteadyDigests();
+    const runs = await runsOfA({
+      digests,
+      ran: (call, reason) =>
+        call === 1
+          ? { ...rewrote(reason), afterEnd: () => digests.edit(SOURCE) }
+          : rewrote(reason),
+    });
+    expect(runs).toBe(5);
+  });
+
+  it("D3143: an edit inside a held workspace's inputs releases it, and its count starts again from 0", async () => {
+    const digests = new SteadyDigests();
+    const runs = await runsOfA({
+      digests,
+      afterRuns: (started) => {
+        digests.edit(SOURCE);
+        started.inputs.moveRevision();
+      },
+    });
+    expect(runs).toBe(6);
+  });
+
+  it("D3144: the log says once that an edit released a held workspace", async () => {
+    const digests = new SteadyDigests();
+    const { entries } = await rewriting({
+      digests,
+      afterRuns: (started) => {
+        digests.edit(SOURCE);
+        started.inputs.moveRevision();
+      },
+    });
+    expect(
+      entries.filter((entry) => entry.startsWith("a is no longer held")),
+    ).toHaveLength(1);
+  });
+
+  it("D3145: a cause naming no path recorded while a run ran counts as an edit, starting the count again from 0", async () => {
+    const runs = await runsOfA({
+      ran: (call, reason) =>
+        call === 1
+          ? { ...rewrote(reason), causes: [WATCHER_FAILED] }
+          : rewrote(reason),
+    });
+    expect(runs).toBe(5);
+  });
+
+  it("D3146: committed digests a round cannot read count as an edit, releasing a held workspace", async () => {
+    const digests = new SteadyDigests();
+    const runs = await runsOfA({
+      digests,
+      ran: (call, reason) => {
+        if (call === 3) digests.unreadable = false;
+        return rewrote(reason);
+      },
+      afterRuns: (started) => {
+        digests.unreadable = true;
+        started.inputs.moveRevision();
+      },
+    });
+    expect(runs).toBe(6);
+  });
+
+  it("D3147: a workspace whose inputs each discovery changes is held, the answer naming the discovery as the job", async () => {
+    const moves = { count: 0 };
+    const { execution } = await rewriting({
+      options: {
+        discoveryChanged: () => [FIXTURE],
+        script: {
+          ...REDISCOVERED,
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: `${path}-digest-${moves.count}`,
+          }),
+        },
+      },
+      ran: () => ({
+        afterEnd: () => {
+          moves.count += 1;
+        },
+        movesRevision: true,
+      }),
+    });
+    expect(selfChangedOf(execution)).toStrictEqual({
+      named: [{ path: FIXTURE, jobs: { named: [{}], more: 0 } }],
+      more: 0,
+    });
+  });
+
+  it("D3148: a time that shares no changed path with the times before it starts the count again at 1", async () => {
+    const runs = await runsOfA({
+      ran: (call, reason) => rewrote(reason, call === 0 ? [OTHER] : [FIXTURE]),
+    });
+    expect(runs).toBe(4);
+  });
+
+  it("D3149: a held workspace names only the paths that changed in every one of its counted times", async () => {
+    const { execution } = await rewriting({
+      ran: (call, reason) =>
+        rewrote(reason, call < 2 ? [FIXTURE, OTHER] : [FIXTURE]),
+    });
+    const named =
+      execution?.state === "idle"
+        ? execution.notRunning?.selfChanged?.named.map(({ path }) => path)
+        : execution;
+    expect(named).toStrictEqual([FIXTURE]);
+  });
+
+  it("D3150: a held workspace reads idle and self-changing, beside its due reason, naming each path and the run that changed it", async () => {
+    const { execution } = await rewriting();
+    expect(execution).toStrictEqual({
+      workspacePath: "a",
+      state: "idle",
+      notRunning: {
+        why: "self-changing",
+        due: {
+          kind: "invalidated",
+          detail: {
+            reason: `its inputs changed while it ran: ${FIXTURE}`,
+            omittedCharacters: 0,
+          },
+        },
+        selfChanged: {
+          named: [
+            {
+              path: FIXTURE,
+              jobs: { named: [{ workspacePath: "a" }], more: 0 },
+            },
+          ],
+          more: 0,
+        },
+      },
+    });
+  });
+
+  it("D3156: a periodic reconciliation retries no held workspace, though its latest run failed", async () => {
+    const { entries } = await rewriting({
+      ran: (call, reason) =>
+        call === 2
+          ? { ...rewrote(reason), run: failedRun("a") }
+          : rewrote(reason),
+      afterRuns: (started) => started.inputs.endPeriodicReconciliation(),
+    });
+    expect(
+      entries.filter((entry) =>
+        entry.startsWith("periodic reconciliation ended"),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it("D3157: a workspace due only for a periodic retry is never counted, so failed runs that change its inputs are retried at each one", async () => {
+    const runs = await runsOfA({
+      ran: () => ({ run: failedRun("a"), changed: [FIXTURE] }),
+      afterRuns: async (started) => {
+        for (let retry = 0; retry < 4; retry += 1) {
+          started.inputs.endPeriodicReconciliation();
+          await untilQuiet(started);
+        }
+      },
+    });
+    expect(runs).toBe(5);
+  });
+
+  it("D3158: a workspace whose current fingerprint cannot be computed is never counted", async () => {
+    const runs = await runsOfA({
+      options: {
+        script: {
+          fingerprintOf: () => ({ ok: false, reason: WATCHER_FAILED }),
+        },
+      },
+      ran: () => ({ changed: [FIXTURE], movesRevision: true }),
+    });
+    expect(runs).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3159: a run stored not fingerprinted for a cause that names no path is not a counted time", async () => {
+    const runs = await runsOfA({
+      ran: () => ({
+        changed: [FIXTURE],
+        changedWhileRunning: true,
+        notKept: { kind: "causes", reason: WATCHER_FAILED_REASON },
+        movesRevision: true,
+      }),
+    });
+    expect(runs).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3160: a run that stored nothing though no change interrupted it is not a counted time", async () => {
+    const runs = await runsOfA({
+      ran: () => ({
+        changed: [FIXTURE],
+        stored: false,
+        changedWhileRunning: true,
+        movesRevision: true,
+      }),
+    });
+    expect(runs).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3161: a run that never began leaves the run before it as the last run begun, so its count follows that run", async () => {
+    const runs = await runsOfA({
+      ran: (call, reason) =>
+        call === 1 ? { notBegun: true, movesRevision: true } : rewrote(reason),
+    });
+    expect(runs).toBe(4);
+  });
+
+  it("D3162: a placement that throws counts as an edit to the workspace's inputs, so it never holds it", async () => {
+    const at = { revision: 1 };
+    const narrowing = new StandInNarrowing(selectionOf([], []));
+    const runs = await runsOfA({
+      options: { narrowing: () => builtAt(at.revision, narrowing) },
+      ran: (_call, reason) => ({
+        ...rewrote(reason),
+        afterEnd: () => {
+          at.revision += 1;
+        },
+      }),
+    });
+    expect(runs).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3165: a workspace reads as edited once more than 1,000 distinct paths changed since its last run began", () => {
+    expect(MAX_COUNTED_CHANGES).toBe(1000);
+  });
+
+  /** The runs of `a`, each rewriting 500 paths, whose inputs each rediscovery changes at `discovered` more paths. */
+  function runsBesideRediscoveries(discovered: number): Promise<number> {
+    const own = [FIXTURE, ...numbered(499, (index) => `a/out/r${index}.json`)];
+    return runsOfA({
+      options: {
+        script: REDISCOVERED,
+        discoveryChanged: () =>
+          numbered(discovered, (index) => `a/out/d${index}.json`),
+      },
+      ran: (_call, reason) => rewrote(reason, own),
+    });
+  }
+
+  it("D3163: a workspace for which exactly 1,000 distinct paths changed since its last run began is still counted", async () => {
+    expect(await runsBesideRediscoveries(500)).toBe(3);
+  });
+
+  it("D3164: a workspace for which 1,001 distinct paths changed since its last run began reads as edited", async () => {
+    expect(await runsBesideRediscoveries(501)).toBe(NEVER_HELD_RUNS);
+  });
+});
+
+const HELD_BY_A: JobsByPath = new Map([[FIXTURE, new Set(["a"])]]);
+
+/**
+ * Workspace `a`'s execution in a schedule whose count holds it by `held`, once `round` has set the round, its latest run
+ * `latest` stored under `fingerprint` and its current fingerprint `a-digest`.
+ */
+function heldExecution(
+  round: (schedule: WorkspaceSchedule) => void,
+  held: JobsByPath = HELD_BY_A,
+  latest: WorkspaceRun = ranWorkspace("a"),
+  fingerprint: StoredRun["inputFingerprint"] = UNFINGERPRINTED,
+): WorkspaceExecution | undefined {
+  const schedule = new WorkspaceSchedule({
+    confirmed: () => true,
+    storedNothing: () => false,
+    heldBy: (path) => (path === "a" ? held : undefined),
+  });
+  round(schedule);
+  const stored: StoredRun = {
+    ...SCOPE,
+    inputFingerprint: fingerprint,
+    adapterVersion: VITEST_ADAPTER_VERSION,
+    runId: "run-0",
+    run: latest,
+  };
+  const [execution] = schedule.read({
+    revision: 2,
+    activity: IDLE_ACTIVITY,
+    workspaces: [discovered("a")],
+    latestRuns: new Map([["a", stored]]),
+    fingerprint: () => ({ ok: true, digest: "a-digest" }),
+  }).schedule.workspaces;
+  return execution;
+}
+
+const plannedAt2 = (schedule: WorkspaceSchedule): void => {
+  schedule.planned(2, new Map());
+};
+
+function whyOf(execution: WorkspaceExecution | undefined): unknown {
+  return execution?.state === "idle" ? execution.notRunning?.why : execution;
+}
+
+describe("the answer for a held workspace", () => {
+  it("D3151: a held workspace reads self-changing while the round is held after a failed step", () => {
+    const execution = heldExecution((schedule) => schedule.held("boom"));
+    expect(whyOf(execution)).toBe("self-changing");
+  });
+
+  it("D3152: a held workspace whose latest run failed reads self-changing, not retry-pending", () => {
+    const execution = heldExecution(
+      plannedAt2,
+      HELD_BY_A,
+      failedRun("a"),
+      digestOf("a-digest"),
+    );
+    expect(whyOf(execution)).toBe("self-changing");
+  });
+
+  it("D3153: while a round is pending, a held workspace says nothing more", () => {
+    expect(heldExecution(() => undefined)).toStrictEqual({
+      workspacePath: "a",
+      state: "idle",
+    });
+  });
+
+  it("D3154: a held workspace names at most 20 of its paths and counts the rest, and names exactly 20 whole", () => {
+    const paths = numbered(21, (index) => `a/f${index}.json`);
+    const listed = (count: number): unknown =>
+      selfChangedOf(
+        heldExecution(
+          plannedAt2,
+          new Map(paths.slice(0, count).map((path) => [path, new Set(["a"])])),
+        ),
+      );
+    const named = paths.slice(0, 20).map((path) => ({
+      path,
+      jobs: { named: [{ workspacePath: "a" }], more: 0 },
+    }));
+    expect({ over: listed(21), atBound: listed(20) }).toStrictEqual({
+      over: { named, more: 1 },
+      atBound: { named, more: 0 },
+    });
+  });
+
+  it("D3155: a held workspace names at most 20 jobs for each path and counts the rest, and names exactly 20 whole", () => {
+    const jobs = numbered(21, (index) => `w${index}`);
+    const listed = (count: number): unknown =>
+      selfChangedOf(
+        heldExecution(
+          plannedAt2,
+          new Map([[FIXTURE, new Set(jobs.slice(0, count))]]),
+        ),
+      );
+    const named = jobs.slice(0, 20).map((workspacePath) => ({ workspacePath }));
+    expect({ over: listed(21), atBound: listed(20) }).toStrictEqual({
+      over: { named: [{ path: FIXTURE, jobs: { named, more: 1 } }], more: 0 },
+      atBound: {
+        named: [{ path: FIXTURE, jobs: { named, more: 0 } }],
+        more: 0,
+      },
+    });
+  });
+});
+
+describe("the jobs a held workspace names", () => {
+  it("D3180: a held workspace names every job that changed its shared path in any counted time, not only in the latest", async () => {
+    const moves = { count: 0 };
+    const moved = (): void => {
+      moves.count += 1;
+    };
+    const { execution } = await rewriting({
+      options: {
+        discoveryChanged: () => [FIXTURE],
+        script: {
+          ...REDISCOVERED,
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: `${path}-digest-${moves.count}`,
+          }),
+        },
+      },
+      ran: (call) => ({
+        ...(call === 0 ? { changed: [FIXTURE] } : {}),
+        afterEnd: moved,
+        movesRevision: true,
+      }),
+    });
+    expect(selfChangedOf(execution)).toStrictEqual({
+      named: [
+        {
+          path: FIXTURE,
+          jobs: { named: [{ workspacePath: "a" }, {}], more: 0 },
+        },
+      ],
+      more: 0,
     });
   });
 });

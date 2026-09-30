@@ -25,6 +25,7 @@ import {
 } from "./input-filter.js";
 import {
   takeInventory,
+  type InputDigests,
   type InventoryResult,
   type InventoryScope,
 } from "./input-inventory.js";
@@ -248,13 +249,26 @@ export class InputTracker implements TrackedInputs {
   }
 
   beginJob(): JobMark {
-    return this.#jobs.open(this.#unavailableReason());
+    const unavailable = this.#unavailableReason();
+    return this.#jobs.open(unavailable, this.#vouchedDigests(unavailable));
   }
 
   /** Judges the job once every event seen before its end has been read and any reconciliation running has ended. */
   async endJob(mark: JobMark): Promise<JobVerdict> {
     await this.settled();
-    return this.#jobs.close(mark, this.#unavailableReason());
+    const unavailable = this.#unavailableReason();
+    return this.#jobs.close(
+      mark,
+      unavailable,
+      this.#vouchedDigests(unavailable),
+    );
+  }
+
+  /** The committed digests, only while nothing keeps the tracker from vouching for them. */
+  #vouchedDigests(unavailable: string | undefined): InputDigests | undefined {
+    return unavailable === undefined
+      ? this.#state.project().digests
+      : undefined;
   }
 
   /**

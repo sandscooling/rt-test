@@ -37,7 +37,12 @@ import {
   unselectedRound,
   type RoundSelection,
 } from "./round-selection.js";
-import { RunHistory, type HistoryReport } from "./run-history.js";
+import {
+  RunHistory,
+  type BegunRun,
+  type HistoryReport,
+} from "./run-history.js";
+import { roundPlacement } from "./run-judgment.js";
 import {
   WorkspaceSchedule,
   type EndedRun,
@@ -54,7 +59,7 @@ const FIRST_ROUND_REASON = "no previous round read the inputs to compare with";
 const FIRST_ROUND_ENTRY = `round without a selection: ${FIRST_ROUND_REASON}`;
 
 /** What a discovery job left. */
-export interface DiscoverReport {
+export interface DiscoverReport extends Pick<HistoryReport, "window"> {
   /** Whether a discovery record was stored. */
   readonly stored: boolean;
 }
@@ -81,10 +86,14 @@ export interface SchedulerParts {
   readonly awaitBuild: (subject: string) => Promise<void>;
   /** Undefined when the job did not begin: a stop, or a revision that moved since `revision` was planned. */
   readonly discover: (revision: number) => Promise<DiscoverReport | undefined>;
-  /** Undefined when the job did not begin, as `discover` says. */
+  /**
+   * Undefined when the job did not begin, as `discover` says, or when it refused a workspace the confirmed start does
+   * not hold. `uninterruptible` says why no change may interrupt the run, when none may.
+   */
   readonly run: (
     entry: WorkspaceDiscovery,
     revision: number,
+    uninterruptible: string | undefined,
   ) => Promise<RunReport | undefined>;
   readonly idle: () => void;
 }
@@ -146,6 +155,7 @@ export class Scheduler {
     this.#schedule = new WorkspaceSchedule({
       confirmed: (entry) => this.#confirmed(entry),
       storedNothing: (path) => this.#runs.storedNothing(path),
+      heldBy: (path) => this.#runs.heldBy(path),
     });
   }
 
@@ -256,6 +266,7 @@ export class Scheduler {
     const view = this.#parts.view();
     if (view.inputs.facts.revision !== revision) return { kind: "again" };
     this.#noteRevision(revision);
+    this.#runs.observed(view.inputs.snapshot?.digests);
     const eligible = this.#eligible(view);
     this.#armRetries(view, eligible, revision);
     if (this.#discoveryDue(revision, view)) {
@@ -311,6 +322,7 @@ export class Scheduler {
     this.#retryWorkspaces.clear();
     for (const { entry, latest } of eligible) {
       const path = entry.workspace.path;
+      if (this.#runs.isHeld(path)) continue;
       const stale = staleReason(
         latest,
         fingerprintDigest(view.inputs.workspaceFingerprint(entry)),
@@ -356,22 +368,30 @@ export class Scheduler {
     );
   }
 
-  /** Each confirmed workspace whose latest run is not bound to its current fingerprint, or failed or crashed while its retry is owed. */
+  /**
+   * Each confirmed workspace whose latest run is not bound to its current fingerprint, or failed or crashed while its
+   * retry is owed, and that its count does not hold.
+   */
   #due(
     revision: number,
     view: ScheduleView,
     eligible: readonly EligibleWorkspace[],
   ): DueWorkspace[] {
+    const placement = roundPlacement(view.inputs, this.#parts.narrowing());
     const due: DueWorkspace[] = [];
     for (const { entry, latest } of eligible) {
       const path = entry.workspace.path;
       const retry = this.#retryWorkspaces.has(path);
-      const reason =
-        staleReason(
-          latest,
-          fingerprintDigest(view.inputs.workspaceFingerprint(entry)),
-        ) ?? (retry ? retryReason(latest) : undefined);
+      const print = view.inputs.workspaceFingerprint(entry);
+      const stale = staleReason(latest, fingerprintDigest(print));
+      const reason = stale ?? (retry ? retryReason(latest) : undefined);
       if (reason === undefined) continue;
+      const retryOnly = stale === undefined;
+      const fingerprinted = print.ok;
+      if (this.#runs.decide({ entry, retryOnly, fingerprinted, placement })) {
+        this.#retryWorkspaces.delete(path);
+        continue;
+      }
       if (!retry && this.#runs.ranAlready(path, revision, entry)) continue;
       due.push({ entry, latest, reason });
     }
@@ -434,7 +454,8 @@ export class Scheduler {
       eligible.map(({ entry }) => entry.workspace.path),
     );
     for (const path of selection.selected) {
-      if (confirmed.has(path) && !dueNow.has(path)) {
+      const holdsCurrent = !dueNow.has(path) && !this.#runs.isHeld(path);
+      if (confirmed.has(path) && holdsCurrent) {
         log.entry(
           `not run: ${path} was selected, and holds results bound to its current input fingerprint`,
         );
@@ -454,6 +475,7 @@ export class Scheduler {
     );
     if (report !== undefined) {
       this.#discoveryNothingStored = !report.stored;
+      this.#runs.discoveryEnded(report.window);
       return;
     }
     this.#discoveryNothingStored = before;
@@ -466,15 +488,20 @@ export class Scheduler {
     const path = entry.workspace.path;
     const retried = this.#retryWorkspaces.has(path);
     this.#retryWorkspaces.delete(path);
-    const recordEnd = this.#runs.began(entry, revision);
+    const uninterruptible = this.#runs.uninterruptible(path);
+    const begun = this.#runs.began(entry, revision);
     this.#dirty = true;
     log.entry(`next in the queue: ${path}, ${GROUP_REASON[group]}`);
-    const report = await this.#runJob(entry, revision);
+    const report = await this.#runJob(entry, revision, uninterruptible, begun);
     if (report === undefined) {
+      const refusedAtPlan =
+        !this.#isStopping() && this.#revision() === revision;
+      // A refused workspace keeps its attempt, so it waits for the revision to move.
+      if (!refusedAtPlan) begun.notBegun();
       if (retried) this.#retryWorkspaces.add(path);
       return;
     }
-    const owedAgain = recordEnd(report);
+    const owedAgain = begun.ended(report);
     this.#schedule.runEnded(path, report, owedAgain);
   }
 
@@ -482,14 +509,17 @@ export class Scheduler {
   async #runJob(
     entry: WorkspaceDiscovery,
     revision: number,
+    uninterruptible: string | undefined,
+    begun: BegunRun,
   ): Promise<RunReport | undefined> {
     try {
       return await this.#schedule.during(
-        this.#parts.run(entry, revision),
+        this.#parts.run(entry, revision, uninterruptible),
         revision,
       );
     } catch (error) {
       this.#schedule.runThrew(entry.workspace.path);
+      begun.threw();
       throw error;
     }
   }

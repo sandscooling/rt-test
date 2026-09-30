@@ -1,3 +1,5 @@
+import type { InputDigests } from "./input-inventory.js";
+
 /** Changed paths or reasons a job's verdict names before it counts the rest. */
 export const MAX_NAMED_CHANGES = 20;
 const LIST_SEPARATOR = ", ";
@@ -17,6 +19,10 @@ export interface JobWindow {
   readonly paths: ReadonlySet<string>;
   /** Every cause that names no input: a watcher failure, a lost input set, or an event no read vouches for. */
   readonly causes: ReadonlySet<string>;
+  /** The committed digests when it began; undefined when its inputs could not be vouched for then. */
+  readonly startDigests: InputDigests | undefined;
+  /** The committed digests when it ended; undefined while it runs or when its inputs could not be vouched for then. */
+  readonly endDigests: InputDigests | undefined;
 }
 
 export type JobVerdict =
@@ -31,6 +37,7 @@ export type JobVerdict =
 interface ChangeWindow extends JobWindow {
   readonly paths: Set<string>;
   readonly causes: Set<string>;
+  endDigests: InputDigests | undefined;
 }
 
 /** The change windows of the jobs running now; each learns every change and failure seen while it runs. */
@@ -38,8 +45,13 @@ export class JobWindows {
   /** By the view each job's mark holds. */
   readonly #open = new Map<JobWindow, ChangeWindow>();
 
-  open(unsettled: string | undefined): JobMark {
-    const window: ChangeWindow = { paths: new Set(), causes: new Set() };
+  open(unsettled: string | undefined, digests?: InputDigests): JobMark {
+    const window: ChangeWindow = {
+      paths: new Set(),
+      causes: new Set(),
+      startDigests: digests,
+      endDigests: undefined,
+    };
     this.#open.set(window, window);
     return unsettled === undefined ? { window } : { window, unsettled };
   }
@@ -55,7 +67,13 @@ export class JobWindows {
   }
 
   /** `unavailable` says why no fingerprint can be computed at the job's end, when none can. */
-  close(mark: JobMark, unavailable: string | undefined): JobVerdict {
+  close(
+    mark: JobMark,
+    unavailable: string | undefined,
+    digests?: InputDigests,
+  ): JobVerdict {
+    const open = this.#open.get(mark.window);
+    if (open !== undefined) open.endDigests = digests;
     this.#open.delete(mark.window);
     if (mark.unsettled !== undefined) {
       return {

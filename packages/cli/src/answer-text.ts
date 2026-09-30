@@ -14,6 +14,7 @@ import {
   NO_BUILD_ENDED,
   NO_SELECTION_INPUT,
   RECONCILIATION_INCOMPLETE,
+  ROUND,
   ROUND_SELECTION,
   roundText,
   SELECTION_REFUSED,
@@ -33,6 +34,7 @@ import {
   type PathStatusResponse,
   type ScheduleDueReason,
   type SelectionExplanation,
+  type SelfChangedPath,
   type SummaryResponse,
   type TestCounts,
   type WorkspaceExecution,
@@ -40,6 +42,12 @@ import {
 import { oneLine } from "./output.js";
 
 type Answer = SummaryResponse | PathStatusResponse;
+type NotRunning = NonNullable<
+  Extract<
+    WorkspaceExecution,
+    { readonly state: typeof EXECUTION_STATE.idle }
+  >["notRunning"]
+>;
 
 export const INDENT = "  ";
 const LIST_SEPARATOR = ", ";
@@ -84,12 +92,20 @@ const DUE_PHRASES: Record<ScheduleDueReason, string> = {
   [DUE_REASON.failedRun]: "its latest run failed",
   [DUE_REASON.crashedRun]: "its latest run crashed",
 };
+const SELF_CHANGING_CAUSE =
+  "because the daemon's own runs and discoveries keep changing its inputs";
 const IDLE_PHRASES: Record<IdleReason, string> = {
   [IDLE_REASON.retryPending]: "a retry is pending",
   [IDLE_REASON.noRunUntilInputChange]:
     "no run comes until the next input change",
   [IDLE_REASON.roundHeld]: "no run comes until the held round is tried again",
+  [IDLE_REASON.selfChanging]: `no run comes until an edit reaches its inputs or the daemon sees a change it cannot attribute, ${SELF_CHANGING_CAUSE}`,
 };
+/** Trying a held round again decides the hold again, so it may release a held workspace. */
+const SELF_CHANGING_IN_HELD_ROUND = `no run comes until an edit reaches its inputs, the daemon sees a change it cannot attribute, or the daemon tries the held round again at the next input event or reconciliation, which may release it, ${SELF_CHANGING_CAUSE}`;
+const SELF_CHANGED_LEAD = "the same inputs changed each time it became due";
+const DISCOVERY_JOB = "the discovery";
+const RUN_JOB = "the run of";
 const DETAIL_SEPARATOR = "; ";
 const INCOMPLETE_MARK = " (incomplete)";
 const NO_OWNER = "no package workspace";
@@ -130,8 +146,7 @@ export function contextLines(answer: Answer): string[] {
         `The latest discovery was stored under adapter version ${discovery.adapterVersion}, not the current ${currentAdapterVersion}, so it is not current.`,
       ];
   const unstored = answer.unstoredJobs.map(
-    (job) =>
-      `${INDENT}${job.workspacePath === undefined ? "the discovery" : `the run of ${oneLine(job.workspacePath)}`}: ${firstLine(job.reason)}`,
+    (job) => `${INDENT}${jobText(job)}: ${firstLine(job.reason)}`,
   );
   const unfingerprinted = answer.unfingerprintedWorkspaces.map(
     (workspace) =>
@@ -154,7 +169,10 @@ export function contextLines(answer: Answer): string[] {
       : [UNFINGERPRINTED_HEADING, ...unfingerprinted]),
     `Daemon: ${oneLine(activityText(answer.activity))}`,
     `Round: ${firstLine(roundText(answer.schedule.round))}`,
-    ...executionLines(answer.schedule.workspaces),
+    ...executionLines(
+      answer.schedule.workspaces,
+      answer.schedule.round.state === ROUND.held,
+    ),
     ...(unstored.length === 0
       ? []
       : ["Ended with nothing stored:", ...unstored]),
@@ -162,18 +180,24 @@ export function contextLines(answer: Answer): string[] {
   ];
 }
 
-function executionLines(workspaces: readonly WorkspaceExecution[]): string[] {
+function executionLines(
+  workspaces: readonly WorkspaceExecution[],
+  roundHeld: boolean,
+): string[] {
   if (workspaces.length === 0) return [];
   return [
     EXECUTION_HEADING,
     ...workspaces.map(
       (workspace) =>
-        `${INDENT}${oneLine(workspace.workspacePath)}: ${executionText(workspace)}`,
+        `${INDENT}${oneLine(workspace.workspacePath)}: ${executionText(workspace, roundHeld)}`,
     ),
   ];
 }
 
-function executionText(workspace: WorkspaceExecution): string {
+function executionText(
+  workspace: WorkspaceExecution,
+  roundHeld: boolean,
+): string {
   switch (workspace.state) {
     case EXECUTION_STATE.running:
       return workspace.state;
@@ -194,8 +218,34 @@ function executionText(workspace: WorkspaceExecution): string {
     case EXECUTION_STATE.idle:
       return workspace.notRunning === undefined
         ? workspace.state
-        : `${workspace.state}: ${IDLE_PHRASES[workspace.notRunning.why]}, since ${dueText(workspace.notRunning.due)}`;
+        : `${workspace.state}: ${notRunningText(workspace.notRunning, roundHeld)}`;
   }
+}
+
+function notRunningText(notRunning: NotRunning, roundHeld: boolean): string {
+  const { why, due, selfChanged } = notRunning;
+  const phrase =
+    roundHeld && why === IDLE_REASON.selfChanging
+      ? SELF_CHANGING_IN_HELD_ROUND
+      : IDLE_PHRASES[why];
+  const text = `${phrase}, since ${dueText(due)}`;
+  if (selfChanged === undefined) return text;
+  return [
+    text,
+    `${SELF_CHANGED_LEAD}: ${namedText(selfChanged, selfChangedText)}`,
+  ].join(DETAIL_SEPARATOR);
+}
+
+function selfChangedText({ path, jobs }: SelfChangedPath): string {
+  return `${oneLine(path)} (during ${namedText(jobs, jobText)})`;
+}
+
+function jobText({
+  workspacePath,
+}: SelfChangedPath["jobs"]["named"][number]): string {
+  return workspacePath === undefined
+    ? DISCOVERY_JOB
+    : `${RUN_JOB} ${oneLine(workspacePath)}`;
 }
 
 function dueText(due: DueFacts): string {

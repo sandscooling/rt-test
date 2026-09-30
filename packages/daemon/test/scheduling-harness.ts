@@ -10,6 +10,7 @@ import {
   type JobMark,
   type JobVerdict,
 } from "../src/inputs/input-jobs.js";
+import type { InputDigests } from "../src/inputs/input-inventory.js";
 import type {
   CurrentInputs,
   TrackedInputs,
@@ -444,15 +445,21 @@ export class StandInInputs implements TrackedInputs {
 
   beginJob(): JobMark {
     this.jobsBegun += 1;
-    return this.#windows.open(undefined);
+    return this.#windows.open(undefined, this.#vouchedDigests());
   }
 
   /** A discovery's or a build's verdict is scripted; a run's is judged from its window, which this closes. */
   async endJob(mark: JobMark): Promise<JobVerdict> {
     this.jobsEnded += 1;
     if (this.#script.heldJobEnds === true) await this.#released.promise;
-    this.#windows.close(mark, undefined);
+    this.#windows.close(mark, undefined, this.#vouchedDigests());
     return this.#verdicts.shift() ?? FINGERPRINTED;
+  }
+
+  /** The scripted committed digests, none while the tracker is scripted as unable to vouch for its inputs, as the tracker keeps a window's. */
+  #vouchedDigests(): InputDigests | undefined {
+    if (this.#script.unavailable !== undefined) return undefined;
+    return this.#script.snapshot?.()?.digests;
   }
 
   /** Records, for each job running, an input that changed, as the tracker records a read that changed one. */

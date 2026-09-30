@@ -80,11 +80,11 @@ export type RunJudgment =
     };
 
 /** How one dependency build places a changed path: by selecting it over the build's own information, or widened. */
-type HeldPlacement =
+export type ChangePlacement =
   | { readonly kind: typeof NARROWING.narrowed; readonly build: BuildPlacement }
   | { readonly kind: typeof NARROWING.widened };
 
-const WIDENED_PLACEMENT: HeldPlacement = { kind: NARROWING.widened };
+const WIDENED_PLACEMENT: ChangePlacement = { kind: NARROWING.widened };
 
 interface RunFacts {
   readonly workspacePath: string;
@@ -93,7 +93,7 @@ interface RunFacts {
   /** The test modules the discovery lists for the workspace, each inside its inputs whatever selection says. */
   readonly testModules: ReadonlySet<string>;
   /** The start revision's build, each build that ended since, and at the end the end revision's. */
-  readonly placements: readonly HeldPlacement[];
+  readonly placements: readonly ChangePlacement[];
   /** Its workspace's fingerprint at its end; undefined while it runs. */
   readonly end: FingerprintResult | undefined;
 }
@@ -125,16 +125,27 @@ function judgeRun(facts: RunFacts): RunJudgment {
   return { kind: JUDGMENT.kept, outside: [...window.paths] };
 }
 
+function placedInside(facts: RunFacts): PathsInside {
+  const { workspacePath, window, testModules, placements } = facts;
+  return placeFor([...window.paths], workspacePath, testModules, placements);
+}
+
+interface PathsInside {
+  readonly inside: readonly string[];
+  /** Those a narrowed build places inside. */
+  readonly narrowed: readonly string[];
+}
+
 /**
  * A path lies inside when any of these holds: a narrowed build's selection of it includes the workspace, that build
  * cannot place it, a widened build is held, or it is a listed test module. Only a narrowed build's placement interrupts.
  */
-function placedInside(facts: RunFacts): {
-  readonly inside: readonly string[];
-  readonly narrowed: readonly string[];
-} {
-  const { workspacePath, window, testModules, placements } = facts;
-  const paths = [...window.paths];
+function placeFor(
+  paths: readonly string[],
+  workspacePath: string,
+  testModules: ReadonlySet<string>,
+  placements: readonly ChangePlacement[],
+): PathsInside {
   const modules = paths.filter((path) => testModules.has(path));
   const inside = new Set(modules);
   const narrowed = new Set<string>();
@@ -174,6 +185,19 @@ export function notKeptVerdict(
 ): NotKeptVerdict | undefined {
   if (judgment.kind === JUDGMENT.kept) return undefined;
   return { kind: judgment.kind, reason: judgmentReason(judgment) };
+}
+
+/** The verdicts that read a run as invalidated, since its inputs changed while it ran. */
+const INVALIDATING: ReadonlySet<NotKeptKind> = new Set([
+  JUDGMENT.changedInside,
+  JUDGMENT.moved,
+]);
+
+/** Whether a stored run's verdict labels it invalidated; undefined is a run stored under its fingerprint. */
+export function labelsInvalidated(
+  notKept: NotKeptVerdict | undefined,
+): boolean {
+  return notKept !== undefined && INVALIDATING.has(notKept.kind);
 }
 
 /** Whether its inputs changed while it ran and a rerun could be bound to a fingerprint, as the scheduler reads it. */
@@ -222,7 +246,7 @@ export function keptAlthoughChanged(judgment: RunJudgment): string | undefined {
 function placementOf(
   view: CurrentInputs,
   query: QueryNarrowing,
-): HeldPlacement | undefined {
+): ChangePlacement | undefined {
   if (view.unavailable !== undefined) return undefined;
   const workspaces = narrowingAt(query, view.facts.revision);
   if (workspaces.kind === NARROWING.building) return undefined;
@@ -232,6 +256,24 @@ function placementOf(
   return confirmed
     ? { kind: NARROWING.narrowed, build: workspaces.narrowing.placement }
     : WIDENED_PLACEMENT;
+}
+
+/** How a round places changed paths: over its view's build, and widened whenever `placementOf` gives none. */
+export function roundPlacement(
+  view: CurrentInputs,
+  query: QueryNarrowing,
+): ChangePlacement {
+  return placementOf(view, query) ?? WIDENED_PLACEMENT;
+}
+
+/** The `paths` inside the workspace's inputs by `placement`, placed as a run's judgment places them; it may throw. */
+export function pathsInside(
+  paths: readonly string[],
+  entry: WorkspaceDiscovery,
+  placement: ChangePlacement,
+): readonly string[] {
+  const testModules = new Set(workspaceTestModules(entry));
+  return placeFor(paths, entry.workspace.path, testModules, [placement]).inside;
 }
 
 /** The latest build over the discovery in effect; widened when the builds give that discovery no narrowing at all. */
@@ -272,7 +314,7 @@ export class RunWatch {
   readonly started: FingerprintResult;
   readonly #parts: RunWatchParts;
   readonly #testModules: ReadonlySet<string>;
-  readonly #held: HeldPlacement[] = [];
+  readonly #held: ChangePlacement[] = [];
   readonly #heldBuilds = new Set<BuildPlacement>();
   /** Weak, so a replaced build's narrowed sets are not kept alive by the watch. */
   readonly #seen = new WeakSet<EndedBuild>();
@@ -303,6 +345,11 @@ export class RunWatch {
         error,
       );
     });
+  }
+
+  /** What the tracker records while the run runs. */
+  get window(): JobWindow {
+    return this.#parts.window;
   }
 
   /** Why the run was interrupted; undefined when it was not. */
@@ -388,7 +435,7 @@ export class RunWatch {
     return true;
   }
 
-  #hold(placement: HeldPlacement): void {
+  #hold(placement: ChangePlacement): void {
     if (placement.kind === NARROWING.widened) {
       if (this.#heldWidened) return;
       this.#heldWidened = true;
@@ -416,7 +463,7 @@ export class RunWatch {
 
   #judgment(
     end: FingerprintResult | undefined,
-    placements: readonly HeldPlacement[] = this.#held,
+    placements: readonly ChangePlacement[] = this.#held,
   ): RunJudgment {
     return judgeRun({
       workspacePath: this.#parts.entry.workspace.path,

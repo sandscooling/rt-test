@@ -71,6 +71,7 @@ function freshSchedule(): WorkspaceSchedule {
   return new WorkspaceSchedule({
     confirmed: () => true,
     storedNothing: () => false,
+    heldBy: () => undefined,
   });
 }
 
