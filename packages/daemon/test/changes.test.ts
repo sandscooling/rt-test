@@ -19,6 +19,10 @@ import {
   RUN_CRASHED,
   RUN_FAILED,
   STALE,
+  TEST_STATES,
+  WORKSPACE_DISCOVERY_FAILED,
+  WORKSPACE_NOT_CONFIRMED,
+  WORKSPACE_UNHANDLED_ERRORS,
   type NoAnswer,
   type NotDiscoveredEntry,
   type RefusedQuery,
@@ -45,6 +49,7 @@ import { inTempDir } from "./harness.js";
 import {
   builtAt,
   discoveredIn,
+  failedRun,
   inputsOf,
   narrowingSelecting,
   NO_BUILD_ENDED,
@@ -839,5 +844,190 @@ describe("the order and bound of the listed changes", () => {
       listed: 20,
       omitted: { failing: 0, recovered: 0, other: 2 },
     });
+  });
+});
+
+describe("recording at an input change", () => {
+  it("D3509: the inputs coming back at an unchanged revision are recorded, so an answer not determined afterwards hands back a cursor newer than the one before them", async () => {
+    const answer = await inWorld(async (world) => {
+      world.changes.start();
+      await flush();
+      const before = cursorOf(await world.ask([A_SOURCE]));
+      world.project = undefined;
+      world.store(resultsWith({ a: runOf(WORKSPACE_A, "failed") }));
+      await flush();
+      world.project = inputsOf(FIRST_INPUTS);
+      world.inputs.endPeriodicReconciliation();
+      await flush();
+      world.project = undefined;
+      const done = await world.ask([A_SOURCE]);
+      return "determined" in done
+        ? {
+            determined: done.determined,
+            newer: done.cursor !== null && done.cursor !== before,
+          }
+        : done;
+    });
+    expect(answer).toStrictEqual({ determined: false, newer: true });
+  });
+
+  it("D3518: a store at a moment not determined records nothing, so an answer not determined afterwards hands back the last determined moment's cursor", async () => {
+    const answer = await inWorld(async (world) => {
+      const before = cursorOf(await world.ask([A_SOURCE]));
+      world.query = NO_BUILD_ENDED;
+      world.store(resultsWith({ a: runOf(WORKSPACE_A, "failed") }));
+      const done = await world.ask([A_SOURCE]);
+      return "determined" in done
+        ? { determined: done.determined, handedBack: done.cursor === before }
+        : done;
+    });
+    expect(answer).toStrictEqual({ determined: false, handedBack: true });
+  });
+});
+
+/** The states that say a test has no outcome: neither `passed` nor one of the failing states. */
+const NO_OUTCOME_STATES = TEST_STATES.filter(
+  (state) =>
+    state !== "passed" &&
+    !(FAILING_STATES as readonly TestState[]).includes(state),
+);
+
+/** A workspace-level entry of workspace `a` of `kind`, which a covering workspace's changes include. */
+function workspaceEntry(
+  kind:
+    | typeof WORKSPACE_DISCOVERY_FAILED
+    | typeof WORKSPACE_NOT_CONFIRMED
+    | typeof WORKSPACE_UNHANDLED_ERRORS,
+): NotDiscoveredEntry {
+  const reason = { reason: `${kind} in ${WORKSPACE_A}`, omittedCharacters: 0 };
+  return kind === WORKSPACE_UNHANDLED_ERRORS
+    ? { kind, workspacePath: WORKSPACE_A, errorCount: 1, ...reason }
+    : { kind, workspacePath: WORKSPACE_A, ...reason };
+}
+
+/** Each listed entry change by its kind and the kind of entry it names. */
+function entryKinds(answer: ChangesAnswer): unknown {
+  if (!answer.determined) return answer;
+  return answer.changes.map((change) => {
+    const entry =
+      "test" in change ? undefined : (change.now ?? change.atCursor);
+    return { kind: change.kind, entry: entry?.kind };
+  });
+}
+
+describe("the kinds of the other states and entries", () => {
+  it("D3510: a test moving between a current pass and a state that says it has no outcome is neither failing nor recovered, whichever way it moves", () => {
+    const kinds = listed(
+      answerBetween({
+        before: [
+          ...NO_OUTCOME_STATES.map((state, index) =>
+            standing(state, CURRENT, `from${index}`),
+          ),
+          ...NO_OUTCOME_STATES.map((_, index) =>
+            standing("passed", CURRENT, `into${index}`),
+          ),
+        ],
+        after: [
+          ...NO_OUTCOME_STATES.map((_, index) =>
+            standing("passed", CURRENT, `from${index}`),
+          ),
+          ...NO_OUTCOME_STATES.map((state, index) =>
+            standing(state, CURRENT, `into${index}`),
+          ),
+        ],
+      }),
+    );
+    expect(
+      Array.isArray(kinds)
+        ? {
+            kinds: [
+              ...new Set(kinds.map((change: { kind: string }) => change.kind)),
+            ],
+            count: kinds.length,
+          }
+        : kinds,
+    ).toStrictEqual({ kinds: ["other"], count: 2 * NO_OUTCOME_STATES.length });
+  });
+
+  it("D3511: a covering workspace whose discovery failed or raised unhandled errors is a failing change when the entry appears and recovered when it goes away, while a workspace not confirmed is neither", () => {
+    expect([
+      entryKinds(
+        answerBetween({
+          before: [],
+          after: [],
+          entriesAfter: [
+            workspaceEntry(WORKSPACE_DISCOVERY_FAILED),
+            workspaceEntry(WORKSPACE_UNHANDLED_ERRORS),
+            workspaceEntry(WORKSPACE_NOT_CONFIRMED),
+          ],
+        }),
+      ),
+      entryKinds(
+        answerBetween({
+          before: [],
+          after: [],
+          entriesBefore: [
+            workspaceEntry(WORKSPACE_DISCOVERY_FAILED),
+            workspaceEntry(WORKSPACE_UNHANDLED_ERRORS),
+          ],
+        }),
+      ),
+    ]).toStrictEqual([
+      [
+        { kind: "failing", entry: WORKSPACE_DISCOVERY_FAILED },
+        { kind: "failing", entry: WORKSPACE_UNHANDLED_ERRORS },
+        { kind: "other", entry: WORKSPACE_NOT_CONFIRMED },
+      ],
+      [
+        { kind: "recovered", entry: WORKSPACE_DISCOVERY_FAILED },
+        { kind: "recovered", entry: WORKSPACE_UNHANDLED_ERRORS },
+      ],
+    ]);
+  });
+
+  it("D3517: a failing change of a test whose run failed, or whose module failed to load, carries the first line of the error its run recorded", () => {
+    const ran = ranWorkspace(WORKSPACE_A, ["passed"]);
+    if (ran.status !== "ran") throw new Error("ranWorkspace returns a ran run");
+    const firstErrors = [
+      answerBetween({
+        before: [standing("passed", CURRENT)],
+        after: [standing(RUN_FAILED, CURRENT)],
+        runs: [storedRun(failedRun(WORKSPACE_A))],
+      }),
+      answerBetween({
+        before: [standing("passed", CURRENT)],
+        after: [standing(MODULE_FAILED_TO_LOAD, CURRENT)],
+        runs: [
+          storedRun({
+            ...ran,
+            modules: [
+              {
+                projectName: PROJECT,
+                modulePath: MODULE,
+                state: "failed",
+                errors: [
+                  "Error: Cannot find module './gone.js'\n    at a.test.ts:1:1",
+                ],
+              },
+            ],
+          }),
+        ],
+      }),
+    ].map((answer) =>
+      answer.determined
+        ? answer.changes.map((change) =>
+            "firstError" in change ? change.firstError : change,
+          )
+        : answer,
+    );
+    expect(firstErrors).toStrictEqual([
+      [{ reason: "Error: config boom", omittedCharacters: 0 }],
+      [
+        {
+          reason: "Error: Cannot find module './gone.js'",
+          omittedCharacters: 0,
+        },
+      ],
+    ]);
   });
 });

@@ -907,7 +907,7 @@
     "defect": "An answer not determined is headed as listing no change since the given cursor, reading as an all-clear though nothing was compared.",
     "file": "packages/cli/src/commands/changes.ts",
     "old": "      `${lead} ${NOT_DETERMINED_LEAD}, since ${notDeterminedText(answer.notDetermined)}`,",
-    "new": "      `${lead} 0 changes since the given cursor`,"
+    "new": "      `${lead} 0 changes in scope since the given cursor`,"
   },
   {
     "id": "D3508",
@@ -915,5 +915,40 @@
     "file": "packages/cli/src/commands/changes.ts",
     "old": "    change.kind === CHANGE_KIND.failing\n      ? [",
     "new": "    false\n      ? ["
+  },
+  {
+    "id": "D3512",
+    "defect": "An answer not determined since named files could not be read never lists them, so the text never names which file could not be read or why.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "  if (facts.kind !== NOT_DETERMINED.pathsUnread) return [];\n  return [\n    UNREAD_HEADING,",
+    "new": "  if (facts.kind !== NOT_DETERMINED.pathsUnread || true) return [];\n  return [\n    UNREAD_HEADING,"
+  },
+  {
+    "id": "D3513",
+    "defect": "The count of tests in scope is printed from the tests outside scope, so the heading for the files' tests carries the rest of the worktree's count.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    `Tests in scope: ${counts.tests}`,",
+    "new": "    `Tests in scope: ${outside.counts.tests}`,"
+  },
+  {
+    "id": "D3514",
+    "defect": "An answer given a usable cursor with no test in scope is headed as listing no change, an all-clear, without saying that no test is in scope.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "      ...(answer.counts.tests === 0 ? [NO_TEST_IN_SCOPE] : []),\n",
+    "new": ""
+  },
+  {
+    "id": "D3515",
+    "defect": "An answer not determined given a cursor not issued or expired never says why the given cursor was not used.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    default:\n      return [UNUSABLE_CURSOR[use]];",
+    "new": "    default:\n      return [];"
+  },
+  {
+    "id": "D3516",
+    "defect": "An entry that newly appeared is printed from its standing at the cursor, which it had none of, so a newly failing module reads as an entry appeared with no entry named.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "  const entry = now ?? atCursor;",
+    "new": "  const entry = atCursor;"
   }
 ]

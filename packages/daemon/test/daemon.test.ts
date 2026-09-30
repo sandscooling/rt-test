@@ -1999,6 +1999,7 @@ describe("the changes for files", () => {
         );
         return {
           idle,
+          firstDetermined: first.determined,
           waited: "thrown" in waited ? waited : waited.outcome,
           later:
             "thrown" in later || !later.determined
@@ -2014,6 +2015,7 @@ describe("the changes for files", () => {
       });
       expect(outcome).toStrictEqual({
         idle: true,
+        firstDetermined: false,
         waited: "settled",
         later: [
           {

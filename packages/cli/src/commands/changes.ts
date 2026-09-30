@@ -56,6 +56,9 @@ const NOT_DETERMINED_LEAD = "not determined";
 const BASELINE_LEAD = "a baseline";
 const NO_CURSOR_GIVEN = "no cursor was given";
 const CURSOR_HANDED_BACK = "the given cursor is handed back unchanged";
+const NO_TEST_IN_SCOPE = "no test is in scope";
+const CHANGE_NOUNS: Nouns = { one: "change", many: "changes" };
+const NAMED_FILE_NOUNS: Nouns = { one: "named file", many: "named files" };
 const ENTRY_APPEARED = "entry appeared";
 const ENTRY_WENT_AWAY = "entry went away";
 const UNUSABLE_CURSOR: Record<
@@ -77,6 +80,11 @@ const NOT_DETERMINED_CAUSES: Record<
 };
 
 type DeterminedResponse = Extract<ChangesResponse, { determined: true }>;
+
+interface Nouns {
+  readonly one: string;
+  readonly many: string;
+}
 
 export const changesCommand: Command = {
   name: NAME,
@@ -137,7 +145,11 @@ function headline(answer: ChangesResponse): string {
     ].join(DETAIL_SEPARATOR);
   }
   if (answer.cursorUse === CURSOR_USE.used) {
-    return `${lead} ${answer.changes.length + omittedCount(answer.omittedChanges)} changes since the given cursor`;
+    const total = answer.changes.length + omittedCount(answer.omittedChanges);
+    return [
+      `${lead} ${counted(total, CHANGE_NOUNS)} in scope since the given cursor`,
+      ...(answer.counts.tests === 0 ? [NO_TEST_IN_SCOPE] : []),
+    ].join(DETAIL_SEPARATOR);
   }
   const cause =
     answer.cursorUse === CURSOR_USE.noneGiven
@@ -159,7 +171,7 @@ function givenCursorText(use: CursorUse): string[] {
 
 function notDeterminedText(facts: NotDeterminedFacts): string {
   if (facts.kind === NOT_DETERMINED.pathsUnread) {
-    return `${facts.unread.length} named files could not be read`;
+    return `${counted(facts.unread.length, NAMED_FILE_NOUNS)} could not be read`;
   }
   return `${NOT_DETERMINED_CAUSES[facts.kind]}: ${cutReasonText(facts.reason)}`;
 }
@@ -239,6 +251,10 @@ function omittedLines(omitted: ChangeCounts): string[] {
 
 function omittedCount(omitted: ChangeCounts): number {
   return CHANGE_KINDS.reduce((sum, kind) => sum + omitted[kind], 0);
+}
+
+function counted(count: number, nouns: Nouns): string {
+  return `${count} ${count === 1 ? nouns.one : nouns.many}`;
 }
 
 function indented(lines: readonly string[]): string[] {

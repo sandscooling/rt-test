@@ -10164,6 +10164,41 @@
     "new": ""
   },
   {
+    "id": "D3509",
+    "defect": "The journal never records when the inputs change, so a moment made determined by the inputs coming back at an unchanged revision goes unrecorded, and an answer not determined afterwards hands back an older cursor, under which a test that passed there and failed again nets to no change.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "        this.#record(INPUT_CHANGE_MOMENT);\n",
+    "new": ""
+  },
+  {
+    "id": "D3510",
+    "defect": "A skipped test counts as failing, so a test moving from skipped to a current pass is listed recovered and one moving into skipped from a pass is listed failing.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  skipped: false,",
+    "new": "  skipped: true,"
+  },
+  {
+    "id": "D3511",
+    "defect": "A workspace whose discovery failed is not a breaking entry, so a covering workspace whose discovery newly fails is listed as other, and its return as other too.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  [WORKSPACE_DISCOVERY_FAILED]: true,",
+    "new": "  [WORKSPACE_DISCOVERY_FAILED]: false,"
+  },
+  {
+    "id": "D3517",
+    "defect": "A failing change of a test whose run failed or crashed carries no first error line, though its run recorded one.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "    return firstError([run.error]);",
+    "new": "    return null;"
+  },
+  {
+    "id": "D3518",
+    "defect": "A store or a build end records its moment though it is not determined, so a cursor handed back names standings no answer could give.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "      if (!determination(inputs, narrowing, []).determined) return;\n",
+    "new": ""
+  },
+  {
     "id": "D3466",
     "defect": "Selection follows no dependency edge, so a change to the shared library selects lib alone: ui, backend and web keep the passing results the edit broke, and the corpus reports each failure the full run finds there as a selection miss and each of those workspaces as a declared run missing.",
     "file": "packages/daemon/src/selection/select-tests.ts",

@@ -12,7 +12,7 @@ import type { TestStanding } from "../query/test-states.js";
  * A target until measured: how many test or entry changes may be recorded after a cursor before it expires. A worktree
  * whose tests all go stale at one edit expires every older cursor once it holds this many tests or more.
  */
-export const MAX_RECORDED_CHANGES = 100_000;
+const MAX_RECORDED_CHANGES = 100_000;
 
 const CURSOR_SEPARATOR = ".";
 const SEQUENCE_FORM = /^[1-9][0-9]*$/;

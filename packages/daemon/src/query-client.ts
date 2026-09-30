@@ -30,9 +30,8 @@ import {
 import { errorText } from "./vitest/error-text.js";
 
 /**
- * How long a path status or a changes query may take to answer, a target until measured: the daemon first reads the
- * named paths, which for a folder is every input it holds under it and for the root every input, more than any
- * changes query's files.
+ * How long a path status or a changes query may take to answer, a target until measured. The daemon first reads the
+ * named paths: for a path status of the root that is every input it holds, which is more than any changes query names.
  */
 const READ_FIRST_BOUND_MS = 60_000;
 

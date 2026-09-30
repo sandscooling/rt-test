@@ -153,6 +153,19 @@ const DROPPED_TEST: ListedChange = {
   atCursor: { state: "passed", freshness: "current" },
 };
 
+/** Counts of `tests` tests, every one standing `state` and `freshness`. */
+function countsOf(
+  tests: number,
+  state: keyof TestCounts["states"],
+  freshness: keyof TestCounts["freshness"],
+): TestCounts {
+  return {
+    tests,
+    states: { ...NO_TESTS.states, [state]: tests },
+    freshness: { ...NO_TESTS.freshness, [freshness]: tests },
+  };
+}
+
 interface ChangesRun {
   readonly exit: ExitCode;
   readonly stdout: string;
@@ -287,6 +300,7 @@ describe("the answer to a changes query", () => {
       determined({
         changes: [FAILING_CHANGE, RECOVERED_ENTRY],
         omittedChanges: { failing: 0, recovered: 0, other: 1 },
+        counts: countsOf(2, "failed", "current"),
       }),
       determined({
         cursorUse: "none-given",
@@ -313,7 +327,10 @@ describe("the answer to a changes query", () => {
       );
     }
     expect(heads).toStrictEqual([
-      [`${lead} 3 changes since the given cursor`, `Cursor: ${NEW_CURSOR}`],
+      [
+        `${lead} 3 changes in scope since the given cursor`,
+        `Cursor: ${NEW_CURSOR}`,
+      ],
       [
         `${lead} a baseline, since no cursor was given`,
         `Cursor: ${NEW_CURSOR}`,
@@ -346,6 +363,155 @@ describe("the answer to a changes query", () => {
       "  recovered entry went away: failed-module packages/a unit src/b.test.ts: SyntaxError: Unexpected token (1 errors)",
       "  other packages/a unit src/c.test.ts > dropped: at the cursor: passed, current; now: none",
       "  and 2 more: other 2",
+    ]);
+  });
+});
+
+const LEAD = `RT Test changes in ${CWD} at input revision 4:`;
+const BUSY = "EBUSY: resource busy or locked";
+
+/** A module of workspace `a` that newly fails to load, listed as a failing change. */
+const APPEARED_ENTRY: ListedChange = {
+  kind: "failing",
+  firstError: { reason: "SyntaxError: Unexpected token", omittedCharacters: 0 },
+  now: {
+    kind: "failed-module",
+    workspacePath: "packages/a",
+    projectName: "unit",
+    modulePath: "src/d.test.ts",
+    errorCount: 1,
+    reason: "SyntaxError: Unexpected token",
+    omittedCharacters: 0,
+  },
+};
+
+/** The first line `rt-test changes` prints for each of `answers`. */
+async function headlines(
+  answers: readonly ChangesResponse[],
+): Promise<string[]> {
+  const heads = [];
+  for (const answer of answers) {
+    heads.push((await runChanges([FILE], answer)).stdout.split("\n")[0] ?? "");
+  }
+  return heads;
+}
+
+/** The `count` lines of `output` from the line `first` on. */
+function linesFrom(output: string, first: string, count: number): string[] {
+  const lines = output.split("\n");
+  const start = lines.indexOf(first);
+  return start === -1 ? [] : lines.slice(start, start + count);
+}
+
+describe("the text of a changes answer", () => {
+  it("D3512: an answer not determined since named files could not be read names each file, escaped, and its reason under the unread files", async () => {
+    const run = await runChanges(
+      [FILE],
+      notDetermined({
+        cursor: null,
+        cursorUse: "none-given",
+        notDetermined: {
+          kind: "paths-unread",
+          unread: [
+            {
+              path: "src/a\u0007.ts",
+              reason: { reason: BUSY, omittedCharacters: 0 },
+            },
+            {
+              path: "src/b.ts",
+              reason: {
+                reason: "EACCES: permission denied",
+                omittedCharacters: 0,
+              },
+            },
+          ],
+        },
+      }),
+    );
+    expect({
+      head: run.stdout.split("\n")[0],
+      unread: linesUnder(run.stdout, "Unread files:"),
+    }).toStrictEqual({
+      head: `${LEAD} not determined, since 2 named files could not be read`,
+      unread: [
+        `  src/a\\u0007.ts: ${BUSY}`,
+        "  src/b.ts: EACCES: permission denied",
+      ],
+    });
+  });
+
+  it("D3513: the tests in scope and the tests outside it are each counted under their own heading, with how many outside changed only when a cursor was used", async () => {
+    const counts = {
+      counts: countsOf(1, "passed", "current"),
+      outside: { counts: countsOf(2, "failed", "stale"), changed: 2 },
+    };
+    const used = await runChanges([FILE], determined(counts));
+    const baseline = await runChanges(
+      [FILE],
+      determined({
+        ...counts,
+        cursorUse: "none-given",
+        outside: { ...counts.outside, changed: null },
+      }),
+    );
+    expect([
+      linesFrom(used.stdout, "Tests in scope: 1", 6),
+      linesFrom(baseline.stdout, "Tests in scope: 1", 4).slice(3),
+    ]).toStrictEqual([
+      [
+        "Tests in scope: 1",
+        "  States: passed 1",
+        "  Freshness: current 1, stale 0, unknown 0",
+        "Tests outside scope: 2, 2 changed since the given cursor",
+        "  States: failed 2",
+        "  Freshness: current 0, stale 2, unknown 0",
+      ],
+      ["Tests outside scope: 2"],
+    ]);
+  });
+
+  it("D3514: an answer given a usable cursor with no test in scope says so after its count of changes, and one with tests in scope does not", async () => {
+    expect(
+      await headlines([
+        determined(),
+        determined({
+          changes: [FAILING_CHANGE],
+          counts: countsOf(1, "failed", "current"),
+        }),
+      ]),
+    ).toStrictEqual([
+      `${LEAD} 0 changes in scope since the given cursor; no test is in scope`,
+      `${LEAD} 1 change in scope since the given cursor`,
+    ]);
+  });
+
+  it("D3515: a baseline for an expired cursor, and an answer not determined given a cursor not issued or expired, each say why the given cursor was not used", async () => {
+    expect(
+      await headlines([
+        determined({
+          cursorUse: "expired",
+          outside: { counts: NO_TESTS, changed: null },
+        }),
+        notDetermined({ cursor: NEW_CURSOR, cursorUse: "not-issued" }),
+        notDetermined({ cursor: NEW_CURSOR, cursorUse: "expired" }),
+      ]),
+    ).toStrictEqual([
+      `${LEAD} a baseline, since the given cursor is older than the changes the daemon keeps`,
+      `${LEAD} not determined, since the dependency build at this input revision has not ended: ${BUILD_NOT_ENDED}; the given cursor was not issued in this daemon's life`,
+      `${LEAD} not determined, since the dependency build at this input revision has not ended: ${BUILD_NOT_ENDED}; the given cursor is older than the changes the daemon keeps`,
+    ]);
+  });
+
+  it("D3516: an entry that newly appeared is printed with the entry it names", async () => {
+    const run = await runChanges(
+      [FILE],
+      determined({
+        changes: [APPEARED_ENTRY],
+        counts: countsOf(1, "passed", "current"),
+      }),
+    );
+    expect(linesUnder(run.stdout, "Changes:")).toStrictEqual([
+      "  failing entry appeared: failed-module packages/a unit src/d.test.ts: SyntaxError: Unexpected token (1 errors); first error: SyntaxError: Unexpected token",
     ]);
   });
 });

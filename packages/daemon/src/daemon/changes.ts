@@ -21,6 +21,7 @@ import { NOT_AWAITED_REASON, resolveFiles, type WaitMoment } from "./waits.js";
 
 const CHANGES_QUERY = "changes query";
 const BUILD_END_MOMENT = "the end of a dependency build";
+const INPUT_CHANGE_MOMENT = "a change of the inputs or the store";
 const COVERAGE_UNKNOWN_REASON =
   "the coverage at a moment whose dependency build had ended could not be taken";
 
@@ -41,8 +42,8 @@ export interface ChangesParts {
 
 /**
  * Answers changes queries at once from the journal of standings this daemon life recorded, and records into it at
- * every determined moment: each changes answer, each stored run or discovery, and each ended dependency build, the
- * one over a newly stored discovery included.
+ * every determined moment: each changes answer, each stored run or discovery, each ended dependency build, the one
+ * over a newly stored discovery included, and each input change.
  */
 export class Changes {
   readonly #parts: ChangesParts;
@@ -56,7 +57,7 @@ export class Changes {
     this.#parts = parts;
   }
 
-  /** Records at each ended dependency build until the stop. */
+  /** Records at each ended dependency build and each input change until the stop. */
   start(): void {
     void this.#recordAtBuildEnds().catch((error: unknown) => {
       this.#parts.log.error("recording the changes at build ends", error);
@@ -156,7 +157,11 @@ export class Changes {
     });
   }
 
-  /** Waits for a build only while one is pending, and otherwise for the next input change or store that may start one. */
+  /**
+   * Waits for a build only while one is pending, and otherwise for the next input change or store. Records after either,
+   * since the inputs becoming available again at an unchanged revision can make the moment determined with no build
+   * ending, and a moment left unrecorded can hide a failure that returns at a later one.
+   */
   async #recordAtBuildEnds(): Promise<void> {
     const { builds, stopSignal } = this.#parts;
     while (!stopSignal.aborted) {
@@ -165,6 +170,7 @@ export class Changes {
         this.#record(BUILD_END_MOMENT);
       } else {
         await this.#nextChange();
+        this.#record(INPUT_CHANGE_MOMENT);
       }
     }
   }

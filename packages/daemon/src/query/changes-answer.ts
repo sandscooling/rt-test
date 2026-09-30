@@ -48,7 +48,7 @@ import { countStandings, type TestStanding } from "./test-states.js";
 import { firstError, firstLineOf, type Coverage } from "./wait-answer.js";
 
 /** How many changes in scope an answer lists; it counts the rest by kind. */
-export const MAX_LISTED_CHANGES = 20;
+const MAX_LISTED_CHANGES = 20;
 
 export const CHANGE_KIND = {
   failing: "failing",
