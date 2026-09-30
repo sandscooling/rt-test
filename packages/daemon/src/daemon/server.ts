@@ -7,15 +7,20 @@ import type {
   SummaryAnswer,
   WaitAnswer,
 } from "../query/answer.js";
+import type { ChangesAnswer } from "../query/changes-answer.js";
 import { errorText } from "../vitest/error-text.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
+  CHANGES_TYPE,
   encodeLine,
   ERROR_TYPE,
   HELLO_TYPE,
+  isCursor,
   isStopRequest,
   isWaitLimit,
   LineDecoder,
+  MAX_CHANGES_PATHS,
+  MAX_CURSOR_CHARACTERS,
   MAX_LINE_BYTES,
   MAX_WAIT_LIMIT_MS,
   MAX_WAIT_PATHS,
@@ -32,6 +37,7 @@ import {
   VERSION_MISMATCH_CODE,
   WAIT_LIMIT_MS,
   WAIT_TYPE,
+  type ChangesResponse,
   type DaemonIdentity,
   type DecodedLine,
   type ErrorCode,
@@ -57,10 +63,19 @@ export interface WaitQuery {
   readonly limitMs: number;
 }
 
-/** What a too-large answer's error asks for instead: fewer files for a wait, a narrower path for the other queries. */
+/** A changes request the server has checked. */
+export interface ChangesQuery {
+  /** Absolute. */
+  readonly paths: readonly string[];
+  /** Absent for a baseline. */
+  readonly since: string | undefined;
+}
+
+/** What a too-large answer's error asks for instead: fewer files for a wait or a changes query, a narrower path for the others. */
 const NARROWER_REQUEST = {
   path: "ask status for a narrower path",
   files: "wait on fewer files",
+  changedFiles: "ask for the changes of fewer files",
 } as const;
 
 /**
@@ -79,6 +94,8 @@ export interface DaemonHandlers {
   pathStatus(path: string, signal: AbortSignal): QueryAnswer<PathStatusAnswer>;
   /** Reads only: starts no job; answers once the files' covering tests settle, their inputs move, or the limit passes. */
   wait(query: WaitQuery, signal: AbortSignal): QueryAnswer<WaitAnswer>;
+  /** Reads only: starts no job and never waits; answers what changed for the files' covering tests since a cursor. */
+  changes(query: ChangesQuery, signal: AbortSignal): QueryAnswer<ChangesAnswer>;
   /** Begins the stop, or joins the one under way. */
   stop(): void;
   isStopping(): boolean;
@@ -345,6 +362,7 @@ type VersionedAnswer =
   | SummaryResponse
   | PathStatusResponse
   | WaitResponse
+  | ChangesResponse
   | ErrorResponse;
 
 function versionedAnswer(
@@ -372,6 +390,9 @@ function versionedAnswer(
   }
   if (message["type"] === WAIT_TYPE) {
     return waitResponse(message, handlers, signal);
+  }
+  if (message["type"] === CHANGES_TYPE) {
+    return changesResponse(message, handlers, signal);
   }
   return error(
     UNKNOWN_REQUEST_CODE,
@@ -401,18 +422,67 @@ function waitResponse(
   handlers: DaemonHandlers,
   signal: AbortSignal,
 ): Queried<WaitResponse> | Promise<Queried<WaitResponse>> {
-  const paths = message["paths"];
+  const paths = namedPaths(message, WAIT_TYPE, MAX_WAIT_PATHS, "a wait");
   const limitMs = "limitMs" in message ? message["limitMs"] : WAIT_LIMIT_MS;
+  if (!Array.isArray(paths)) return paths;
+  if (!isWaitLimit(limitMs)) {
+    return error(
+      "invalid-request",
+      `a ${WAIT_TYPE} request's limitMs must be a whole number of ms from 1 to ${MAX_WAIT_LIMIT_MS}; got ${JSON.stringify(limitMs)}`,
+    );
+  }
+  const query: WaitQuery = { paths, limitMs };
+  return queryResponse(WAIT_TYPE, () => handlers.wait(query, signal));
+}
+
+/** Refuses a changes request whose paths or cursor it cannot take before any of its work begins. */
+function changesResponse(
+  message: ProtocolMessage,
+  handlers: DaemonHandlers,
+  signal: AbortSignal,
+): Queried<ChangesResponse> | Promise<Queried<ChangesResponse>> {
+  const paths = namedPaths(
+    message,
+    CHANGES_TYPE,
+    MAX_CHANGES_PATHS,
+    "a changes request",
+  );
+  if (!Array.isArray(paths)) return paths;
+  const since = message["since"];
+  if (since !== undefined && !isCursor(since)) {
+    return error(
+      "invalid-request",
+      `a ${CHANGES_TYPE} request's since must be a non-empty string of at most ${MAX_CURSOR_CHARACTERS} characters; got ${valueShape(since)}`,
+    );
+  }
+  const query: ChangesQuery = { paths, since };
+  return queryResponse(CHANGES_TYPE, () => handlers.changes(query, signal));
+}
+
+/** A refused value by its kind and size, never echoed, since a value near the line limit would push the refusal past it. */
+function valueShape(value: unknown): string {
+  if (typeof value !== "string") return `a value of type ${typeof value}`;
+  return `a string of ${Array.from(value).length} characters`;
+}
+
+/** The request's paths when they are a non-empty array of at most `max` absolute paths; otherwise its refusal. */
+function namedPaths(
+  message: ProtocolMessage,
+  type: string,
+  max: number,
+  allower: string,
+): string[] | ErrorResponse {
+  const paths = message["paths"];
   if (!Array.isArray(paths) || paths.length === 0) {
     return error(
       "invalid-request",
-      `a ${WAIT_TYPE} request must carry a non-empty array of absolute paths`,
+      `a ${type} request must carry a non-empty array of absolute paths`,
     );
   }
-  if (paths.length > MAX_WAIT_PATHS) {
+  if (paths.length > max) {
     return error(
       "invalid-request",
-      `a ${WAIT_TYPE} request names ${paths.length} files, more than the ${MAX_WAIT_PATHS} a wait allows`,
+      `a ${type} request names ${paths.length} files, more than the ${max} ${allower} allows`,
     );
   }
   const notAbsolute = (paths as unknown[]).filter(
@@ -421,17 +491,10 @@ function waitResponse(
   if (notAbsolute.length > 0) {
     return error(
       "invalid-request",
-      `a ${WAIT_TYPE} request's paths must be absolute; got ${notAbsolute.map((path) => JSON.stringify(path)).join(", ")}`,
+      `a ${type} request's paths must be absolute; got ${notAbsolute.map((path) => JSON.stringify(path)).join(", ")}`,
     );
   }
-  if (!isWaitLimit(limitMs)) {
-    return error(
-      "invalid-request",
-      `a ${WAIT_TYPE} request's limitMs must be a whole number of ms from 1 to ${MAX_WAIT_LIMIT_MS}; got ${JSON.stringify(limitMs)}`,
-    );
-  }
-  const query: WaitQuery = { paths: paths as string[], limitMs };
-  return queryResponse(WAIT_TYPE, () => handlers.wait(query, signal));
+  return paths as string[];
 }
 
 type Typed<T extends string, A> = A & { type: T; protocolVersion: number };
@@ -459,8 +522,7 @@ function checkedAnswer<T extends string, A extends object>(
   type: T,
   response: Answered<A>,
 ): Queried<Typed<T, A>> {
-  const narrower =
-    type === WAIT_TYPE ? NARROWER_REQUEST.files : NARROWER_REQUEST.path;
+  const narrower = narrowerRequest(type);
   if ("refused" in response) {
     return error("invalid-request", response.refused);
   }
@@ -476,6 +538,12 @@ function checkedAnswer<T extends string, A extends object>(
     );
   }
   return typed;
+}
+
+function narrowerRequest(type: string): string {
+  if (type === WAIT_TYPE) return NARROWER_REQUEST.files;
+  if (type === CHANGES_TYPE) return NARROWER_REQUEST.changedFiles;
+  return NARROWER_REQUEST.path;
 }
 
 function queryFailed(failure: unknown): ErrorResponse {

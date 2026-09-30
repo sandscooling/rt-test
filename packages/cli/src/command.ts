@@ -52,6 +52,13 @@ export function optionalRoot(positionals: string[]): string | undefined {
   return nonEmptyPath(positionals[0], "root");
 }
 
+/** One or more file positionals, none empty. */
+export function requiredFiles(positionals: string[]): string[] {
+  if (positionals.length === 0) throw new UsageError("Missing file.");
+  for (const file of positionals) nonEmptyPath(file, "file");
+  return positionals;
+}
+
 /** An empty path would resolve to the current directory, so an unset shell variable would silently pick it. */
 export function nonEmptyPath(
   path: string | undefined,

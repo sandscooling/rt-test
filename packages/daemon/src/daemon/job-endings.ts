@@ -1,3 +1,7 @@
+import type { FingerprintResult } from "../inputs/fingerprint.js";
+import type { JobVerdict } from "../inputs/input-jobs.js";
+import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "../store/schema.js";
+import type { StoreBindings, StoreScope } from "../store/stored-records.js";
 import { NewerStoreSchemaError } from "../store/transaction.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
@@ -34,6 +38,26 @@ export function runToStore(
   if (!outcome.ended) return { unstored: outcome.reason };
   const run = outcome.value;
   return run.status === "not-confirmed" ? { unstored: run.reason } : { run };
+}
+
+/** The job's record is bound to `fingerprint` only when its verdict says so; one stored not fingerprinted is logged. */
+export function storeBindings(
+  { scope, log }: { readonly scope: StoreScope; readonly log: DaemonLog },
+  job: string,
+  verdict: JobVerdict,
+  fingerprint: () => FingerprintResult,
+): StoreBindings {
+  const print: FingerprintResult = verdict.fingerprinted
+    ? fingerprint()
+    : { ok: false, reason: verdict.reason };
+  if (print.ok) {
+    return {
+      ...scope,
+      inputFingerprint: { kind: FINGERPRINT_DIGEST, digest: print.digest },
+    };
+  }
+  log.entry(`${job} is stored not fingerprinted: ${print.reason}`);
+  return { ...scope, inputFingerprint: { kind: NOT_FINGERPRINTED } };
 }
 
 /** Only a refusal that names its remedy reaches the reason; any other failure's detail stays in the log. */

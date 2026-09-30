@@ -13,6 +13,7 @@ import type {
   SummaryAnswer,
   WaitAnswer,
 } from "../query/answer.js";
+import type { ChangesAnswer } from "../query/changes-answer.js";
 import { BUSY_TIMEOUT_MS } from "../store/schema.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText } from "../vitest/error-text.js";
@@ -37,6 +38,9 @@ export const WAIT_LIMIT_MS = 100_000;
 export const MAX_WAIT_LIMIT_MS = 3_600_000;
 const MIN_WAIT_LIMIT_MS = 1;
 export const MAX_WAIT_PATHS = 1_000;
+export const MAX_CHANGES_PATHS = 1_000;
+/** A cursor the daemon issues is far shorter; the bound keeps a request's cursor from growing without limit. */
+export const MAX_CURSOR_CHARACTERS = 256;
 
 /** Frozen. */
 export const STOP_TYPE = "stop";
@@ -54,6 +58,7 @@ export const STATUS_TYPE = "status";
 export const SUMMARY_TYPE = "summary";
 export const PATH_STATUS_TYPE = "path-status";
 export const WAIT_TYPE = "wait";
+export const CHANGES_TYPE = "changes";
 
 export const START_TYPE = "start";
 export const SERVING_TYPE = "serving";
@@ -187,6 +192,24 @@ export interface WaitRequest {
   readonly limitMs?: number;
 }
 
+export interface ChangesRequest {
+  readonly type: typeof CHANGES_TYPE;
+  readonly protocolVersion: number;
+  /** Absolute, from one to `MAX_CHANGES_PATHS`. */
+  readonly paths: readonly string[];
+  /** The cursor an earlier changes answer returned; absent for a baseline. */
+  readonly since?: string;
+}
+
+/** Whether `value` is a cursor a changes request may carry: a non-empty string of at most `MAX_CURSOR_CHARACTERS`. */
+export function isCursor(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value !== "" &&
+    Array.from(value).length <= MAX_CURSOR_CHARACTERS
+  );
+}
+
 /** Whether `value` is a limit a wait takes: a whole number of ms from 1 to `MAX_WAIT_LIMIT_MS`. */
 export function isWaitLimit(value: unknown): value is number {
   return (
@@ -209,6 +232,11 @@ export type PathStatusResponse = PathStatusAnswer & {
 
 export type WaitResponse = WaitAnswer & {
   readonly type: typeof WAIT_TYPE;
+  readonly protocolVersion: number;
+};
+
+export type ChangesResponse = ChangesAnswer & {
+  readonly type: typeof CHANGES_TYPE;
   readonly protocolVersion: number;
 };
 

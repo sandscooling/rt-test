@@ -37,11 +37,28 @@ import {
 } from "./daemon/protocol.js";
 
 export {
+  queryChanges,
   queryPathStatus,
   querySummary,
   queryWait,
+  type ChangesOptions,
   type WaitOptions,
 } from "./query-client.js";
+export {
+  CHANGE_KIND,
+  CHANGE_KINDS,
+  CURSOR_USE,
+  NOT_DETERMINED,
+  type ChangeCounts,
+  type ChangeKind,
+  type ChangeStanding,
+  type CursorUse,
+  type EntryChange,
+  type ListedChange,
+  type NotDeterminedFacts,
+  type TestChange,
+  type UnreadFile,
+} from "./query/changes-answer.js";
 export { startPlan, type StartPlan } from "./start-plan.js";
 export {
   NON_INPUTS_ABSENT,
@@ -57,6 +74,7 @@ export { errorText } from "./vitest/error-text.js";
 export {
   MAX_WAIT_LIMIT_MS,
   PROTOCOL_VERSION,
+  type ChangesResponse,
   type DaemonActivity,
   type DaemonIdentity,
   type PathStatusResponse,

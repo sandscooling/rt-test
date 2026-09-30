@@ -6,9 +6,7 @@ import {
   queryWait,
   ROUND,
   WAIT_OUTCOME,
-  type ListedCoverage,
   type NamedFailure,
-  type WaitFile,
   type WaitOptions,
   type WaitResponse,
 } from "@rt-test/daemon/client";
@@ -16,20 +14,21 @@ import {
   answerFields,
   contextLines,
   countLines,
-  cutReasonText,
-  DETAIL_SEPARATOR,
+  coverageLine,
   executionLines,
+  fileLines,
+  firstErrorText,
   INDENT,
   joinLines,
   namedText,
   notDiscoveredLines,
-  notNarrowedCause,
-  pathSelectionText,
+  testText,
 } from "../answer-text.js";
 import {
   absolutePath,
   JSON_OPTION,
   nonEmptyPath,
+  requiredFiles,
   UsageError,
   type Command,
 } from "../command.js";
@@ -45,20 +44,10 @@ const MS_PER_SECOND = 1_000;
 const MIN_LIMIT_SECONDS = 1;
 const MAX_LIMIT_SECONDS = Math.floor(MAX_WAIT_LIMIT_MS / MS_PER_SECOND);
 const DECIMAL_DIGITS = /^[0-9]+$/;
-const NAME_PATH_SEPARATOR = " > ";
-const FILES_HEADING = "Files:";
 const FAILURES_HEADING = "Failures:";
 const COVERING_HEADING = "Covering workspaces:";
 const NO_COVERING_WORKSPACE = "Covering workspaces: none the daemon runs";
-const NOTHING_COVERS = "covered by no test";
-const EVERY_WORKSPACE_COVERS = "covered by every discovered workspace";
-const COVERAGE_NOT_KNOWN = "its covering workspaces are not yet known";
-const NO_ERROR_RECORDED = "no error was recorded";
 const NOT_BOUND = "before it bound to an input revision";
-const COVERAGE_NOT_YET_KNOWN =
-  "Coverage: not yet known, so every test counts as covering";
-
-type CoverageState = WaitResponse["coverage"]["state"];
 
 export const waitCommand: Command = {
   name: NAME,
@@ -91,12 +80,6 @@ export const waitCommand: Command = {
   },
 };
 
-function requiredFiles(positionals: string[]): string[] {
-  if (positionals.length === 0) throw new UsageError("Missing file.");
-  for (const file of positionals) nonEmptyPath(file, "file");
-  return positionals;
-}
-
 /** Whole seconds in decimal digits, so no hex, exponent or padded form converts; the daemon's default when absent. */
 function waitOptions(limit: string | undefined): WaitOptions {
   if (limit === undefined) return {};
@@ -114,10 +97,7 @@ function waitText(answer: WaitResponse): string {
   return joinLines([
     headline(answer),
     coverageLine(answer.coverage),
-    FILES_HEADING,
-    ...answer.files.map(
-      (file) => `${INDENT}${fileText(file, answer.coverage.state)}`,
-    ),
+    ...fileLines(answer.files, answer.coverage.state),
     `Covering tests: ${answer.counts.tests}`,
     ...countLines(answer.counts),
     ...notDiscoveredLines(answer.notDiscovered),
@@ -153,49 +133,6 @@ function headline(answer: WaitResponse): string {
   }
 }
 
-function coverageLine(coverage: WaitResponse["coverage"]): string {
-  switch (coverage.state) {
-    case COVERAGE.selected:
-      return `Coverage: by selection at input revision ${coverage.revision}`;
-    case COVERAGE.widened:
-      return `Coverage: every discovered workspace at input revision ${coverage.revision}, since ${notNarrowedCause(coverage.widenedBy)}: ${cutReasonText(coverage.reason)}`;
-    case COVERAGE.notYetKnown:
-      return COVERAGE_NOT_YET_KNOWN;
-  }
-}
-
-function fileText(file: WaitFile, coverage: CoverageState): string {
-  const unread =
-    file.unread === undefined
-      ? []
-      : [`could not be read: ${cutReasonText(file.unread)}`];
-  return `${oneLine(file.path)}: ${[coveringText(file, coverage), ...unread].join(DETAIL_SEPARATOR)}`;
-}
-
-/** Selection's report, then the workspaces whose fingerprints list the file; a file neither reaches is covered by none. */
-function coveringText(file: WaitFile, coverage: CoverageState): string {
-  if (coverage === COVERAGE.widened) return EVERY_WORKSPACE_COVERS;
-  const { selection, listed } = file;
-  if (selection === undefined || listed === undefined) {
-    return COVERAGE_NOT_KNOWN;
-  }
-  const listing =
-    listed.named.length === 0 && listed.more === 0
-      ? []
-      : [`listed by ${namedText(listed, listedText)}`];
-  const nothing =
-    selection.selected.named.length === 0 && listing.length === 0
-      ? [NOTHING_COVERS]
-      : [];
-  return [...nothing, pathSelectionText(selection), ...listing].join(
-    DETAIL_SEPARATOR,
-  );
-}
-
-function listedText({ workspacePath, listedAs }: ListedCoverage): string {
-  return `${oneLine(workspacePath)} (${listedAs})`;
-}
-
 function failureLines(failures: WaitResponse["namedFailures"]): string[] {
   if (failures.named.length === 0) return [];
   return [
@@ -206,13 +143,5 @@ function failureLines(failures: WaitResponse["namedFailures"]): string[] {
 }
 
 function failureText(failure: NamedFailure): string {
-  const test =
-    failure.testName === undefined
-      ? ""
-      : `${NAME_PATH_SEPARATOR}${failure.testName.map(oneLine).join(NAME_PATH_SEPARATOR)}`;
-  const error =
-    failure.firstError === null
-      ? NO_ERROR_RECORDED
-      : cutReasonText(failure.firstError);
-  return `${oneLine(failure.workspacePath)} ${oneLine(failure.projectName)} ${oneLine(failure.modulePath)}${test}: ${failure.state}, ${failure.freshness}: ${error}`;
+  return `${testText(failure, failure.testName)}: ${failure.state}, ${failure.freshness}: ${firstErrorText(failure.firstError)}`;
 }

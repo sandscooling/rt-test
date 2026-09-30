@@ -1,6 +1,7 @@
 import type { FingerprintResult } from "../inputs/fingerprint.js";
 import type { JobVerdict } from "../inputs/input-jobs.js";
 import type { CurrentInputs, TrackedInputs } from "../inputs/input-tracker.js";
+import { narrowingAt, type QueryNarrowing } from "../inputs/narrowed-inputs.js";
 import type {
   NoAnswer,
   PathStatusAnswer,
@@ -8,16 +9,12 @@ import type {
   SummaryAnswer,
   WaitAnswer,
 } from "../query/answer.js";
+import type { ChangesAnswer } from "../query/changes-answer.js";
 import { resolveCallerPath } from "../query/caller-paths.js";
 import { pathStatusAnswer, withoutFingerprints } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
 import type { LatestResults, RtTestStore } from "../store/open-store.js";
-import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "../store/schema.js";
-import type {
-  StoreBindings,
-  StoredDiscovery,
-  StoreScope,
-} from "../store/stored-records.js";
+import type { StoredDiscovery, StoreScope } from "../store/stored-records.js";
 import {
   confirmedEntry,
   type ConfirmedStart,
@@ -27,6 +24,7 @@ import type {
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
+import { Changes, type ChangesMoment } from "./changes.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
 import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
@@ -35,6 +33,7 @@ import {
   interruptedRun,
   logMissingConfirmed,
   runToStore,
+  storeBindings,
   storeFailureReason,
   threwOutcome,
   UnstoredJobs,
@@ -54,7 +53,7 @@ import {
 } from "./run-judgment.js";
 import type { DiscoverReport } from "./discovery-history.js";
 import { Scheduler, type RunReport } from "./scheduler.js";
-import type { DaemonHandlers, WaitQuery } from "./server.js";
+import type { ChangesQuery, DaemonHandlers, WaitQuery } from "./server.js";
 import { StopSequence } from "./stop-sequence.js";
 import { NOT_AWAITED_REASON, Waits } from "./waits.js";
 import type { EndedRun } from "./workspace-schedule.js";
@@ -98,6 +97,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #builds: DependencyBuilds;
   readonly #scheduler: Scheduler;
   readonly #waits: Waits;
+  readonly #changes: Changes;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJobs;
   readonly #refusals: RefusalNotes;
@@ -125,10 +125,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       start: parts.start,
       quietWindowMs: parts.quietWindowMs,
       isStopping: () => this.isStopping(),
-      view: () => {
-        const results = this.#latestResults();
-        return { results, inputs: this.#queryInputs(results) };
-      },
+      view: () => this.#moment(),
       narrowing: () => this.#builds.narrowing(),
       awaitBuild: (subject) => this.#builds.awaitBuild(subject),
       discover: (revision) => this.#idleAfter(this.#discover(revision)),
@@ -138,18 +135,15 @@ export class DaemonLifecycle implements DaemonHandlers {
         this.#activity = { state: "idle" };
       },
     });
-    this.#waits = new Waits({
+    const reading = {
       consumerRoot: parts.identity.consumerRoot,
       inputs: parts.inputs,
       builds: this.#builds,
-      schedule: this.#scheduler.schedule,
       stopSignal: this.stopSignal,
-      moment: () => {
-        const results = this.#latestResults();
-        const inputs = this.#queryInputs(results);
-        return { results, view: this.#view(), inputs };
-      },
-    });
+      moment: () => this.#moment(),
+    };
+    this.#waits = new Waits({ ...reading, schedule: this.#scheduler.schedule });
+    this.#changes = new Changes({ ...reading, log: parts.log });
     this.#whenStopped = new Promise((resolve) => {
       this.#markStopped = resolve;
     });
@@ -159,6 +153,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     this.#protectStoredDiscovery();
     this.#parts.inputs.start();
     this.#builds.start();
+    this.#changes.start();
     this.#sequence = this.#scheduler
       .start()
       .catch((error: unknown) => {
@@ -214,16 +209,36 @@ export class DaemonLifecycle implements DaemonHandlers {
     return this.#waits.wait(query, signal);
   }
 
-  /**
-   * The inputs narrowed by the builds only while they build over the stored discovery the answer reads, which becomes
-   * theirs when a failed read at start left them none.
-   */
+  changes(
+    query: ChangesQuery,
+    signal: AbortSignal,
+  ): Promise<ChangesAnswer | NoAnswer | RefusedQuery> {
+    return this.#changes.answer(query, signal);
+  }
+
+  /** The latest stored results, the daemon's view, and the inputs narrowed for them with the narrowing at their revision. */
+  #moment(): ChangesMoment {
+    const results = this.#latestResults();
+    const query = this.#queryNarrowing(results);
+    const inputs = this.#parts.inputs.current(query);
+    const narrowing = narrowingAt(query, inputs.facts.revision);
+    return { results, view: this.#view(), inputs, narrowing };
+  }
+
   #queryInputs(results: LatestResults): CurrentInputs {
+    return this.#parts.inputs.current(this.#queryNarrowing(results));
+  }
+
+  /**
+   * The builds' state, which narrows the inputs only while they build over the stored discovery the answer reads, which
+   * becomes theirs when a failed read at start left them none.
+   */
+  #queryNarrowing(results: LatestResults): QueryNarrowing {
     if (results.discovery !== undefined) this.#builds.use(results.discovery);
-    return this.#parts.inputs.current({
+    return {
       ...this.#builds.narrowing(),
       discoveryId: results.discovery?.discoveryId,
-    });
+    };
   }
 
   isStopping(): boolean {
@@ -318,7 +333,8 @@ export class DaemonLifecycle implements DaemonHandlers {
       return report(false);
     }
     let movedOnceComposed = false;
-    const bindings = this.#bindings(
+    const bindings = storeBindings(
+      this.#parts,
       "the discovery",
       held,
       (): FingerprintResult => {
@@ -481,7 +497,8 @@ export class DaemonLifecycle implements DaemonHandlers {
     const { run } = left;
     await this.#builds.awaitBuild(`the verdict on ${job}`);
     const judgment = watch.judge(this.#runInputs());
-    const bindings = this.#bindings(
+    const bindings = storeBindings(
+      this.#parts,
       job,
       runVerdict(judgment),
       () => watch.started,
@@ -523,26 +540,6 @@ export class DaemonLifecycle implements DaemonHandlers {
     return this.#parts.inputs.current(this.#builds.narrowing());
   }
 
-  /** The job's record is bound to `fingerprint` only when its verdict says so. */
-  #bindings(
-    job: string,
-    verdict: JobVerdict,
-    fingerprint: () => FingerprintResult,
-  ): StoreBindings {
-    const { scope, log } = this.#parts;
-    const print: FingerprintResult = verdict.fingerprinted
-      ? fingerprint()
-      : { ok: false, reason: verdict.reason };
-    if (print.ok) {
-      return {
-        ...scope,
-        inputFingerprint: { kind: FINGERPRINT_DIGEST, digest: print.digest },
-      };
-    }
-    log.entry(`${job} is stored not fingerprinted: ${print.reason}`);
-    return { ...scope, inputFingerprint: { kind: NOT_FINGERPRINTED } };
-  }
-
   /** Returns whether the record was stored; a stored one leaves the list of jobs that stored nothing, and a failed write is logged and listed. */
   #store(
     what: string,
@@ -553,6 +550,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       write();
       this.#unstored.unlist(workspacePath);
       this.#waits.moved();
+      this.#changes.stored(`storing ${what}`);
       return true;
     } catch (error) {
       this.#parts.log.error(`storing ${what}`, error);

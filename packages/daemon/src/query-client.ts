@@ -5,6 +5,7 @@ import {
   type DaemonTarget,
 } from "./daemon/proven-connection.js";
 import {
+  CHANGES_TYPE,
   ERROR_TYPE,
   isWaitLimit,
   NOTHING_TO_ANSWER_CODE,
@@ -16,6 +17,8 @@ import {
   UNKNOWN_REQUEST_CODE,
   WAIT_LIMIT_MS,
   WAIT_TYPE,
+  type ChangesRequest,
+  type ChangesResponse,
   type PathStatusRequest,
   type PathStatusResponse,
   type ProtocolMessage,
@@ -27,10 +30,11 @@ import {
 import { errorText } from "./vitest/error-text.js";
 
 /**
- * How long a path status may take to answer, a target until measured: the daemon first reads the path, which for a
- * folder is every input it holds under it and for the root every input.
+ * How long a path status or a changes query may take to answer, a target until measured: the daemon first reads the
+ * named paths, which for a folder is every input it holds under it and for the root every input, more than any
+ * changes query's files.
  */
-const PATH_STATUS_BOUND_MS = 60_000;
+const READ_FIRST_BOUND_MS = 60_000;
 
 /** What the worktree's daemon's stored runs say about the whole worktree; it starts nothing. */
 export async function querySummary(
@@ -57,9 +61,38 @@ export async function queryPathStatus(
   const answer = await query(
     targetOf(consumerRoot, "query"),
     request,
-    PATH_STATUS_BOUND_MS,
+    READ_FIRST_BOUND_MS,
   );
   return answer as unknown as PathStatusResponse;
+}
+
+export interface ChangesOptions {
+  /** The cursor an earlier changes answer returned; absent for a baseline. */
+  readonly since?: string;
+}
+
+/**
+ * Which tests covering the files at the absolute `paths` changed state or freshness since `since`, answered at once
+ * with a cursor for the next call; it starts nothing and never waits.
+ */
+export async function queryChanges(
+  consumerRoot: string,
+  paths: readonly string[],
+  options: ChangesOptions = {},
+): Promise<ChangesResponse> {
+  const { since } = options;
+  const request: ChangesRequest = {
+    type: CHANGES_TYPE,
+    protocolVersion: PROTOCOL_VERSION,
+    paths,
+    ...(since === undefined ? {} : { since }),
+  };
+  const answer = await query(
+    targetOf(consumerRoot, "query"),
+    request,
+    READ_FIRST_BOUND_MS,
+  );
+  return answer as unknown as ChangesResponse;
 }
 
 export interface WaitOptions {
@@ -99,7 +132,7 @@ export async function queryWait(
  */
 async function query(
   target: DaemonTarget,
-  request: SummaryRequest | PathStatusRequest | WaitRequest,
+  request: SummaryRequest | PathStatusRequest | WaitRequest | ChangesRequest,
   boundMs?: number,
 ): Promise<ProtocolMessage> {
   const { consumerRoot } = target;

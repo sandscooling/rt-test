@@ -31,8 +31,7 @@ import type { WaitQuery } from "./server.js";
 import { boundedList, type ScheduleReader } from "./workspace-schedule.js";
 
 export const NOT_AWAITED_REASON = "nobody waits for the answer any more";
-const DIRECTORY_REASON = "is a directory, and a wait names only files";
-const REFUSAL_LEAD = "the wait refuses the paths it cannot take";
+const WAIT_QUERY = "wait";
 const REFUSAL_SEPARATOR = "; ";
 
 /** What moves the waits: the tracker, the schedule, the store and the dependency builds. */
@@ -117,7 +116,11 @@ export class Waits {
     query: WaitQuery,
     signal: AbortSignal,
   ): Promise<WaitResult | RefusedQuery> {
-    const resolved = this.#resolve(query.paths);
+    const resolved = resolveFiles(
+      query.paths,
+      this.#parts.consumerRoot,
+      WAIT_QUERY,
+    );
     if ("refused" in resolved) return Promise.resolve(resolved);
     return new Promise<WaitResult>((resolve, reject) => {
       const wait: PendingWait = {
@@ -155,21 +158,6 @@ export class Waits {
     const waiting = this.#storedWaiters;
     this.#storedWaiters = [];
     for (const resolve of waiting) resolve();
-  }
-
-  #resolve(
-    given: readonly string[],
-  ): { readonly paths: string[] } | RefusedQuery {
-    const paths = new Set<string>();
-    const refusals: string[] = [];
-    for (const path of given) {
-      const target = resolveCallerPath(path, this.#parts.consumerRoot);
-      if (!target.ok) refusals.push(target.reason);
-      else if (isDirectory(path)) refusals.push(`${path} ${DIRECTORY_REASON}`);
-      else paths.add(target.path);
-    }
-    if (refusals.length === 0) return { paths: [...paths] };
-    return { refused: `${REFUSAL_LEAD}: ${refusals.join(REFUSAL_SEPARATOR)}` };
   }
 
   /**
@@ -426,6 +414,31 @@ function differing(
   for (const path of paths) {
     if (before.get(path) !== after.get(path)) into.add(path);
   }
+}
+
+/**
+ * Each of the absolute `given` paths root-relative, each once, or the refusal of them all naming why each refused path
+ * cannot be taken: it lies outside the consumer root, is a directory, or is a missing name the Windows host may read as
+ * another. `query` names the query that takes only files.
+ */
+export function resolveFiles(
+  given: readonly string[],
+  consumerRoot: string,
+  query: string,
+): { readonly paths: string[] } | RefusedQuery {
+  const paths = new Set<string>();
+  const refusals: string[] = [];
+  for (const path of given) {
+    const target = resolveCallerPath(path, consumerRoot);
+    if (!target.ok) refusals.push(target.reason);
+    else if (isDirectory(path)) {
+      refusals.push(`${path} is a directory, and a ${query} names only files`);
+    } else paths.add(target.path);
+  }
+  if (refusals.length === 0) return { paths: [...paths] };
+  return {
+    refused: `the ${query} refuses the paths it cannot take: ${refusals.join(REFUSAL_SEPARATOR)}`,
+  };
 }
 
 /** A path that cannot be statted is left to the named read, which reports what it could not read. */
