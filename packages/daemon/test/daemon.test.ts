@@ -2108,4 +2108,63 @@ describe("the changes for files", () => {
     },
     KEY_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3566: a changes query gives its request only what is left of its bound once the hello is proven",
+    async () => {
+      const boundMs = 8_000;
+      const helloTakesMs = 3_000;
+      const withinWhatIsLeft = await inTempDir(async (root) => {
+        const daemon = answerAs(exitedPid(), "key");
+        const request = DaemonConnection.prototype.request;
+        const realNow = Date.now.bind(Date);
+        let passedMs = 0;
+        const clock = vi
+          .spyOn(Date, "now")
+          .mockImplementation(() => realNow() + passedMs);
+        const sent = vi
+          .spyOn(DaemonConnection.prototype, "request")
+          .mockImplementation(async function (
+            this: DaemonConnection,
+            message: object,
+            bound?: number,
+          ) {
+            const answer = await request.call(this, message, bound);
+            if ((message as ProtocolMessage)["type"] === "hello") {
+              passedMs += helloTakesMs;
+            }
+            return answer;
+          });
+        try {
+          await withKeyedStandIn(
+            root,
+            (context) => (request, standIn, connectionClosed) =>
+              request["type"] === CHANGES_TYPE
+                ? {
+                    type: ERROR_TYPE,
+                    code: STOPPING_CODE,
+                    message: "the daemon is stopping",
+                  }
+                : daemon(context)(request, standIn, connectionClosed),
+            () =>
+              settled(queryChanges(root, [join(root, "a.ts")], { boundMs })),
+          );
+          return sent.mock.calls
+            .filter(
+              ([message]) =>
+                (message as ProtocolMessage)["type"] === CHANGES_TYPE,
+            )
+            .map(
+              ([, bound]) =>
+                typeof bound === "number" && bound <= boundMs - helloTakesMs,
+            );
+        } finally {
+          sent.mockRestore();
+          clock.mockRestore();
+        }
+      });
+      expect(withinWhatIsLeft).toStrictEqual([true]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
 });

@@ -10281,5 +10281,12 @@
     "file": "packages/daemon/src/daemon/endpoint.ts",
     "old": "  return existsSync(directory) ? undefined : protectDirectory(directory);",
     "new": "  return undefined;"
+  },
+  {
+    "id": "D3566",
+    "defect": "A changes query gives its request the whole boundMs again once the hello is proven, rather than what is left of one deadline, so the hook's query can outlast the hook's own deadline and the no-answer line is never told.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "  const answer = await query(targetOf(consumerRoot, \"query\"), request, {\n    deadline,\n  });",
+    "new": "  const answer = await query(targetOf(consumerRoot, \"query\"), request, {\n    deadline,\n    requestMs: boundMs,\n  });"
   }
 ]

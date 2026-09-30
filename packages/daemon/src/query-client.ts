@@ -67,7 +67,7 @@ export async function queryPathStatus(
 export interface ChangesOptions {
   /** The cursor an earlier changes answer returned; absent for a baseline. */
   readonly since?: string;
-  /** A whole number of ms the whole query may take, the daemon's proof of its hello included; a path status's when absent. */
+  /** A whole number of ms the whole query may take, the daemon's proof of its hello included; `READ_FIRST_BOUND_MS` when absent. */
   readonly boundMs?: number;
 }
 

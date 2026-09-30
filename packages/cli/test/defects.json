@@ -1163,7 +1163,7 @@
   },
   {
     "id": "D3556",
-    "defect": "A batch's edited files are written to memory only with the daemon's answer, so a batch the deadline ends forgets them.",
+    "defect": "A batch's edited files are written to memory only with what the daemon's reply leads the run to write, an answer or the first telling of a loss, so a batch the deadline ends forgets them.",
     "file": "packages/cli/src/commands/hook.ts",
     "old": "      : saved(\n          run,\n          agent,\n          said(NOTHING),\n          withEdits(memory.of(agent), edited, Date.now()),\n        );",
     "new": "      : (memory.set(agent, withEdits(memory.of(agent), edited, Date.now())),\n        said(NOTHING));"
@@ -1195,5 +1195,33 @@
     "file": "packages/cli/src/commands/hook.ts",
     "old": "  const asked = await askSession(run, memory.of(agent).cursor);",
     "new": "  const asked = await askSession(run, undefined);"
+  },
+  {
+    "id": "D3565",
+    "defect": "The session's prompts write the main agent's memory file, so a prompt's run that overlaps a batch's run overwrites the file that batch edited, and the cursor it kept, with what the prompt's run read at its start.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "        onStanding(run, PROMPTS_WRITER, (line) =>",
+    "new": "        onStanding(run, agentWriter(undefined), (line) =>"
+  },
+  {
+    "id": "D3567",
+    "defect": "Whether a loss was told reads the latest answer from the teller's own files only, so an answer at a turn's end does not end a loss told to the main agent, and its next loss goes untold.",
+    "file": "packages/cli/src/hook-memory.ts",
+    "old": "    const answers = [...this.#memories.values()].map(",
+    "new": "    const answers = this.#tellers(writer).map((teller) => this.of(teller)).map("
+  },
+  {
+    "id": "D3568",
+    "defect": "A turn end or a prompt that gets an answer does not record it, so it does not end a loss told to the main agent, and the main agent's next loss goes untold.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "        ...run.memory.of(writer),\n        answeredAt: Date.now(),\n",
+    "new": "        ...run.memory.of(writer),\n"
+  },
+  {
+    "id": "D3569",
+    "defect": "With every remembered file unusable the hook asks again about no file, and an answer to that empty request drops every edited file from the agent's memory, so the session asks nothing from then on.",
+    "file": "packages/cli/src/commands/hook.ts",
+    "old": "  if (unusable.size === 0 || rest.length === 0) return none;",
+    "new": "  if (unusable.size === 0) return none;"
   }
 ]

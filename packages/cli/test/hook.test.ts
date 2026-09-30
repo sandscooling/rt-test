@@ -1045,3 +1045,99 @@ describe("the session's memory", () => {
     });
   });
 });
+
+describe("runs of one session that overlap", () => {
+  it("D3565: a prompt's run that overlaps a batch's run leaves the file that batch edited, and the cursor it kept, in the main agent's memory", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const first = join(root, "a.ts");
+      const second = join(root, "b.ts");
+      await run(BATCH, [withoutCursor({ cursor: "main.1" })], {
+        toolCalls: [write(first)],
+      });
+      let release: (answer: ChangesResponse) => void = () => undefined;
+      const held = new Promise<ChangesResponse>((resolve) => {
+        release = resolve;
+      });
+      const prompt = run(PROMPT, [held as unknown as ChangesResponse]);
+      while (scripted.calls.length < 2) await nextTurn();
+      await run(BATCH, [determined({ cursor: "main.2" })], {
+        toolCalls: [write(second)],
+      });
+      release(withoutCursor());
+      await prompt;
+      await run(BATCH, [determined()], { toolCalls: [bash()] });
+      const last = scripted.calls.at(-1);
+      return {
+        first,
+        second,
+        asked: last?.[1],
+        since: (last?.[2] as ChangesOptions | undefined)?.since,
+      };
+    });
+    expect({ asked: outcome.asked, since: outcome.since }).toStrictEqual({
+      asked: [outcome.second, outcome.first],
+      since: "main.2",
+    });
+  });
+});
+
+describe("the end of a loss", () => {
+  it("D3567: an answer at a turn's end ends a loss told to the main agent, so its next loss is told again", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const runs = [
+        await run(BATCH, [stopping(root)], {
+          toolCalls: [write(join(root, "a.ts"))],
+        }),
+        await run(STOP, [withoutCursor()]),
+        await run(BATCH, [stopping(root)], { toolCalls: [bash()] }),
+      ];
+      return { root, printed: runs.map(printed) };
+    });
+    expect(outcome.printed).toStrictEqual([
+      context(BATCH, noAnswerLine(outcome.root)),
+      {},
+      context(BATCH, noAnswerLine(outcome.root)),
+    ]);
+  });
+
+  it("D3568: an answer with a prompt ends a loss told to the main agent, so its next loss is told again", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const runs = [
+        await run(BATCH, [stopping(root)], {
+          toolCalls: [write(join(root, "a.ts"))],
+        }),
+        await run(PROMPT, [withoutCursor()]),
+        await run(BATCH, [stopping(root)], { toolCalls: [bash()] }),
+      ];
+      return { root, printed: runs.map(printed) };
+    });
+    expect(outcome.printed).toStrictEqual([
+      context(BATCH, noAnswerLine(outcome.root)),
+      {},
+      context(BATCH, noAnswerLine(outcome.root)),
+    ]);
+  });
+
+  it("D3569: a loss while the only remembered file has vanished asks the daemon once, tells the loss, and keeps the file remembered", async () => {
+    const outcome = await inHookSession(async ({ root, run }) => {
+      const file = join(root, "a.ts");
+      writeFileSync(file, "");
+      await run(BATCH, [withoutCursor()], { toolCalls: [write(file)] });
+      rmSync(file);
+      const lost = await run(BATCH, [stopping(root), withoutCursor()], {
+        toolCalls: [bash()],
+      });
+      await run(BATCH, [determined()], { toolCalls: [bash()] });
+      return {
+        root,
+        file,
+        lost: { exit: lost.exit, printed: printed(lost) },
+        asked: askedPaths(),
+      };
+    });
+    expect({ lost: outcome.lost, asked: outcome.asked }).toStrictEqual({
+      lost: { exit: 1, printed: context(BATCH, noAnswerLine(outcome.root)) },
+      asked: [[outcome.file], [outcome.file], [outcome.file]],
+    });
+  });
+});
