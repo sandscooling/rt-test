@@ -24,7 +24,10 @@ const NON_INPUTS_MEMBER = "nonInputs";
 const NON_INPUT_VARIABLES_MEMBER = "nonInputVariables";
 /** Every file of a full reconciliation is tested against every pattern, so this bounds that work. */
 const MAX_NON_INPUT_PATTERNS = 256;
-/** Every environment variable is tested against every entry at each reconciliation, so this bounds that work. */
+/**
+ * Every environment variable is tested against every entry at each reconciliation, and again for each set of
+ * variables a workspace counts by value, so this bounds that work.
+ */
 const MAX_NON_INPUT_VARIABLES = 256;
 const NO_VARIABLES: readonly string[] = [];
 const GLOBSTAR = "**";
@@ -54,7 +57,10 @@ export type NonInputsDeclaration =
       readonly file: typeof NON_INPUTS_FILE;
       readonly state: typeof NON_INPUTS_DECLARED;
       readonly patterns: readonly string[];
-      /** Present only when the file has the member: names, or prefixes ending in `*`, counted only as set. */
+      /**
+       * Present only when the file has the member: names, or prefixes ending in `*`, counted only as set, except for a
+       * workspace whose tests Vite can carry one to.
+       */
       readonly variables?: readonly string[];
     }
   | {

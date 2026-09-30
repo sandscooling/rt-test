@@ -301,6 +301,11 @@ export function holdsFileContent(digest: string): boolean {
   return digest.startsWith(`${FILE_KIND}${KIND_SEPARATOR}`);
 }
 
+/** The digest the inputs hold for a file whose content digests as `content`, read directly or through a link. */
+export function heldFileDigest(content: string): string {
+  return `${FILE_KIND}${KIND_SEPARATOR}${content}`;
+}
+
 /** A digest of text or bytes held whole in memory, where `contentDigest` streams a file. */
 export function wholeDigest(content: string | Uint8Array): string {
   return createHash(DIGEST_ALGORITHM).update(content).digest(DIGEST_ENCODING);

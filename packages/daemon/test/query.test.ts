@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { WorkspaceSchedule } from "../src/daemon/workspace-schedule.js";
 import { currentInputs } from "../src/inputs/current-inputs.js";
-import { countEnvironment } from "../src/inputs/environment-digest.js";
 import {
   ProjectInputs,
   type FingerprintResult,
@@ -41,7 +40,7 @@ import type { UnreadWorkspaceSource } from "../src/vitest/find-workspaces.js";
 import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
 import type { TestOutcome } from "@rt-test/core";
-import { inTempDir, onPlatform } from "./harness.js";
+import { handBuiltEnvironment, inTempDir, onPlatform } from "./harness.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 type DiscoveredWorkspace = Extract<
@@ -1086,7 +1085,7 @@ function viewOf(
     facts: SETTLED_FACTS,
     unavailable,
     nonInputsUnusable: undefined,
-    environment: countEnvironment(process.env, []).digest,
+    environment: handBuiltEnvironment(process.env),
     narrowing,
     project: () =>
       new ProjectInputs(

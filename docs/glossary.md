@@ -47,7 +47,7 @@ A file the consumer lists in `rt-test.json` as read by no test, so a change to i
 _Avoid_: ignored file, excluded file
 
 **Non-input variable**:
-An environment variable whose value the input fingerprint leaves out, counting only whether it is set and whether it is empty: a session or process identifier on RT Test's fixed list, or one `rt-test.json` declares in `nonInputVariables`.
+An environment variable whose value the input fingerprint leaves out, counting only whether it is set and whether it is empty: a session or process identifier on RT Test's fixed list, or one `rt-test.json` declares in `nonInputVariables`. A discovered workspace whose tests Vite can hand one to, through an env file's expansion or an env prefix, counts it by value.
 _Avoid_: ignored variable, session variable
 
 **Start environment**:
@@ -161,6 +161,10 @@ _Avoid_: cancelled, timed out
 **Unsettled**:
 A wait's answer when its time limit passed before every covering test had a current result or an explicit non-current state, naming what each covering workspace is still doing.
 _Avoid_: timed out, failed
+
+**Cursor**:
+The token a `changes` answer returns, naming the test standings the daemon recorded when it answered, so the next `changes` call reports only what changed since.
+_Avoid_: checkpoint, bookmark, since-id
 
 ### Falsification
 
