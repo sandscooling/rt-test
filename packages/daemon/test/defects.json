@@ -1557,8 +1557,8 @@
     "id": "D1444",
     "defect": "A line that is not JSON closes the connection, so the client's next request goes unanswered.",
     "file": "packages/daemon/src/daemon/server.ts",
-    "old": "    send(socket, error(\"invalid-json\", `the line is ${parsed.reason}`));",
-    "new": "    send(socket, error(\"invalid-json\", `the line is ${parsed.reason}`));\n    socket.end();"
+    "old": "    connection.reply(error(\"invalid-json\", `the line is ${parsed.reason}`));",
+    "new": "    connection.reply(error(\"invalid-json\", `the line is ${parsed.reason}`));\n    connection.socket.end();"
   },
   {
     "id": "D1445",
@@ -1585,8 +1585,8 @@
     "id": "D1448",
     "defect": "The daemon greets a connection before it has sent anything, so a read-only client of another user receives data.",
     "file": "packages/daemon/src/daemon/server.ts",
-    "old": "      serve(socket, { handlers, prove }, log);",
-    "new": "      socket.write(encodeLine({ type: \"greeting\" }));\n      serve(socket, { handlers, prove }, log);"
+    "old": "      serve(connection, { handlers, prove }, log);",
+    "new": "      socket.write(encodeLine({ type: \"greeting\" }));\n      serve(connection, { handlers, prove }, log);"
   },
   {
     "id": "D1449",
@@ -1662,7 +1662,7 @@
     "id": "D1459",
     "defect": "A stop does not abort the job in progress, so it waits out a run to its end.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    executor.abort();",
+    "old": "    void this.#halting(failures, () => executor.abort());\n",
     "new": ""
   },
   {
@@ -1683,8 +1683,8 @@
     "id": "D1463",
     "defect": "A stop during a stop starts a second stop sequence instead of joining the first.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    this.#stopping ??= this.#stopSequence().finally(() => this.#markStopped());",
-    "new": "    this.#stopping = this.#stopSequence().finally(() => this.#markStopped());"
+    "old": "    if (this.isStopping()) return;\n    this.#stopBegun.abort();",
+    "new": "    this.#stopBegun.abort();"
   },
   {
     "id": "D1464",
@@ -2040,8 +2040,8 @@
     "id": "D1569",
     "defect": "The version-mismatch error carries no proof, so a client of any version cannot tell this user's daemon of another version from an impostor.",
     "file": "packages/daemon/src/daemon/server.ts",
-    "old": "    pid: handlers.identity.pid,\n    ...withProof(proof),\n  };\n  send(socket, mismatch);",
-    "new": "    pid: handlers.identity.pid,\n  };\n  send(socket, mismatch);"
+    "old": "    pid: handlers.identity.pid,\n    ...withProof(proof),\n  };\n  connection.reply(mismatch);",
+    "new": "    pid: handlers.identity.pid,\n  };\n  connection.reply(mismatch);"
   },
   {
     "id": "D1570",
@@ -2775,8 +2775,8 @@
     "id": "D1838",
     "defect": "A query that throws is answered without what went wrong, so the reason never says why it failed.",
     "file": "packages/daemon/src/daemon/server.ts",
-    "old": "    return error(QUERY_FAILED_CODE, `the query failed: ${errorText(failure)}`);",
-    "new": "    return error(QUERY_FAILED_CODE, \"the query failed\");"
+    "old": "  return error(QUERY_FAILED_CODE, `the query failed: ${errorText(failure)}`);",
+    "new": "  return error(QUERY_FAILED_CODE, \"the query failed\");"
   },
   {
     "id": "D1839",
@@ -2894,7 +2894,7 @@
     "id": "D1881",
     "defect": "The stop sequence never stops the input tracker, so a job's end waiting on the inputs holds the stop forever.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.stop();\n",
+    "old": "    await this.#halting(failures, () => inputs.stop());\n",
     "new": ""
   },
   {
@@ -4644,7 +4644,7 @@
     "id": "D2520",
     "defect": "The stop sequence never stops the dependency builds, so a run waiting for a build holds the stop for good.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const buildsStopped = this.#builds.stop();\n",
+    "old": "    const buildsStopped = this.#halting(failures, () => this.#builds.stop());\n",
     "new": "    const buildsStopped = Promise.resolve();\n"
   },
   {
@@ -8230,5 +8230,250 @@
     "file": "packages/daemon/src/daemon/scheduler.ts",
     "old": "      if (refusedAtPlan) return;\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
     "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) return;\n      begun.notBegun();\n"
+  },
+  {
+    "id": "D3187",
+    "defect": "A late answer is never written, so its client waits on a request whose work has answered.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    turn.message = message;\n    this.#flush();",
+    "new": "    turn.message = message;"
+  },
+  {
+    "id": "D3188",
+    "defect": "A request pending on one connection holds every other connection's answers, which queue behind it.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "class ServedConnection {\n  state: ConnectionState = \"awaiting-hello\";\n  readonly socket: Socket;\n  readonly #log: DaemonLog;\n  readonly #turns: Turn[] = [];",
+    "new": "const SHARED_TURNS: Turn[] = [];\nclass ServedConnection {\n  state: ConnectionState = \"awaiting-hello\";\n  readonly socket: Socket;\n  readonly #log: DaemonLog;\n  readonly #turns: Turn[] = SHARED_TURNS;"
+  },
+  {
+    "id": "D3189",
+    "defect": "An answer ready at once is written ahead of an earlier request's answer still pending, so the client takes it as that request's answer.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    this.#queue({ message: answer, work: undefined });",
+    "new": "    send(this.socket, answer);"
+  },
+  {
+    "id": "D3190",
+    "defect": "A connection with exactly 8 requests unanswered is closed, one short of the bound.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    if (this.#turns.length > MAX_UNANSWERED_REQUESTS) this.#closeOverBound();",
+    "new": "    if (this.#turns.length >= MAX_UNANSWERED_REQUESTS) this.#closeOverBound();"
+  },
+  {
+    "id": "D3191",
+    "defect": "A connection that keeps sending requests behind a pending one is never closed, so the daemon holds an answer for each without bound.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    if (this.#turns.length > MAX_UNANSWERED_REQUESTS) this.#closeOverBound();",
+    "new": ""
+  },
+  {
+    "id": "D3193",
+    "defect": "After a hello of another version, the next line ends the connection at once, cutting off the pending request's answer and the mismatch error queued behind it.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    connection.endOnceAnswered();",
+    "new": "    connection.socket.end();"
+  },
+  {
+    "id": "D3194",
+    "defect": "A stop leaves each pending request unanswered, so its client waits out its bound for an answer the daemon will never give.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      for (const connection of connections) connection.answerPendingStopping();",
+    "new": "      for (const connection of connections) void connection;"
+  },
+  {
+    "id": "D3195",
+    "defect": "A stop answers a pending request but leaves its work running, so the work reads the store the stop is closing.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      turn.message = stoppingError();\n      turn.work?.abort();",
+    "new": "      turn.message = stoppingError();"
+  },
+  {
+    "id": "D3196",
+    "defect": "A request the stop answered still has its work's later answer written, so the client takes that line as the answer to its next request.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    void answer.then((message) => this.#settle(turn, message));",
+    "new": "    void answer.then((message) => send(this.socket, message));"
+  },
+  {
+    "id": "D3197",
+    "defect": "A stop replaces an answer already computed and waiting its turn with the stopping error.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      if (turn.message !== undefined) continue;\n      turn.message = stoppingError();",
+    "new": "      turn.message = stoppingError();"
+  },
+  {
+    "id": "D3198",
+    "defect": "A stop request's acknowledgement is written ahead of the stopping error of an earlier pending request, so the client takes the acknowledgement as that request's answer.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    handlers.stop();\n    connection.reply(\n      stopAcknowledgement(handlers, prove(parsed.message[\"challenge\"])),\n    );",
+    "new": "    send(\n      connection.socket,\n      stopAcknowledgement(handlers, prove(parsed.message[\"challenge\"])),\n    );\n    handlers.stop();"
+  },
+  {
+    "id": "D3199",
+    "defect": "A status while the daemon stops is refused with the stopping error, so a client cannot read the stop's state.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (message[\"type\"] === STATUS_TYPE) {\n    return { type: STATUS_TYPE, ...handlers.identity, ...handlers.status() };\n  }\n  if (handlers.isStopping()) {\n    return stoppingError();\n  }",
+    "new": "  if (handlers.isStopping()) {\n    return stoppingError();\n  }\n  if (message[\"type\"] === STATUS_TYPE) {\n    return { type: STATUS_TYPE, ...handlers.identity, ...handlers.status() };\n  }"
+  },
+  {
+    "id": "D3200",
+    "defect": "The stop signal aborts only once the stop sequence has run, so a pending request waits through the whole stop for its stopping error.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    this.#stopBegun.abort();\n    void this.#stopSequence()",
+    "new": "    void this.#stopSequence()\n      .then(() => this.#stopBegun.abort())"
+  },
+  {
+    "id": "D3201",
+    "defect": "The lifecycle reads not stopping once its stop has begun, so the server answers a query from the store the stop is closing.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    return this.stopSignal.aborted;",
+    "new": "    return false;"
+  },
+  {
+    "id": "D3202",
+    "defect": "A client's close leaves its pending request's work running for a client that is gone.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    for (const turn of this.#turns.splice(0)) {\n      if (turn.message === undefined) turn.work?.abort();\n    }",
+    "new": "    this.#turns.splice(0);"
+  },
+  {
+    "id": "D3203",
+    "defect": "A late answer's rejection after its connection closed is an unhandled rejection, which ends the daemon.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      ? response.then((late) => checkedAnswer(type, late)).catch(queryFailed)",
+    "new": "      ? response.then((late) => checkedAnswer(type, late))"
+  },
+  {
+    "id": "D3204",
+    "defect": "A late answer's rejection is answered without what went wrong, so the reason never says why the query failed.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      ? response.then((late) => checkedAnswer(type, late)).catch(queryFailed)",
+    "new": "      ? response.then((late) => checkedAnswer(type, late)).catch(() => error(QUERY_FAILED_CODE, \"the query failed\"))"
+  },
+  {
+    "id": "D3205",
+    "defect": "A late answer skips the checks an answer given at once passes, so a late nothing-to-answer is written as a summary.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      ? response.then((late) => checkedAnswer(type, late)).catch(queryFailed)",
+    "new": "      ? response.then((late) => ({ ...late, type, protocolVersion: PROTOCOL_VERSION })).catch(queryFailed)"
+  },
+  {
+    "id": "D3206",
+    "defect": "A late answer skips the line-limit check an answer given at once passes, so an answer past the limit is written as a line no client can read.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "      ? response.then((late) => checkedAnswer(type, late)).catch(queryFailed)",
+    "new": "      ? response.then((late) => ({ ...late, type, protocolVersion: PROTOCOL_VERSION })).catch(queryFailed)"
+  },
+  {
+    "id": "D3207",
+    "defect": "A request's own bound is ignored for the default, so a caller's longer wait is cut off at 10000 ms.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      }, boundMs);",
+    "new": "      }, RESPONSE_BOUND_MS);"
+  },
+  {
+    "id": "D3208",
+    "defect": "A request given no bound waits twice the response bound, so a daemon that is not answering holds its client for 20 s.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "    boundMs: number = RESPONSE_BOUND_MS,",
+    "new": "    boundMs: number = 2 * RESPONSE_BOUND_MS,"
+  },
+  {
+    "id": "D3209",
+    "defect": "A request whose bound passes leaves its connection open, so the daemon keeps running the work of a request nobody waits for.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "        this.#waiting = undefined;\n        this.#socket.destroy();\n        reject(",
+    "new": "        this.#waiting = undefined;\n        reject("
+  },
+  {
+    "id": "D3210",
+    "defect": "A bound of 0 ms reaches the timer, which fires it after 1 ms.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      boundMs < MIN_TIMER_DELAY_MS ||",
+    "new": "      boundMs < 0 ||"
+  },
+  {
+    "id": "D3211",
+    "defect": "A fractional bound reaches the timer, which truncates it.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      !Number.isInteger(boundMs) ||\n      boundMs < MIN_TIMER_DELAY_MS ||",
+    "new": "      boundMs < MIN_TIMER_DELAY_MS ||"
+  },
+  {
+    "id": "D3212",
+    "defect": "A bound past the timer's ceiling reaches the timer, which fires it after 1 ms.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      boundMs < MIN_TIMER_DELAY_MS ||\n      boundMs > MAX_TIMER_DELAY_MS",
+    "new": "      boundMs < MIN_TIMER_DELAY_MS"
+  },
+  {
+    "id": "D3213",
+    "defect": "A bound of 1 ms, the least a timer keeps, is refused.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      boundMs < MIN_TIMER_DELAY_MS ||",
+    "new": "      boundMs <= MIN_TIMER_DELAY_MS ||"
+  },
+  {
+    "id": "D3214",
+    "defect": "A bound at the timer's ceiling is refused.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      boundMs > MAX_TIMER_DELAY_MS",
+    "new": "      boundMs >= MAX_TIMER_DELAY_MS"
+  },
+  {
+    "id": "D3215",
+    "defect": "A request with a refused bound is still written, so its answer is read as the answer to the next request.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "  ): Promise<ProtocolMessage> {\n    if (",
+    "new": "  ): Promise<ProtocolMessage> {\n    this.#socket.write(encodeLine(message));\n    if ("
+  },
+  {
+    "id": "D3216",
+    "defect": "A second request while the first waits for its answer is written and takes the first one's answer.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "    if (this.#waiting !== undefined) {\n      throw new Error(\n        \"another request on this connection still waits for its answer\",\n      );\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D3247",
+    "defect": "A stop sequence that rejects is an unhandled rejection, which ends the daemon with nothing in its log.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    void this.#stopSequence()\n      .catch((error: unknown) => {\n        this.#parts.log.error(\"the stop sequence failed\", error);\n      })\n      .finally",
+    "new": "    void this.#stopSequence()\n      .finally"
+  },
+  {
+    "id": "D3248",
+    "defect": "A NaN bound passes a whole-number check by remainder and reaches the timer, which fires it after 1 ms.",
+    "file": "packages/daemon/src/daemon/daemon-connection.ts",
+    "old": "      !Number.isInteger(boundMs) ||",
+    "new": "      boundMs % 1 > 0 ||"
+  },
+  {
+    "id": "D3192",
+    "defect": "A tracker stop that rejects skips the executor, build executor, store and endpoint closings, so the daemon exits leaving its key and lock files and a build process behind.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    await this.#halting(failures, () => inputs.stop());\n",
+    "new": "    await inputs.stop();\n"
+  },
+  {
+    "id": "D3249",
+    "defect": "The bound counts only requests whose work still runs, so a client that sends one late request and then any number answered at once makes the daemon hold every one of those answers without bound.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    if (this.#turns.length > MAX_UNANSWERED_REQUESTS) this.#closeOverBound();",
+    "new": "    if (this.#turns.filter((turn) => turn.message === undefined).length > MAX_UNANSWERED_REQUESTS) this.#closeOverBound();"
+  },
+  {
+    "id": "D3254",
+    "defect": "A stop request on a connection holding 8 unanswered requests queues its acknowledgement first, which passes the bound and closes the connection, so neither the stopping errors nor the acknowledgement is written.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    handlers.stop();\n    connection.reply(\n      stopAcknowledgement(handlers, prove(parsed.message[\"challenge\"])),\n    );",
+    "new": "    connection.reply(\n      stopAcknowledgement(handlers, prove(parsed.message[\"challenge\"])),\n    );\n    handlers.stop();"
+  },
+  {
+    "id": "D3255",
+    "defect": "A stop whose sequence fails never resolves stopped(), so the daemon never exits and keeps its lock.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    void this.#stopSequence()\n      .catch((error: unknown) => {\n        this.#parts.log.error(\"the stop sequence failed\", error);\n      })\n      .finally(() => this.#markStopped());",
+    "new": "    void this.#stopSequence()\n      .then(() => this.#markStopped())\n      .catch((error: unknown) => {\n        this.#parts.log.error(\"the stop sequence failed\", error);\n      });"
   }
 ]

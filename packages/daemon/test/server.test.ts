@@ -1,15 +1,21 @@
 import { once } from "node:events";
 import { createConnection, Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
+import { DaemonConnection } from "../src/daemon/daemon-connection.js";
 import {
   daemonVerifier,
   type DaemonVerifier,
 } from "../src/daemon/endpoint-proof.js";
 import {
   PROTOCOL_VERSION,
+  RESPONSE_BOUND_MS,
   type DaemonIdentity,
 } from "../src/daemon/protocol.js";
-import type { SummaryAnswer } from "../src/query/answer.js";
+import type {
+  NoAnswer,
+  PathStatusAnswer,
+  SummaryAnswer,
+} from "../src/query/answer.js";
 import {
   CLOSE_GRACE_MS,
   connectionServer,
@@ -22,12 +28,16 @@ import {
   eventually,
   keyedEndpoint,
   memoryLog,
+  RawConnection,
+  settled,
+  until,
   withConnection,
   withDaemonKey,
-  type RawConnection,
 } from "./daemon-harness.js";
-import { inTempDir } from "./harness.js";
+import { inTempDir, WAITING, within } from "./harness.js";
+import { Deferred } from "./scheduling-harness.js";
 import { testSocketPath, withTestEndpoint } from "./test-endpoint.js";
+import { unhandledRejectionsDuring } from "./unhandled-rejections.js";
 
 /** The longest path `listen` accepts for a Unix socket: `sun_path` holds 108 bytes, the last for the terminating NUL. */
 const SOCKET_PATH_LIMIT_BYTES = 107;
@@ -54,15 +64,26 @@ type Queries = Partial<Pick<DaemonHandlers, "summary" | "pathStatus">>;
 
 const NO_STAND_IN_ANSWER = { noAnswer: "the stand-in answers no query" };
 
-function handlers(stopping: boolean, queries: Queries = {}): DaemonHandlers {
+/** The stand-in begins its stop as the lifecycle does, by aborting `stop`, whose signal `isStopping` reads. */
+function handlers(
+  stopping: boolean,
+  queries: Queries = {},
+  stop = new AbortController(),
+): DaemonHandlers {
+  if (stopping) stop.abort();
   return {
     identity: IDENTITY,
-    status: () => ({ activity: { state: "idle" }, stopping, unstoredJobs: [] }),
+    stopSignal: stop.signal,
+    status: () => ({
+      activity: { state: "idle" },
+      stopping: stop.signal.aborted,
+      unstoredJobs: [],
+    }),
     summary: () => NO_STAND_IN_ANSWER,
     pathStatus: () => NO_STAND_IN_ANSWER,
     ...queries,
-    stop: () => undefined,
-    isStopping: () => stopping,
+    stop: () => stop.abort(),
+    isStopping: () => stop.signal.aborted,
   };
 }
 
@@ -119,24 +140,106 @@ const PROVEN_WORKTREE = "/consumer";
 const LONGEST_CHALLENGE = "c".repeat(256);
 const OVERLONG_CHALLENGE = "c".repeat(257);
 
-/** Each answer by its type and error code, which is what a client branches on. */
+/** An answer by its type and error code, which is what a client branches on. */
+function kindOf(
+  line: Awaited<ReturnType<RawConnection["next"]>> | typeof WAITING,
+): unknown {
+  if (line === CLOSED || line === WAITING) return line;
+  return {
+    type: line["type"],
+    ...("code" in line ? { code: line["code"] } : {}),
+  };
+}
+
+/** Each of the next `count` answers by its kind. */
 async function answerKinds(
   connection: RawConnection,
   count: number,
 ): Promise<unknown[]> {
   const kinds: unknown[] = [];
   for (let index = 0; index < count; index += 1) {
-    const line = await connection.next();
-    kinds.push(
-      line === CLOSED
-        ? CLOSED
-        : {
-            type: line["type"],
-            ...("code" in line ? { code: line["code"] } : {}),
-          },
-    );
+    kinds.push(kindOf(await connection.next()));
   }
   return kinds;
+}
+
+const SUMMARY = { type: "summary", protocolVersion: PROTOCOL_VERSION };
+
+/** Several requests written at once, so the daemon reads them together, in order. */
+function linesOf(...messages: object[]): string {
+  return messages.map((message) => `${JSON.stringify(message)}\n`).join("");
+}
+
+/** A summary whose content no test reads: only its type reaches a client's branch. */
+const LATE_SUMMARY = { answered: "late" } as unknown as SummaryAnswer;
+
+/** Answers every summary with a promise the test settles, recording the signal each summary's work was given. */
+class LateSummaries {
+  readonly signals: AbortSignal[] = [];
+  readonly #answers: Deferred<SummaryAnswer | NoAnswer>[] = [];
+
+  readonly summary = (
+    signal: AbortSignal,
+  ): Promise<SummaryAnswer | NoAnswer> => {
+    const answer = new Deferred<SummaryAnswer | NoAnswer>();
+    this.signals.push(signal);
+    this.#answers.push(answer);
+    return answer.promise;
+  };
+
+  /** Settles the summary asked `index`th, from 0. */
+  answer(index: number, value: SummaryAnswer | NoAnswer = LATE_SUMMARY): void {
+    this.#answers[index]?.resolve(value);
+  }
+
+  /** Resolves once `count` summaries have been asked. */
+  asked(count: number): Promise<void> {
+    return until(() => this.signals.length === count);
+  }
+}
+
+/**
+ * Serves stand-in handlers whose summaries `late` answers, and hands `body` a way to open connections to them and the
+ * controller whose abort begins the stop, as the lifecycle's `stop()` does for a stop signal. Closes every connection
+ * however `body` ends.
+ */
+function onLateServer<T>(
+  late: LateSummaries,
+  body: (
+    connect: () => Promise<RawConnection>,
+    stop: AbortController,
+  ) => Promise<T>,
+  queries: Queries = {},
+): Promise<T> {
+  const stop = new AbortController();
+  const server = connectionServer(
+    handlers(false, { summary: late.summary, ...queries }, stop),
+    memoryLog(),
+    NO_PROOF,
+  );
+  const opened: RawConnection[] = [];
+  return withTestEndpoint(server.onConnection, async (path) => {
+    try {
+      return await body(async () => {
+        const connection = await RawConnection.open(path);
+        opened.push(connection);
+        return connection;
+      }, stop);
+    } finally {
+      for (const connection of opened) connection.close();
+    }
+  });
+}
+
+/** A connection that has said hello, with `requests` written after it; resolves once the hello's answer is read. */
+async function helloThen(
+  connect: () => Promise<RawConnection>,
+  ...requests: object[]
+): Promise<RawConnection> {
+  const connection = await connect();
+  connection.send(linesOf(HELLO, ...requests));
+  await connection.next();
+  return connection;
 }
 
 describe("answering a bad line and serving on", () => {
@@ -207,6 +310,14 @@ describe("answering a bad line and serving on", () => {
       { type: "error", code: "stopping" },
     ]);
   });
+
+  it("D3199: a status while the daemon stops is answered with the status, not the stopping error", async () => {
+    const kinds = await onServer((connection) => {
+      connection.send(linesOf(HELLO, STATUS));
+      return answerKinds(connection, 2);
+    }, true);
+    expect(kinds).toStrictEqual([{ type: "hello" }, { type: "status" }]);
+  });
 });
 
 describe("writing only in answer to a line", () => {
@@ -224,7 +335,6 @@ describe("writing only in answer to a line", () => {
 });
 
 describe("answering a query", () => {
-  const SUMMARY = { type: "summary", protocolVersion: PROTOCOL_VERSION };
   /** The frozen 1 MiB line limit, in bytes. */
   const LINE_LIMIT_BYTES = 1_048_576;
 
@@ -374,7 +484,528 @@ describe("answering a query", () => {
       asked: [],
     });
   });
+
+  it("D3204: a query whose work rejects later gets a query-failed error saying what went wrong", async () => {
+    expect(
+      await summaryError({
+        summary: () => Promise.reject(new Error("the store is unreadable")),
+      }),
+    ).toStrictEqual({
+      type: "error",
+      code: "query-failed",
+      message: expect.stringContaining("the store is unreadable"),
+    });
+  });
+
+  it("D3205: a query whose work later has nothing to answer gets a nothing-to-answer error carrying the reason", async () => {
+    const reason = "the latest discovery holds no test";
+    expect(
+      await summaryError({
+        summary: () => Promise.resolve({ noAnswer: reason }),
+      }),
+    ).toStrictEqual({
+      type: "error",
+      code: "nothing-to-answer",
+      message: reason,
+    });
+  });
+
+  it("D3206: a late answer one byte past the line limit is refused with a reason giving its size and the limit", async () => {
+    const answer = answerOfSize(LINE_LIMIT_BYTES + 1);
+    expect(
+      await summaryError({ summary: () => Promise.resolve(answer) }),
+    ).toStrictEqual({
+      type: "error",
+      code: "nothing-to-answer",
+      message: expect.stringMatching(/1048577 bytes.*1048576 bytes/),
+    });
+  });
 });
+
+/** Long enough for a line the daemon wrote at once to reach the client, so its absence means it was not written. */
+const NOT_WRITTEN_MS = 100;
+const PATH_STATUS = {
+  type: "path-status",
+  protocolVersion: PROTOCOL_VERSION,
+  path: IDENTITY.consumerRoot,
+};
+/** A path status whose content no test reads. */
+const AT_ONCE_PATH_STATUS = {
+  answered: "at once",
+} as unknown as PathStatusAnswer;
+
+describe(
+  "answering a request once its answer is ready",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3187: a late answer is written on its connection once its work resolves, and not before", async () => {
+      const late = new LateSummaries();
+      const outcome = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(connect, SUMMARY);
+        await late.asked(1);
+        const answer = connection.next();
+        const before = await within(answer, NOT_WRITTEN_MS);
+        late.answer(0);
+        return {
+          before: kindOf(before),
+          after: kindOf(await within(answer, RESPONSE_BOUND_MS)),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        before: WAITING,
+        after: { type: "summary" },
+      });
+    });
+
+    it("D3188: while a request is pending, another connection's hello, status, summary, path status and stop are each answered", async () => {
+      const late = new LateSummaries();
+      let summaries = 0;
+      const kinds = await onLateServer(
+        late,
+        async (connect) => {
+          await helloThen(connect, SUMMARY);
+          await late.asked(1);
+          const other = await connect();
+          other.send(linesOf(HELLO, STATUS, SUMMARY, PATH_STATUS, STOP));
+          return within(answerKinds(other, 5), RESPONSE_BOUND_MS);
+        },
+        {
+          summary: (signal) => {
+            summaries += 1;
+            return summaries === 1 ? late.summary(signal) : LATE_SUMMARY;
+          },
+          pathStatus: () => AT_ONCE_PATH_STATUS,
+        },
+      );
+      expect(kinds).toStrictEqual([
+        { type: "hello" },
+        { type: "status" },
+        { type: "summary" },
+        { type: "path-status" },
+        { type: "stopping" },
+      ]);
+    });
+
+    it("D3189: an answer ready at once waits behind an earlier one still pending on its connection", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(connect, SUMMARY, STATUS);
+        await late.asked(1);
+        late.answer(0);
+        return within(answerKinds(connection, 2), RESPONSE_BOUND_MS);
+      });
+      expect(kinds).toStrictEqual([{ type: "summary" }, { type: "status" }]);
+    });
+
+    it("D3190: a connection with 8 requests unanswered stays open, and each is answered in turn", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(
+          connect,
+          ...Array.from({ length: 8 }, () => SUMMARY),
+        );
+        await late.asked(8);
+        for (let index = 0; index < 8; index += 1) late.answer(index);
+        return within(answerKinds(connection, 8), RESPONSE_BOUND_MS);
+      });
+      expect(kinds).toStrictEqual(
+        Array.from({ length: 8 }, () => ({ type: "summary" })),
+      );
+    });
+
+    it("D3191: a connection that leaves 9 requests unanswered is closed", async () => {
+      const late = new LateSummaries();
+      const next = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(
+          connect,
+          ...Array.from({ length: 9 }, () => SUMMARY),
+        );
+        return within(connection.next(), RESPONSE_BOUND_MS);
+      });
+      expect(next).toBe(CLOSED);
+    });
+
+    it("D3193: after a hello of another version behind a pending request, the next line ends the connection only once that answer and the mismatch error are written", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(
+          connect,
+          SUMMARY,
+          { type: "hello", protocolVersion: OTHER_PROTOCOL_VERSION },
+          STATUS,
+        );
+        await late.asked(1);
+        late.answer(0);
+        return within(answerKinds(connection, 3), RESPONSE_BOUND_MS);
+      });
+      expect(kinds).toStrictEqual([
+        { type: "summary" },
+        { type: "error", code: "protocol-version-mismatch" },
+        CLOSED,
+      ]);
+    });
+
+    it("D3249: a connection that leaves 9 requests unanswered, 8 of them answered at once behind a pending one, is closed and the pending work aborted", async () => {
+      const late = new LateSummaries();
+      const outcome = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(
+          connect,
+          SUMMARY,
+          ...Array.from({ length: 8 }, () => STATUS),
+        );
+        const next = await within(connection.next(), RESPONSE_BOUND_MS);
+        return { next, aborted: late.signals[0]?.aborted };
+      });
+      expect(outcome).toStrictEqual({ next: CLOSED, aborted: true });
+    });
+  },
+);
+
+describe(
+  "a stop while requests are pending",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3194: a stop begun by a signal answers a pending request with the stopping error at once", async () => {
+      const late = new LateSummaries();
+      const answer = await onLateServer(late, async (connect, stop) => {
+        const connection = await helloThen(connect, SUMMARY);
+        await late.asked(1);
+        stop.abort();
+        return kindOf(await within(connection.next(), RESPONSE_BOUND_MS));
+      });
+      expect(answer).toStrictEqual({ type: "error", code: "stopping" });
+    });
+
+    it("D3195: a stop aborts the signal of a pending request's work", async () => {
+      const late = new LateSummaries();
+      const aborted = await onLateServer(late, async (connect, stop) => {
+        const connection = await helloThen(connect, SUMMARY);
+        await late.asked(1);
+        stop.abort();
+        await within(connection.next(), RESPONSE_BOUND_MS);
+        return late.signals[0]?.aborted;
+      });
+      expect(aborted).toBe(true);
+    });
+
+    it("D3196: a request the stop answered never has its work's later answer written, so the next answer is the next request's", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect, stop) => {
+        const connection = await helloThen(connect, SUMMARY);
+        await late.asked(1);
+        stop.abort();
+        const stopping = await within(connection.next(), RESPONSE_BOUND_MS);
+        late.answer(0);
+        await new Promise((resolve) => setImmediate(resolve));
+        connection.sendLine(STATUS);
+        return [
+          kindOf(stopping),
+          kindOf(await within(connection.next(), RESPONSE_BOUND_MS)),
+        ];
+      });
+      expect(kinds).toStrictEqual([
+        { type: "error", code: "stopping" },
+        { type: "status" },
+      ]);
+    });
+
+    it("D3197: an answer already computed and waiting behind a pending request is written as computed after the stopping error", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect, stop) => {
+        const connection = await helloThen(connect, SUMMARY, STATUS);
+        await late.asked(1);
+        stop.abort();
+        return within(answerKinds(connection, 2), RESPONSE_BOUND_MS);
+      });
+      expect(kinds).toStrictEqual([
+        { type: "error", code: "stopping" },
+        { type: "status" },
+      ]);
+    });
+
+    it("D3198: a stop request behind a pending request is acknowledged after that request's stopping error", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(connect, SUMMARY, STOP);
+        return within(answerKinds(connection, 2), RESPONSE_BOUND_MS);
+      });
+      expect(kinds).toStrictEqual([
+        { type: "error", code: "stopping" },
+        { type: "stopping" },
+      ]);
+    });
+
+    it("D3254: a stop request behind 8 pending requests is acknowledged after their 8 stopping errors, rather than closing the connection past the bound", async () => {
+      const late = new LateSummaries();
+      const kinds = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(
+          connect,
+          ...Array.from({ length: 8 }, () => SUMMARY),
+          STOP,
+        );
+        return within(answerKinds(connection, 9), RESPONSE_BOUND_MS);
+      });
+      expect(kinds).toStrictEqual([
+        ...Array.from({ length: 8 }, () => ({
+          type: "error",
+          code: "stopping",
+        })),
+        { type: "stopping" },
+      ]);
+    });
+  },
+);
+
+describe(
+  "a client that closes while its request is pending",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3202: the pending request's work signal aborts", async () => {
+      const late = new LateSummaries();
+      const aborted = await onLateServer(late, async (connect) => {
+        const connection = await helloThen(connect, SUMMARY);
+        await late.asked(1);
+        connection.close();
+        return eventually(
+          () => late.signals[0]?.aborted === true,
+          RESPONSE_BOUND_MS,
+        );
+      });
+      expect(aborted).toBe(true);
+    });
+
+    it("D3203: a rejection the work gives after the close is never an unhandled rejection", async () => {
+      const late = new LateSummaries();
+      const workEnds = new Deferred<void>();
+      const unhandled = await unhandledRejectionsDuring(() =>
+        onLateServer(
+          late,
+          async (connect) => {
+            const connection = await helloThen(connect, SUMMARY);
+            await late.asked(1);
+            connection.close();
+            await eventually(
+              () => late.signals[0]?.aborted === true,
+              RESPONSE_BOUND_MS,
+            );
+            workEnds.resolve();
+            await new Promise((resolve) => setImmediate(resolve));
+          },
+          {
+            summary: (signal) => {
+              void late.summary(signal);
+              return workEnds.promise.then(() => {
+                throw new Error("the work was aborted");
+              });
+            },
+          },
+        ),
+      );
+      expect(unhandled.map(String)).toStrictEqual([]);
+    });
+  },
+);
+
+/** Longer than the default bound, as a caller whose request waits on work gives. */
+const CALLER_BOUND_MS = 30_000;
+/** Node's timer ceiling: a longer delay fires after 1 ms. */
+const TIMER_CEILING_MS = 2_147_483_647;
+const PENDING = "pending";
+
+/** Serves stand-in handlers with `queries`, and hands `body` a client connection that has said hello. */
+function withClient<T>(
+  queries: Queries,
+  body: (client: DaemonConnection) => Promise<T>,
+): Promise<T> {
+  const server = connectionServer(
+    handlers(false, queries),
+    memoryLog(),
+    NO_PROOF,
+  );
+  return withTestEndpoint(server.onConnection, async (path) => {
+    const opened = await DaemonConnection.open(path);
+    if (!opened.ok) throw new Error(opened.reason);
+    try {
+      await opened.connection.request(HELLO);
+      return await body(opened.connection);
+    } finally {
+      opened.connection.close();
+    }
+  });
+}
+
+/** Resolves once the event loop has turned, so every settled promise's callbacks have run. */
+function afterATurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Asks a summary the stand-in never answers, with `boundMs` or the default, and says how the request stands just
+ * before the bound passes and once it has, on a fake clock.
+ */
+async function aroundTheBound(
+  boundMs: number,
+  ask: (client: DaemonConnection) => Promise<unknown>,
+): Promise<unknown> {
+  const late = new LateSummaries();
+  return withClient({ summary: late.summary }, async (client) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let state: unknown = PENDING;
+      void settled(ask(client)).then((outcome) => {
+        state = outcome;
+      });
+      await vi.advanceTimersByTimeAsync(boundMs - 1);
+      await afterATurn();
+      const before = state;
+      await vi.advanceTimersByTimeAsync(1);
+      await afterATurn();
+      return { before, after: state };
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+}
+
+/** Whether a request refused as a `RangeError` named `bound` and the range, or else how the request ended. */
+async function boundRefusal(bound: number): Promise<unknown> {
+  return withClient({}, async (client) => {
+    const outcome = await client.request(STATUS, bound).then(
+      (answer) => kindOf(answer),
+      (error: unknown) => error,
+    );
+    if (!(outcome instanceof RangeError)) {
+      return outcome instanceof Error ? outcome.message : outcome;
+    }
+    const words = outcome.message.split(/[^\w.]+/);
+    return {
+      namesBound: words.includes(String(bound)),
+      namesRange:
+        words.includes("1") && words.includes(String(TIMER_CEILING_MS)),
+    };
+  });
+}
+
+const NAMES_BOUND_AND_RANGE = { namesBound: true, namesRange: true };
+
+describe(
+  "a client's bound on an answer",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3207: a request given a bound waits that long, past the default, then rejects naming it", async () => {
+      expect(
+        await aroundTheBound(CALLER_BOUND_MS, (client) =>
+          client.request(SUMMARY, CALLER_BOUND_MS),
+        ),
+      ).toStrictEqual({
+        before: PENDING,
+        after: { thrown: expect.stringContaining("30000 ms") },
+      });
+    });
+
+    it("D3208: a request given no bound waits 10000 ms, then rejects naming it", async () => {
+      expect(
+        await aroundTheBound(10_000, (client) => client.request(SUMMARY)),
+      ).toStrictEqual({
+        before: PENDING,
+        after: { thrown: expect.stringContaining("10000 ms") },
+      });
+    });
+
+    it("D3209: a request whose bound passes closes its connection, so the daemon aborts the request's work", async () => {
+      const late = new LateSummaries();
+      const aborted = await withClient(
+        { summary: late.summary },
+        async (client) => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          try {
+            void settled(client.request(SUMMARY, CALLER_BOUND_MS));
+            while (late.signals.length === 0) await afterATurn();
+            await vi.advanceTimersByTimeAsync(CALLER_BOUND_MS);
+          } finally {
+            vi.useRealTimers();
+          }
+          return eventually(
+            () => late.signals[0]?.aborted === true,
+            RESPONSE_BOUND_MS,
+          );
+        },
+      );
+      expect(aborted).toBe(true);
+    });
+
+    it("D3210: a bound of 0 ms is refused, naming the bound and the range", async () => {
+      expect(await boundRefusal(0)).toStrictEqual(NAMES_BOUND_AND_RANGE);
+    });
+
+    it("D3211: a bound of 1.5 ms is refused, naming the bound and the range", async () => {
+      expect(await boundRefusal(1.5)).toStrictEqual(NAMES_BOUND_AND_RANGE);
+    });
+
+    it("D3248: a bound of NaN is refused, naming the bound and the range", async () => {
+      expect(await boundRefusal(Number.NaN)).toStrictEqual(
+        NAMES_BOUND_AND_RANGE,
+      );
+    });
+
+    it("D3212: a bound of 2147483648 ms, one past the timer's ceiling, is refused, naming the bound and the range", async () => {
+      expect(await boundRefusal(TIMER_CEILING_MS + 1)).toStrictEqual(
+        NAMES_BOUND_AND_RANGE,
+      );
+    });
+
+    it("D3213: a bound of 1 ms is kept: a request the daemon has not answered rejects naming it", async () => {
+      const late = new LateSummaries();
+      const outcome = await withClient({ summary: late.summary }, (client) =>
+        settled(client.request(SUMMARY, 1)),
+      );
+      expect(outcome).toStrictEqual({
+        thrown: expect.stringMatching(/\b1 ms\b/),
+      });
+    });
+
+    it("D3214: a bound of 2147483647 ms, the timer's ceiling, is kept: the request is answered", async () => {
+      expect(await boundRefusal(TIMER_CEILING_MS)).toStrictEqual({
+        type: "status",
+      });
+    });
+
+    it("D3215: a refused bound writes nothing, so the next request gets its own answer", async () => {
+      const answer = await withClient({}, async (client) => {
+        await settled(client.request(SUMMARY, 0));
+        return kindOf(await client.request(STATUS));
+      });
+      expect(answer).toStrictEqual({ type: "status" });
+    });
+
+    it("D3216: a second request while the first waits for its answer is refused, and the first gets its own answer", async () => {
+      const late = new LateSummaries();
+      const outcome = await withClient(
+        { summary: late.summary },
+        async (client) => {
+          const first = settled(client.request(SUMMARY));
+          const second = settled(client.request(STATUS));
+          await late.asked(1);
+          late.answer(0);
+          const answered = await within(first, RESPONSE_BOUND_MS);
+          return {
+            first:
+              answered === WAITING || "thrown" in answered
+                ? answered
+                : kindOf(answered),
+            second: await within(second, RESPONSE_BOUND_MS),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        first: { type: "summary" },
+        second: {
+          thrown: expect.stringContaining("still waits for its answer"),
+        },
+      });
+    });
+  },
+);
 
 describe("a client of another protocol version", () => {
   it("D1449: after a hello of another version, any line but the stop closes the connection unanswered", async () => {

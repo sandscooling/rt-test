@@ -32,7 +32,7 @@ sprint-2: in-progress
 2-3p-listed-ignored-events: backlog
 2-3n-env-snapshot: ready-for-dev
 2-3o-count-carried-env: backlog
-2-4-late-answers: ready-for-dev
+2-4-late-answers: done
 2-4d-read-named-paths: ready-for-dev
 2-4b-wait-for-files: ready-for-dev
 2-4c-wait-command: ready-for-dev

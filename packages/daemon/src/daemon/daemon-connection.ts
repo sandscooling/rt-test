@@ -10,6 +10,9 @@ import {
 
 /** The connection errors that mean nothing listens on the endpoint: no pipe or socket file, or a stale Linux one. */
 const NOTHING_LISTENS = new Set(["ENOENT", "ECONNREFUSED"]);
+/** The bounds a Node timer keeps: it fires a delay outside them after 1 ms. */
+const MIN_TIMER_DELAY_MS = 1;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export type Connected =
   | { readonly ok: true; readonly connection: DaemonConnection }
@@ -62,10 +65,31 @@ export class DaemonConnection {
     }
   }
 
-  /** Sends one message and resolves with the daemon's answer, rejecting when none arrives within the response bound. */
-  async request(message: object): Promise<ProtocolMessage> {
+  /**
+   * Sends one message and resolves with the daemon's answer, rejecting when none arrives within `boundMs`. A bound a
+   * timer cannot keep, or a request while another waits for its answer, is refused before anything is sent: the
+   * daemon answers in order, so a second waiter would take the first one's answer.
+   */
+  async request(
+    message: object,
+    boundMs: number = RESPONSE_BOUND_MS,
+  ): Promise<ProtocolMessage> {
+    if (
+      !Number.isInteger(boundMs) ||
+      boundMs < MIN_TIMER_DELAY_MS ||
+      boundMs > MAX_TIMER_DELAY_MS
+    ) {
+      throw new RangeError(
+        `a request's bound must be a whole number of ms from ${MIN_TIMER_DELAY_MS} to ${MAX_TIMER_DELAY_MS}, not ${boundMs}`,
+      );
+    }
+    if (this.#waiting !== undefined) {
+      throw new Error(
+        "another request on this connection still waits for its answer",
+      );
+    }
     this.#socket.write(encodeLine(message));
-    const line = await this.#nextLine();
+    const line = await this.#nextLine(boundMs);
     const parsed = parseLine(line);
     if (!parsed.ok)
       throw new Error(
@@ -78,7 +102,7 @@ export class DaemonConnection {
     this.#socket.destroy();
   }
 
-  #nextLine(): Promise<string> {
+  #nextLine(boundMs: number): Promise<string> {
     const queued = this.#lines.shift();
     if (queued !== undefined) return Promise.resolve(queued);
     if (this.#closed !== undefined) return Promise.reject(this.#closed);
@@ -86,10 +110,8 @@ export class DaemonConnection {
       const timer = setTimeout(() => {
         this.#waiting = undefined;
         this.#socket.destroy();
-        reject(
-          new Error(`the daemon did not answer within ${RESPONSE_BOUND_MS} ms`),
-        );
-      }, RESPONSE_BOUND_MS);
+        reject(new Error(`the daemon did not answer within ${boundMs} ms`));
+      }, boundMs);
       this.#waiting = (line) => {
         clearTimeout(timer);
         this.#waiting = undefined;

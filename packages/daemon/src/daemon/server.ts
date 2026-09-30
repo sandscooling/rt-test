@@ -38,14 +38,23 @@ import {
   type VersionMismatchError,
 } from "./protocol.js";
 
-/** What the daemon's lifecycle answers a connection with. */
+/** A query's answer, or a promise of it when its work is still to come. */
+type QueryAnswer<A> = A | NoAnswer | Promise<A | NoAnswer>;
+
+/**
+ * What the daemon's lifecycle answers a connection with. A query that answers with a promise has its `signal` aborted
+ * once nobody waits for that answer: the stop began, or its connection closed, by the client or past the daemon's bound
+ * on unanswered requests.
+ */
 export interface DaemonHandlers {
   readonly identity: DaemonIdentity;
+  /** Aborts as the stop begins, before the stop sequence closes anything. */
+  readonly stopSignal: AbortSignal;
   status(): Pick<StatusResponse, "activity" | "stopping" | "unstoredJobs">;
   /** Reads only: starts no job and changes no activity. */
-  summary(): SummaryAnswer | NoAnswer;
+  summary(signal: AbortSignal): QueryAnswer<SummaryAnswer>;
   /** Reads only; `path` is absolute. */
-  pathStatus(path: string): PathStatusAnswer | NoAnswer;
+  pathStatus(path: string, signal: AbortSignal): QueryAnswer<PathStatusAnswer>;
   /** Begins the stop, or joins the one under way. */
   stop(): void;
   isStopping(): boolean;
@@ -64,6 +73,11 @@ type ConnectionState = "awaiting-hello" | "ready" | "mismatched";
 
 /** How long a closing connection may take to flush before it is dropped, so a client that stops reading cannot hold the stop. */
 export const CLOSE_GRACE_MS = 1_000;
+/**
+ * How many requests a connection may leave unanswered before it is closed: each may hold an answer of up to
+ * `MAX_LINE_BYTES` while it waits its turn behind a pending one.
+ */
+export const MAX_UNANSWERED_REQUESTS = 8;
 
 /** Writes to a connection only in answer to a line it sent, so a client that cannot write receives nothing. */
 export function connectionServer(
@@ -71,15 +85,26 @@ export function connectionServer(
   log: DaemonLog,
   prove: Prover,
 ): ConnectionServer {
-  const sockets = new Set<Socket>();
+  const connections = new Set<ServedConnection>();
+  handlers.stopSignal.addEventListener(
+    "abort",
+    () => {
+      for (const connection of connections) connection.answerPendingStopping();
+    },
+    { once: true },
+  );
   return {
     onConnection: (socket) => {
-      sockets.add(socket);
-      socket.once("close", () => sockets.delete(socket));
-      serve(socket, { handlers, prove }, log);
+      const connection = new ServedConnection(socket, log);
+      connections.add(connection);
+      socket.once("close", () => {
+        connections.delete(connection);
+        connection.drop();
+      });
+      serve(connection, { handlers, prove }, log);
     },
     closeConnections: () => {
-      for (const socket of sockets) {
+      for (const { socket } of connections) {
         socket.end(() => socket.destroy());
         setTimeout(() => socket.destroy(), CLOSE_GRACE_MS).unref();
       }
@@ -87,64 +112,167 @@ export function connectionServer(
   };
 }
 
+/** A request's answer, written in its turn; undefined while its work runs. */
+interface Turn {
+  message: object | undefined;
+  readonly work: AbortController | undefined;
+}
+
+/**
+ * Writes one answer per request line, in the order the lines arrived, however late each answer is ready, since a
+ * client matches each answer to its request by position.
+ */
+class ServedConnection {
+  state: ConnectionState = "awaiting-hello";
+  readonly socket: Socket;
+  readonly #log: DaemonLog;
+  readonly #turns: Turn[] = [];
+  #ending = false;
+  #dropped = false;
+
+  constructor(socket: Socket, log: DaemonLog) {
+    this.socket = socket;
+    this.#log = log;
+  }
+
+  /** Whether a line arriving now is answered. */
+  get answering(): boolean {
+    return this.socket.writable && !this.#ending;
+  }
+
+  /** Queues the answer to the latest line. */
+  reply(answer: object): void {
+    this.#queue({ message: answer, work: undefined });
+  }
+
+  /**
+   * Queues the answer to the latest line, still to come; `work` holds the signal its work was given. `answer` never
+   * rejects: a failed query resolves with its error answer.
+   */
+  replyLate(answer: Promise<object>, work: AbortController): void {
+    const turn: Turn = { message: undefined, work };
+    void answer.then((message) => this.#settle(turn, message));
+    this.#queue(turn);
+  }
+
+  /** Answers each request whose work still runs with the stopping error, and aborts that work. */
+  answerPendingStopping(): void {
+    for (const turn of this.#turns) {
+      if (turn.message !== undefined) continue;
+      turn.message = stoppingError();
+      turn.work?.abort();
+    }
+    this.#flush();
+  }
+
+  /** Ends the connection once every earlier request's answer is written. */
+  endOnceAnswered(): void {
+    this.#ending = true;
+    this.#flush();
+  }
+
+  /** Aborts the work of each request still pending and writes nothing more. */
+  drop(): void {
+    this.#dropped = true;
+    for (const turn of this.#turns.splice(0)) {
+      if (turn.message === undefined) turn.work?.abort();
+    }
+  }
+
+  #queue(turn: Turn): void {
+    this.#turns.push(turn);
+    this.#flush();
+    if (this.#turns.length > MAX_UNANSWERED_REQUESTS) this.#closeOverBound();
+  }
+
+  /** A late answer is dropped once the request was answered otherwise or the connection was dropped. */
+  #settle(turn: Turn, message: object): void {
+    if (this.#dropped || turn.message !== undefined) return;
+    turn.message = message;
+    this.#flush();
+  }
+
+  #flush(): void {
+    for (
+      let turn = this.#turns[0];
+      turn?.message !== undefined;
+      turn = this.#turns[0]
+    ) {
+      this.#turns.shift();
+      send(this.socket, turn.message);
+    }
+    if (this.#ending && this.#turns.length === 0 && this.socket.writable) {
+      this.socket.end();
+    }
+  }
+
+  #closeOverBound(): void {
+    this.#log.entry(
+      `a client connection was closed: it left more than ${MAX_UNANSWERED_REQUESTS} requests unanswered`,
+    );
+    this.socket.destroy();
+    this.drop();
+  }
+}
+
 interface Answerer {
   readonly handlers: DaemonHandlers;
   readonly prove: Prover;
 }
 
-function serve(socket: Socket, answerer: Answerer, log: DaemonLog): void {
+function serve(
+  connection: ServedConnection,
+  answerer: Answerer,
+  log: DaemonLog,
+): void {
   const decoder = new LineDecoder();
-  const connection = { state: "awaiting-hello" as ConnectionState };
-  socket.on("data", (chunk: Buffer) => {
+  connection.socket.on("data", (chunk: Buffer) => {
     for (const line of decoder.push(chunk)) {
-      if (!socket.writable) return;
-      answer(socket, connection, line, answerer);
+      if (!connection.answering) return;
+      answer(connection, line, answerer);
     }
   });
-  socket.on("error", (error) => {
+  connection.socket.on("error", (error) => {
     log.entry(`a client connection failed: ${errorText(error)}`);
   });
 }
 
 function answer(
-  socket: Socket,
-  connection: { state: ConnectionState },
+  connection: ServedConnection,
   line: DecodedLine,
   answerer: Answerer,
 ): void {
   const { handlers, prove } = answerer;
   const parsed = line.tooLong ? undefined : parseLine(line.text);
   if (parsed?.ok === true && isStopRequest(parsed.message)) {
-    send(
-      socket,
+    // Begun first: the stop answers every pending request, so the queued acknowledgement never passes the bound.
+    handlers.stop();
+    connection.reply(
       stopAcknowledgement(handlers, prove(parsed.message["challenge"])),
     );
-    handlers.stop();
     return;
   }
   if (connection.state === "mismatched") {
-    socket.end();
+    connection.endOnceAnswered();
     return;
   }
   if (parsed === undefined) {
-    send(
-      socket,
+    connection.reply(
       error("line-too-long", `a line is longer than ${MAX_LINE_BYTES} bytes`),
     );
     return;
   }
   if (!parsed.ok) {
-    send(socket, error("invalid-json", `the line is ${parsed.reason}`));
+    connection.reply(error("invalid-json", `the line is ${parsed.reason}`));
     return;
   }
   const message = parsed.message;
   if (message["type"] === HELLO_TYPE) {
-    connection.state = hello(socket, message, answerer);
+    connection.state = hello(connection, message, answerer);
     return;
   }
   if (connection.state === "awaiting-hello") {
-    send(
-      socket,
+    connection.reply(
       error(
         "hello-required",
         "send a hello before any request other than stop",
@@ -152,11 +280,14 @@ function answer(
     );
     return;
   }
-  send(socket, versionedAnswer(message, handlers));
+  const work = new AbortController();
+  const response = versionedAnswer(message, handlers, work.signal);
+  if (response instanceof Promise) connection.replyLate(response, work);
+  else connection.reply(response);
 }
 
 function hello(
-  socket: Socket,
+  connection: ServedConnection,
   message: ProtocolMessage,
   { handlers, prove }: Answerer,
 ): ConnectionState {
@@ -169,7 +300,7 @@ function hello(
       pid: handlers.identity.pid,
       ...withProof(proof),
     };
-    send(socket, response);
+    connection.reply(response);
     return "ready";
   }
   const mismatch: VersionMismatchError = {
@@ -181,7 +312,7 @@ function hello(
     pid: handlers.identity.pid,
     ...withProof(proof),
   };
-  send(socket, mismatch);
+  connection.reply(mismatch);
   return "mismatched";
 }
 
@@ -191,7 +322,8 @@ type VersionedAnswer =
 function versionedAnswer(
   message: ProtocolMessage,
   handlers: DaemonHandlers,
-): VersionedAnswer {
+  signal: AbortSignal,
+): VersionedAnswer | Promise<VersionedAnswer> {
   if (message["protocolVersion"] !== PROTOCOL_VERSION) {
     return error(
       "invalid-request",
@@ -202,13 +334,13 @@ function versionedAnswer(
     return { type: STATUS_TYPE, ...handlers.identity, ...handlers.status() };
   }
   if (handlers.isStopping()) {
-    return error(STOPPING_CODE, "the daemon is stopping");
+    return stoppingError();
   }
   if (message["type"] === SUMMARY_TYPE) {
-    return queryResponse(() => withType(SUMMARY_TYPE, handlers.summary()));
+    return queryResponse(SUMMARY_TYPE, () => handlers.summary(signal));
   }
   if (message["type"] === PATH_STATUS_TYPE) {
-    return pathStatusResponse(message["path"], handlers);
+    return pathStatusResponse(message["path"], handlers, signal);
   }
   return error(
     UNKNOWN_REQUEST_CODE,
@@ -219,47 +351,64 @@ function versionedAnswer(
 function pathStatusResponse(
   path: unknown,
   handlers: DaemonHandlers,
-): PathStatusResponse | ErrorResponse {
+  signal: AbortSignal,
+): Queried<PathStatusResponse> | Promise<Queried<PathStatusResponse>> {
   if (typeof path !== "string" || !isAbsolute(path)) {
     return error(
       "invalid-request",
       `a ${PATH_STATUS_TYPE} request must carry an absolute path; got ${JSON.stringify(path ?? null)}`,
     );
   }
-  return queryResponse(() =>
-    withType(PATH_STATUS_TYPE, handlers.pathStatus(path)),
+  return queryResponse(PATH_STATUS_TYPE, () =>
+    handlers.pathStatus(path, signal),
   );
 }
 
-function withType<T extends string, A extends object>(
+type Typed<T extends string, A> = A & { type: T; protocolVersion: number };
+type Queried<R> = R | ErrorResponse;
+
+/**
+ * A query that throws or rejects, has nothing to answer, or would pass the line limit is answered with an error
+ * saying why, whether its answer came at once or late.
+ */
+function queryResponse<T extends string, A extends object>(
   type: T,
-  answer: A | NoAnswer,
-): (A & { type: T; protocolVersion: number }) | NoAnswer {
-  if ("noAnswer" in answer) return answer;
-  return { ...answer, type, protocolVersion: PROTOCOL_VERSION };
+  answer: () => QueryAnswer<A>,
+): Queried<Typed<T, A>> | Promise<Queried<Typed<T, A>>> {
+  try {
+    const response = answer();
+    return response instanceof Promise
+      ? response.then((late) => checkedAnswer(type, late)).catch(queryFailed)
+      : checkedAnswer(type, response);
+  } catch (failure) {
+    return queryFailed(failure);
+  }
 }
 
-/** A query that throws, has nothing to answer, or would pass the line limit is answered with an error saying why. */
-function queryResponse<R extends object>(
-  answer: () => R | NoAnswer,
-): R | ErrorResponse {
-  let response: R | NoAnswer;
-  try {
-    response = answer();
-  } catch (failure) {
-    return error(QUERY_FAILED_CODE, `the query failed: ${errorText(failure)}`);
-  }
+function checkedAnswer<T extends string, A extends object>(
+  type: T,
+  response: A | NoAnswer,
+): Queried<Typed<T, A>> {
   if ("noAnswer" in response) {
     return error(NOTHING_TO_ANSWER_CODE, response.noAnswer);
   }
-  const size = Buffer.byteLength(JSON.stringify(response));
+  const typed = { ...response, type, protocolVersion: PROTOCOL_VERSION };
+  const size = Buffer.byteLength(JSON.stringify(typed));
   if (size > MAX_LINE_BYTES) {
     return error(
       NOTHING_TO_ANSWER_CODE,
       `the answer is ${size} bytes, longer than the protocol's line limit of ${MAX_LINE_BYTES} bytes; ask status for a narrower path`,
     );
   }
-  return response;
+  return typed;
+}
+
+function queryFailed(failure: unknown): ErrorResponse {
+  return error(QUERY_FAILED_CODE, `the query failed: ${errorText(failure)}`);
+}
+
+function stoppingError(): ErrorResponse {
+  return error(STOPPING_CODE, "the daemon is stopping");
 }
 
 function stopAcknowledgement(

@@ -106,6 +106,7 @@ import {
   interrupted,
   workspace,
 } from "./scheduling-harness.js";
+import { unhandledRejectionsDuring } from "./unhandled-rejections.js";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -1716,7 +1717,116 @@ describe("stopping", () => {
       ],
     });
   });
+
+  it("D3200: the stop signal has aborted once stop() returns, while the run in progress still holds the stop sequence", async () => {
+    const { started, held } = heldAt("a", ["a"]);
+    const { lifecycle } = await begun(started);
+    lifecycle.stop();
+    const aborted = lifecycle.stopSignal.aborted;
+    held.resolve({ ended: true, value: interrupted("a") });
+    await lifecycle.stopped();
+    expect(aborted).toBe(true);
+  });
+
+  it("D3201: the lifecycle reads stopping once its stop has begun", async () => {
+    const { lifecycle } = await begun(scripted({}));
+    lifecycle.stop();
+    const stopping = lifecycle.isStopping();
+    await lifecycle.stopped();
+    expect(stopping).toBe(true);
+  });
+
+  it("D3247: a stop sequence that rejects is logged and still ends the stop, with no unhandled rejection", async () => {
+    let logged: boolean | undefined;
+    const unhandled = await unhandledRejectionsDuring(async () => {
+      const { lifecycle, log } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discovered("a")),
+          }),
+          new RecordingStore(),
+          IDENTITY,
+          new FailingStopInputs(),
+        ),
+      );
+      lifecycle.stop();
+      await lifecycle.stopped();
+      logged = log.entries.some((entry) =>
+        entry.startsWith("error: the stop sequence failed: "),
+      );
+    });
+    expect({ logged, unhandled: unhandled.map(String) }).toStrictEqual({
+      logged: true,
+      unhandled: [],
+    });
+  });
+
+  it("D3192: a tracker stop that rejects still closes the executor, the build executor, the store and the endpoint", async () => {
+    const executor = new ClosingExecutor({
+      ended: true,
+      value: discovery(discovered("a")),
+    });
+    const { lifecycle, builds, store, endpointCloses } = await begun(
+      daemon(
+        confirmed("a"),
+        executor,
+        new RecordingStore(),
+        IDENTITY,
+        new FailingStopInputs(),
+      ),
+    );
+    lifecycle.stop();
+    await lifecycle.stopped();
+    expect({
+      executor: executor.closes,
+      builds: builds.closes,
+      store: store.closed,
+      endpoint: endpointCloses.count,
+    }).toStrictEqual({ executor: 1, builds: 1, store: true, endpoint: 1 });
+  });
+
+  it("D3255: a stop whose sequence fails still resolves stopped(), so the daemon exits", async () => {
+    const { lifecycle } = await begun(
+      daemon(
+        confirmed("a"),
+        new ScriptedExecutor({
+          ended: true,
+          value: discovery(discovered("a")),
+        }),
+        new RecordingStore(),
+        IDENTITY,
+        new FailingStopInputs(),
+      ),
+    );
+    lifecycle.stop();
+    let stopped = false;
+    void lifecycle.stopped().then(() => {
+      stopped = true;
+    });
+    await flush();
+    expect(stopped).toBe(true);
+  });
 });
+
+/** A scripted executor that counts its closes. */
+class ClosingExecutor extends ScriptedExecutor {
+  closes = 0;
+
+  override close(): Promise<void> {
+    this.closes += 1;
+    return super.close();
+  }
+}
+
+/** Stand-in inputs whose stop rejects, as a tracker that fails to close its watches would. */
+class FailingStopInputs extends StandInInputs {
+  override async stop(): Promise<void> {
+    await super.stop();
+    throw new Error("the tracker failed to stop");
+  }
+}
 
 const BUILT: BuildOutcome = { ended: true, value: NO_DEPENDENCIES };
 const BUILD_FAILED_REASON =

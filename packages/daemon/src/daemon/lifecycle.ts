@@ -96,7 +96,8 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #unstored: UnstoredJobs;
   #loggedRefusal: string | undefined;
   #sequence: Promise<void> = Promise.resolve();
-  #stopping: Promise<void> | undefined;
+  readonly #stopBegun = new AbortController();
+  readonly stopSignal: AbortSignal = this.#stopBegun.signal;
   readonly #whenStopped: Promise<void>;
   #markStopped: () => void = () => undefined;
 
@@ -189,7 +190,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   isStopping(): boolean {
-    return this.#stopping !== undefined;
+    return this.stopSignal.aborted;
   }
 
   /**
@@ -235,7 +236,13 @@ export class DaemonLifecycle implements DaemonHandlers {
   }
 
   stop(): void {
-    this.#stopping ??= this.#stopSequence().finally(() => this.#markStopped());
+    if (this.isStopping()) return;
+    this.#stopBegun.abort();
+    void this.#stopSequence()
+      .catch((error: unknown) => {
+        this.#parts.log.error("the stop sequence failed", error);
+      })
+      .finally(() => this.#markStopped());
   }
 
   /** Resolves once a stop has run to its end. */
@@ -509,15 +516,20 @@ export class DaemonLifecycle implements DaemonHandlers {
     this.#unstored.list(workspacePath, reason);
   }
 
+  /**
+   * A failed step skips none after it, and the store closes only once the job in progress and the builds have ended. A
+   * step failing before the closings fails the stop once they have run.
+   */
   async #stopSequence(): Promise<void> {
     const { log, executor, buildExecutor, store, closeEndpoint, inputs } =
       this.#parts;
     log.entry("stop requested");
-    this.#scheduler.stop();
+    const failures: unknown[] = [];
+    void this.#halting(failures, () => this.#scheduler.stop());
     // Before the tracker: its stop resolves every wait of the builds' rounds at once, which would spin them.
-    const buildsStopped = this.#builds.stop();
-    executor.abort();
-    await inputs.stop();
+    const buildsStopped = this.#halting(failures, () => this.#builds.stop());
+    void this.#halting(failures, () => executor.abort());
+    await this.#halting(failures, () => inputs.stop());
     await this.#sequence;
     await buildsStopped;
     await this.#closing("the executor", () => executor.close());
@@ -526,7 +538,19 @@ export class DaemonLifecycle implements DaemonHandlers {
     );
     await this.#closing("the store", () => store.close());
     await this.#closing("the endpoint", closeEndpoint);
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "a step before the closings failed");
+    }
     log.entry("stopped");
+  }
+
+  /** Runs a step whether or not it throws at once, so a failure it gives cannot skip the steps after it. */
+  async #halting(failures: unknown[], step: () => unknown): Promise<void> {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(error);
+    }
   }
 
   /** Each closer runs whatever an earlier one did, so no release is skipped. */
