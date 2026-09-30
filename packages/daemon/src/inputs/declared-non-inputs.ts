@@ -1,9 +1,15 @@
 import { lstatSync } from "node:fs";
 import type { DaemonLog } from "../daemon/daemon-log.js";
 import {
-  countEnvironment,
-  type EnvironmentCount,
-  type StartEnvironment,
+  CountedEnvironment,
+  type CarriedReason,
+  type CarriedReport,
+  type CarriedVariables,
+  type FoundIn,
+} from "./carried-variables.js";
+import type {
+  EnvironmentCount,
+  StartEnvironment,
 } from "./environment-digest.js";
 import {
   declaredNonInputs,
@@ -17,11 +23,17 @@ import {
   type NonInputMatch,
   type NonInputsDeclaration,
 } from "./non-inputs.js";
-import { liesUnderRoot, protection, type Protection } from "./protection.js";
+import {
+  liesUnderRoot,
+  protection,
+  workspaceName,
+  type Protection,
+} from "./protection.js";
 
 const LIST_SEPARATOR = ", ";
 const PART_SEPARATOR = "; ";
 const EMPTY_LIST = "none";
+const NAMING_LISTS = `the session list or ${NON_INPUTS_FILE}`;
 const NO_DECLARATION: NonInputsDeclaration = {
   file: NON_INPUTS_FILE,
   state: NON_INPUTS_ABSENT,
@@ -45,11 +57,13 @@ export class DeclaredNonInputs {
   #declaration: NonInputsDeclaration | undefined;
   #logged: string | undefined;
   #loggedEnvironment: string | undefined;
+  /** By workspace path, kept across declarations, so a recount neither repeats a workspace's line nor drops one. */
+  readonly #loggedCarried = new Map<string, string>();
   #protection: Protection;
   #match: NonInputMatch = () => undefined;
   /** The daemon's environment as it began serving, which every executor process starts with. */
   readonly #startEnvironment: StartEnvironment;
-  #environment: EnvironmentCount;
+  #environment: CountedEnvironment;
 
   /** `root` is the consumer root's real path. */
   constructor(
@@ -61,9 +75,10 @@ export class DeclaredNonInputs {
     this.#log = log;
     this.#protection = protection(undefined, root);
     this.#startEnvironment = startEnvironment;
-    this.#environment = countEnvironment(
+    this.#environment = new CountedEnvironment(
       startEnvironment,
       declaredVariables(NO_DECLARATION),
+      this.#reportCarried,
     );
   }
 
@@ -109,17 +124,18 @@ export class DeclaredNonInputs {
     return this.#declaration ?? NO_DECLARATION;
   }
 
-  /** The environment's digest under the variable entries the declaration in effect adds to the session list. */
-  get environment(): string {
-    return this.#environment.digest;
+  /** The start environment under the variable entries the declaration in effect adds to the session list. */
+  get environment(): CountedEnvironment {
+    return this.#environment;
   }
 
   /** Reads `rt-test.json` again, which takes effect at once. */
   read(): void {
     this.#declaration = readNonInputs(this.#root);
-    this.#environment = countEnvironment(
+    this.#environment = new CountedEnvironment(
       this.#startEnvironment,
       declaredVariables(this.#declaration),
+      this.#reportCarried,
     );
     this.#rebuild();
   }
@@ -170,13 +186,22 @@ export class DeclaredNonInputs {
 
   #reportEnvironment(declaration: NonInputsDeclaration): void {
     const text = environmentText(
-      this.#environment,
+      this.#environment.count,
       declaredVariables(declaration),
     );
     if (text === this.#loggedEnvironment) return;
     this.#loggedEnvironment = text;
     this.#log.entry(text);
   }
+
+  /** Logs a workspace's line when it differs from the one last logged for it; none for one never counting any. */
+  readonly #reportCarried: CarriedReport = (workspace, carried) => {
+    const last = this.#loggedCarried.get(workspace);
+    const text = carriedText(workspace, carried, last !== undefined);
+    if (text === undefined || text === last) return;
+    this.#loggedCarried.set(workspace, text);
+    this.#log.entry(text);
+  };
 
   #declaresPatterns(): boolean {
     return (
@@ -216,6 +241,44 @@ function environmentText(
     `counted only as set, from RT Test's session list: ${quotedList(count.sessionEntriesSet)}`,
     `declared in ${NON_INPUTS_FILE}: ${quotedList(declared)}`,
   ].join(PART_SEPARATOR);
+}
+
+/**
+ * A workspace's line, which overrides the `environment:` line for that workspace: each listed or declared variable
+ * counted by value there and why, or that every one is and where the `$` lies, by names only, never a value. Undefined
+ * when none is counted and no line was logged before.
+ */
+function carriedText(
+  workspace: string,
+  carried: CarriedVariables,
+  loggedBefore: boolean,
+): string | undefined {
+  const where = `for the workspace ${workspaceName(workspace)}`;
+  if (carried.every) {
+    return `warning: environment: every variable ${NAMING_LISTS} names counted by value ${where}, since ${foundText(carried.where)} holds a $ that begins no name Vite's expansion reads there`;
+  }
+  if (carried.names.size === 0) {
+    return loggedBefore
+      ? `environment: none counted by value ${where} any longer, so each variable ${NAMING_LISTS} names counts only as set there`
+      : undefined;
+  }
+  const names = [...carried.names]
+    .sort(([first], [second]) => (first < second ? -1 : 1))
+    .map(([name, reason]) => `${JSON.stringify(name)} (${reasonText(reason)})`)
+    .join(LIST_SEPARATOR);
+  return `environment: counted by value ${where} although ${NAMING_LISTS} names it: ${names}`;
+}
+
+function reasonText(reason: CarriedReason): string {
+  return "prefix" in reason
+    ? `the env prefix ${JSON.stringify(reason.prefix)} begins it`
+    : `referenced by ${foundText(reason)}`;
+}
+
+function foundText({ file, through }: FoundIn): string {
+  return through === undefined
+    ? `the env file ${file}`
+    : `the value of ${JSON.stringify(through)} from the env file ${file}`;
 }
 
 function quotedList(names: readonly string[]): string {

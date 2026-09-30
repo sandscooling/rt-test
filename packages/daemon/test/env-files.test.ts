@@ -463,3 +463,26 @@ describe("a listed setup file whose path runs through a file", () => {
     expect(same).toBe(true);
   });
 });
+
+describe("an env file the inputs hold", () => {
+  it("D3411: an env file whose digest the inputs hold but whose text cannot be read leaves its workspace with no fingerprint, the reason naming the file and the error", async () => {
+    const outcome = await withLocalEnvFile((root, file) => {
+      openFailsWith(file, "EACCES");
+      const print = workspaceFingerprint(
+        new ProjectInputs(root, new Map([[LOCAL_ENV_FILE, "file:0000"]])),
+        workspaceWithSources(root, [ROOT_SOURCE]),
+        handBuiltReads(root),
+      );
+      return print.ok
+        ? print
+        : {
+            ok: false,
+            unreadable:
+              print.reason.startsWith(
+                `the env file ${LOCAL_ENV_FILE} cannot be read: `,
+              ) && print.reason.includes("EACCES"),
+          };
+    });
+    expect(outcome).toStrictEqual({ ok: false, unreadable: true });
+  });
+});

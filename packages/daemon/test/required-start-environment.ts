@@ -22,7 +22,7 @@ export function omittingTheStartEnvironment(
   discovery: TestDiscovery,
   log: DaemonLog,
 ): void {
-  // @ts-expect-error a snapshot's environment digest is required
+  // @ts-expect-error a snapshot's environment is required
   void new SnapshotReads(project.root);
   // @ts-expect-error a workspace fingerprint's reads are required
   workspaceFingerprint(project, entry);

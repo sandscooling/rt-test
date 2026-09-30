@@ -9,15 +9,22 @@ import type {
 import { errorText } from "../vitest/error-text.js";
 import { resolveWorkspaceVitest } from "../vitest/load-vitest.js";
 import {
+  carriedUnion,
+  type CarriedVariables,
+  type CountedEnvironment,
+} from "./carried-variables.js";
+import {
   discoveryEnvFilesKnown,
   envFileDigest,
   workspaceEnvFilesKnown,
+  type EnvFileDigest,
   type EnvFilesKnown,
 } from "./env-files.js";
 import { absoluteInputPath } from "./input-filter.js";
 import {
   DIGEST_ALGORITHM,
   DIGEST_ENCODING,
+  heldFileDigest,
   holdsFileContent,
   MODIFIED_TIME_RESOLUTION_MS,
   wholeDigest,
@@ -41,6 +48,7 @@ const SETUP_FILE = "setup file";
 /** A path `statSync` finds no entry at, a missing file or one below a file. */
 const NOTHING_THERE = null;
 const ENV_FILES_UNKNOWN = "are not known";
+const CHANGED_SINCE_HELD = "changed since the inputs were read";
 const ENV_SOURCES_UNREPORTED =
   "its discovery does not report the env sources of its projects";
 
@@ -112,16 +120,18 @@ function workspaceInputs(
  */
 export class SnapshotReads {
   readonly #root: string;
-  /** The digest of the start environment, as `countEnvironment` gives it, which every fingerprint here takes. */
-  readonly environment: string;
+  /** The start environment under the entries in effect, whose digest every fingerprint here takes. */
+  readonly environment: CountedEnvironment;
   /** By test module path, as `testModuleFile` names it. */
   readonly #modules = new Map<string, FingerprintResult>();
   /** By env file path, named as a test module's is. */
-  readonly #envFiles = new Map<string, FingerprintResult>();
+  readonly #envFiles = new Map<string, EnvFileDigest>();
+  /** By discovered workspace, since a running discovery's entry for a workspace can differ from the one in effect. */
+  readonly #carried = new WeakMap<WorkspaceDiscovery, CarriedVariables>();
   /** By workspace directory. */
   readonly #versions = new Map<string, string | null>();
 
-  constructor(root: string, environment: string) {
+  constructor(root: string, environment: CountedEnvironment) {
     this.#root = root;
     this.environment = environment;
   }
@@ -133,12 +143,24 @@ export class SnapshotReads {
     );
   }
 
-  /** The digest of what Vite reads at the env file `path`, named as a test module's is. */
-  envFileDigest(path: string): FingerprintResult {
-    return readOnce(this.#envFiles, path, () => {
-      const read = envFileDigest(absoluteInputPath(this.#root, path));
-      return read.ok ? { ok: true, digest: read.digest ?? ABSENT_FILE } : read;
-    });
+  /** The digest and text of what Vite reads at the env file `path`, named as a test module's is. */
+  envFile(path: string): EnvFileDigest {
+    return readOnce(this.#envFiles, path, () =>
+      envFileDigest(absoluteInputPath(this.#root, path)),
+    );
+  }
+
+  /** Which listed or declared variables count by value for `entry`, decided once from the text of its env files. */
+  carried(
+    entry: WorkspaceDiscovery,
+    texts: ReadonlyMap<string, string | undefined>,
+  ): CarriedVariables {
+    let carried = this.#carried.get(entry);
+    if (carried === undefined) {
+      carried = this.environment.carried(entry, texts);
+      this.#carried.set(entry, carried);
+    }
+    return carried;
   }
 
   /** Absent when no Vitest resolves from the directory, which is itself a state the digest must tell apart. */
@@ -169,10 +191,11 @@ export function workspaceFingerprint(
   const inputs = workspaceInputs(project, workspaceListing(entry), narrowed);
   const listed = listedDigests(inputs, reads);
   if (!listed.ok) return listed;
+  const carried = reads.carried(entry, listed.envFileTexts);
   return {
     ok: true,
     digest: digestOf({
-      ...sharedParts(reads.environment),
+      ...sharedParts(reads.environment.digest(carried)),
       inputs: inputs.selected.digest(),
       testModules: listed.modules,
       envFiles: listed.envFiles,
@@ -202,10 +225,15 @@ export function discoveryFingerprint(
   );
   const listed = listedDigests(inputs, reads);
   if (!listed.ok) return listed;
+  const carried = carriedUnion(
+    discovery.workspaces.map((entry) =>
+      reads.carried(entry, listed.envFileTexts),
+    ),
+  );
   return {
     ok: true,
     digest: digestOf({
-      ...sharedParts(reads.environment),
+      ...sharedParts(reads.environment.digest(carried)),
       inputs: inputs.selected.digest(),
       testModules: listed.modules,
       envFiles: listed.envFiles,
@@ -232,12 +260,24 @@ type PathDigests =
   | { readonly ok: true; readonly digests: Digests }
   | { readonly ok: false; readonly reason: string };
 
+/** The text Vite reads at each listed env file by path, undefined where it reads nothing. */
+type EnvFileTexts = ReadonlyMap<string, string | undefined>;
+
 type ListedDigests =
   | {
       readonly ok: true;
       /** Each listed test module, setup file and global setup file's, under the digest's `testModules` part. */
       readonly modules: Digests;
       readonly envFiles: Digests;
+      readonly envFileTexts: EnvFileTexts;
+    }
+  | { readonly ok: false; readonly reason: string };
+
+type EnvFileReads =
+  | {
+      readonly ok: true;
+      readonly digests: Digests;
+      readonly texts: EnvFileTexts;
     }
   | { readonly ok: false; readonly reason: string };
 
@@ -253,35 +293,51 @@ function listedDigests(
     ok: true,
     modules: modules.digests,
     envFiles: envFiles.digests,
+    envFileTexts: envFiles.texts,
   };
 }
 
 /**
  * Digests each listed env file: from the project's inputs when they hold its content, or not at all when the
  * selected inputs count it, and otherwise as Vite reads it, since the inputs hold a FIFO or a link to anything but a
- * file by its type or target, which does not change with what Vite reads.
+ * file by its type or target, which does not change with what Vite reads. Each is also read for its text, which must
+ * be the content a held digest describes, so no fingerprint pairs one content's digest with another's references.
  */
 function envFileDigests(
   inputs: WorkspaceInputs,
   reads: SnapshotReads,
-): PathDigests {
+): EnvFileReads {
   const digests: string[][] = [];
+  const texts = new Map<string, string | undefined>();
   for (const path of [...new Set(inputs.envFiles)].sort()) {
-    const held = heldEnvDigest(inputs.project, path);
-    if (held !== undefined) {
-      if (!inputs.selected.digests.has(path)) digests.push([path, held]);
-      continue;
-    }
-    const read = reads.envFileDigest(path);
+    const read = reads.envFile(path);
     if (!read.ok) {
       return {
         ok: false,
         reason: `the env file ${path} cannot be read: ${read.reason}`,
       };
     }
-    digests.push([path, read.digest]);
+    texts.set(path, read.text);
+    const held = heldEnvDigest(inputs.project, path);
+    if (held === undefined) {
+      digests.push([path, read.digest ?? ABSENT_FILE]);
+    } else if (!describesRead(held, read)) {
+      return {
+        ok: false,
+        reason: `the env file ${path} ${CHANGED_SINCE_HELD}`,
+      };
+    } else if (!inputs.selected.digests.has(path)) {
+      digests.push([path, held]);
+    }
   }
-  return { ok: true, digests };
+  return { ok: true, digests, texts };
+}
+
+/** Whether a digest the inputs hold is of the content `read` found; never when nothing is there. */
+function describesRead(held: string, read: EnvFileDigest): boolean {
+  return (
+    read.ok && read.digest !== undefined && heldFileDigest(read.digest) === held
+  );
 }
 
 /**
@@ -341,11 +397,11 @@ function moduleDigest(path: string): FingerprintResult {
   }
 }
 
-function readOnce(
-  reads: Map<string, FingerprintResult>,
+function readOnce<Read>(
+  reads: Map<string, Read>,
   path: string,
-  read: () => FingerprintResult,
-): FingerprintResult {
+  read: () => Read,
+): Read {
   let result = reads.get(path);
   if (result === undefined) {
     result = read();

@@ -169,7 +169,8 @@ export function protectedModules(
   );
 }
 
-function reportedProjects(
+/** The projects whose selection facts the workspace's discovery reports; none for one it did not discover. */
+export function reportedProjects(
   entry: WorkspaceDiscovery,
 ): readonly ProjectSelectionFacts[] {
   return entry.status === "discovered" && entry.selectionFacts.reported

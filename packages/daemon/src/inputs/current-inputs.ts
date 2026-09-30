@@ -8,6 +8,7 @@ import {
   type InputsNotNarrowed,
 } from "../query/answer.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
+import type { CountedEnvironment } from "./carried-variables.js";
 import {
   discoveryFingerprint,
   protectedFileChangedSince,
@@ -101,8 +102,11 @@ export interface InputsMoment {
   readonly unavailable: string | undefined;
   /** Why `rt-test.json` cannot be used or its patterns do not apply; undefined otherwise. */
   readonly nonInputsUnusable: string | undefined;
-  /** The environment's digest under the declaration in effect, which every fingerprint of the moment takes. */
-  readonly environment: string;
+  /**
+   * The start environment under the declaration in effect, whose digest every fingerprint of the moment takes, with
+   * the variables Vite can carry to its workspaces' tests counted by value.
+   */
+  readonly environment: CountedEnvironment;
   /** The dependency builds' state for the discovery the query reads; undefined for every input of the project. */
   readonly narrowing: QueryNarrowing | undefined;
   /** Read only when a fingerprint can be computed. */
