@@ -4,12 +4,12 @@ Test execution and falsification for Vitest projects, taken off coding agents.
 
 Coding agents spend most of their time running and falsifying the tests they write. RT Test is meant to do that work for them: a local daemon runs each edit's tests and proves them against their named defects, and agents query the answers instead of running anything. It answers three questions: does the code pass, are the results still current, and have the tests shown that they detect their intended defects?
 
-**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, and an `rt-test` CLI that starts and stops that daemon, asks it what its stored runs say about the worktree or a path, waits until the tests covering given files have current results or none coming, and lists what changed for the tests covering given files since an earlier answer. The daemon watches the worktree's inputs, leaving out the files the consumer declares no test reads, and reports a result current only while the inputs its run started from are unchanged. After an edit it waits until the inputs have held still for 1,000 ms (a target), discovers again when its stored discovery is no longer current, and reruns each workspace whose latest run is no longer bound to its current input fingerprint; a restart reruns nothing that still reads current. An edit inside the inputs of a workspace whose run is in progress interrupts that run once the edited revision's dependency build has ended; the run stores nothing and runs again once the inputs settle, while an edit only outside them leaves its results current. It does not yet show its schedule in every answer, or falsify defects. It is not published to npm.
+**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, and an `rt-test` CLI that starts and stops that daemon, asks it what its stored runs say about the worktree or a path, waits until the tests covering given files have current results or none coming, and lists what changed for the tests covering given files since an earlier answer, and runs as an opt-in Claude Code hook that tells a coding agent, after each batch of its tool calls, what changed for the tests covering the files it edited. The daemon watches the worktree's inputs, leaving out the files the consumer declares no test reads, and reports a result current only while the inputs its run started from are unchanged. After an edit it waits until the inputs have held still for 1,000 ms (a target), discovers again when its stored discovery is no longer current, and reruns each workspace whose latest run is no longer bound to its current input fingerprint; a restart reruns nothing that still reads current. An edit inside the inputs of a workspace whose run is in progress interrupts that run once the edited revision's dependency build has ended; the run stores nothing and runs again once the inputs settle, while an edit only outside them leaves its results current. It does not yet show its schedule in every answer, or falsify defects. It is not published to npm.
 
 ## Intended experience
 
 - Start RT Test explicitly for a trusted project; from then on its daemon is the only thing that runs tests, and agents never start a run.
-- Ask through a CLI with versioned `--json` output: `status <path>` gives counts per state for a file or folder, `wait <files>` returns once the results covering your files are current or can get none, or sooner as superseded or unsettled, and `changes <files>` lists what changed for the tests covering your files since your last ask.
+- Ask through a CLI with versioned `--json` output: `status <path>` gives counts per state for a file or folder, `wait <files>` returns once the results covering your files are current or can get none, or sooner as superseded or unsettled, and `changes <files>` lists what changed for the tests covering your files since your last ask; an opt-in Claude Code hook tells the agent what its edits changed.
 - Mark affected results stale as soon as saved inputs change, and never run a test again while its result is current.
 - Select the tests each edit needs, widening when a dependency is uncertain and explaining every broad fallback, with a Convex adapter for function-reference edges.
 - Falsify each test against its named defect as an in-memory transform, without touching a developer's working files, and report tests with no defect as gaps.
@@ -91,6 +91,52 @@ Each asks the daemon serving `root` (the current directory by default, never a p
 - No answer calls a worktree, folder or file passing or failing; read the counts.
 
 With `--json`, stdout carries one document with `schemaVersion` (1), `command`, `ok` and the answer's fields, such as `counts.states`, `counts.freshness`, `notDiscovered` and `inputs`. Exit codes: 0 when the query answered, whatever the tests' states; 1 when it could not, such as no daemon, a stopping or older daemon, no stored discovery, a discovery holding nothing to count, a path outside the root, refused on Windows as possibly naming another file, or with nothing at or under it, no answer within the bound, a query that failed inside the daemon, or an answer longer than the protocol allows, when you should ask `status` for a narrower path, or `wait` or `changes` on fewer files; for `wait` and `changes`, also a path it refuses (outside the root, a directory, or refused on Windows) or more than 1,000 files, and for `changes` a `--since` cursor longer than 256 characters; and 2 on a usage error, such as an empty `--since`.
+
+## Agent hook
+
+`rt-test hook claude-code` tells a Claude Code agent, after each batch of its tool calls, which tests covering the files the session edited changed state or freshness since that agent's last report, failures first, naming up to five with each failure's first line. At the end of a turn it shows you one line while those tests are failing or not current, or RT Test has not decided them, and gives the agent the same line with your next prompt. It says once when no daemon answers, starts nothing, and never blocks Claude Code. It is opt-in: add this block to `.claude/settings.json` or `.claude/settings.local.json`, with `node "<path to RT Test>/packages/cli/dist/bin.js"` in place of `rt-test` until the CLI is published:
+
+```json
+{
+  "hooks": {
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rt-test hook claude-code --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rt-test hook claude-code --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rt-test hook claude-code --root \"${CLAUDE_PROJECT_DIR}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+It keeps each session's memory in your own RT Test directory (`~/AppData/Local/rt-test` on Windows, `/tmp/rt-test-<uid>` on Linux), never in the project, and forgets it once untouched for 7 days. Its end-to-end time, process start included, has a target of 100 ms; on Windows 11 with Node 24 and a warm daemon over a 1-test project it measured 177 ms at p50 and 537 ms at p95, and at p50 most of it was process start and the daemon key check.
 
 ## Develop
 

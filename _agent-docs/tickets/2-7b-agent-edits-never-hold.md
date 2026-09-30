@@ -122,7 +122,7 @@ The orchestrator split the original ticket 2.7 at 08:04 by outcome: 2.7 keeps th
 - **2.4b** (ready-for-dev, building in Tree 1): reads `scheduler.ts` and `run-history.ts` and writes `protocol.ts`, `server.ts`, `lifecycle.ts` and `query-client.ts`. Lands first.
 - **2.5** (ready-for-dev): reads `protocol.ts` and `query-client.ts`. Lands first.
 - **2.6** (built at 50dc810 on `wt/1`, before review, 10:56 on 2026-09-30): creates `ChangesRequest`, its route and validation (`changesResponse`, `ChangesQuery`), the changes handler (`Changes.answer` in `daemon/changes.ts`, wired by `lifecycle.ts`) and `queryChanges`, and leaves edit attribution to this ticket (its Q7). Lands first.
-- **2.7** (ready-for-dev): creates `commands/hook.ts`, whose `PostToolBatch` request this ticket widens. Lands just before this ticket.
+- **2.7** (done): created `commands/hook.ts`, whose `PostToolBatch` request this ticket widens. Landed before this ticket.
 
 #### Sizing
 

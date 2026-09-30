@@ -1,5 +1,6 @@
 import { isUsageError, type CliIo, type Command } from "./command.js";
 import { changesCommand } from "./commands/changes.js";
+import { hookCommand } from "./commands/hook.js";
 import { startCommand } from "./commands/start.js";
 import { statusCommand } from "./commands/status.js";
 import { stopCommand } from "./commands/stop.js";
@@ -14,6 +15,7 @@ const COMMANDS: readonly Command[] = [
   statusCommand,
   waitCommand,
   changesCommand,
+  hookCommand,
 ];
 
 /** Writes nothing to stdout on a usage error, since a strict parse that fails never reached `--json`. */

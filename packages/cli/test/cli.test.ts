@@ -1,9 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -36,7 +39,9 @@ import {
   DEPENDENCY_BUILDS_ENDED,
   daemonStatus,
   FIRST_ROUND,
+  identityHash,
   PROTOCOL_VERSION,
+  queryWait,
   ROUND_SELECTION,
   servingDaemon,
   TEST_STATES,
@@ -48,6 +53,7 @@ import {
   type ExplainedPath,
   type SummaryResponse,
   type WorkspaceExecution,
+  userDirectory,
 } from "@rt-test/daemon/client";
 import { daemonEntryPoint } from "../../daemon/src/daemon/entry-point.js";
 import { isRunning } from "../../daemon/src/daemon/runtime-directory.js";
@@ -86,6 +92,16 @@ import {
 import { main } from "../src/main.js";
 import { EXIT_FAILURE, Output, oneLine, type ExitCode } from "../src/output.js";
 import { decideTrust, type TrustDecision } from "../src/trust-prompt.js";
+import {
+  BATCH,
+  context,
+  HARNESS,
+  payloadOf,
+  printed,
+  runHook,
+  STOP,
+  TOOL_CALLS,
+} from "./hook-harness.js";
 
 const BIN = fileURLToPath(new URL("../src/bin.ts", import.meta.url));
 const LIST_MODULES = join(REPO, "test/fixtures/daemon/list-modules.mjs");
@@ -2617,6 +2633,85 @@ describe("a query", () => {
         };
       });
       expect(outcome.actual).toStrictEqual(outcome.expected);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+/** What an agent writes over the daemon fixture's passing test, which now fails. */
+const AGENT_BROKEN_TEST =
+  'it("passes", () => {\n  throw new Error("broken by the agent\'s edit");\n});\n';
+
+/** Removes the memory files the hook kept in the user's own directory for `sessionId` over `root`. */
+function removeHookMemory(sessionId: string, root: string): void {
+  const directory = userDirectory();
+  if (!directory.ok) return;
+  const prefix = `hook-${identityHash(sessionId, root)}-`;
+  for (const name of readdirSync(directory.directory)) {
+    if (name.startsWith(prefix)) rmSync(join(directory.directory, name));
+  }
+}
+
+describe("the agent hook against a started daemon", () => {
+  it(
+    "D3564: after an agent's edit breaks a covering test, its next batch reports that test failing with its first error, and the turn end tells the person",
+    async () => {
+      const sessionId = `hook-test-${randomUUID()}`;
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await idleDaemon(root, pids);
+        if ("thrown" in identity) return identity;
+        const file = join(root, WORKSPACE_B, "passes.test.mjs");
+        const hook = async (event: string, toolCalls?: readonly unknown[]) => {
+          const run = await runHook(
+            [HARNESS, "--root", root],
+            root,
+            payloadOf(event, {
+              root,
+              sessionId,
+              ...(toolCalls === undefined ? {} : { toolCalls }),
+            }),
+          );
+          return { exit: run.exit, printed: printed(run) };
+        };
+        try {
+          const first = await hook(BATCH, [TOOL_CALLS.write(file)]);
+          writeFileSync(file, AGENT_BROKEN_TEST);
+          const waited = await settled(
+            queryWait(root, [file], { limitMs: DAEMON_WAIT_MS }),
+          );
+          const second = await hook(BATCH, [TOOL_CALLS.bash()]);
+          const stop = await hook(STOP);
+          return {
+            first,
+            waited: "thrown" in waited ? waited : waited.outcome,
+            second,
+            stop,
+          };
+        } finally {
+          removeHookMemory(sessionId, root);
+        }
+      });
+      expect(outcome).toStrictEqual({
+        first: { exit: 0, printed: {} },
+        waited: "settled",
+        second: {
+          exit: 0,
+          printed: context(
+            BATCH,
+            expect.stringMatching(
+              /^RT Test: 1 change since your last report in the tests covering the files this session edited, failures first:\n {2}failing packages\/b .*passes\.test\.mjs > passes: at your last report: passed, current; now: failed, current; first error: [^\n]*broken by the agent's edit[^\n]*$/,
+            ) as unknown as string,
+          ),
+        },
+        stop: {
+          exit: 0,
+          printed: {
+            systemMessage: expect.stringMatching(
+              /^RT Test: of the \d+ tests covering the files this session edited, 1 is failing and 0 are not current\.$/,
+            ) as unknown,
+          },
+        },
+      });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

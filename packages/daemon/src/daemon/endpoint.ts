@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import {
   createConnection,
@@ -10,6 +11,7 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { errorText } from "../vitest/error-text.js";
 import { runtimeDirectoryRefusal, takeLock } from "./runtime-directory.js";
+import { protectDirectory } from "./windows-acl.js";
 
 export const WINDOWS = "win32";
 /*
@@ -103,19 +105,15 @@ export function clientEndpoint(worktreeIdentity: string): EndpointLocation {
  */
 function endpointOf(worktreeIdentity: string): Endpoint {
   if (process.platform === WINDOWS) {
-    const user = userInfo();
-    const name = identityHash(user.username, worktreeIdentity);
-    const keyDirectory = join(user.homedir, ...WINDOWS_KEY_DIRECTORY);
+    const name = identityHash(userInfo().username, worktreeIdentity);
+    const keyDirectory = userDirectoryPath();
     return {
       path: `${PIPE_PREFIX}${name}`,
       keyDirectory,
       keyFile: join(keyDirectory, `${name}${KEY_EXTENSION}`),
     };
   }
-  const runtimeDirectory = join(
-    SHARED_TEMPORARY_DIRECTORY,
-    `${RUNTIME_DIRECTORY_PREFIX}${process.getuid?.()}`,
-  );
+  const runtimeDirectory = userDirectoryPath();
   const name = identityHash(worktreeIdentity);
   return {
     path: join(runtimeDirectory, `${name}${SOCKET_EXTENSION}`),
@@ -123,6 +121,41 @@ function endpointOf(worktreeIdentity: string): Endpoint {
     keyDirectory: runtimeDirectory,
     keyFile: join(runtimeDirectory, `${name}${KEY_EXTENSION}`),
   };
+}
+
+/** The key directory on Windows, and the runtime directory on Linux. */
+function userDirectoryPath(): string {
+  if (process.platform === WINDOWS) {
+    return join(userInfo().homedir, ...WINDOWS_KEY_DIRECTORY);
+  }
+  return join(
+    SHARED_TEMPORARY_DIRECTORY,
+    `${RUNTIME_DIRECTORY_PREFIX}${process.getuid?.()}`,
+  );
+}
+
+export type UserDirectory =
+  | { readonly ok: true; readonly directory: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * The user's own RT Test directory, where the daemon keeps its key, made owner-only when missing. On Linux one that
+ * is not this user's alone is refused. On Windows an existing one is used as found, since only this user or an
+ * administrator can create it in the profile, and every daemon start protects it.
+ */
+export function userDirectory(): UserDirectory {
+  const directory = userDirectoryPath();
+  const refusal =
+    process.platform === WINDOWS
+      ? protectedIfMissing(directory)
+      : runtimeDirectoryRefusal(directory, true);
+  return refusal === undefined
+    ? { ok: true, directory }
+    : { ok: false, reason: refusal };
+}
+
+function protectedIfMissing(directory: string): string | undefined {
+  return existsSync(directory) ? undefined : protectDirectory(directory);
 }
 
 /** Resolves with the connected socket, or rejects with the connection error, whose `code` says why. */

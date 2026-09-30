@@ -37,5 +37,5 @@ sprint-2: in-progress
 2-4b-wait-for-files: done
 2-5-edit-corpus: done
 2-6-changes-query: done
-2-7-agent-hook: ready-for-dev
+2-7-agent-hook: done
 2-7b-agent-edits-never-hold: ready-for-dev

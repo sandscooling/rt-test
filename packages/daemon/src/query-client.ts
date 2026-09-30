@@ -1,4 +1,5 @@
 import {
+  boundUntil,
   onProvenConnection,
   requireAnswer,
   targetOf,
@@ -57,17 +58,17 @@ export async function queryPathStatus(
     protocolVersion: PROTOCOL_VERSION,
     path,
   };
-  const answer = await query(
-    targetOf(consumerRoot, "query"),
-    request,
-    READ_FIRST_BOUND_MS,
-  );
+  const answer = await query(targetOf(consumerRoot, "query"), request, {
+    requestMs: READ_FIRST_BOUND_MS,
+  });
   return answer as unknown as PathStatusResponse;
 }
 
 export interface ChangesOptions {
   /** The cursor an earlier changes answer returned; absent for a baseline. */
   readonly since?: string;
+  /** A whole number of ms the whole query may take, the daemon's proof of its hello included; `READ_FIRST_BOUND_MS` when absent. */
+  readonly boundMs?: number;
 }
 
 /**
@@ -79,18 +80,22 @@ export async function queryChanges(
   paths: readonly string[],
   options: ChangesOptions = {},
 ): Promise<ChangesResponse> {
-  const { since } = options;
+  const { since, boundMs = READ_FIRST_BOUND_MS } = options;
+  if (!Number.isInteger(boundMs) || boundMs <= 0) {
+    throw new RangeError(
+      `a changes query's boundMs must be a whole number of ms above 0, not ${boundMs}`,
+    );
+  }
+  const deadline = Date.now() + boundMs;
   const request: ChangesRequest = {
     type: CHANGES_TYPE,
     protocolVersion: PROTOCOL_VERSION,
     paths,
     ...(since === undefined ? {} : { since }),
   };
-  const answer = await query(
-    targetOf(consumerRoot, "query"),
-    request,
-    READ_FIRST_BOUND_MS,
-  );
+  const answer = await query(targetOf(consumerRoot, "query"), request, {
+    deadline,
+  });
   return answer as unknown as ChangesResponse;
 }
 
@@ -117,31 +122,44 @@ export async function queryWait(
   };
   // A limit the daemon refuses is answered at once, so the bound need not cover it.
   const waitsMs = isWaitLimit(limitMs) ? limitMs : WAIT_LIMIT_MS;
-  const answer = await query(
-    targetOf(consumerRoot, "query"),
-    request,
-    waitsMs + RESPONSE_BOUND_MS,
-  );
+  const answer = await query(targetOf(consumerRoot, "query"), request, {
+    requestMs: waitsMs + RESPONSE_BOUND_MS,
+  });
   return answer as unknown as WaitResponse;
 }
 
 /**
- * The daemon's answer to a query, or a rejection saying why it has none; `boundMs` is how long it may take, the
- * connection's default when absent.
+ * How long the request's answer may take once the hello is proven, or when the whole query, its hello included, ends:
+ * a `Date.now()` time.
+ */
+type QueryBound =
+  { readonly requestMs: number } | { readonly deadline: number };
+
+/**
+ * The daemon's answer to a query, or a rejection saying why it has none; with no `bound`, each answer may take the
+ * connection's default.
  */
 async function query(
   target: DaemonTarget,
   request: SummaryRequest | PathStatusRequest | WaitRequest | ChangesRequest,
-  boundMs?: number,
+  bound?: QueryBound,
 ): Promise<ProtocolMessage> {
   const { consumerRoot } = target;
-  const answer = await onProvenConnection(target, (connection) =>
-    connection.request(request, boundMs).catch((failure: unknown) => {
-      throw new Error(
-        `Cannot get an answer from the daemon for ${consumerRoot}: ${errorText(failure)}.`,
-        { cause: failure },
-      );
-    }),
+  const deadline =
+    bound !== undefined && "deadline" in bound ? bound.deadline : undefined;
+  const answer = await onProvenConnection(
+    target,
+    async (connection) => {
+      try {
+        return await connection.request(request, requestBoundMs(bound));
+      } catch (failure) {
+        throw new Error(
+          `Cannot get an answer from the daemon for ${consumerRoot}: ${errorText(failure)}.`,
+          { cause: failure },
+        );
+      }
+    },
+    deadline,
   );
   if (answer === undefined) {
     throw new Error(
@@ -153,6 +171,11 @@ async function query(
   }
   requireAnswer(consumerRoot, answer, request.type);
   return answer;
+}
+
+function requestBoundMs(bound: QueryBound | undefined): number | undefined {
+  if (bound === undefined) return undefined;
+  return "requestMs" in bound ? bound.requestMs : boundUntil(bound.deadline);
 }
 
 function queryErrorReason(

@@ -48,6 +48,7 @@ export {
   CHANGE_KIND,
   CHANGE_KINDS,
   CURSOR_USE,
+  FAILING_STATES,
   NOT_DETERMINED,
   type ChangeCounts,
   type ChangeKind,
@@ -59,6 +60,12 @@ export {
   type TestChange,
   type UnreadFile,
 } from "./query/changes-answer.js";
+export {
+  identityHash,
+  userDirectory,
+  type UserDirectory,
+} from "./daemon/endpoint.js";
+export { resolveCallerPath } from "./query/caller-paths.js";
 export { startPlan, type StartPlan } from "./start-plan.js";
 export {
   NON_INPUTS_ABSENT,
@@ -72,6 +79,7 @@ export type {
 export type { UnreadWorkspaceSource } from "./vitest/find-workspaces.js";
 export { errorText } from "./vitest/error-text.js";
 export {
+  MAX_CHANGES_PATHS,
   MAX_WAIT_LIMIT_MS,
   PROTOCOL_VERSION,
   type ChangesResponse,
@@ -86,6 +94,7 @@ export {
 export {
   activityText,
   COVERAGE,
+  CURRENT,
   DEPENDENCY_BUILD_FAILED,
   DEPENDENCY_BUILD_TIMED_OUT,
   DEPENDENCY_BUILDS_ENDED,
