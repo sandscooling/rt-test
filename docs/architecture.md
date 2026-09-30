@@ -60,7 +60,7 @@
   - `State dimensions`: The five independent state dimensions and the summary denominators. Load it when you add or change a state.
   - `Dependency index`: The graph design, workspace then file granularity, function-level caveats and adapter rules. Load it when you work on selection beyond workspace granularity.
   - `Convex adapter`: The planned Convex adapter and keeping Convex results distinct. Load it when you work on the Convex adapter.
-  - `Execution and falsification isolation`: Scheduling principles, transform falsification (ADR-0003), verdicts from run facts, defect definitions (ADR-0004) and the bootstrap verifier's limits. Load it when you work on scheduling or falsification.
+  - `Execution and falsification isolation`: Scheduling principles, transform falsification (ADR-0003), the reused instance per job (ADR-0007), verdicts from run facts and canaries (ADR-0008), defect definitions (ADR-0004, ADR-0009) and the bootstrap verifier's limits. Load it when you work on scheduling or falsification.
   - `Query surface`: The planned queries, the wait contract, the round, execution and selection facts in every answer, `--json` schema versions, and no MCP. Load it when you add or change a query or its answer.
   - `Upstream integration references`: Links to the Vitest reporter and programmatic APIs and to Convex testing. Load it when you integrate with Vitest or Convex APIs.
 
@@ -249,13 +249,13 @@ Results belong to the inputs actually executed. If an input changes during a run
 
 ### State dimensions
 
-| Dimension          | Intended values                                                                 |
-| ------------------ | ------------------------------------------------------------------------------- |
-| Last test outcome  | Passed, failed, skipped, error, never run                                       |
-| Freshness          | Current, stale, unknown                                                         |
-| Execution          | Idle, queued, running, interrupted                                              |
-| Defect evidence    | Detected, survived, invalid experiment, unclear, anchor missing, never verified |
-| Evidence freshness | Current, stale, unknown                                                         |
+| Dimension          | Intended values                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| Last test outcome  | Passed, failed, skipped, error, never run                                                           |
+| Freshness          | Current, stale, unknown                                                                             |
+| Execution          | Idle, queued, running, interrupted                                                                  |
+| Defect evidence    | Detected, survived, invalid experiment, unclear, anchor missing, invalid definition, never verified |
+| Evidence freshness | Current, stale, unknown                                                                             |
 
 Collect module-level errors and run-level unhandled errors independently of individual test outcomes. Include discovered, selected, executed, skipped, stale, and unknown denominators in summaries. An empty or incomplete run cannot be called verified.
 
@@ -279,15 +279,17 @@ Keep `convex-test` results distinct from typechecking, development backend synch
 
 Reuse runner infrastructure where supported, while retaining the configured test isolation. Debounce edit bursts, prioritize direct targets and prior failures, and never run a test that holds a current result for the same inputs. Cancellation must leave explicit interrupted or stale states.
 
-Falsification applies each mutation as an in-memory module transform in a separate Vitest instance and never writes a mutated file ([ADR-0003](adr/0003-transform-falsification.md)). Verify the baseline before mutation. Decide each verdict from run facts: the failure phase, the error kind, whether the mutated code was reached, and the baseline result. Only an assertion failure in the intended test counts as a detection; setup, collection, compile, timeout, and unrelated failures are invalid or unclear experiments. Ordinary results and mutation runs use different namespaces. Changing the test, mutation, input closure, or falsifier invalidates the evidence. Canary fixtures exercise the fact collector.
+Falsification applies each mutation as an in-memory module transform in a separate Vitest instance and never writes a mutated file ([ADR-0003](adr/0003-transform-falsification.md)). Verify the baseline before mutation. Decide each verdict from run facts: the failure phase, the error kind, whether the mutated site executed during the intended test, and the baseline result. Only an assertion failure in the intended test after the mutated site executed, repeated in a confirming run, counts as a detection; setup, collection, compile, timeout, and unrelated failures are invalid or unclear experiments. Ordinary results and mutation runs use different namespaces. Changing the test, mutation, input closure, or falsifier invalidates the evidence. Canary fixtures exercise the fact collector.
 
-Defect definitions come from a configurable location in the consumer repository, and evidence stays under the local state directory ([ADR-0004](adr/0004-defect-definitions-in-consumer.md)). A missing mutation anchor is a per-defect state; the other defects still run.
+A falsification job covers one Vitest workspace in one reused Vitest instance: a baseline, each defect's experiment alone, and a restored baseline, reading each run's facts only from the modules that run executed, and starting only while no ordinary job is due or running ([ADR-0007](adr/0007-reused-instance-per-falsification-job.md)). The facts that decide a verdict, and the canary fixtures that confirm them on each Vitest version a workspace installs before its first falsification there, are in [ADR-0008](adr/0008-detection-from-task-facts-and-canaries.md).
+
+Defect definitions come from the JSON files the `defects` member of `rt-test.json` lists in the consumer repository, and evidence stays under the local state directory ([ADR-0004](adr/0004-defect-definitions-in-consumer.md), [ADR-0009](adr/0009-defect-definition-files.md)). A missing mutation anchor and an invalid definition are per-defect states; the other defects still run.
 
 The bootstrap `scripts/verify-defects.mjs` only validates the known hook-free fixtures listed in the repository's `defects.json` files. Its assertion-message check is not a general attribution algorithm and must not become one by copying it unchanged.
 
 ### Query surface
 
-The CLI offers summary, `status <path>` with counts per state for files and folders, failures, affected selection, explanation, defect evidence, gaps, and `wait <files>`. Read operations never trigger execution. A wait binds to the input revision at call time and returns when every test covering the files has a current result or an explicit non-current state, or as superseded, naming the newer revision, as soon as a covering input changes, or as unsettled, naming each covering workspace's execution state, once its time limit passes. The default limit stays under the two minutes a coding agent's shell tool commonly allows a command, so an agent always gets an answer and can wait again.
+The CLI offers summary, `status <path>` with counts per state for files and folders, failures, affected selection, explanation, defect evidence, gaps, and `wait <files>`. Read operations never trigger execution. `defects` gives each defect definition's evidence state, its freshness and reason, the verified, eligible and total counts, and the gaps. A wait binds to the input revision at call time and returns when every test covering the files has a current result or an explicit non-current state, or as superseded, naming the newer revision, as soon as a covering input changes, or as unsettled, naming each covering workspace's execution state, once its time limit passes. The default limit stays under the two minutes a coding agent's shell tool commonly allows a command, so an agent always gets an answer and can wait again.
 
 Every summary and `status <path>` answer also carries the daemon's round: pending, naming what it waits for (the first reconciliation, the quiet window, the settling of the inputs, a dependency build, a rediscovery, or a job begun at an earlier input revision); planned at an input revision; or held after a failed scheduling step until the daemon tries again at the next input event or reconciliation. It carries each confirmed workspace's execution state: running; queued, with why it is due and up to 3 of the changed paths or broad fallbacks that chose it; interrupted by a change until the next round decides it; or idle, saying why no run is coming when its results are not current. It carries the latest selection: up to 20 changed paths, each with up to 20 workspaces it selected and up to 20 it reached that cannot run, up to 20 broad fallbacks, and the selected and total counts, or why no selection was made. On a workspace's latest run, it says whether this daemon stored it invalidated, with the reason. A query the daemon cannot answer, because no discovery is stored or the latest was refused as unreadable, says in its reason what the round is doing and names up to 20 jobs that ended with nothing stored, counting the rest.
 
