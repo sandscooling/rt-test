@@ -1,7 +1,9 @@
 import type { TestProject } from "vitest/node";
 import { testModuleFile } from "../inputs/non-inputs.js";
 import { crawledLinks } from "../inputs/crawl-links.js";
+import { namedList } from "../inputs/input-jobs.js";
 import { globCwd, patternBase } from "../inputs/vitest-glob.js";
+import { releaseLine, type ReleaseLine } from "./load-vitest.js";
 import {
   SNAPSHOT_GUARD_FILE,
   usesBrowserMode,
@@ -63,6 +65,15 @@ export interface TestFilePatterns {
 
 /** Vite's `envPrefix` for a config that sets none. */
 const DEFAULT_ENV_PREFIX = "VITE_";
+/** Where Vitest 5 records each nested projects container's config file, a member its types omit; absent when none. */
+const CONTAINER_RECORD = "_containerConfigFiles";
+/** The first Vitest major whose project configs can declare projects of their own. */
+const CONTAINER_MAJOR = 5;
+/**
+ * The newest Vitest 5 minor whose source was checked for where it records nested projects containers. Raising it is
+ * the step a Vitest 5 minor upgrade owes, once that minor's source is checked.
+ */
+const VERIFIED_CONTAINER_MINOR = 0;
 
 /** Where one resolved Vite config loads env files from. */
 export interface EnvSource {
@@ -72,6 +83,11 @@ export interface EnvSource {
   readonly envPrefixes: readonly string[];
   /** As Vite resolved it, which names the `.env.<mode>` files. */
   readonly mode: string;
+}
+
+/** Stored with the facts, so the reason stays true after RT Test verifies more of Vitest. */
+export interface EnvSourcesNotKnown {
+  readonly notKnown: string;
 }
 
 export interface ProjectSelectionFacts {
@@ -84,8 +100,17 @@ export interface ProjectSelectionFacts {
   readonly globalSetupFiles: readonly string[];
   readonly aliases: readonly ReportedAlias[];
   readonly testFilePatterns: TestFilePatterns;
-  /** The project's own config's, then the root config's: Vitest gives the project's tests the env of both. */
-  readonly envSources: readonly EnvSource[];
+  /**
+   * The project's own config's, then the root config's: Vitest gives the project's tests the env of both. Not known
+   * where Vitest 5 may also give them a nested projects container's env, since no project names its container.
+   */
+  readonly envSources: readonly EnvSource[] | EnvSourcesNotKnown;
+}
+
+export function isNotKnown(
+  envSources: ProjectSelectionFacts["envSources"],
+): envSources is EnvSourcesNotKnown {
+  return !Array.isArray(envSources);
 }
 
 /** Per project not in browser mode. Only a discovery stored without every fact this version reads is not reported. */
@@ -112,27 +137,37 @@ export async function selectionFacts(
   const rootGlobalSetup = asList(
     session.instance.getRootProject().config.globalSetup,
   );
+  const notKnown = envSourcesNotKnown(session);
   const projects: ProjectSelectionFacts[] = [];
   for (const project of session.instance.projects) {
     if (usesBrowserMode(project)) continue;
     projects.push(
-      await projectFacts(session, project, rootGlobalSetup, signal),
+      await projectFacts(
+        session,
+        project,
+        { rootGlobalSetup, notKnown },
+        signal,
+      ),
     );
   }
   return { reported: true, projects };
 }
 
+/** What every project of the session shares. */
+interface SessionFacts {
+  readonly rootGlobalSetup: readonly string[];
+  /** Undefined when the env sources each project's config gives are all its tests read. */
+  readonly notKnown: EnvSourcesNotKnown | undefined;
+}
+
 async function projectFacts(
   session: WorkspaceSession,
   project: TestProject,
-  rootGlobalSetup: readonly string[],
+  { rootGlobalSetup, notKnown }: SessionFacts,
   signal: AbortSignal,
 ): Promise<ProjectSelectionFacts> {
   const { config } = project;
-  const rootRelative = (path: string): string => {
-    const location = session.locate(project.name, path);
-    return testModuleFile(location.workspacePath, location.modulePath);
-  };
+  const rootRelative = rootRelativeTo(session, project.name);
   const ownGlobalSetup = asList(config.globalSetup);
   const includeSource = inSourcePatterns(config.includeSource);
   const vitestDirectory = globCwd(config.dir || config.root);
@@ -167,11 +202,87 @@ async function projectFacts(
       exclude: [...config.exclude],
       includeSource: [...includeSource],
     },
-    envSources: [
+    envSources: notKnown ?? [
       envSource(project.vite.config, rootRelative),
       envSource(session.instance.vite.config, rootRelative),
     ],
   };
+}
+
+/** Names a path the project's config reaches as a test module's path is named. */
+function rootRelativeTo(
+  session: WorkspaceSession,
+  projectName: string,
+): (path: string) => string {
+  return (path) => {
+    const location = session.locate(projectName, path);
+    return testModuleFile(location.workspacePath, location.modulePath);
+  };
+}
+
+/**
+ * Vitest 5 gives the tests of a project that a nested projects container declares the container's env as well, and
+ * records only which containers exist, so every project of a workspace holding one has env sources not known.
+ */
+function envSourcesNotKnown(
+  session: WorkspaceSession,
+): EnvSourcesNotKnown | undefined {
+  const { config, version } = session.instance;
+  const release = releaseLine(version);
+  if (release !== undefined && release.major < CONTAINER_MAJOR) {
+    return undefined;
+  }
+  const recorded = CONTAINER_RECORD in config ? config[CONTAINER_RECORD] : [];
+  if (!isStringList(recorded)) {
+    return {
+      notKnown: `Vitest records its nested projects containers in ${CONTAINER_RECORD} in a form RT Test does not read`,
+    };
+  }
+  if (recorded.length === 0) {
+    return verifiesContainerRecord(release)
+      ? undefined
+      : unrecordedContainers(config.projects, version);
+  }
+  const rootRelative = rootRelativeTo(
+    session,
+    session.instance.getRootProject().name,
+  );
+  const containers = [...new Set(recorded.map(rootRelative))].sort();
+  return {
+    notKnown: `a nested projects container declares its projects (${namedList(containers)})`,
+  };
+}
+
+/** Where a verified minor records no container, it has none. A version that is not a release is not verified. */
+function verifiesContainerRecord(release: ReleaseLine | undefined): boolean {
+  return (
+    release?.major === CONTAINER_MAJOR &&
+    release.minor <= VERIFIED_CONTAINER_MINOR
+  );
+}
+
+/**
+ * On a minor not verified, a container can hide behind any `projects` entry naming a config file, a directory or a
+ * glob, as the root config wrote it; an inline project cannot declare projects.
+ */
+function unrecordedContainers(
+  declared: unknown,
+  version: string,
+): EnvSourcesNotKnown | undefined {
+  const byPath =
+    Array.isArray(declared) &&
+    declared.some((entry: unknown) => typeof entry === "string");
+  if (!byPath) return undefined;
+  return {
+    notKnown: `RT Test has not verified where Vitest ${version} records nested projects containers, and it records none in ${CONTAINER_RECORD} while the root config declares projects by path`,
+  };
+}
+
+function isStringList(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((element: unknown) => typeof element === "string")
+  );
 }
 
 /**

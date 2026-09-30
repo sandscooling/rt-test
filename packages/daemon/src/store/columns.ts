@@ -193,8 +193,14 @@ export function projectSelectionFacts(value: unknown): ProjectSelectionFacts {
     globalSetupFiles: jsonStrings(value, "globalSetupFiles"),
     aliases: jsonArray(value, "aliases", reportedAlias),
     testFilePatterns: testFilePatterns(jsonRecord(value, "testFilePatterns")),
-    envSources: jsonArray(value, "envSources", envSource),
+    envSources: storedEnvSources(value),
   };
+}
+
+function storedEnvSources(value: unknown): ProjectSelectionFacts["envSources"] {
+  const field = jsonField(value, "envSources");
+  if (isRecord(field)) return { notKnown: jsonText(field, "notKnown") };
+  return jsonArray(value, "envSources", envSource);
 }
 
 function envSource(value: unknown): EnvSource {

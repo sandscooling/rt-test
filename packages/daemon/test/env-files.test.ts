@@ -406,3 +406,15 @@ describe("reading an env file as Vite does", () => {
     });
   });
 });
+
+describe("a project whose env sources are not known", () => {
+  it("D3123: names no env file, rather than failing to list them", () => {
+    const project = projectFacts({
+      envSources: {
+        notKnown:
+          "a nested projects container declares its projects (app/vitest.config.mjs)",
+      },
+    });
+    expect(settle(() => projectEnvFiles(project))).toStrictEqual([]);
+  });
+});

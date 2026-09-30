@@ -41,7 +41,6 @@ import {
 } from "../src/vitest/run-workspace.js";
 import type {
   CrawledLinks,
-  EnvSource,
   SpelledDirectory,
   ProjectSelectionFacts,
   ReportedAlias,
@@ -375,7 +374,7 @@ export interface FactsCase {
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly includeSource?: readonly string[];
-  readonly envSources?: readonly EnvSource[];
+  readonly envSources?: ProjectSelectionFacts["envSources"];
 }
 
 export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {

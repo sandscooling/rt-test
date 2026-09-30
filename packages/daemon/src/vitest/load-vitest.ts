@@ -94,12 +94,23 @@ function readVersion(manifestPath: string): string | undefined {
   return typeof version === "string" ? version : undefined;
 }
 
-/** Undefined when the version is outside every supported line. */
-function supportedMajor(version: string): number | undefined {
+export interface ReleaseLine {
+  readonly major: number;
+  readonly minor: number;
+}
+
+/** Undefined for a version that is not a release, such as a prerelease. */
+export function releaseLine(version: string): ReleaseLine | undefined {
   const match = RELEASE_VERSION.exec(version);
   if (!match) return undefined;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
+  return { major: Number(match[1]), minor: Number(match[2]) };
+}
+
+/** Undefined when the version is outside every supported line. */
+function supportedMajor(version: string): number | undefined {
+  const release = releaseLine(version);
+  if (release === undefined) return undefined;
+  const { major, minor } = release;
   const supported = SUPPORTED_VITEST_LINES.some(
     (line) =>
       line.major === major &&

@@ -13,9 +13,10 @@ import type {
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
-import type {
-  EnvSource,
-  ProjectSelectionFacts,
+import {
+  isNotKnown,
+  type EnvSource,
+  type ProjectSelectionFacts,
 } from "../vitest/selection-facts.js";
 import { wholeDigest } from "./input-inventory.js";
 
@@ -36,18 +37,28 @@ const OPEN_WITHOUT_BLOCKING = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
 const FIFO_REASON = "it is a FIFO, whose read could block";
 const NOTHING_READ: EnvFileDigest = { ok: true, digest: undefined };
 
-/** Root-relative, `/`-separated env files, or the discovered workspace whose projects do not report their sources. */
+/** Root-relative, `/`-separated env files, or the discovered workspace whose projects' env sources are not known. */
 export type ListedEnvFiles =
   | { readonly known: true; readonly files: readonly string[] }
-  | { readonly known: false; readonly unreportedWorkspace: string };
+  | {
+      readonly known: false;
+      readonly workspace: string;
+      /** As its projects' facts store it; absent when its discovery does not report their env sources. */
+      readonly reason?: string;
+    };
 
 /** A digest of what Vite reads at a path, undefined when it reads nothing there, or why it cannot be read. */
 export type EnvFileDigest =
   | { readonly ok: true; readonly digest: string | undefined }
   | { readonly ok: false; readonly reason: string };
 
-/** Every env file each of the project's sources names, named as its env directory is. */
+/**
+ * Every env file each of the project's sources names, named as its env directory is. None for a project whose sources
+ * are not known, which is safe only because its workspace and discovery then have no fingerprint, so nothing that
+ * protection or selection derives from the list can leave a result current.
+ */
 export function projectEnvFiles(project: ProjectSelectionFacts): string[] {
+  if (isNotKnown(project.envSources)) return [];
   return [...new Set(project.envSources.flatMap(sourceEnvFiles))];
 }
 
@@ -66,8 +77,13 @@ function sourceEnvFiles(source: EnvSource): string[] {
 /** A workspace that was not discovered loaded no config, so it names none. */
 export function workspaceEnvFiles(entry: WorkspaceDiscovery): ListedEnvFiles {
   if (entry.status !== "discovered") return { known: true, files: [] };
-  if (!entry.selectionFacts.reported) {
-    return { known: false, unreportedWorkspace: entry.workspace.path };
+  const workspace = entry.workspace.path;
+  if (!entry.selectionFacts.reported) return { known: false, workspace };
+  const notKnown = entry.selectionFacts.projects
+    .map((project) => project.envSources)
+    .find(isNotKnown);
+  if (notKnown !== undefined) {
+    return { known: false, workspace, reason: notKnown.notKnown };
   }
   return {
     known: true,

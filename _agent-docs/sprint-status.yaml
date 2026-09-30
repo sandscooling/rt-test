@@ -27,7 +27,7 @@ sprint-2: in-progress
 2-3k-hold-self-changing-runs: backlog
 2-3l-hold-self-changing-discovery: backlog
 2-3m-env-files: done
-2-3q-nested-container-env: ready-for-dev
+2-3q-nested-container-env: done
 2-3p-listed-ignored-events: backlog
 2-3n-env-snapshot: backlog
 2-3o-count-carried-env: backlog

@@ -15,10 +15,10 @@ them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review 
 
 A **nested projects container** is a config file that a `projects` entry names and that itself declares `projects`, at any depth below the workspace's root config (Dev Notes § Settled facts).
 
-- [ ] AC1: Under Vitest 5, wherever Vitest has recorded its nested projects containers where 5.0 records them (AC4 covers a later minor that has not), and apart from the cases Dev Notes § Known limits names, a discovered workspace in which a nested projects container declares projects has no fingerprint, and neither has the discovery holding it. Every answer lists that workspace among the unfingerprinted workspaces with a reason saying its env files are not known because a nested projects container declares its projects, naming each container's config file. So no result of that workspace reads current after an edit to an env file in a container's env directory, a gitignored `.env.local` included.
-- [ ] AC2: A workspace in which no nested projects container declares projects reports its env sources, and keeps its fingerprint, as ticket 2.3m gives them, under Vitest 4.1 and under each Vitest 5 minor RT Test has verified (5.0). That includes a Vitest 5.0 workspace whose projects are config files or directories that declare no `projects`, one beside a nested workspace in the same discovery (whose own fingerprint is gone by AC1), and a Vitest 4.1 workspace whose project config declares `projects`, which 4.1 ignores, running that project's own tests with its own env.
-- [ ] AC3: The store keeps, across a restart, a discovery whose projects' env sources are not known, with the reason. A store at schema version 8 opens at version 9 with every stored selection-facts report dropped, so each discovered workspace in it reads as not reporting (ticket 2.3m's AC5) until the next discovery; stores at versions 1 to 7 still migrate.
-- [ ] AC4: Under a Vitest 5 minor later than the newest one RT Test has verified (5.0), where Vitest has not recorded nested projects containers where 5.0 records them, a discovered workspace whose root config declares a `projects` entry by path (a config file, a directory or a glob) has no fingerprint, and neither has the discovery holding it; the reason names the missing record and the workspace's Vitest version. Under that minor a workspace whose root config declares only inline projects, or none, keeps its fingerprint as AC2 gives it. Under any Vitest 5 minor, a record present in any shape but a list of paths leaves the workspace with no fingerprint, with a reason naming the record.
+- [x] AC1: Under Vitest 5, wherever Vitest has recorded its nested projects containers where 5.0 records them (AC4 covers a later minor that has not), and apart from the cases Dev Notes § Known limits names, a discovered workspace in which a nested projects container declares projects has no fingerprint, and neither has the discovery holding it. Every answer lists that workspace among the unfingerprinted workspaces with a reason saying its env files are not known because a nested projects container declares its projects, naming each container's config file up to the bound an answer's named list keeps (20) and counting the rest. So no result of that workspace reads current after an edit to an env file in a container's env directory, a gitignored `.env.local` included.
+- [x] AC2: A workspace in which no nested projects container declares projects reports its env sources, and keeps its fingerprint, as ticket 2.3m gives them, under Vitest 4.1 and under each Vitest 5 minor RT Test has verified (5.0). That includes a Vitest 5.0 workspace whose projects are config files or directories that declare no `projects`, one beside a nested workspace in the same discovery (whose own fingerprint is gone by AC1), and a Vitest 4.1 workspace whose project config declares `projects`, which 4.1 ignores, running that project's own tests with its own env.
+- [x] AC3: The store keeps, across a restart, a discovery whose projects' env sources are not known, with the reason. A store at schema version 8 opens at version 9 with every stored selection-facts report dropped, so each discovered workspace in it reads as not reporting (ticket 2.3m's AC5) until the next discovery; stores at versions 1 to 7 still migrate.
+- [x] AC4: Under a Vitest 5 minor later than the newest one RT Test has verified (5.0), where Vitest has not recorded nested projects containers where 5.0 records them, a discovered workspace whose root config declares a `projects` entry by path (a config file, a directory or a glob) has no fingerprint, and neither has the discovery holding it; the reason names the missing record and the workspace's Vitest version. Under that minor a workspace whose root config declares only inline projects, or none, keeps its fingerprint as AC2 gives it. Under any Vitest 5 minor, a record present in any shape but a list of paths leaves the workspace with no fingerprint, with a reason naming the record.
 
 ## Unverified Assumptions
 
@@ -33,6 +33,8 @@ when that is literally true.
 
 None open: every third-party behavior this ticket rests on was read in the installed Vitest 5.0.1 and 4.1.11 source or run in the spike, each recorded with its source under Dev Notes § Settled facts. A Vitest 5 minor later than 5.0.1 is not installed, so where it records container config files is unknowable here; Dev Notes § Known limits holds what that leaves.
 
+Resolution (dev, 2026-09-29 19:05): no row to resolve. Re-read while building: `_containerConfigFiles` written only when non-empty (5.0.1 `chunks/index.DzobfTyw.js` 12434 to 12437) from Vite's absolute `configFile` (12615, 12626); `Vitest.version` (`chunks/plugin.d.CN87HSxv.d.ts` 2305); `ResolvedConfig` extends `Required<UserConfig>` (4355), so `config.projects` is typed present though absent when none is declared, and the code reads it as `unknown`; `TestProjectConfiguration` is `string | TestProjectInlineConfiguration | Promise<UserWorkspaceConfig> | UserProjectConfigFn` (4501), so a string entry is the only by-path form.
+
 ## Tasks / Subtasks
 
 <!--
@@ -41,17 +43,17 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (AC1, AC2, AC4) In `vitest/selection-facts.ts`, let a project's `envSources` be either the list it is today or an object holding why its env sources are not known (`{ notKnown: <reason> }`, which keeps every hand-built list assignable), and say so in the member's docblock. In `selectionFacts`, decide once per session, from the resolved root config (`session.instance.config`) and the session's Vitest version (`session.instance.version`, public on both lines), whether the workspace's env sources are known. When not known, report that reason as every reported project's `envSources`; when known, report both sources as today. Name the member and the minor below with constants; the minor's comment says that raising it is the step a Vitest 5 minor upgrade owes, once that minor's source is checked for where it records containers. Vitest 5.0.1 records each container's config file in the untyped `_containerConfigFiles` and leaves it absent when there is none, so read it as `unknown` without a widening cast:
+- [x] (AC1, AC2, AC4) In `vitest/selection-facts.ts`, let a project's `envSources` be either the list it is today or an object holding why its env sources are not known (`{ notKnown: <reason> }`, which keeps every hand-built list assignable), and say so in the member's docblock. In `selectionFacts`, decide once per session, from the resolved root config (`session.instance.config`) and the session's Vitest version (`session.instance.version`, public on both lines), whether the workspace's env sources are known. Take the major and minor of that version from one parser shared with `vitest/load-vitest.ts`: export from it a function giving a release version's major and minor, or undefined, and have `supportedMajor` call it, so `RELEASE_VERSION` stays the one spelling of a release; a version that does not parse counts as an unverified minor, failing toward not known. When not known, report that reason as every reported project's `envSources`; when known, report both sources as today. Name the member and the minor below with constants; the minor's comment says that raising it is the step a Vitest 5 minor upgrade owes, once that minor's source is checked for where it records containers. Vitest 5.0.1 records each container's config file in the untyped `_containerConfigFiles` and leaves it absent when there is none, so read it as `unknown` without a widening cast:
   - On Vitest 4.1, known, whatever the member holds.
   - Present as a list of strings on Vitest 5: not known when non-empty, with a reason naming each listed container config file, named as a test module's path is; known when empty.
   - Present with any other value on Vitest 5: not known, with a reason naming the member.
   - Absent on a Vitest 5 minor at or below a named constant for the newest minor whose container record RT Test verified (0): known.
   - Absent on a later Vitest 5 minor: not known when `session.instance.config.projects` (the definitions as written) holds a string entry, with a reason naming the missing member and the Vitest version; known otherwise.
-- [ ] (AC1, AC4) In `inputs/env-files.ts`, make `workspaceEnvFiles` return not known for a discovered workspace any of whose reported projects' env sources are not known, carrying that project's stored reason, apart from the unreported workspace's case; keep the `known` discriminant of `ListedEnvFiles`, which ticket 2.4b's coverage reads. Keep `discoveryEnvFiles` returning the first not-known workspace as it does. Make `projectEnvFiles` list none for a project whose sources are not known, and state in its docblock that its empty list for such a project is safe only because the discovery's fingerprint refuses the workspace before any caller (today `protectedFiles`) acts on it.
-- [ ] (AC1, AC4) In `inputs/fingerprint.ts`, make `envFilesUnknown` say the workspace's env files are not known followed by the stored reason for a workspace whose projects carry one, keeping the `ENV_FILES_UNKNOWN` text for an unreported workspace.
-- [ ] (AC3) In `store/columns.ts`, parse `envSources` as the list it parses today or the not-known object with its reason string, refusing anything else as the other fields do. In `store/schema.ts`, raise `STORE_SCHEMA_VERSION` to 9, name version 8 as the version whose code never reported env sources as not known, and give it the `DROP_INCOMPLETE_FACTS` migration (`UPDATE discovery_workspaces SET selection_facts = NULL;`, which drops every report), as versions 3 to 7 have; each older entry already ends at `STORE_SCHEMA_VERSION` through `SET_SCHEMA_VERSION`, so versions 1 to 7 reach 9 unchanged.
-- [ ] (AC1, AC4) Send the orchestrator exact text for `docs/architecture.md`'s input tracker paragraph (orchestrator-owned under this lane): after "a discovered workspace whose env sources are not reported, such as one in a discovery stored before they were", add a Vitest 5 workspace in which a nested projects container declares projects, and one on an unverified Vitest 5 minor that declares projects by path where Vitest recorded no containers; and in the known limits, replace "a Vitest 5 project that a nested `projects` container declares, whose container's env files are not listed, though Vitest gives its tests the container's env" with the limits under Dev Notes § Known limits.
-- [ ] (Support) Lint and typecheck.
+- [x] (AC1, AC4) In `inputs/env-files.ts`, make `workspaceEnvFiles` return not known for a discovered workspace any of whose reported projects' env sources are not known, carrying that project's stored reason, apart from the unreported workspace's case; keep the `known` discriminant of `ListedEnvFiles`, which ticket 2.4b's coverage reads. Keep `discoveryEnvFiles` returning the first not-known workspace as it does. Make `projectEnvFiles` list none for a project whose sources are not known, and state in its docblock that its empty list for such a project is safe only because the discovery's fingerprint refuses the workspace before any caller (today `protectedFiles`) acts on it.
+- [x] (AC1, AC4) In `inputs/fingerprint.ts`, make `envFilesUnknown` say the workspace's env files are not known followed by the stored reason for a workspace whose projects carry one, keeping the `ENV_FILES_UNKNOWN` text for an unreported workspace.
+- [x] (AC3) In `store/columns.ts`, parse `envSources` as the list it parses today or the not-known object with its reason string, refusing anything else as the other fields do. In `store/schema.ts`, raise `STORE_SCHEMA_VERSION` to 9, name version 8 as the version whose code never reported env sources as not known, and give it the `DROP_INCOMPLETE_FACTS` migration (`UPDATE discovery_workspaces SET selection_facts = NULL;`, which drops every report), as versions 3 to 7 have; each older entry already ends at `STORE_SCHEMA_VERSION` through `SET_SCHEMA_VERSION`, so versions 1 to 7 reach 9 unchanged.
+- [x] (AC1, AC4) Send the orchestrator exact text for `docs/architecture.md`'s input tracker paragraph (orchestrator-owned under this lane): after "a discovered workspace whose env sources are not reported, such as one in a discovery stored before they were", add a Vitest 5 workspace in which a nested projects container declares projects, and one on an unverified Vitest 5 minor that declares projects by path where Vitest recorded no containers; and in the known limits, replace "a Vitest 5 project that a nested `projects` container declares, whose container's env files are not listed, though Vitest gives its tests the container's env" with the limits under Dev Notes § Known limits.
+- [x] (Support) Lint and typecheck.
 
 ## Reusable Code
 
@@ -66,12 +68,14 @@ Check this list before creating any constant, helper or type, and import what ex
 - `envFilesUnknown` and `ENV_FILES_UNKNOWN` (`inputs/fingerprint.ts`): the reason an answer carries in `unfingerprintedWorkspaces`, which needs no answer-side change (ticket 2.3m § Decisions, "No answer-side code").
 - `DROP_INCOMPLETE_FACTS` and `SET_SCHEMA_VERSION` (`store/schema.ts`): the migration an incomplete report already gets.
 - `jsonArray`, `jsonField` and `jsonText` (`store/columns.ts`): `envSource` already tells a field's kinds apart through `jsonField`.
+- `RELEASE_VERSION` and `supportedMajor` (`vitest/load-vitest.ts`): the one parse of a Vitest release version, private today; task 1 exports it rather than copying the regex (sanity check F1).
 - `rootRelative`'s naming (`session.locate` and `testModuleFile`, `vitest/selection-facts.ts`): names a container config file as a test module's path is named.
 - `projectFacts` in `packages/daemon/test/harness.ts`, for create-tests: its `envSources: facts.envSources ?? []` default passes a not-known object through unchanged once its parameter type allows one.
 
 ### Must Create
 
 - The not-known shape of `envSources` and the constants naming Vitest's container record member and the newest verified Vitest 5 minor (`vitest/selection-facts.ts`).
+- The exported release-line parse in `vitest/load-vitest.ts`, which `supportedMajor` calls.
 - The stored reason on `ListedEnvFiles`' not-known case (`inputs/env-files.ts`).
 - The version 8 constant and its migration entry (`store/schema.ts`).
 
@@ -134,6 +138,7 @@ Asked by create-ticket at 18:56, decided by the orchestrator at 18:57 within the
 - **Q3. Sizing** (about 16 raw files, 21 estimated, 3 code units at the time): proceed as-is. The extra is tests and a fixture, and a split would cut the store's parsing of the not-known shape from the detection that writes it.
 - **Decided by create-ticket, agreed at 18:57**: schema 8 to 9 with `DROP_INCOMPLETE_FACTS`, and `envSources: null`, since replaced by a stored reason (§ Decisions), which Q2's answer requires.
 - **Ticket review**, 18:57 to 19:00, over the draft before Q2's answer; triaged by create-ticket at 19:01. Applied: F1 as a settled fact (a container resolving no project fails the load, so "declares projects" and "is recorded" coincide), F2 reworded for the minor gate (AC1 excepts the one remaining known limit), F3 as a scoped decision (a workspace of browser-mode projects only), F4 (the function name left the criteria), F5 (AC2 names the mixed discovery), F6 (task 4 states what the migration drops and why versions 1 to 7 still reach 9), F7 (the docblock's reasoning), F8 (the log's one level), F9 (the version gate answers it; the cross-check it proposed is rejected in § Decisions), F10, F12 (the migration anchors and their fate) and F13 (2.3m's AC5 quoted). Rejected: F11, since no test reads `unreportedWorkspace`. Moot after Q2's answer: the `null` shape the review read. The reviewer's revision over the 19:00 text (19:02) added two, both applied: AC1 is scoped to where Vitest records its containers, since AC4's reason applies on an unverified minor with no record; and a known limit names a container a plugin injects, which `config.projects` never shows.
+- **Sanity check F1**, asked by rt-t2-3q-dev at 19:06, ruled by create-ticket at 19:07, CONFIRMED: task 1's minor gate needs a Vitest version's major and minor, and the only parse is `load-vitest.ts`'s private `RELEASE_VERSION` inside `supportedMajor`, which authoring did not name, so the task could be built only by copying the regex. Task 1 now exports the parse from `load-vitest.ts` for `supportedMajor` and the gate to share; a version that does not parse counts as unverified. `load-vitest.ts` joined the file list (about 17 raw files, 22 estimated, inside Q3's proceed-as-is).
 - **For 2.4b** (orchestrator, 18:57): the orchestrator tells 2.4b's author that a wait on a nested container's env file sees an unreported workspace for as long as the config holds.
 
 ### Known limits
@@ -158,7 +163,7 @@ For `docs/architecture.md`'s list:
 
 For create-tests. Widening `envSources` to allow a not-known object breaks each reader that indexes or maps it: `packages/daemon/test/discover-tests.test.ts` (the `facts.envSources[...]` and `facts.envSources` readers in the env source tests) and `packages/daemon/test/store.test.ts` (the `envSources` map and index readers in its env source tests). Hand-built literals stay valid. `packages/daemon/test/harness.ts`'s `projectFacts` types its `envSources` parameter as a list. AC4's unverified-minor branch needs the session's Vitest version faked, since the repository installs only 5.0.1. The schema bump breaks the version pins `store.test.ts` re-pinned at 8 (D1280, D2097, D2846, D2791, D2831, D2859, D2792).
 
-Named-defect anchors this change moves or may move, in `packages/daemon/test/defects.json`: D2792 (`export const STORE_SCHEMA_VERSION = 8;`) certainly; D3038 (`columns.ts`, `envSources: jsonArray(...)`), D3070 (`env-files.ts`, `projectEnvFiles`' return), D3074 (`env-files.ts`, the unreported return) and D3043, D3048, D3050 and D3051 (`selection-facts.ts`, the `envSources` array) if the lines they anchor are edited. The `STORE_MIGRATIONS` anchors (D2260, D2791, D2829, D2830, D2831, D2846, D2859, D3040, D3041) cover the version 3 to 7 entries, which appending a version 8 entry leaves as they are; no anchor names `envFilesUnknown` or `ENV_FILES_UNKNOWN` (`node` over `defects.json`, 19:01). No test reads `ListedEnvFiles`' `unreportedWorkspace` (`rg -n "unreportedWorkspace" packages/daemon/test`, 19:01: `defects.json` only). A test of AC1 and AC2 needs a fixture with a nested container, run under both installs through `linkVitest` (`harness.ts`), and apart from `test/fixtures/daemon/selection-facts`, whose env source tests would read not known under Vitest 5 if it gained a container; env files match this repository's `.gitignore`, so a test writes them into its temporary copy.
+Named-defect anchors this change moves or may move, in `packages/daemon/test/defects.json`: D2792 (`export const STORE_SCHEMA_VERSION = 8;`) certainly; D3038 (`columns.ts`, `envSources: jsonArray(...)`), D3070 (`env-files.ts`, `projectEnvFiles`' return), D3074 (`env-files.ts`, the unreported return) and D3043, D3048, D3050 and D3051 (`selection-facts.ts`, the `envSources` array) if the lines they anchor are edited. The `STORE_MIGRATIONS` anchors (D2260, D2791, D2829, D2830, D2831, D2846, D2859, D3040, D3041) cover the version 3 to 7 entries, which appending a version 8 entry leaves as they are; no anchor names `envFilesUnknown` or `ENV_FILES_UNKNOWN` (`node` over `defects.json`, 19:01). In `vitest/load-vitest.ts`, D1020 (`RELEASE_VERSION`) and D1021 to D1023 and D1025 (`supportedMajor`'s line test and `SUPPORTED_VITEST_LINES`) stay intact while those lines are kept as they are. No test reads `ListedEnvFiles`' `unreportedWorkspace` (`rg -n "unreportedWorkspace" packages/daemon/test`, 19:01: `defects.json` only). A test of AC1 and AC2 needs a fixture with a nested container, run under both installs through `linkVitest` (`harness.ts`), and apart from `test/fixtures/daemon/selection-facts`, whose env source tests would read not known under Vitest 5 if it gained a container; env files match this repository's `.gitignore`, so a test writes them into its temporary copy.
 
 ### Pending siblings
 
@@ -210,6 +215,7 @@ is_consolidation: false
 sizing_ac_count: 4
 files_to_modify:
   - packages/daemon/src/vitest/selection-facts.ts
+  - packages/daemon/src/vitest/load-vitest.ts
   - packages/daemon/src/inputs/env-files.ts
   - packages/daemon/src/inputs/fingerprint.ts
   - packages/daemon/src/store/columns.ts
@@ -234,41 +240,156 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 3cd3e56a-651f-4d63-a096-ed8efae23905
 
 #### Test Files This Change Broke
 
-None.
+- `packages/daemon/test/discover-tests.test.ts`: the env source tests index `facts.envSources[0]`, `[1]` and read `facts.envSources` whole (lines 2673 to 2824 at 19:18); each now fails to typecheck against `readonly EnvSource[] | EnvSourcesNotKnown` (10 errors, `bun run --filter @rt-test/daemon typecheck`, 19:18).
+- `packages/daemon/test/store.test.ts`: `envSources[0]?.envDirectory` at line 1864 fails to typecheck (1 error); the version pins at 8 (D1280, D2097, D2846, D2791, D2831, D2859, D2792) now read 9.
+- `packages/daemon/test/harness.ts`: `projectFacts` types its `envSources` parameter as `readonly EnvSource[]`, so a not-known object cannot be passed until it widens to `ProjectSelectionFacts["envSources"]`.
+- Stale anchors (`old` no longer matches once): D2792 (`export const STORE_SCHEMA_VERSION = 8;`, now 9), D3038 (`columns.ts`, now `envSources: storedEnvSources(value),` with the list parse in `storedEnvSources`), D3074 (`env-files.ts`, the unreported return is now `return { known: false, workspace };`, since `ListedEnvFiles`' not-known case holds `workspace` and an optional `reason`).
+- Records to re-prove, since their mutated file was edited: `load-vitest.ts` D1020 to D1026 and D1028 (anchors intact); `selection-facts.ts` D2105, D2106, D2108 to D2115, D2117, D2119, D2257, D2258, D2812 to D2814, D2860, D3042 to D3051, D3085 (anchors intact); `env-files.ts` D3052 to D3064, D3067, D3068, D3070, D3071, D3074 to D3076, D3082 to D3084; `fingerprint.ts` D1898 to D1900, D1913 to D1915, D2160, D2211, D2534, D3065, D3066, D3069, D3072, D3073, D3077 to D3080 (anchors intact); `columns.ts` D1221, D2099 to D2103, D2121, D2259, D2261, D2815, D2828, D2847, D2858, D2896, D2927, D2962, D3036 to D3039, D3091, D3092; `schema.ts` D1278, D1280, D1281, D1327, D2096 to D2098, D2122, D2260, D2791, D2792, D2829 to D2831, D2846, D2859, D3040, D3041. `verify-defects.mjs --edited` selects these.
 
 #### ACs Owed a Test
 
-None.
+- AC2, the Vitest 4.1 arm: a 4.1 workspace whose project config declares `projects` keeps its two env sources and its fingerprint. Evidence so far is a trace (`envSourcesNotKnown` returns undefined for a release major below 5) and a probe that faked `version` to `4.1.11` on a 5.0.1 instance; a real 4.1 install through `linkVitest` has not run. The 5.0 arms (flat file and directory projects, a nested workspace beside a flat one) were observed in the probe below.
+- AC3: a discovery whose projects' env sources are not known survives a restart with its reason, and a version 8 store opens at 9 with every selection-facts report dropped. Evidence so far: the `projectSelectionFacts` JSON round trip in the probe, and a trace of the new `STORE_MIGRATIONS` entry; no real store was opened.
 
 #### Tests Owed
 
-None.
+- The not-known reason names at most `MAX_NAMED_CHANGES` container files and counts the rest (`namedList`), since the reason reaches every answer uncut through `unfingerprintedWorkspaces`; a defect dropping the bound puts every container path into every answer.
+- `columns.ts` refuses an `envSources` object without a string `notKnown`, and any value that is neither a list nor an object.
+- `workspaceEnvFiles` carries the stored reason, and `envFilesUnknown` keeps the unreported text when there is none.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 36fd6765-bcab-4e38-aa56-01cda3178ec6
 
 #### Named Defects
 
-None.
+- D3113: Every project reports its own config's and the root config's env sources even where a nested projects container declares projects, so the workspace and its discovery keep a fingerprint that misses the container's env files, and an edit to one leaves old results current. (AC1)
+- D3114: The not-known reason names each nested container's config file by the absolute path Vitest records, unlike every other path an answer names. (AC1)
+- D3115: Vitest 5.0, the newest verified minor, is read as unverified, so every Vitest 5.0 workspace declaring projects by path, with no nested container, loses its fingerprint and reruns at every revision. (AC2)
+- D3116: Vitest 4.1, which ignores a project config's own projects, is checked for a container record it never keeps, so a Vitest 4.1 workspace declaring projects by path loses its fingerprint. (AC2)
+- D3117: A Vitest 5 minor whose source RT Test never checked is treated as verified, so where it records no container a workspace declaring projects by path keeps a fingerprint that may miss a nested container's env files. (AC4)
+- D3118: On an unverified Vitest 5 minor an inline project is read as a projects entry by path, so a workspace declaring only inline projects, none of which can be a container, loses its fingerprint. (AC4)
+- D3119: On an unverified Vitest 5 minor a root config that declares no projects is read as declaring them by path, so a workspace with no projects loses its fingerprint. (AC4)
+- D3120: A container record Vitest keeps in a shape other than a list of paths is read as recording no container, so a workspace whose nested containers Vitest records that way keeps a fingerprint without their env files. (AC4)
+- D3121: An empty container record is read as recording a container, so on the verified Vitest 5 minor a workspace declaring projects by path, with no nested container, loses its fingerprint. (AC2; re-anchored to the `if (recorded.length === 0) {` block after review fix R1)
+- D3122: The not-known reason names every recorded container config file with no bound, so a workspace with many containers puts every path into every answer. (AC1)
+- D3123: Listing the env files of a project whose env sources are not known throws, so protecting the discovery of a workspace holding a nested projects container fails. (AC1)
+- D3124: A workspace whose projects' env sources are not known is refused with the reason of a workspace whose discovery does not report them, so the answer blames an old discovery instead of naming the nested containers or the unverified Vitest version. (AC1, AC4)
+- D3125: The refusal of a workspace whose discovery does not report its projects' env sources ends in undefined instead of saying so. (AC1)
+- D3126: A stored report of env sources that are not known reads back as naming no env file, so after a restart a workspace holding a nested projects container gets a fingerprint and its old results read current. (AC3)
+- D3127: A stored not-known report whose reason is not a string is read with that value's text as its reason, where every other malformed field is refused as unreadable. (AC3)
+- D3128: The version 8 migration keeps every stored report, so a Vitest 5 workspace whose nested container's env sources the report left out reads complete after the upgrade and its old results read current. (AC3)
+- D3129: A version 8 store has no migration to the current version, so every existing store is refused once the daemon is upgraded. (AC3)
+- D3130: On a Vitest 5 minor RT Test has not verified, an empty container record is read as recording no container, so a workspace declaring projects by path keeps a fingerprint that may miss a nested container's env files. (AC4, review gap G1)
+- D3131: A container record listing a value that is not a path is read as a list of paths, so the workspace's discovery throws instead of reporting its env sources not known with a reason naming the record. (AC4, review gap G2)
+- D3132: A container config file Vitest records twice is named twice in the not-known reason and counted twice toward its bound. (AC1, review gap G3)
+- Re-anchored: D2792 (a new store created at version 8, one below the current 9; its earlier mutation to 7 is the same defect one step further), D3038 (a stored project with no env sources, now anchored in `storedEnvSources`) and D3074 (an unreported workspace, now `return { known: false, workspace };`). Re-pinned to schema version 9, as AC3 changed it: D1280, D2097, D2846, D2791, D2792, D2831, D2859, D3040, D3041.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/store/columns.ts` (`storedEnvSources`, a stored `envSources` that is a string, a number or null): every reader refuses it through `jsonArray`, as D3038 proves for a missing field, and no plausible edit reads it as sources; only the field its refusal names could differ.
+- `packages/daemon/src/vitest/selection-facts.ts` (`verifiesContainerRecord`, a Vitest version that does not parse as a release): unreachable, since `supportedMajor` in `load-vitest.ts` refuses such an install before any session starts, and the session's version is the one it read.
 
 ### Review Record
 
+Review session: threadId c072f041-3910-4014-881b-767ce7afbc7d
+
+Reviewed 2026-09-29 19:45 to 19:55 in Tree 1 (`wt/1`), against the working tree over f1fd9b3: four fresh-eyes batches (vitest, store, fingerprint, env-files), one agent over the installed Vitest 5.0.1 and 4.1.11 source, and the checklist pass.
+
+#### Findings fixed
+
+- **R1** (HIGH, consumer; reach unreachable on 5.0.1, which never writes an empty record, and unknown on later minors): on a Vitest 5 minor above the verified one, an empty `_containerConfigFiles` was read as no container, so a workspace declaring projects by path kept its fingerprint, where AC4 gives it none while Vitest records no containers where 5.0 does. `envSourcesNotKnown` now reads an absent record as an empty one, and an empty record is known only on a verified minor. This narrows task 1's "known when empty" to verified minors, as AC4 and the orchestrator's 18:58 minor gate read. D3121's anchor moved with it.
+- **R2** (LOW, C46): `DROP_INCOMPLETE_FACTS`' docblock named only a report missing a fact, not version 8's, which is dropped because it may read complete without being so.
+- **R3** (LOW, record): AC1 said the reason names each container's config file; the reason names up to 20 and counts the rest (dev's adversarial F1, D3122). AC1 now says so.
+- **R4** (LOW, record): the File List omitted the tests session's paths.
+
+#### Discarded
+
+- A container reached through a directory or glob `projects` entry: 5.0.1 resolves both to a config file entry (`index.DzobfTyw.js` 13176 to 13182) and records every entry that is not inline and declares `projects` (12610 to 12626), so the record covers them.
+- Gating on the manifest's Vitest version rather than `instance.version`: the runtime version is the bundled literal matching the manifest on both lines (5.0.1 `cac.fSuRXrAx.js` 623, 4.1.11 `cac.uFydS1Z4.js` 624).
+- A workspace whose every project is in browser mode keeping its fingerprint: a recorded decision and known limit.
+- Making `ListedEnvFiles`' `reason` required: its one consumer supplies the unreported text, and 2.4b keys only on `known`.
+- An empty stored reason string, the untagged stored shape, the root project's name passed to `session.locate` (which uses it for nothing but the label), the `isNotKnown` name, and test-file organization (D3074 beside D3125, `fingerprintRefusals` rooted at `REPO`).
+
+#### Validation
+
+- `bun x oxlint` over `selection-facts.ts` and `schema.ts`, exit 0; `bun run --filter @rt-test/daemon typecheck`, exit 0 (19:54, and the tests session's at 19:57 over the tree with its tests); `bun x prettier --check` over both files and this ticket, exit 0; `node scripts/check-line-citations.mjs` clean (19:55).
+- Suite: `bun x vitest related packages/daemon/src/vitest/selection-facts.ts packages/daemon/src/store/schema.ts --run` through the run lease, 23 of 68 test files, 1555 tests passed, exit 0 (20:03 to 20:06).
+- Named defects: the tests session proved D3121, D3130 to D3132 and every record in `discover-tests.test.ts` (150, which covers every record mutating `selection-facts.ts`) on Windows and Linux (19:57 to 20:03). This session proved the 20 records mutating `schema.ts` (D1278, D1280, D1281, D1327, D2096 to D2098, D2122, D2260, D2791, D2792, D2829 to D2831, D2846, D2859, D3040, D3041, D3128, D3129) by `--ids` on Windows: 20 of 20 detected, exit 0 (20:06).
+- `node scripts/check-sprint-keys.mjs` and `node scripts/check-requirement-markers.mjs`, each exit 0 (19:56).
+
+#### Tech debt
+
+- **TD1** (LOW, internal, duplication): one string-list guard in three copies, `isStringArray` in `packages/daemon/src/store/columns.ts` (the function after `jsonField`) and `packages/daemon/src/selection/tsconfig-edges.ts`, and `isStringList` in `packages/daemon/src/vitest/selection-facts.ts`. One exported guard needs a module all three layers import without a cycle, since `columns.ts` imports `selection-facts.ts`.
+- **TD2** (LOW, consumer, pre-existing): `discoveryEnvFiles` in `packages/daemon/src/inputs/env-files.ts` returns the first workspace whose env files are not known, so a discovery holding two such workspaces names one; each workspace's own refusal names itself.
+- **TD3** (LOW, daemon-state, pre-existing): `storedEnvSources` in `packages/daemon/src/store/columns.ts` reads a stored `envSources: []` as a project naming no env file, where D3038 refuses a missing field as unreadable; no writer stores an empty list, since every known project reports its own and the root config's source.
+
 #### Test Coverage Gaps
 
-None.
+- **G1** (HIGH, consumer, AC4), `packages/daemon/src/vitest/selection-facts.ts` `envSourcesNotKnown`: On a Vitest 5 minor RT Test has not verified, an empty container record is read as recording no container, so a workspace declaring projects by path keeps a fingerprint that may miss a nested container's env files. Expected test: the nested-projects fixture presented as version `5.1.0` with record `[]`; `packages/flat` reports env files not known with the unverified-minor reason.
+- **G2** (MEDIUM, daemon-state, AC4), `packages/daemon/src/vitest/selection-facts.ts` `isStringList`: A container record listing a value that is not a path, such as `[1]`, is read as a list of paths, so the workspace's discovery throws instead of reporting its env sources not known with a reason naming the record. Expected test: the record presented as a list holding a number; `packages/flat` reports D3120's reason. D3120 presents a string, which the array check alone refuses.
+- **G3** (MEDIUM, consumer, AC1), `packages/daemon/src/vitest/selection-facts.ts` `envSourcesNotKnown`: A container config file Vitest records twice, as it does when two containers declare the same nested container or `injectTestProjects` appends again (5.0.1 `index.DzobfTyw.js` 12434 to 12437), is named twice in the reason and counted twice toward its bound. Expected test: a record listing one container file twice; the reason names it once.
+- **D3121 re-anchor**: its `old` (`if (recorded.length === 0) return undefined;`) no longer matches after R1; the empty-record check is now the `if (recorded.length === 0) {` block.
+
+Denominator: 17 named-defect tests (D3113 to D3129) against the behaviors the four criteria name; with G1 to G3, 20.
 
 ### Completion Notes
 
+Built by rt-t2-3q-dev, 2026-09-29 19:06 to 19:19, in Tree 1 (`wt/1`).
+
+- **Sanity check F1** (19:06): the minor gate's version parse had no reusable source. The author confirmed it and updated the ticket (19:07); the orchestrator granted `vitest/load-vitest.ts` (19:06). `releaseLine` is exported and `supportedMajor` calls it; the D1020 to D1026 and D1028 anchors still match once.
+- **What was built.** `selection-facts.ts`: `EnvSourcesNotKnown`, `isNotKnown`, and `envSourcesNotKnown(session)`, decided once per session. Below Vitest 5 the sources are known. A string list in `_containerConfigFiles` is not known when non-empty (the reason names each container config file root-relative, sorted and deduplicated, bounded by `namedList`) and known when empty. Any other value is not known and names the member. When the member is absent, a verified minor (`VERIFIED_CONTAINER_MINOR`, 0) is known; any other version, including one that does not parse as a release, is not known when the root's `config.projects` holds a string entry, and the reason names the member and the version. The not-known object becomes every reported project's `envSources`. `env-files.ts`: the not-known case of `ListedEnvFiles` is `{ known: false, workspace, reason? }`, where `reason` is absent only for an unreported workspace; `projectEnvFiles` lists none for a not-known project. `fingerprint.ts`: `the env files of the workspace <name> are not known: <reason>`, keeping the old text for an unreported workspace. `columns.ts`: `storedEnvSources` parses an object as `{ notKnown }` and anything else as the list. `schema.ts`: version 9, with version 8 dropping every report.
+- **Acceptance evidence** (a probe under `_agent-docs/.scratch/2-3q/`, driven through `createVitest` as `workspace-session.ts` drives it, on the installed Vitest 5.0.1, 19:11 to 19:18, each exit 0, removed at finalize):
+  - Nested (a root declaring the container `app` and an inline `top`; `app` declaring an inline project and a second container `inner`): every project, `top` included, carries the reason naming `app/inner/vitest.config.mjs` and `app/vitest.config.mjs`. `workspaceEnvFiles` is not known, and `workspaceFingerprint` refuses with the reason (AC1; `discoveryEnvFiles` returns that first not-known result, by trace).
+  - Flat (a file project with no `projects` and an inline one): both sources are listed and the fingerprint is kept (AC2).
+  - `version` faked to `5.1.0` with the record removed: the nested and flat consumers are not known with the unverified-minor reason; the inline-only and no-projects consumers keep their fingerprint (AC4).
+  - Record set to `"x"` or `[1]`: not known, naming the member. Record `[]`: known. `version` faked to `4.1.11` with a record present: known (AC2 by trace, AC4).
+  - Every project's facts round-trip through `projectSelectionFacts` unchanged (AC3, partly).
+- **Adversarial review** (general-purpose agent, 19:12 to 19:16), 4 findings:
+  - F1 (MEDIUM, consumer), fixed: the container list was unbounded and reaches every answer uncut; it is now bounded with `namedList` (`inputs/input-jobs.ts`).
+  - F2 (LOW), fixed: `projectEnvFiles`' docblock now covers protection and selection as well as the fingerprints.
+  - F3 (LOW), fixed in part: the docblock clause explaining the project-name parameter was removed. `rootRelativeTo` still takes a project name, since `session.locate` requires one, and for container files it is the root project's, whose config tree declares them.
+  - F4 (LOW), left as a change-request candidate below.
+  - Post-fix re-validation at 19:18: `bun x oxlint` over the six files exit 0, `bun x prettier --check` exit 0, `rt-test` typecheck exit 0; the `@rt-test/daemon` typecheck exits 1 on the 11 test-file errors above and nothing else.
+- **Gates** (19:18): lint and prettier as above; `node scripts/check-line-citations.mjs` clean; literal check over the diff: the member name, the major and the verified minor are named constants. No test run, as this skill requires.
+- **README**: user-visible behavior changed (a Vitest 5 nested-container workspace's results now read unknown). The exact text went to the orchestrator, since the file is orchestrator-owned under this lane.
+- **Pre-existing fix, reported**: `docs/architecture.md`'s store sentence stopped at version 7 and named no env sources. The corrected text went to the orchestrator with this ticket's text.
+
+#### Change-request candidates
+
+- **Three private string-list guards** (`isStringArray` in `store/columns.ts` and `selection/tsconfig-edges.ts`, `isStringList` in `vitest/selection-facts.ts`): one exported guard in a module all three layers can import without a cycle (`columns.ts` imports `selection-facts.ts`, so neither can host it). Left here because it needs a new module and an edit to `tsconfig-edges.ts`, both outside this lane's File List; review-changes can take it with the orchestrator's grant. Surface internal, no behavioral consequence.
+
 ### File List
+
+Dev, by rt-t2-3q-dev:
+
+- `packages/daemon/src/vitest/load-vitest.ts` (modified)
+- `packages/daemon/src/vitest/selection-facts.ts` (modified)
+- `packages/daemon/src/inputs/env-files.ts` (modified)
+- `packages/daemon/src/inputs/fingerprint.ts` (modified)
+- `packages/daemon/src/store/columns.ts` (modified)
+- `packages/daemon/src/store/schema.ts` (modified)
+- `_agent-docs/tickets/2-3q-nested-container-env.md` (this ticket's dev sections)
+
+Tests, by rt-t2-3q-tests:
+
+- `packages/daemon/test/discover-tests.test.ts` (modified)
+- `packages/daemon/test/env-files.test.ts` (modified)
+- `packages/daemon/test/input-tracker.test.ts` (modified)
+- `packages/daemon/test/store.test.ts` (modified)
+- `packages/daemon/test/harness.ts` (modified)
+- `packages/daemon/test/defects.json` (modified)
+- `test/fixtures/daemon/nested-projects/` (created)
+
+Review, by rt-t2-3q-review:
+
+- `packages/daemon/src/vitest/selection-facts.ts` (modified)
+- `packages/daemon/src/store/schema.ts` (modified)
+- `_agent-docs/tickets/2-3q-nested-container-env.md` (AC1's wording and the Review Record)
 
 Planning, by create-ticket:
 
