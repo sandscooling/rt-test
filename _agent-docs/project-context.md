@@ -78,6 +78,8 @@ P43. **Give a root test that spawns a process the shared budget**: A `describe` 
 
 P44. **Build fixture git repositories from the shared settings**: A root test that commits in a fixture repository applies `test/scripts/git-fixture.ts` (`writeFixtureGitConfig` or `FIXTURE_GIT_FLAGS`) or builds it with `initRepo` from `test/scripts/orchestration/harness.ts`, so a developer's global hooks, signing and identity never reach it.
 
+P45. **Give a daemon test that writes or checks a key the key budget**: A test under `packages/daemon/test/` that writes a daemon key, or points a client at a listener on an endpoint, with the real system tools unmocked, runs under `KEY_TEST_OPTIONS` on its `describe` or with `KEY_TEST_TIMEOUT_MS` as its own timeout, both from `test/daemon-key.ts`, unless a longer timeout such as `DAEMON_TEST_TIMEOUT_MS` already covers it. On Windows each key write runs `whoami` and `icacls` and each check runs `icacls`, and Vitest's 5000 ms default fails such a test under a loaded run.
+
 ## Product direction
 
 P31. **Keep RT Test generic**: Fleet Cooling is the proving ground, not a dependency. Nothing application- or backend-specific enters the core; Convex support lives in an adapter.

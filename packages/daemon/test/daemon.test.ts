@@ -54,7 +54,6 @@ import {
   endExecutors,
   eventually,
   fixtureFile,
-  frozenProof,
   declareFixtureMarkers,
   holdAt,
   leakAtFirstRun,
@@ -67,12 +66,17 @@ import {
   until,
   withConnection,
   withDaemonConsumer,
-  withDaemonKey,
   withDaemons,
   withPreload,
   withStandIn,
   type StandIn,
 } from "./daemon-harness.js";
+import {
+  frozenProof,
+  KEY_TEST_OPTIONS,
+  KEY_TEST_TIMEOUT_MS,
+  withDaemonKey,
+} from "./daemon-key.js";
 import {
   REPO,
   confirmEvery,
@@ -139,10 +143,26 @@ function escaped(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** How a stand-in proves its answers: with the key it holds, with another key, or not at all. */
+type Proving = "key" | "another key" | "no proof";
+
+/** How an impostor proves its answers. */
+type ImpostorProving = Exclude<Proving, "key">;
+
+/** Why a client refuses each impostor's answer, so a refusal for any other reason, such as an unchecked key directory, fails. */
+const IMPOSTOR_REFUSAL: Readonly<Record<ImpostorProving, string>> = {
+  "another key": "its proof does not match this worktree's daemon key",
+  "no proof": "it answered without a proof",
+};
+
 /** How a client reports a process on the endpoint that does not prove itself this user's daemon for the root. */
-function notTheDaemon(path: string, root: string): RegExp {
+function notTheDaemon(
+  path: string,
+  root: string,
+  proving: ImpostorProving,
+): RegExp {
   return new RegExp(
-    `The process answering on ${escaped(path)} is not this user's daemon for ${escaped(root)}: `,
+    `The process answering on ${escaped(path)} is not this user's daemon for ${escaped(root)}: ${escaped(IMPOSTOR_REFUSAL[proving])}`,
   );
 }
 
@@ -173,9 +193,6 @@ function withKeyedStandIn<T>(
     withStandIn(worktree, answer({ worktree, key, keyText }), body),
   );
 }
-
-/** How a stand-in proves its answers: with the key it holds, with another key, or not at all. */
-type Proving = "key" | "another key" | "no proof";
 
 function proofField(
   proving: Proving,
@@ -869,31 +886,37 @@ describe("stopping a daemon", () => {
     DAEMON_TEST_TIMEOUT_MS,
   );
 
-  it("D1503: a start that finds a daemon of another protocol version is refused, naming its process and version and saying it can be stopped", async () => {
-    const start = await inTempDir((root) =>
-      withKeyedStandIn(
-        root,
-        (context) => (request) => ({
-          type: "error",
-          code: "protocol-version-mismatch",
-          message: "another version",
-          protocolVersion: NEXT_PROTOCOL_VERSION,
-          clientProtocolVersion: PROTOCOL_VERSION,
-          pid: 4242,
-          ...proofField("key", context, request, 4242),
-        }),
-        () =>
-          settled(startDaemon({ trusted: true, start: confirmNothing(root) })),
-      ),
-    );
-    expect(start).toStrictEqual({
-      thrown: expect.stringMatching(
-        new RegExp(
-          String.raw`process 4242\b.*protocol version ${NEXT_PROTOCOL_VERSION}\b.*can be stopped`,
+  it(
+    "D1503: a start that finds a daemon of another protocol version is refused, naming its process and version and saying it can be stopped",
+    async () => {
+      const start = await inTempDir((root) =>
+        withKeyedStandIn(
+          root,
+          (context) => (request) => ({
+            type: "error",
+            code: "protocol-version-mismatch",
+            message: "another version",
+            protocolVersion: NEXT_PROTOCOL_VERSION,
+            clientProtocolVersion: PROTOCOL_VERSION,
+            pid: 4242,
+            ...proofField("key", context, request, 4242),
+          }),
+          () =>
+            settled(
+              startDaemon({ trusted: true, start: confirmNothing(root) }),
+            ),
         ),
-      ),
-    });
-  });
+      );
+      expect(start).toStrictEqual({
+        thrown: expect.stringMatching(
+          new RegExp(
+            String.raw`process 4242\b.*protocol version ${NEXT_PROTOCOL_VERSION}\b.*can be stopped`,
+          ),
+        ),
+      });
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("the executor process", () => {
@@ -1076,122 +1099,126 @@ describe("two worktrees of one project", () => {
   );
 });
 
-describe("a process on the endpoint that is not this user's daemon", () => {
-  /** Holds `root`'s endpoint as an impostor proving as `proving` says, and hands `body` the endpoint's path. */
-  function asImpostor<T>(
-    root: string,
-    proving: Proving,
-    body: (path: string) => Promise<T>,
-  ): Promise<T> {
-    return withKeyedStandIn(root, answerAs(exitedPid(), proving), (standIn) =>
-      body(standIn.endpoint.path),
-    );
-  }
+describe(
+  "a process on the endpoint that is not this user's daemon",
+  KEY_TEST_OPTIONS,
+  () => {
+    /** Holds `root`'s endpoint as an impostor proving as `proving` says, and hands `body` how a client refuses it. */
+    function asImpostor<T>(
+      root: string,
+      proving: ImpostorProving,
+      body: (expected: RegExp) => Promise<T>,
+    ): Promise<T> {
+      return withKeyedStandIn(root, answerAs(exitedPid(), proving), (standIn) =>
+        body(notTheDaemon(standIn.endpoint.path, root, proving)),
+      );
+    }
 
-  it("D1556: status refuses an impostor whose hello carries a proof made with another key, naming the endpoint", async () => {
-    const outcome = await inTempDir((root) =>
-      asImpostor(root, "another key", async (path) => ({
-        status: await settled(daemonStatus(root)),
-        expected: notTheDaemon(path, root),
-      })),
-    );
-    expect(outcome.status).toStrictEqual({
-      thrown: expect.stringMatching(outcome.expected),
+    it("D1556: status refuses an impostor whose hello carries a proof made with another key, naming the endpoint and saying the proof does not match the key", async () => {
+      const outcome = await inTempDir((root) =>
+        asImpostor(root, "another key", async (expected) => ({
+          status: await settled(daemonStatus(root)),
+          expected,
+        })),
+      );
+      expect(outcome.status).toStrictEqual({
+        thrown: expect.stringMatching(outcome.expected),
+      });
     });
-  });
 
-  it("D1557: stop refuses an impostor whose acknowledgement names an exited process and carries a proof made with another key", async () => {
-    const outcome = await inTempDir((root) =>
-      asImpostor(root, "another key", async (path) => ({
-        stop: await settled(stopDaemon(root)),
-        expected: notTheDaemon(path, root),
-      })),
-    );
-    expect(outcome.stop).toStrictEqual({
-      thrown: expect.stringMatching(outcome.expected),
+    it("D1557: stop refuses an impostor whose acknowledgement names an exited process and carries a proof made with another key, saying the proof does not match the key", async () => {
+      const outcome = await inTempDir((root) =>
+        asImpostor(root, "another key", async (expected) => ({
+          stop: await settled(stopDaemon(root)),
+          expected,
+        })),
+      );
+      expect(outcome.stop).toStrictEqual({
+        thrown: expect.stringMatching(outcome.expected),
+      });
     });
-  });
 
-  it("D1558: a start refuses an impostor whose hello carries a proof made with another key, and spawns no daemon", async () => {
-    const outcome = await inTempDir((root) =>
-      asImpostor(root, "another key", async (path) => ({
-        start: await settled(trustedStart(confirmNothing(root))),
-        stateDirectoryMade: existsSync(join(root, ".rt-test")),
-        expected: notTheDaemon(path, root),
-      })),
-    );
-    expect({
-      start: outcome.start,
-      stateDirectoryMade: outcome.stateDirectoryMade,
-    }).toStrictEqual({
-      start: { thrown: expect.stringMatching(outcome.expected) },
-      stateDirectoryMade: false,
+    it("D1558: a start refuses an impostor whose hello carries a proof made with another key, saying the proof does not match the key, and spawns no daemon", async () => {
+      const outcome = await inTempDir((root) =>
+        asImpostor(root, "another key", async (expected) => ({
+          start: await settled(trustedStart(confirmNothing(root))),
+          stateDirectoryMade: existsSync(join(root, ".rt-test")),
+          expected,
+        })),
+      );
+      expect({
+        start: outcome.start,
+        stateDirectoryMade: outcome.stateDirectoryMade,
+      }).toStrictEqual({
+        start: { thrown: expect.stringMatching(outcome.expected) },
+        stateDirectoryMade: false,
+      });
     });
-  });
 
-  it("D1559: status refuses an impostor whose hello carries no proof, naming the endpoint", async () => {
-    const outcome = await inTempDir((root) =>
-      asImpostor(root, "no proof", async (path) => ({
-        status: await settled(daemonStatus(root)),
-        expected: notTheDaemon(path, root),
-      })),
-    );
-    expect(outcome.status).toStrictEqual({
-      thrown: expect.stringMatching(outcome.expected),
+    it("D1559: status refuses an impostor whose hello carries no proof, naming the endpoint and saying it answered without a proof", async () => {
+      const outcome = await inTempDir((root) =>
+        asImpostor(root, "no proof", async (expected) => ({
+          status: await settled(daemonStatus(root)),
+          expected,
+        })),
+      );
+      expect(outcome.status).toStrictEqual({
+        thrown: expect.stringMatching(outcome.expected),
+      });
     });
-  });
 
-  it("D1560: stop refuses an impostor whose acknowledgement names an exited process and carries no proof", async () => {
-    const outcome = await inTempDir((root) =>
-      asImpostor(root, "no proof", async (path) => ({
-        stop: await settled(stopDaemon(root)),
-        expected: notTheDaemon(path, root),
-      })),
-    );
-    expect(outcome.stop).toStrictEqual({
-      thrown: expect.stringMatching(outcome.expected),
+    it("D1560: stop refuses an impostor whose acknowledgement names an exited process and carries no proof, saying it answered without a proof", async () => {
+      const outcome = await inTempDir((root) =>
+        asImpostor(root, "no proof", async (expected) => ({
+          stop: await settled(stopDaemon(root)),
+          expected,
+        })),
+      );
+      expect(outcome.stop).toStrictEqual({
+        thrown: expect.stringMatching(outcome.expected),
+      });
     });
-  });
 
-  it("D1561: a start refuses an impostor whose hello carries no proof, and spawns no daemon", async () => {
-    const outcome = await inTempDir((root) =>
-      asImpostor(root, "no proof", async (path) => ({
-        start: await settled(trustedStart(confirmNothing(root))),
-        stateDirectoryMade: existsSync(join(root, ".rt-test")),
-        expected: notTheDaemon(path, root),
-      })),
-    );
-    expect({
-      start: outcome.start,
-      stateDirectoryMade: outcome.stateDirectoryMade,
-    }).toStrictEqual({
-      start: { thrown: expect.stringMatching(outcome.expected) },
-      stateDirectoryMade: false,
+    it("D1561: a start refuses an impostor whose hello carries no proof, saying it answered without a proof, and spawns no daemon", async () => {
+      const outcome = await inTempDir((root) =>
+        asImpostor(root, "no proof", async (expected) => ({
+          start: await settled(trustedStart(confirmNothing(root))),
+          stateDirectoryMade: existsSync(join(root, ".rt-test")),
+          expected,
+        })),
+      );
+      expect({
+        start: outcome.start,
+        stateDirectoryMade: outcome.stateDirectoryMade,
+      }).toStrictEqual({
+        start: { thrown: expect.stringMatching(outcome.expected) },
+        stateDirectoryMade: false,
+      });
     });
-  });
 
-  it("D1571: a stop verifies a daemon that removes its key as it acknowledges, since the client read the key before sending", async () => {
-    const pid = exitedPid();
-    const stop = await inTempDir((root) =>
-      withKeyedStandIn(
-        root,
-        (context) => (request, standIn, connectionClosed) => {
-          if (request["type"] !== "stop") return undefined;
-          context.key.remove();
-          void connectionClosed.then(() => standIn.close());
-          return {
-            type: "stopping",
-            pid,
-            logFile: "stand-in.log",
-            ...proofField("key", context, request, pid),
-          };
-        },
-        () => settled(stopDaemon(root)),
-      ),
-    );
-    expect(stop).toStrictEqual({ pid });
-  });
-});
+    it("D1571: a stop verifies a daemon that removes its key as it acknowledges, since the client read the key before sending", async () => {
+      const pid = exitedPid();
+      const stop = await inTempDir((root) =>
+        withKeyedStandIn(
+          root,
+          (context) => (request, standIn, connectionClosed) => {
+            if (request["type"] !== "stop") return undefined;
+            context.key.remove();
+            void connectionClosed.then(() => standIn.close());
+            return {
+              type: "stopping",
+              pid,
+              logFile: "stand-in.log",
+              ...proofField("key", context, request, pid),
+            };
+          },
+          () => settled(stopDaemon(root)),
+        ),
+      );
+      expect(stop).toStrictEqual({ pid });
+    });
+  },
+);
 
 describe("the key and the store lock a daemon holds", () => {
   it(
@@ -1446,52 +1473,64 @@ describe("a query to the worktree's daemon", () => {
     );
   }
 
-  it("D1846: a daemon that predates the queries answers with its unknown-request error, and the reason says to stop it and start it again", async () => {
-    const outcome = await inTempDir(async (root) => ({
-      summary: await summaryFromDaemonAnswering(root, {
-        code: "unknown-request",
-        message: 'unknown request type "summary"',
-      }),
-      root,
-    }));
-    expect(outcome.summary).toStrictEqual({
-      thrown: `The daemon serving ${outcome.root} predates this query; stop it and start it again.`,
-    });
-  });
-
-  it("D1847: a daemon that is stopping answers with its stopping error, and the reason says it is stopping", async () => {
-    const outcome = await inTempDir(async (root) => ({
-      summary: await summaryFromDaemonAnswering(root, {
-        code: "stopping",
-        message: "the daemon is stopping",
-      }),
-      root,
-    }));
-    expect(outcome.summary).toStrictEqual({
-      thrown: `The daemon serving ${outcome.root} is stopping.`,
-    });
-  });
-
-  it("D1875: a daemon that proves its hello and then drops the connection before answering gives a reason naming the root", async () => {
-    const outcome = await inTempDir(async (root) => {
-      const daemon = answerAs(exitedPid(), "key");
-      const summary = await withKeyedStandIn(
+  it(
+    "D1846: a daemon that predates the queries answers with its unknown-request error, and the reason says to stop it and start it again",
+    async () => {
+      const outcome = await inTempDir(async (root) => ({
+        summary: await summaryFromDaemonAnswering(root, {
+          code: "unknown-request",
+          message: 'unknown request type "summary"',
+        }),
         root,
-        (context) => (request, standIn, connectionClosed) => {
-          if (request["type"] !== "summary") {
-            return daemon(context)(request, standIn, connectionClosed);
-          }
-          void standIn.close();
-          return undefined;
-        },
-        () => settled(querySummary(root)),
-      );
-      return { summary, root };
-    });
-    expect(outcome.summary).toStrictEqual({
-      thrown: expect.stringContaining(outcome.root),
-    });
-  });
+      }));
+      expect(outcome.summary).toStrictEqual({
+        thrown: `The daemon serving ${outcome.root} predates this query; stop it and start it again.`,
+      });
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1847: a daemon that is stopping answers with its stopping error, and the reason says it is stopping",
+    async () => {
+      const outcome = await inTempDir(async (root) => ({
+        summary: await summaryFromDaemonAnswering(root, {
+          code: "stopping",
+          message: "the daemon is stopping",
+        }),
+        root,
+      }));
+      expect(outcome.summary).toStrictEqual({
+        thrown: `The daemon serving ${outcome.root} is stopping.`,
+      });
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D1875: a daemon that proves its hello and then drops the connection before answering gives a reason naming the root",
+    async () => {
+      const outcome = await inTempDir(async (root) => {
+        const daemon = answerAs(exitedPid(), "key");
+        const summary = await withKeyedStandIn(
+          root,
+          (context) => (request, standIn, connectionClosed) => {
+            if (request["type"] !== "summary") {
+              return daemon(context)(request, standIn, connectionClosed);
+            }
+            void standIn.close();
+            return undefined;
+          },
+          () => settled(querySummary(root)),
+        );
+        return { summary, root };
+      });
+      expect(outcome.summary).toStrictEqual({
+        thrown: expect.stringContaining(outcome.root),
+      });
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("a stand-in on the endpoint", () => {

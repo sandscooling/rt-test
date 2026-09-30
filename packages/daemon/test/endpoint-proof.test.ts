@@ -6,15 +6,27 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { DaemonConnection } from "../src/daemon/daemon-connection.js";
 import {
   createDaemonKey,
   daemonVerifier,
 } from "../src/daemon/endpoint-proof.js";
 import type { Endpoint } from "../src/daemon/endpoint.js";
-import { frozenProof, keyedEndpoint, withDaemonKey } from "./daemon-harness.js";
+import {
+  provenRequest,
+  type DaemonTarget,
+} from "../src/daemon/proven-connection.js";
+import {
+  frozenProof,
+  KEY_TEST_OPTIONS,
+  keyedEndpoint,
+  withDaemonKey,
+} from "./daemon-key.js";
 import { inTempDir } from "./harness.js";
+import { withTestEndpoint } from "./test-endpoint.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -38,7 +50,7 @@ const OTHER_WORKTREE = "/home/dev/other";
 const CHALLENGE = "a fresh challenge";
 const MISMATCH = "its proof does not match this worktree's daemon key";
 
-describe("what a proof binds", () => {
+describe("what a proof binds", KEY_TEST_OPTIONS, () => {
   it("D1562: a proof made with the key for another worktree identity is refused", async () => {
     const refusal = await inTempDir((dir) => {
       const endpoint = keyedEndpoint(dir);
@@ -102,9 +114,82 @@ describe("what a proof binds", () => {
     });
     expect(refusal).toBe(MISMATCH);
   });
+
+  it("D3286: an answer that carries no proof is refused as answering without one, quoting the answer", async () => {
+    const refusal = await inTempDir((dir) => {
+      const endpoint = keyedEndpoint(dir);
+      return withDaemonKey(endpoint, WORKTREE, () => {
+        const verifier = daemonVerifier(endpoint, WORKTREE);
+        if (!verifier.ok) return verifier.reason;
+        return verifier.verifier.refusal(CHALLENGE, {
+          type: "hello",
+          pid: 4242,
+        });
+      });
+    });
+    expect(refusal).toBe(
+      'it answered without a proof: {"type":"hello","pid":4242}',
+    );
+  });
 });
 
-describe("writing and removing the key", () => {
+/** Answers every line a client sends with `answer`, as a process holding the endpoint would. */
+function answering(answer: object): (socket: Socket) => void {
+  return (socket) => {
+    socket.on("data", () => socket.write(`${JSON.stringify(answer)}\n`));
+  };
+}
+
+/** Sends a proven hello for `target` over a connection to `path`, and says why the client refused the answer. */
+async function helloRefusal(
+  target: DaemonTarget,
+  path: string,
+): Promise<string> {
+  const opened = await DaemonConnection.open(path);
+  if (!opened.ok) return opened.reason;
+  try {
+    await provenRequest(target, opened.connection, (challenge) => ({
+      type: "hello",
+      challenge,
+    }));
+    return "accepted";
+  } catch (error) {
+    return (error as Error).message;
+  } finally {
+    opened.connection.close();
+  }
+}
+
+describe("a client's refusal of an answer", KEY_TEST_OPTIONS, () => {
+  it("D3285: a request answered with a proof made with another key is refused naming the endpoint, the root and that the proof does not match the key", async () => {
+    const outcome = await inTempDir((dir) => {
+      const endpoint = keyedEndpoint(dir);
+      const target = {
+        consumerRoot: WORKTREE,
+        worktreeIdentity: WORKTREE,
+        endpoint,
+      };
+      return withDaemonKey(endpoint, WORKTREE, () =>
+        withTestEndpoint(
+          answering({
+            type: "hello",
+            pid: 4242,
+            proof: frozenProof("another key", CHALLENGE, WORKTREE, 4242),
+          }),
+          async (path) => ({
+            endpointPath: endpoint.path,
+            refusal: await helloRefusal(target, path),
+          }),
+        ),
+      );
+    });
+    expect(outcome.refusal).toBe(
+      `The process answering on ${outcome.endpointPath} is not this user's daemon for ${WORKTREE}: its proof does not match this worktree's daemon key.`,
+    );
+  });
+});
+
+describe("writing and removing the key", KEY_TEST_OPTIONS, () => {
   it("D1691: the key file is written readable by its owner alone, mode 0600", async () => {
     const write = vi.mocked(writeFileSync);
     const modes = await inTempDir((dir) => {
@@ -152,7 +237,7 @@ describe("writing and removing the key", () => {
   });
 });
 
-describe("removing the key", () => {
+describe("removing the key", KEY_TEST_OPTIONS, () => {
   it("D1564: a stopping daemon's key removal leaves the key a starting daemon wrote in its place", async () => {
     const kept = await inTempDir((dir) => {
       const endpoint = keyedEndpoint(dir);
