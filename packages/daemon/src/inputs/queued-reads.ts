@@ -1,4 +1,4 @@
-import { statSync, type WatchEventType } from "node:fs";
+import { lstatSync, type WatchEventType } from "node:fs";
 import { relativePosixPath } from "../vitest/find-workspaces.js";
 import type { GitFiles } from "./git-files.js";
 import {
@@ -23,13 +23,19 @@ import {
   type ListedReads,
 } from "./listed-files.js";
 
-export const RENAME_EVENT = "rename";
+const RENAME_EVENT = "rename";
 const CHANGE_EVENT = "change";
 /** A read a query asked for, which no event reported: evidence of no write, so it acts only on a change it finds. */
 const NAMED_READ = "named";
 
 type QueuedKind = WatchEventType | typeof NAMED_READ;
 type QueuedPath = [path: string, kind: QueuedKind];
+
+/** A path a named read found but could not read, root-relative, with why. */
+export interface UnreadPath {
+  readonly path: string;
+  readonly reason: string;
+}
 
 /** How many of `paths` count as changed paths not yet read: every one but a named read. */
 export function pendingCount(paths: readonly QueuedPath[]): number {
@@ -70,6 +76,8 @@ export class QueuedReads {
   readonly #queue = new Map<string, QueuedKind>();
   /** Queued only because protection changed whether they count, so reading them marks no job; an event clears one. */
   readonly #quiet = new Set<string>();
+  /** Why the last read of each named absolute path could not read it, until another read of it. */
+  readonly #unreadNamed = new Map<string, string>();
 
   constructor(parts: QueuedReadsParts) {
     this.#root = parts.root;
@@ -126,6 +134,14 @@ export class QueuedReads {
     return added.length;
   }
 
+  /** Each of the absolute `paths` whose last read was a named one that could not read it. */
+  unreadNamed(paths: readonly string[]): UnreadPath[] {
+    return paths.flatMap((path) => {
+      const reason = this.#unreadNamed.get(path);
+      return reason === undefined ? [] : [{ path: this.#label(path), reason }];
+    });
+  }
+
   /** Every waiting path with its kind, which no longer waits. */
   takeBatch(): QueuedPath[] {
     const batch = [...this.#queue];
@@ -135,8 +151,8 @@ export class QueuedReads {
 
   /**
    * The absolute paths a read of the root-relative `named` path reads: each input held at or under it, compared as the
-   * host compares names, or with none held, the file at it. Walks nothing, so a folder no input is held under, or a
-   * missing path no input was held at, gives none.
+   * host compares names, or with none held, the entry at it unless a directory, as its event would read it. Walks
+   * nothing, so a folder no input is held under, or a missing path no input was held at, gives none.
    */
   namedPaths(named: string): string[] {
     const absolute = absoluteInputPath(this.#root, named);
@@ -145,7 +161,7 @@ export class QueuedReads {
       .map((input) => absoluteInputPath(this.#root, input))
       .filter((input) => liesInsideOnHost(absolute, input));
     if (held.length > 0) return held;
-    return isFile(absolute) ? [absolute] : [];
+    return namesEntryButDirectory(absolute) ? [absolute] : [];
   }
 
   /**
@@ -241,6 +257,7 @@ export class QueuedReads {
     kind: WatchEventType,
   ): Promise<void> {
     const relative = this.#label(path);
+    this.#unreadNamed.delete(path);
     const record = this.#quiet.delete(path)
       ? () => undefined
       : (changed: readonly string[]) => this.#recordAll(changed);
@@ -266,18 +283,19 @@ export class QueuedReads {
   }
 
   /**
-   * Changes only what it finds changed: a new file, a held input's digest, or a held input now gone. It keeps the held
-   * read of an unchanged input, against which the file's own event is judged, and leaves to that event an entry it
-   * cannot read as a file.
+   * Changes only what it finds changed: a new entry, a held input's digest, or a held input it can no longer read as
+   * one, which it drops, so no held read vouches for content it could not read, and keeps why it could not. It keeps
+   * the held read of an unchanged input, against which the file's own event is judged.
    */
   async #readNamed(filter: InputFilter, path: string): Promise<void> {
     const relative = this.#label(path);
     const entry = await readEntryDigest(path, this.#signal);
-    if (entry.kind === "absent") {
+    if (entry.kind === "unreadable") this.#unreadNamed.set(path, entry.reason);
+    else this.#unreadNamed.delete(path);
+    if (entry.kind !== "input") {
       this.#recordAll(this.#state.remove(relative, path));
       return;
     }
-    if (entry.kind !== "input") return;
     if (this.#state.holdsDigest(relative, entry.read.digest)) return;
     this.#readFile(filter, path, entry.read, (changed) =>
       this.#recordAll(changed),
@@ -365,10 +383,14 @@ export class QueuedReads {
   }
 }
 
-/** False for a path that cannot be statted for any reason, not only a missing one. */
-function isFile(path: string): boolean {
+/**
+ * Whether `path` names an entry other than a directory, a link named as itself, so a dangling link counts; false for a
+ * path that cannot be statted for any reason, not only a missing one.
+ */
+function namesEntryButDirectory(path: string): boolean {
   try {
-    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    return entry !== undefined && !entry.isDirectory();
   } catch {
     return false;
   }

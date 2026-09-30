@@ -16,6 +16,7 @@ import type {
   TrackedInputs,
 } from "../src/inputs/input-tracker.js";
 import type { QueryNarrowing } from "../src/inputs/narrowed-inputs.js";
+import type { UnreadPath } from "../src/inputs/queued-reads.js";
 import {
   NON_INPUTS_ABSENT,
   NON_INPUTS_FILE,
@@ -332,6 +333,8 @@ export interface InputsScript {
   readonly changedFails?: string;
   /** Holds each read of named paths until the test resolves `namedReadHeld` or the inputs stop. */
   readonly heldNamedRead?: boolean;
+  /** The paths each read of named paths resolves with as found but not readable; none when absent. */
+  readonly unreadNamed?: readonly UnreadPath[];
 }
 
 export const NO_DECLARATION: NonInputsDeclaration = {
@@ -463,11 +466,10 @@ export class StandInInputs implements TrackedInputs {
     });
   }
 
-  readNamed(paths: readonly string[]): Promise<void> {
+  async readNamed(paths: readonly string[]): Promise<readonly UnreadPath[]> {
     this.namedReads.push(paths);
-    return this.#script.heldNamedRead === true
-      ? this.namedReadHeld.promise
-      : Promise.resolve();
+    if (this.#script.heldNamedRead === true) await this.namedReadHeld.promise;
+    return this.#script.unreadNamed ?? [];
   }
 
   beginJob(): JobMark {

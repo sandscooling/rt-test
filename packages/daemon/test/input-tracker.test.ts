@@ -5359,7 +5359,7 @@ function afterATurn(): Promise<void> {
 }
 
 /** Whether `wait` has settled once the event loop has turned. */
-async function settlesWithinATurn(wait: Promise<void>): Promise<boolean> {
+async function settlesWithinATurn(wait: Promise<unknown>): Promise<boolean> {
   let done = false;
   void wait.then(() => {
     done = true;
@@ -5602,6 +5602,126 @@ describe(
         } finally {
           vi.mocked(watch).mockReset();
         }
+      });
+      expect(rose).toBe(true);
+    });
+  },
+);
+
+/** The verdict of a job during which the tracker read a change to a.ts, and to nothing else. */
+const A_TS_CHANGED = {
+  fingerprinted: false,
+  reason: "its inputs changed while it ran: a.ts",
+  changedWhileRunning: true,
+};
+
+/**
+ * Tracks `root`, holding `a.ts` and `b.ts`, over silent watches, opens a job, runs `edit`, reads `a.ts` by name, and
+ * hands back the job's verdict.
+ */
+async function verdictAcrossNamedRead(
+  root: string,
+  edit: () => void,
+): Promise<JobVerdict> {
+  writeTree(root, { "a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+  silentCapturedWatches();
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      const mark = tracker.beginJob();
+      edit();
+      await tracker.readNamed(["a.ts"]);
+      return tracker.endJob(mark);
+    });
+  } finally {
+    vi.mocked(watch).mockReset();
+  }
+}
+
+describe(
+  "what a named read changes",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3382: a named read that finds a held input's content changed marks the job open across it, naming the input", async () => {
+      const verdict = await inTempDir((root) =>
+        verdictAcrossNamedRead(root, () =>
+          writeFileSync(join(root, "a.ts"), AFTER_SAVE),
+        ),
+      );
+      expect(verdict).toStrictEqual(A_TS_CHANGED);
+    });
+
+    it("D3383: a named read that finds a held input gone marks the job open across it, naming the input", async () => {
+      const verdict = await inTempDir((root) =>
+        verdictAcrossNamedRead(root, () => rmSync(join(root, "a.ts"))),
+      );
+      expect(verdict).toStrictEqual(A_TS_CHANGED);
+    });
+
+    it("D3384: a named read that finds a held input replaced by a directory drops its held read, so the input revision moves", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["a.ts"], () => {
+          rmSync(join(root, "a.ts"));
+          mkdirSync(join(root, "a.ts"));
+        });
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3385: a named read that cannot read a held input drops its held read, so the input revision moves", async () => {
+      const rose = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        try {
+          return await namedReadRaisesRevision(root, ["a.ts"], () => {
+            vi.mocked(readEntryDigest).mockImplementation((path, signal) =>
+              basename(path) === "a.ts"
+                ? Promise.resolve({
+                    kind: "unreadable",
+                    reason: "EACCES: permission denied",
+                  })
+                : realReadEntryDigest(path, signal),
+            );
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+        }
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3389: a named read of a new file it cannot read resolves with the path and the reason", async () => {
+      const unread = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE });
+        silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            writeFileSync(join(root, "new.ts"), AFTER_SAVE);
+            vi.mocked(readEntryDigest).mockImplementation((path, signal) =>
+              basename(path) === "new.ts"
+                ? Promise.resolve({
+                    kind: "unreadable",
+                    reason: "EBUSY: resource busy or locked",
+                  })
+                : realReadEntryDigest(path, signal),
+            );
+            return tracker.readNamed(["new.ts"]);
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(unread).toStrictEqual([
+        { path: "new.ts", reason: "EBUSY: resource busy or locked" },
+      ]);
+    });
+
+    it("D3387: a named read reads a dangling symbolic link created before any event reports it, so the input revision moves", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["link.ts"], () =>
+          symlinkSync("missing-target.ts", join(root, "link.ts"), "file"),
+        );
       });
       expect(rose).toBe(true);
     });

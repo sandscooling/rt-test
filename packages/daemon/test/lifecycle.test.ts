@@ -1909,6 +1909,37 @@ describe("answering a query", () => {
     });
   });
 
+  it("D3420: a path status whose named read found a path it could not read answers each workspace unfingerprinted, the reason naming the path", async () => {
+    const unfingerprinted = await inTempDir(async (root) => {
+      const inputs = new StandInInputs({
+        unreadNamed: [
+          { path: "a/new.ts", reason: "EBUSY: resource busy or locked" },
+        ],
+      });
+      const { lifecycle } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discoveredWithTest("a")),
+          }),
+          new RecordingStore(),
+          { ...IDENTITY, consumerRoot: root },
+          inputs,
+        ),
+      );
+      const answer = await lifecycle.pathStatus(root, stillWaited());
+      return "noAnswer" in answer ? answer : answer.unfingerprintedWorkspaces;
+    });
+    expect(unfingerprinted).toStrictEqual([
+      {
+        workspacePath: "a",
+        reason:
+          "the status could not read what it names: a/new.ts (EBUSY: resource busy or locked)",
+      },
+    ]);
+  });
+
   it("D3020: a summary during a run reads that run's workspace running, as the answer's activity names it", async () => {
     const { started } = heldAt("b", ["a", "b"], discoveredWithTest);
     const { lifecycle } = await begun(started);

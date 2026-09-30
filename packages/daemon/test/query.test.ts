@@ -2170,6 +2170,14 @@ describe("resolving a caller's path", () => {
       ]),
     ).toBe("src/notes~1.md");
   });
+
+  it("D3388: on Windows, a missing file ending in a dot under an ordinary missing directory is refused, naming the file", async () => {
+    expect(
+      await resolvedOn("win32", "src/newdir/gone.ts.", "gone.ts.", [
+        "src/kept.ts",
+      ]),
+    ).toStrictEqual(NAMES_PATH_AND_NAME);
+  });
 });
 
 const NOT_VITEST_PATH = "packages/tooling";

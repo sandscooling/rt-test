@@ -9376,8 +9376,8 @@
     "id": "D3367",
     "defect": "A named read resolves before its reads are read, so a status composes its answer from the inputs before the named file was read.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    return this.#ledger.waitForReadOrReconciliation();",
-    "new": "    return Promise.resolve();"
+    "old": "    await this.#ledger.waitForReadOrReconciliation();\n",
+    "new": ""
   },
   {
     "id": "D3368",
@@ -9390,14 +9390,14 @@
     "id": "D3369",
     "defect": "A named read that finds a held input gone keeps it, so a status of a file deleted before its event arrives answers from its last result as current.",
     "file": "packages/daemon/src/inputs/queued-reads.ts",
-    "old": "    if (entry.kind === \"absent\") {\n      this.#recordAll(this.#state.remove(relative, path));\n      return;\n    }",
-    "new": "    if (entry.kind === \"absent\") return;"
+    "old": "    if (entry.kind !== \"input\") {\n      this.#recordAll(this.#state.remove(relative, path));\n      return;\n    }",
+    "new": "    if (entry.kind !== \"input\") return;"
   },
   {
     "id": "D3370",
     "defect": "A named path the tracker does not hold is never read, so a status of a file created before its event arrives does not find it.",
     "file": "packages/daemon/src/inputs/queued-reads.ts",
-    "old": "    return isFile(absolute) ? [absolute] : [];",
+    "old": "    return namesEntryButDirectory(absolute) ? [absolute] : [];",
     "new": "    return [];"
   },
   {
@@ -9446,8 +9446,8 @@
     "id": "D3377",
     "defect": "A path status answers without waiting for its named read, so it answers from the inputs before the named file was read.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await this.#parts.inputs.readNamed([target.path]);",
-    "new": "    void this.#parts.inputs.readNamed([target.path]);"
+    "old": "    const unread = await this.#parts.inputs.readNamed([target.path]);",
+    "new": "    const unread = [];\n    void this.#parts.inputs.readNamed([target.path]);"
   },
   {
     "id": "D3378",
@@ -9460,8 +9460,8 @@
     "id": "D3379",
     "defect": "A path status reads nothing before it answers, so a real daemon answers a file saved before the watcher reports the save from its pre-edit result as current.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await this.#parts.inputs.readNamed([target.path]);\n",
-    "new": ""
+    "old": "    const unread = await this.#parts.inputs.readNamed([target.path]);\n",
+    "new": "    const unread = [];\n"
   },
   {
     "id": "D3380",
@@ -9476,5 +9476,68 @@
     "file": "packages/daemon/src/query-client.ts",
     "old": "    connection.request(request, boundMs).catch((failure: unknown) => {",
     "new": "    connection.request(request, boundMs ?? PATH_STATUS_BOUND_MS).catch((failure: unknown) => {"
+  },
+  {
+    "id": "D3382",
+    "defect": "A named read that finds a held input's content changed marks no open job, so a run that read the pre-edit content ends fingerprinted and is stored under the post-edit fingerprint, reading current.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    this.#readFile(filter, path, entry.read, (changed) =>\n      this.#recordAll(changed),\n    );",
+    "new": "    this.#readFile(filter, path, entry.read, () => undefined);"
+  },
+  {
+    "id": "D3383",
+    "defect": "A named read that finds a held input gone marks no open job, so a run across the deletion ends fingerprinted.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind !== \"input\") {\n      this.#recordAll(this.#state.remove(relative, path));",
+    "new": "    if (entry.kind !== \"input\") {\n      this.#state.remove(relative, path);"
+  },
+  {
+    "id": "D3384",
+    "defect": "A named read that finds a held input replaced by a directory keeps its held read, so a status answers the pre-edit result as current.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind !== \"input\") {\n      this.#recordAll(this.#state.remove(relative, path));\n      return;\n    }",
+    "new": "    if (entry.kind === \"absent\") {\n      this.#recordAll(this.#state.remove(relative, path));\n      return;\n    }\n    if (entry.kind !== \"input\") return;"
+  },
+  {
+    "id": "D3385",
+    "defect": "A named read that cannot read a held input keeps its held read, so a status answers the pre-edit result as current.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind !== \"input\") {\n      this.#recordAll(this.#state.remove(relative, path));\n      return;\n    }",
+    "new": "    if (entry.kind === \"absent\") {\n      this.#recordAll(this.#state.remove(relative, path));\n      return;\n    }\n    if (entry.kind !== \"input\") return;"
+  },
+  {
+    "id": "D3386",
+    "defect": "A path below a file, which Linux reports as ENOTDIR, reads as unreadable rather than absent, so on Linux an event naming a child of a held folder replaced by a file loses the input set.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "const MISSING_CODES: ReadonlySet<string> = new Set([\"ENOENT\", \"ENOTDIR\"]);",
+    "new": "const MISSING_CODES: ReadonlySet<string> = new Set([\"ENOENT\"]);"
+  },
+  {
+    "id": "D3387",
+    "defect": "A named read reads an unheld path only when it holds a regular file, so a dangling symbolic link created before its event, which the event adds as an input, is not read.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    return namesEntryButDirectory(absolute) ? [absolute] : [];",
+    "new": "    return lstatSync(absolute, { throwIfNoEntry: false })?.isFile() === true\n      ? [absolute]\n      : [];"
+  },
+  {
+    "id": "D3388",
+    "defect": "On Windows, only the first missing name is judged, so a path whose missing directory is ordinary and whose missing last name ends in a dot is answered.",
+    "file": "packages/daemon/src/query/caller-paths.ts",
+    "old": "  for (const name of missing) {",
+    "new": "  for (const name of missing.slice(0, 1)) {"
+  },
+  {
+    "id": "D3389",
+    "defect": "A named read keeps no reason for an entry it could not read, so a status of a new file locked against reads answers from the held reads as current.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind === \"unreadable\") this.#unreadNamed.set(path, entry.reason);\n    else this.#unreadNamed.delete(path);",
+    "new": "    this.#unreadNamed.delete(path);"
+  },
+  {
+    "id": "D3420",
+    "defect": "A path status whose named read found a path it could not read keeps every fingerprint, so its tests read current rather than unknown with a reason naming the path.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  if (unread.length === 0) return inputs;",
+    "new": "  return inputs;"
   }
 ]

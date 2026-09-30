@@ -7,7 +7,7 @@ import type {
   SummaryAnswer,
 } from "../query/answer.js";
 import { resolveCallerPath } from "../query/caller-paths.js";
-import { pathStatusAnswer } from "../query/path-status.js";
+import { pathStatusAnswer, withoutFingerprints } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
 import type { LatestResults, RtTestStore } from "../store/open-store.js";
 import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "../store/schema.js";
@@ -180,14 +180,14 @@ export class DaemonLifecycle implements DaemonHandlers {
   ): Promise<PathStatusAnswer | NoAnswer> {
     const target = resolveCallerPath(path, this.identity.consumerRoot);
     if (!target.ok) return { noAnswer: target.reason };
-    await this.#parts.inputs.readNamed([target.path]);
+    const unread = await this.#parts.inputs.readNamed([target.path]);
     if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };
     const results = this.#latestResults();
     return pathStatusAnswer(
       target,
       results,
       this.#view(),
-      this.#queryInputs(results),
+      withoutFingerprints(this.#queryInputs(results), unread),
     );
   }
 

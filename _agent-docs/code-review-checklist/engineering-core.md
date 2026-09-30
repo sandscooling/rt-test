@@ -91,6 +91,8 @@ C34. **Treat an expected absence as expected**: In layered cleanup, a later laye
 
 C171. **Run every release step of a shutdown**: A shutdown runs each of its release steps whatever an earlier step did, collecting or logging each failure rather than letting it skip a later close, and still waits for in-flight writers before closing what they write to. FAIL on a rejected or thrown step that leaves a later close, a lock or a key file unreleased.
 
+C172. **Read a path below a file as missing on every host**: A file-system error check that reads `ENOENT` as nothing there reads `ENOTDIR` the same way, since Linux reports a path through a file as `ENOTDIR` where Windows reports `ENOENT`. FAIL on a missing-entry check that names `ENOENT` alone.
+
 C35. **Report derived values, not the caller's claim**: When code derives a value that replaces a caller-supplied argument, the record and the log carry the derived value.
 
 C36. **Return whether a guarded operation applied**: An operation that can no-op (guard refusal, already terminal, replay) returns an explicit applied flag, and callers gate every success signal on it.

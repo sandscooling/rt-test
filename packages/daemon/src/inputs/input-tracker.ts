@@ -42,7 +42,7 @@ import type { QueryNarrowing } from "./narrowed-inputs.js";
 import { NON_INPUTS_FILE, type NonInputsDeclaration } from "./non-inputs.js";
 import { protection } from "./protection.js";
 import { keepReleasedFiles } from "./protection-walk.js";
-import { pendingCount, QueuedReads } from "./queued-reads.js";
+import { pendingCount, QueuedReads, type UnreadPath } from "./queued-reads.js";
 import {
   RECONCILE_INTERVAL_MS,
   ReconcileSchedule,
@@ -119,10 +119,11 @@ export interface TrackedInputs {
    * Reads each root-relative path, a folder as each input held under it, changing only what the read finds changed,
    * and resolves once those reads and every event seen before the call are read, or at once while a reconciliation runs
    * or once one begins, or when the tracker has stopped. Reads nothing while a reconciliation runs or before an input
-   * set is established, and never `rt-test.json`; its reads count as no pending change, drop no input set and ask for
-   * no reconciliation, leaving an entry they cannot read as a file to its event.
+   * set is established, and never `rt-test.json`; its reads count as no pending change, ask for no reconciliation, and
+   * drop a held input they cannot read as one rather than the input set, which a failed git check of a new path still
+   * loses, as for an event. Resolves with each path whose read found an entry it could not read.
    */
-  readNamed(paths: readonly string[]): Promise<void>;
+  readNamed(paths: readonly string[]): Promise<readonly UnreadPath[]>;
   beginJob(): JobMark;
   endJob(mark: JobMark): Promise<JobVerdict>;
   /**
@@ -272,16 +273,18 @@ export class InputTracker implements TrackedInputs {
   }
 
   /** An ignore file named is read as the input it is; its rules apply at its event or the next reconciliation. */
-  readNamed(paths: readonly string[]): Promise<void> {
-    if (this.#stopped) return Promise.resolve();
+  async readNamed(paths: readonly string[]): Promise<readonly UnreadPath[]> {
+    if (this.#stopped) return [];
+    let named: string[] = [];
     if (!this.#reconciling && this.#state.established) {
-      const named = paths
+      named = paths
         .flatMap((path) => this.#reads.namedPaths(path))
         .filter((path) => !liesInsideOnHost(this.#declarationFile, path));
       this.#ledger.accept(this.#reads.enqueueNamed(named));
       this.#processQueue();
     }
-    return this.#ledger.waitForReadOrReconciliation();
+    await this.#ledger.waitForReadOrReconciliation();
+    return this.#reads.unreadNamed(named);
   }
 
   /** Each edge of a job reads the digests a round's view compares, only while the view can vouch for them. */

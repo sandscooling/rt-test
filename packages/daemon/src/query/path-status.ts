@@ -1,7 +1,10 @@
 import { statSync, type Stats } from "node:fs";
 import { posix } from "node:path";
 import { testModuleFile } from "../inputs/non-inputs.js";
+import type { FingerprintResult } from "../inputs/fingerprint.js";
+import { namedList } from "../inputs/input-jobs.js";
 import type { CurrentInputs } from "../inputs/input-tracker.js";
+import type { UnreadPath } from "../inputs/queued-reads.js";
 import type { LatestResults } from "../store/open-store.js";
 import { POSIX_SEPARATOR, ROOT_PATH } from "../vitest/find-workspaces.js";
 import {
@@ -26,6 +29,7 @@ import { queryBasis, type DaemonView } from "./summary.js";
 import { countStandings, type TestStanding } from "./test-states.js";
 
 const ENTRY_SEPARATOR = ", ";
+const UNREAD_REASON = "the status could not read what it names";
 
 /** Answers for the discovered tests and not-discovered entries at or under `target`, a path inside the consumer root. */
 export function pathStatusAnswer(
@@ -80,6 +84,23 @@ function encloses(entry: NotDiscoveredEntry, target: string): boolean {
 
 function isModuleEntry(entry: NotDiscoveredEntry): boolean {
   return entry.kind === FAILED_MODULE || entry.kind === TYPECHECK_MODULE;
+}
+
+/** `inputs`, less every fingerprint when `unread` names a path, since no read vouches for what that path holds. */
+export function withoutFingerprints(
+  inputs: CurrentInputs,
+  unread: readonly UnreadPath[],
+): CurrentInputs {
+  if (unread.length === 0) return inputs;
+  const reason = `${UNREAD_REASON}: ${namedList(unread.map(({ path, reason }) => `${path} (${reason})`))}`;
+  const none: FingerprintResult = { ok: false, reason };
+  return {
+    ...inputs,
+    snapshot: undefined,
+    workspaceFingerprint: () => none,
+    discoveryFingerprint: () => none,
+    protectedFileChangedSince: () => reason,
+  };
 }
 
 /** Both relative to the consumer root, `/`-separated. */
