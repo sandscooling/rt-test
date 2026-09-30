@@ -106,8 +106,8 @@ export function countEnvironment(
 ): EnvironmentCount {
   const session = SESSION_VARIABLES.map(comparable);
   const entries = [...new Set([...session, ...declared.map(comparable)])];
-  /** Names Windows keeps apart can fold to one key, so each key keeps every value. */
-  const values = new Map<string, Set<string>>();
+  /** Names Windows keeps apart can fold to one key, so each key keeps every value by the name holding it. */
+  const values = new Map<string, Map<string, string>>();
   const set = new Set<string>();
   const nonEmpty = new Set<string>();
   for (const [name, value] of Object.entries(environment)) {
@@ -115,13 +115,16 @@ export function countEnvironment(
     const naming = entries.filter((entry) => names(entry, key));
     const held = value ?? "";
     if (naming.length === 0) {
-      values.set(key, (values.get(key) ?? new Set<string>()).add(held));
+      values.set(
+        key,
+        (values.get(key) ?? new Map<string, string>()).set(name, held),
+      );
     }
     for (const entry of naming) set.add(entry);
     if (held !== "") for (const entry of naming) nonEmpty.add(entry);
   }
   const lines = [
-    ...[...values].map(([name, held]) => [BY_VALUE, name, ...[...held].sort()]),
+    ...[...values].map(([key, held]) => [BY_VALUE, key, ...byName(held)]),
     ...[...set].map((entry) => [BY_PRESENCE, entry, nonEmpty.has(entry)]),
   ].map((line) => JSON.stringify(line));
   const hash = createHash(DIGEST_ALGORITHM);
@@ -147,6 +150,13 @@ export function variableEntryProblem(entry: string): string | undefined {
   return mark === 0
     ? `is ${PREFIX_MARK} alone, which would leave every variable's value out`
     : undefined;
+}
+
+/** The values of `held` in the sort order of the names holding them, the order in which Node picks among them. */
+function byName(held: ReadonlyMap<string, string>): string[] {
+  return [...held]
+    .sort(([first], [second]) => (first < second ? -1 : 1))
+    .map(([, value]) => value);
 }
 
 function comparable(name: string): string {
