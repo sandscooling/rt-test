@@ -2677,6 +2677,17 @@ describe("the environment's count", () => {
     });
     expect(reversed).toBe(listed);
   });
+
+  it("D3336: on Windows, swapping the values of two names that fold to one key, Path=a and PATH=b becoming Path=b and PATH=a, changes the environment's digest", async () => {
+    const moved = await onPlatform("win32", async () => {
+      const count = await freshEnvironmentCount();
+      return (
+        count({ Path: "a", PATH: "b" }, []).digest !==
+        count({ Path: "b", PATH: "a" }, []).digest
+      );
+    });
+    expect(moved).toBe(true);
+  });
 });
 
 describe(

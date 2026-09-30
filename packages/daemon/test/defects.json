@@ -6730,8 +6730,8 @@
     "id": "D2965",
     "defect": "On Windows, of two names Windows keeps apart that fold to one key, such as Aß and ASS, only the value enumerated last counts, so a change in the other's value leaves results current.",
     "file": "packages/daemon/src/inputs/environment-digest.ts",
-    "old": "      values.set(key, (values.get(key) ?? new Set<string>()).add(held));",
-    "new": "      values.set(key, new Set([held]));"
+    "old": "        (values.get(key) ?? new Map<string, string>()).set(name, held),",
+    "new": "        new Map([[name, held]]),"
   },
   {
     "id": "D2966",
@@ -9168,5 +9168,12 @@
     "file": "packages/daemon/src/daemon/discovery-history.ts",
     "old": "    if (again.size > 0) this.#hold(again, HELD_AGAIN_ENTRY);",
     "new": "    if (again.size > 0) this.#hold(count.shared, HELD_AGAIN_ENTRY);"
+  },
+  {
+    "id": "D3336",
+    "defect": "On Windows, the values of names that fold to one key are counted sorted rather than in the order of their names, so swapping values between two spellings leaves the environment's digest unmoved while an executor process sees the other value, and a stale result reads current.",
+    "file": "packages/daemon/src/inputs/environment-digest.ts",
+    "old": "    .sort(([first], [second]) => (first < second ? -1 : 1))\n    .map(([, value]) => value);",
+    "new": "    .map(([, value]) => value)\n    .sort();"
   }
 ]
