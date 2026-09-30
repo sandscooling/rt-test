@@ -10162,5 +10162,61 @@
     "file": "packages/daemon/src/query-client.ts",
     "old": "    ...(since === undefined ? {} : { since }),",
     "new": ""
+  },
+  {
+    "id": "D3466",
+    "defect": "Selection follows no dependency edge, so a change to the shared library selects lib alone: ui, backend and web keep the passing results the edit broke, and the corpus reports each failure the full run finds there as a selection miss and each of those workspaces as a declared run missing.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "      ...(context.dependents.get(current) ?? []),\n",
+    "new": ""
+  },
+  {
+    "id": "D3467",
+    "defect": "The scheduler reads every workspace as having no stored run, so each new input revision runs every confirmed workspace again, and the corpus reports each workspace an edit did not reach as a run outside the declared set and a duplicate execution under its unchanged fingerprint.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "const stale = staleReason(latest, fingerprintDigest(print), refused);",
+    "new": "const stale = staleReason(undefined, fingerprintDigest(print), refused);"
+  },
+  {
+    "id": "D3468",
+    "defect": "The tracker's declared non-input match never matches, so the docs files stay inputs and a docs edit moves the input revision and runs every workspace, which the corpus reports as an input revision moved and runs outside the declared set.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "        : declaredNonInputs(this.#declaration, this.#protection);",
+    "new": "        : () => undefined;"
+  },
+  {
+    "id": "D3469",
+    "defect": "Selection reads every changed path as owned by the root, so each path falls back to the whole project and every edit runs every workspace, which the corpus reports as runs outside the declared set.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "if (owner === ROOT_PATH && dependencies.packageWorkspaces.length > 1) {",
+    "new": "if (dependencies.packageWorkspaces.length > 1) {"
+  },
+  {
+    "id": "D3470",
+    "defect": "The daemon records a test that failed as passed, so after the shared library edit it runs exactly the declared workspaces yet holds each test the full run fails as a current pass, which the corpus reports only as selection misses.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "return finished(\"failed\", result.errors.map(errorText));",
+    "new": "return finished(\"passed\");"
+  },
+  {
+    "id": "D3471",
+    "defect": "The corpus's duplicate execution comparison never reports, so a run stored under its workspace's previous fingerprint and adapter version reads clean.",
+    "file": "packages/daemon/test/edit-corpus-findings.ts",
+    "old": "  if (!duplicate) return [];",
+    "new": "  return [];"
+  },
+  {
+    "id": "D3472",
+    "defect": "The corpus compares a run with its workspace's first stored run rather than its previous one, so a run at a fingerprint only an older, superseded run held, as after a revert, reads as a duplicate execution.",
+    "file": "packages/daemon/test/edit-corpus-findings.ts",
+    "old": "const previous = earlierRuns.findLast(",
+    "new": "const previous = earlierRuns.find("
+  },
+  {
+    "id": "D3473",
+    "defect": "The baseline's run-once check lets a workspace run twice, so a daemon that runs a workspace twice at its start, under two fingerprints, reads clean.",
+    "file": "packages/daemon/test/edit-corpus-findings.ts",
+    "old": ".filter(([, count]) => count > 1)",
+    "new": ".filter(([, count]) => count > 2)"
   }
 ]

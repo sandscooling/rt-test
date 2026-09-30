@@ -1,0 +1,11 @@
+{
+  "name": "@corpus/ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/label.mjs"
+  },
+  "dependencies": {
+    "@corpus/lib": "workspace:*"
+  }
+}
