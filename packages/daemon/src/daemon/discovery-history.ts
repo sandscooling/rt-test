@@ -44,6 +44,8 @@ export interface DiscoveryInEffect {
 interface DiscoveryChanges {
   /** What changed since the last discovery began; undefined when none has begun. */
   discoveryChanges(): SubjectChanges | undefined;
+  discoveryBegan(): void;
+  discoveryNotBegun(): void;
   discoveryEnded(window: JobWindow): void;
   discoveryThrew(): void;
 }
@@ -58,7 +60,7 @@ interface DiscoveryHistoryParts {
 }
 
 /** What records a begun discovery's end, whichever way it ends. */
-type BegunDiscovery = Omit<BegunRun, "ended"> & {
+type BegunDiscovery = Omit<BegunRun, "ended" | "refused"> & {
   ended(report: DiscoverReport): void;
 };
 
@@ -172,6 +174,7 @@ export class DiscoveryHistory {
       before?.onceMoreFrom !== undefined && before.revision === revision;
     const startCount = this.#decided;
     this.#retry = false;
+    this.#changes.discoveryBegan();
     this.#attempt = {
       revision,
       stored: false,
@@ -184,6 +187,7 @@ export class DiscoveryHistory {
         this.#ended({ revision, isOnceMore, startCount }, report);
       },
       notBegun: () => {
+        this.#changes.discoveryNotBegun();
         this.#attempt = before;
         this.#retry ||= retry;
       },

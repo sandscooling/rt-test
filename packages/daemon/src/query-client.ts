@@ -69,6 +69,8 @@ export interface ChangesOptions {
   readonly since?: string;
   /** A whole number of ms the whole query may take, the daemon's proof of its hello included; `READ_FIRST_BOUND_MS` when absent. */
   readonly boundMs?: number;
+  /** The files among `paths` the caller edited, whose changes the daemon counts as edits, never as its own jobs'. */
+  readonly edited?: readonly string[];
 }
 
 /**
@@ -80,7 +82,7 @@ export async function queryChanges(
   paths: readonly string[],
   options: ChangesOptions = {},
 ): Promise<ChangesResponse> {
-  const { since, boundMs = READ_FIRST_BOUND_MS } = options;
+  const { since, edited, boundMs = READ_FIRST_BOUND_MS } = options;
   if (!Number.isInteger(boundMs) || boundMs <= 0) {
     throw new RangeError(
       `a changes query's boundMs must be a whole number of ms above 0, not ${boundMs}`,
@@ -92,6 +94,7 @@ export async function queryChanges(
     protocolVersion: PROTOCOL_VERSION,
     paths,
     ...(since === undefined ? {} : { since }),
+    ...(edited === undefined ? {} : { edited }),
   };
   const answer = await query(targetOf(consumerRoot, "query"), request, {
     deadline,

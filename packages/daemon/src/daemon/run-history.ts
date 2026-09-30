@@ -3,6 +3,7 @@ import { namedList, type JobWindow } from "../inputs/input-jobs.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import {
   ChangeRecord,
+  type EditReport,
   type Job,
   type JobsByPath,
   type SubjectChanges,
@@ -62,6 +63,8 @@ export interface BegunRun {
   notBegun(): void;
   /** The run began and threw, so no count follows it. */
   threw(): void;
+  /** The lifecycle refused the workspace, so the run never began and its attempt stays as having stored nothing. */
+  refused(): void;
 }
 
 interface RunHistoryParts {
@@ -144,13 +147,26 @@ export class RunHistory {
     this.#changes.observed(digests);
   }
 
+  /** A caller's report of the input keys it edited, whose every change counts as an edit, never a job's. */
+  reportEdits(keys: readonly string[]): EditReport {
+    return this.#changes.reportEdits(keys);
+  }
+
+  discoveryBegan(): void {
+    this.#changes.jobBegan(DISCOVERY);
+  }
+
+  discoveryNotBegun(): void {
+    this.#changes.jobNotBegun(DISCOVERY);
+  }
+
   discoveryEnded(window: JobWindow): void {
     this.#changes.jobEnded(window, DISCOVERY);
   }
 
   /** The discovery began and threw, so no count follows it. */
   discoveryThrew(): void {
-    this.#changes.begun(DISCOVERY);
+    this.#changes.jobThrew(DISCOVERY);
   }
 
   /** What changed since the last discovery began; undefined when none has begun. */
@@ -203,6 +219,7 @@ export class RunHistory {
       before.revision === revision &&
       before.modules === modules;
     const startCount = this.#decided.get(path) ?? NO_COUNT;
+    this.#changes.jobBegan(path);
     this.#attempts.set(path, {
       revision,
       modules,
@@ -217,10 +234,12 @@ export class RunHistory {
         return this.#ended({ path, modules, isRerun, startCount }, report);
       },
       notBegun: () => {
+        this.#changes.jobNotBegun(path);
         if (before === undefined) this.#attempts.delete(path);
         else this.#attempts.set(path, before);
       },
-      threw: () => this.#changes.begun(path),
+      threw: () => this.#changes.jobThrew(path),
+      refused: () => this.#changes.jobNotBegun(path),
     };
   }
 

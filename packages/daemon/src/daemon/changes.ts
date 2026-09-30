@@ -14,6 +14,7 @@ import { queryBasis } from "../query/summary.js";
 import { coverageAt } from "../query/wait-answer.js";
 import { errorText } from "../vitest/error-text.js";
 import { ChangeJournal } from "./change-journal.js";
+import type { EditReport } from "./change-record.js";
 import type { DaemonLog } from "./daemon-log.js";
 import type { DependencyBuilds } from "./dependency-builds.js";
 import type { ChangesQuery } from "./server.js";
@@ -38,6 +39,8 @@ export interface ChangesParts {
   readonly stopSignal: AbortSignal;
   readonly log: DaemonLog;
   readonly moment: () => ChangesMoment;
+  /** Counts every change to the root-relative input keys a caller edited as an edit, never a job's. */
+  readonly reportEdits: (keys: readonly string[]) => EditReport;
 }
 
 /**
@@ -65,8 +68,9 @@ export class Changes {
   }
 
   /**
-   * Refuses the query whole when any path is one a wait refuses. Otherwise reads the paths, and once `signal` aborts
-   * reads nothing more, since a stop may have closed the store; then answers in one turn with what the read found.
+   * Refuses the query whole when any path is one a wait refuses. Otherwise reports its edited files before reading the
+   * paths, so a job beginning before the read holds them too, and once `signal` aborts reads nothing more, since a stop
+   * may have closed the store; then answers in one turn with what the read found.
    */
   async answer(
     query: ChangesQuery,
@@ -75,8 +79,13 @@ export class Changes {
     const { consumerRoot, inputs } = this.#parts;
     const resolved = resolveFiles(query.paths, consumerRoot, CHANGES_QUERY);
     if ("refused" in resolved) return resolved;
-    const { paths } = resolved;
-    await inputs.readNamed(paths);
+    const { paths, byGiven } = resolved;
+    const report = this.#reportEdits(query.edited, byGiven);
+    try {
+      await inputs.readNamed(paths);
+    } finally {
+      report?.read();
+    }
     if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };
     const moment = this.#parts.moment();
     const unread = inputs.unreadNamed(paths);
@@ -90,6 +99,17 @@ export class Changes {
   stored(moment: string): void {
     this.#record(moment);
     this.#wake?.();
+  }
+
+  /** Undefined when the query names no edited file. */
+  #reportEdits(
+    edited: readonly string[],
+    byGiven: ReadonlyMap<string, string>,
+  ): EditReport | undefined {
+    if (edited.length === 0) return undefined;
+    return this.#parts.reportEdits(
+      edited.flatMap((given) => byGiven.get(given) ?? []),
+    );
   }
 
   /** Records the moment when it is determined; a reading that fails is logged at warning level and skipped. */

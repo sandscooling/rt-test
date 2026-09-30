@@ -40,7 +40,6 @@ import {
   type ChangesResponse,
   type DaemonIdentity,
   type DecodedLine,
-  type ErrorCode,
   type ErrorResponse,
   type ProtocolMessage,
   type HelloResponse,
@@ -51,6 +50,12 @@ import {
   type VersionMismatchError,
   type WaitResponse,
 } from "./protocol.js";
+import {
+  editedPaths,
+  error,
+  namedPaths,
+  valueShape,
+} from "./request-fields.js";
 
 type Answered<A> = A | NoAnswer | RefusedQuery;
 /** A query's answer, or a promise of it when its work is still to come. */
@@ -69,6 +74,8 @@ export interface ChangesQuery {
   readonly paths: readonly string[];
   /** Absent for a baseline. */
   readonly since: string | undefined;
+  /** The files among `paths` the caller edited, each as given; empty when it named none. */
+  readonly edited: readonly string[];
 }
 
 /** What a too-large answer's error asks for instead: fewer files for a wait or a changes query, a narrower path for the others. */
@@ -435,7 +442,7 @@ function waitResponse(
   return queryResponse(WAIT_TYPE, () => handlers.wait(query, signal));
 }
 
-/** Refuses a changes request whose paths or cursor it cannot take before any of its work begins. */
+/** Refuses a changes request whose paths, cursor or edited files it cannot take before any of its work begins. */
 function changesResponse(
   message: ProtocolMessage,
   handlers: DaemonHandlers,
@@ -455,46 +462,10 @@ function changesResponse(
       `a ${CHANGES_TYPE} request's since must be a non-empty string of at most ${MAX_CURSOR_CHARACTERS} characters; got ${valueShape(since)}`,
     );
   }
-  const query: ChangesQuery = { paths, since };
+  const edited = editedPaths(message["edited"], paths);
+  if (!Array.isArray(edited)) return edited;
+  const query: ChangesQuery = { paths, since, edited };
   return queryResponse(CHANGES_TYPE, () => handlers.changes(query, signal));
-}
-
-/** A refused value by its kind and size, never echoed, since a value near the line limit would push the refusal past it. */
-function valueShape(value: unknown): string {
-  if (typeof value !== "string") return `a value of type ${typeof value}`;
-  return `a string of ${Array.from(value).length} characters`;
-}
-
-/** The request's paths when they are a non-empty array of at most `max` absolute paths; otherwise its refusal. */
-function namedPaths(
-  message: ProtocolMessage,
-  type: string,
-  max: number,
-  allower: string,
-): string[] | ErrorResponse {
-  const paths = message["paths"];
-  if (!Array.isArray(paths) || paths.length === 0) {
-    return error(
-      "invalid-request",
-      `a ${type} request must carry a non-empty array of absolute paths`,
-    );
-  }
-  if (paths.length > max) {
-    return error(
-      "invalid-request",
-      `a ${type} request names ${paths.length} files, more than the ${max} ${allower} allows`,
-    );
-  }
-  const notAbsolute = (paths as unknown[]).filter(
-    (path) => typeof path !== "string" || !isAbsolute(path),
-  );
-  if (notAbsolute.length > 0) {
-    return error(
-      "invalid-request",
-      `a ${type} request's paths must be absolute; got ${notAbsolute.map((path) => JSON.stringify(path)).join(", ")}`,
-    );
-  }
-  return paths as string[];
 }
 
 type Typed<T extends string, A> = A & { type: T; protocolVersion: number };
@@ -569,10 +540,6 @@ function stopAcknowledgement(
 /** A request without a challenge gets no proof field, rather than one holding nothing. */
 function withProof(proof: string | undefined): { proof?: string } {
   return proof === undefined ? {} : { proof };
-}
-
-function error(code: ErrorCode, message: string): ErrorResponse {
-  return { type: ERROR_TYPE, protocolVersion: PROTOCOL_VERSION, code, message };
 }
 
 function send(socket: Socket, message: object): void {

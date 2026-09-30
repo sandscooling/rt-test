@@ -18,6 +18,7 @@ import {
 } from "../vitest/confirmed-start.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
+import type { EditReport } from "./change-record.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
   DiscoveryHistory,
@@ -185,6 +186,11 @@ export class Scheduler {
         await this.#untilChangeOrStop();
       }
     }
+  }
+
+  /** A caller's report of the input keys it edited, whose every change counts as an edit, never a job's. */
+  reportEdits(keys: readonly string[]): EditReport {
+    return this.#runs.reportEdits(keys);
   }
 
   /** Releases every wait, and with it the quiet window's timer; nothing starts after it. */
@@ -506,7 +512,10 @@ export class Scheduler {
         !this.#isStopping() && this.#revision() === revision;
       // Defensive: the lifecycle refuses only what its start does not confirm, which #eligible leaves out. A refused
       // workspace keeps its attempt as having stored nothing, so each periodic reconciliation re-arms its retry.
-      if (refusedAtPlan) return;
+      if (refusedAtPlan) {
+        begun.refused();
+        return;
+      }
       begun.notBegun();
       if (retried) this.#retryWorkspaces.add(path);
       return;
