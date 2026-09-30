@@ -50,6 +50,22 @@ export function namedPaths(
   return paths as string[];
 }
 
+/** The request's path when it is absent or absolute, the whole worktree when absent; otherwise its refusal. */
+export function optionalPath(
+  message: ProtocolMessage,
+  type: string,
+): { readonly path: string | undefined } | ErrorResponse {
+  const path = message["path"];
+  if (path === undefined) return { path: undefined };
+  if (typeof path !== "string" || !isAbsolute(path)) {
+    return error(
+      "invalid-request",
+      `a ${type} request's path, when it has one, must be absolute; got ${valueShape(path)}`,
+    );
+  }
+  return { path };
+}
+
 /** A changes request's edited files, none when absent, when each is one of its `paths`; otherwise its refusal. */
 export function editedPaths(
   edited: unknown,

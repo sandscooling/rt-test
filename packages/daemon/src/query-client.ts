@@ -7,6 +7,7 @@ import {
 } from "./daemon/proven-connection.js";
 import {
   CHANGES_TYPE,
+  DEFECTS_TYPE,
   ERROR_TYPE,
   isWaitLimit,
   NOTHING_TO_ANSWER_CODE,
@@ -20,6 +21,8 @@ import {
   WAIT_TYPE,
   type ChangesRequest,
   type ChangesResponse,
+  type DefectsRequest,
+  type DefectsResponse,
   type PathStatusRequest,
   type PathStatusResponse,
   type ProtocolMessage,
@@ -31,8 +34,9 @@ import {
 import { errorText } from "./vitest/error-text.js";
 
 /**
- * How long a path status or a changes query may take to answer, a target until measured. The daemon first reads the
- * named paths: for a path status of the root that is every input it holds, which is more than any changes query names.
+ * How long a path status, a changes or a defects query may take to answer, a target until measured. The daemon first
+ * reads the named paths, or for defects the definition files: for a path status of the root that is every input it
+ * holds, which is more than any changes query names.
  */
 const READ_FIRST_BOUND_MS = 60_000;
 
@@ -62,6 +66,25 @@ export async function queryPathStatus(
     requestMs: READ_FIRST_BOUND_MS,
   });
   return answer as unknown as PathStatusResponse;
+}
+
+/**
+ * Each defect definition's state and the tests no definition names, at or under the absolute `path`, or in the whole
+ * worktree when it is absent; it starts nothing.
+ */
+export async function queryDefects(
+  consumerRoot: string,
+  path?: string,
+): Promise<DefectsResponse> {
+  const request: DefectsRequest = {
+    type: DEFECTS_TYPE,
+    protocolVersion: PROTOCOL_VERSION,
+    ...(path === undefined ? {} : { path }),
+  };
+  const answer = await query(targetOf(consumerRoot, "query"), request, {
+    requestMs: READ_FIRST_BOUND_MS,
+  });
+  return answer as unknown as DefectsResponse;
 }
 
 export interface ChangesOptions {
@@ -144,7 +167,12 @@ type QueryBound =
  */
 async function query(
   target: DaemonTarget,
-  request: SummaryRequest | PathStatusRequest | WaitRequest | ChangesRequest,
+  request:
+    | SummaryRequest
+    | PathStatusRequest
+    | WaitRequest
+    | ChangesRequest
+    | DefectsRequest,
   bound?: QueryBound,
 ): Promise<ProtocolMessage> {
   const { consumerRoot } = target;

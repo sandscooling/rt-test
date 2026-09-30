@@ -1,5 +1,6 @@
 import { isUsageError, type CliIo, type Command } from "./command.js";
 import { changesCommand } from "./commands/changes.js";
+import { defectsCommand } from "./commands/defects.js";
 import { hookCommand } from "./commands/hook.js";
 import { startCommand } from "./commands/start.js";
 import { statusCommand } from "./commands/status.js";
@@ -15,6 +16,7 @@ const COMMANDS: readonly Command[] = [
   statusCommand,
   waitCommand,
   changesCommand,
+  defectsCommand,
   hookCommand,
 ];
 

@@ -10,6 +10,7 @@ import type {
   WaitAnswer,
 } from "../query/answer.js";
 import type { ChangesAnswer } from "../query/changes-answer.js";
+import { defectsAnswer, type DefectsAnswer } from "../query/defects-answer.js";
 import { resolveCallerPath } from "../query/caller-paths.js";
 import { pathStatusAnswer, withoutFingerprints } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
@@ -38,11 +39,7 @@ import {
   threwOutcome,
   UnstoredJobs,
 } from "./job-endings.js";
-import type {
-  DaemonActivity,
-  DaemonIdentity,
-  UnstoredJob,
-} from "./protocol.js";
+import type { DaemonActivity, DaemonIdentity } from "./protocol.js";
 import { RefusalNotes } from "./refusal-notes.js";
 import {
   changedWhileRunning,
@@ -168,11 +165,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       });
   }
 
-  status(): {
-    activity: DaemonActivity;
-    stopping: boolean;
-    unstoredJobs: readonly UnstoredJob[];
-  } {
+  status(): ReturnType<DaemonHandlers["status"]> {
     return {
       activity: this.#activity,
       stopping: this.isStopping(),
@@ -218,6 +211,22 @@ export class DaemonLifecycle implements DaemonHandlers {
     signal: AbortSignal,
   ): Promise<ChangesAnswer | NoAnswer | RefusedQuery> {
     return this.#changes.answer(query, signal);
+  }
+
+  /** Reads the store before the definition files, so no read reaches a store a stop has closed meanwhile. */
+  defects(
+    path: string | undefined,
+    signal: AbortSignal,
+  ): Promise<DefectsAnswer | NoAnswer> {
+    const results = this.#latestResults();
+    return defectsAnswer({
+      path,
+      results,
+      daemon: this.#view(),
+      inputs: this.#queryInputs(results),
+      stateDirectory: this.identity.stateDirectory,
+      signal,
+    });
   }
 
   /** The latest stored results, the daemon's view, and the inputs narrowed for them with the narrowing at their revision. */

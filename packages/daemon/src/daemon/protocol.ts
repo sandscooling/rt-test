@@ -14,6 +14,7 @@ import type {
   WaitAnswer,
 } from "../query/answer.js";
 import type { ChangesAnswer } from "../query/changes-answer.js";
+import type { DefectsAnswer } from "../query/defects-answer.js";
 import { BUSY_TIMEOUT_MS } from "../store/schema.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText } from "../vitest/error-text.js";
@@ -59,6 +60,7 @@ export const SUMMARY_TYPE = "summary";
 export const PATH_STATUS_TYPE = "path-status";
 export const WAIT_TYPE = "wait";
 export const CHANGES_TYPE = "changes";
+export const DEFECTS_TYPE = "defects";
 
 export const START_TYPE = "start";
 export const SERVING_TYPE = "serving";
@@ -206,6 +208,13 @@ export interface ChangesRequest {
   readonly edited?: readonly string[];
 }
 
+export interface DefectsRequest {
+  readonly type: typeof DEFECTS_TYPE;
+  readonly protocolVersion: number;
+  /** Absolute; the whole worktree when absent. */
+  readonly path?: string;
+}
+
 /** Whether `value` is a cursor a changes request may carry: a non-empty string of at most `MAX_CURSOR_CHARACTERS`. */
 export function isCursor(value: unknown): value is string {
   return (
@@ -242,6 +251,11 @@ export type WaitResponse = WaitAnswer & {
 
 export type ChangesResponse = ChangesAnswer & {
   readonly type: typeof CHANGES_TYPE;
+  readonly protocolVersion: number;
+};
+
+export type DefectsResponse = DefectsAnswer & {
+  readonly type: typeof DEFECTS_TYPE;
   readonly protocolVersion: number;
 };
 

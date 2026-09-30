@@ -84,11 +84,11 @@ const PROTECTED_NAMES: ReadonlySet<string> = new Set([
 /** Reads files only. A missing file declares nothing silently; one that cannot be used declares nothing, with the reason. */
 export function readNonInputs(consumerRoot: string): NonInputsDeclaration {
   const file = join(consumerRoot, NON_INPUTS_FILE);
-  const before = presence(file);
+  const before = presenceDeclaration(file);
   if (before !== true) return before;
   const read = readJson(file);
   if (!read.ok) {
-    const after = presence(file);
+    const after = presenceDeclaration(file);
     return after === true ? unusable(`it ${read.reason}`) : after;
   }
   const problem = declarationProblem(read.value);
@@ -198,22 +198,55 @@ export function testModuleFile(
   return posix.normalize(posix.join(workspacePath, modulePath));
 }
 
+export const PRESENCE = {
+  file: "file",
+  absent: "absent",
+  link: "link",
+  other: "other",
+  unreadable: "unreadable",
+} as const;
+
+/** What is at a path, read without following a link. */
+export type Presence =
+  | {
+      readonly kind: Exclude<
+        (typeof PRESENCE)[keyof typeof PRESENCE],
+        typeof PRESENCE.unreadable
+      >;
+    }
+  | { readonly kind: typeof PRESENCE.unreadable; readonly reason: string };
+
 /**
- * True when a regular file is there; otherwise the declaration its absence, another kind of entry, or the failure
- * to tell, makes. A symbolic link is never followed, and a FIFO or device is never read, since its read can block.
+ * Only a regular file is read: a symbolic link is never followed, and a FIFO or device is never read, since its read
+ * can block.
  */
-function presence(file: string): true | NonInputsDeclaration {
+export function presence(file: string): Presence {
   let stats: Stats | undefined;
   try {
     stats = lstatSync(file, { throwIfNoEntry: false });
   } catch (error) {
-    return unusable(`it cannot be read: ${errorText(error)}`);
+    return { kind: PRESENCE.unreadable, reason: errorText(error) };
   }
-  if (stats === undefined) {
-    return { file: NON_INPUTS_FILE, state: NON_INPUTS_ABSENT };
+  if (stats === undefined) return { kind: PRESENCE.absent };
+  if (stats.isSymbolicLink()) return { kind: PRESENCE.link };
+  return { kind: stats.isFile() ? PRESENCE.file : PRESENCE.other };
+}
+
+/** True when a regular file is there; otherwise the declaration its absence, another kind of entry, or the failure to tell, makes. */
+function presenceDeclaration(file: string): true | NonInputsDeclaration {
+  const found = presence(file);
+  switch (found.kind) {
+    case PRESENCE.file:
+      return true;
+    case PRESENCE.absent:
+      return { file: NON_INPUTS_FILE, state: NON_INPUTS_ABSENT };
+    case PRESENCE.link:
+      return unusable(SYMBOLIC_LINK_PROBLEM);
+    case PRESENCE.other:
+      return unusable(NOT_A_FILE_PROBLEM);
+    case PRESENCE.unreadable:
+      return unusable(`it cannot be read: ${found.reason}`);
   }
-  if (stats.isSymbolicLink()) return unusable(SYMBOLIC_LINK_PROBLEM);
-  return stats.isFile() ? true : unusable(NOT_A_FILE_PROBLEM);
 }
 
 function unusable(why: string): NonInputsDeclaration {
@@ -276,7 +309,8 @@ function listProblem(value: object, rule: ListMember): string | undefined {
   return undefined;
 }
 
-function patternProblem(pattern: string): string | undefined {
+/** Why a root-relative pattern cannot be used, or undefined when it can. */
+export function patternProblem(pattern: string): string | undefined {
   if (pattern === "") return "is empty";
   if (pattern.startsWith(POSIX_SEPARATOR)) {
     return `begins with ${POSIX_SEPARATOR}; a pattern is relative to the consumer root`;
@@ -300,11 +334,51 @@ function patternProblem(pattern: string): string | undefined {
 }
 
 /** Whole segments, `**` standing for any number of them, none included. */
-function matchesPath(
+export function matchesPath(
   pattern: readonly string[],
   path: readonly string[],
 ): boolean {
   return matchesSequence(pattern, path, GLOBSTAR, matchesSegment);
+}
+
+/** Whether the pattern could match a path below the directory `directory` names, a segment or more deeper. */
+export function matchesBelow(
+  pattern: readonly string[],
+  directory: readonly string[],
+): boolean {
+  const reached = new Set<number>([0]);
+  for (const name of directory) {
+    const next = new Set<number>();
+    for (const index of withGlobstarSkips(pattern, reached)) {
+      const wanted = pattern[index];
+      if (wanted === GLOBSTAR) next.add(index);
+      else if (wanted !== undefined && matchesSegment(wanted, name)) {
+        next.add(index + 1);
+      }
+    }
+    if (next.size === 0) return false;
+    reached.clear();
+    for (const index of next) reached.add(index);
+  }
+  return [...withGlobstarSkips(pattern, reached)].some(
+    (index) => index < pattern.length,
+  );
+}
+
+/** Each pattern position reached, and each one past the `**` runs it stands on, which may match no segment. */
+function withGlobstarSkips(
+  pattern: readonly string[],
+  reached: ReadonlySet<number>,
+): Set<number> {
+  const all = new Set<number>();
+  for (let index of reached) {
+    all.add(index);
+    while (pattern[index] === GLOBSTAR) {
+      index += 1;
+      all.add(index);
+    }
+  }
+  return all;
 }
 
 /** `*` stands for any run of characters within the segment and `?` for one, a leading dot included. */
