@@ -371,7 +371,7 @@ Validation: `vitest related` over the 11 production files and `scheduling-harnes
 - Re-anchored on the moved code, each defect kept: D1987, D1988, D2658, D2659, D2663, D2732, D2975, D3096, D3139, D3147, D3180, D3182; D2659, D2663, D2732 and D3147 now mutate `discovery-history.ts`.
 - D3184's title and defect corrected: its retry is dropped until the next periodic reconciliation re-arms it, not until the revision moves.
 - Stale, repaired and re-proven: D1879 and D2159 filtered on `stored not fingerprinted`, which AC3's once-more line now also holds, so they read their own line's prefix; D3147, D3180 and D3182 relied on rediscoveries that each change a path, which the discovery's own hold now stops after three, so their discovery's current fingerprint cannot be computed (never counted, AC1) and each input revision still rediscovers.
-- D3330 unused.
+- D3330: A discovery held again names every path its re-holding rediscovery wrote, not only those its latest hold named. (AC2, AC4, decision (g); the review's gap on `#holdAt`, id granted by the orchestrator at 04:23, detected on Windows at 04:26 and on Linux under Node 24.13.1 at 04:26)
 
 #### Deliberately Untested
 
@@ -389,9 +389,25 @@ Validation: `vitest related` over the 11 production files and `scheduling-harnes
 
 ### Review Record
 
+Review session: threadId 8be62be0-c023-40f9-8483-aa1a0a2c57bc
+
+Reviewed 3d0b12c, and the doc changes of 19ba5cd and 14918d6 (doc-verify: no discrepancies), on 2026-09-30 04:16 to 04:22: three fresh-eyes batches (scheduler, answers, cli) and the ticket's checklist rules. Every criterion holds in the code. Triaged by the owner's ruling of 03:25 (a finding no realistic consumer can hit is a known limit unless it could report a stale result as current).
+
+Fixed here: the `ScheduleFacts.selfChangingDiscovery` docblock attached "which changes no freshness or count" to an unattributable change rather than to the hold; `DiscoveryChanges` and `BegunDiscovery` were exported with no importer (C59); this File List omitted the tests session's files.
+
+Doc discrepancies for the orchestrator: `docs/architecture.md`'s known limits still list "until ticket 2.3l, a test module that writes an input when it is loaded, which keeps discoveries repeating, so no workspace runs;", and its refused-run paragraph still says "Until that run is stored, the workspace's due reason reads `no-run`." § Doc text words both replacements.
+
+Dropped, each unreachable by a realistic consumer and never a stale result: a hold coinciding with an owed once-more (needs mixed writes at an unmoved revision; costs one discovery); the revision terms of `#ended`'s `unmoved` and `began`'s `isOnceMore` (latency or a not-current test list); a hold outliving a discovery that reads current again (needs a job restoring exact bytes); protection's change dropped after a job window not fingerprinted for another cause (reads not current); `endJob`'s throw in `#protectDiscovered`'s catch replacing the original (mirrors `#run`); renaming the locals `held` in `#discover` and `WorkspaceSchedule.read` (would re-anchor D1987 and D3316 to D3318 for naming alone). By ruling or ticket: the held-round clause of the discovery's CLI line (AC4 requires it), `CLI_JSON_SCHEMA_VERSION` (the ticket keeps it), `RunHistory` giving the discovery's reads (the task offered it).
+
+Tech debt, for triage once committed:
+
+- `DUE_PHRASES` (`packages/cli/src/answer-text.ts`) and `DUE_REASON_TEXT` (`packages/daemon/src/daemon/due-workspaces.ts`) spell six of the eight due phrases identically, and this change wrote the `run-refused` phrase into both; a rewording of one leaves the log and the answer describing the same reason differently. Only `failedRun` and `crashedRun` differ on purpose (the log adds the retry clause).
+
 #### Test Coverage Gaps
 
-None.
+| Source                                                      | Named defect                                                                                                                                                                                                                         | Expected test                                                                                                                                                                                                                                                            | Severity                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `packages/daemon/src/daemon/discovery-history.ts` `#holdAt` | A re-hold names every path the re-holding time changed, not only those its latest hold named, in the log and in every answer's `selfChangingDiscovery` (mutation: `this.#hold(count.shared, HELD_AGAIN_ENTRY)` in place of `again`). | A scheduler test like D3301 whose rediscovery after the edit writes the held path and a second path; the re-hold's log entry and `selfChangingDiscovery` name the held path only. D3301 writes one path each time, so it survives the mutation. (AC2, AC4, decision (g)) | LOW (consumer, wrong paths named; reach unknown) |
 
 ### Completion Notes
 
@@ -423,5 +439,12 @@ Built by rt-t2-3l-dev in Tree 2 (`wt/2`, from `main` at 384f0ea), 2026-09-30 03:
 - packages/daemon/src/query/summary.ts
 - packages/daemon/src/daemon/protocol.ts
 - packages/cli/src/answer-text.ts
+- packages/daemon/test/scheduler.test.ts (tests session)
+- packages/daemon/test/scheduling-harness.ts (tests session)
+- packages/daemon/test/lifecycle.test.ts (tests session)
+- packages/daemon/test/query.test.ts (tests session)
+- packages/daemon/test/defects.json (tests session)
+- packages/cli/test/cli.test.ts (tests session)
+- packages/cli/test/defects.json (tests session)
 - _agent-docs/tickets/2-3l-hold-self-changing-discovery.md (created by create-ticket, 2026-09-29, against `main` at 7bd5957; amended 2026-09-30 01:45 against `main` at 3cda5f2 under the orchestrator's 01:42 grant; task and criterion boxes and the dev record by dev-ticket, 2026-09-30 03:26)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (§ Ticket 2.3l: the cause wording (i), the build order after 2.3p and 2.4, the ticket link, under the dispatch's grant; the once-more wait, AC5 and the refused-at-plan correction, under the 01:42 grant)

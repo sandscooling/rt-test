@@ -395,7 +395,7 @@ export interface ScheduleFacts {
   readonly workspaces: readonly WorkspaceExecution[];
   /**
    * Present while the discovery is held and no round is pending: the paths that changed each time it became due. No
-   * rediscovery begins until an edit or a change the daemon cannot attribute, which changes no freshness or count.
+   * rediscovery begins until an edit or a change the daemon cannot attribute. The hold changes no freshness or count.
    */
   readonly selfChangingDiscovery?: NamedList<SelfChangedPath>;
 }

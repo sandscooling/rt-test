@@ -3613,6 +3613,19 @@ describe("holding a discovery whose own jobs keep changing its inputs", () => {
     ]);
   });
 
+  it("D3330: a discovery held again names only the paths its latest hold named, though its rediscovery also wrote another", async () => {
+    const digests = new SteadyDigests();
+    const { schedule } = await rediscovering({
+      digests,
+      discovered: (call) => {
+        if (call < 3) return writesOnLoad();
+        return call === 3 ? writesOnLoad([FIXTURE, OTHER]) : {};
+      },
+      afterRounds: editedSource(digests),
+    });
+    expect(schedule.selfChangingDiscovery).toStrictEqual(HELD_BY_THE_DISCOVERY);
+  });
+
   it("D3302: the log says once that an edit released the held discovery", async () => {
     const digests = new SteadyDigests();
     const { entries } = await rediscovering({

@@ -41,7 +41,7 @@ export interface DiscoveryInEffect {
 }
 
 /** The discovery's part of the change record, whose one owner records every job. */
-export interface DiscoveryChanges {
+interface DiscoveryChanges {
   /** What changed since the last discovery began; undefined when none has begun. */
   discoveryChanges(): SubjectChanges | undefined;
   discoveryEnded(window: JobWindow): void;
@@ -58,7 +58,7 @@ interface DiscoveryHistoryParts {
 }
 
 /** What records a begun discovery's end, whichever way it ends. */
-export type BegunDiscovery = Omit<BegunRun, "ended"> & {
+type BegunDiscovery = Omit<BegunRun, "ended"> & {
   ended(report: DiscoverReport): void;
 };
 
