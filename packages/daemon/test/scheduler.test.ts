@@ -166,7 +166,7 @@ function rig(options: RigOptions = {}): Rig {
   let discoveries = 0;
   let stopping = false;
   const digests = (): InputDigests | undefined =>
-    options.script?.snapshot?.()?.digests;
+    options.script?.snapshot?.()?.comparedDigests;
   const windowOf = (
     startDigests: InputDigests | undefined,
     changed: readonly string[] = [],
@@ -1062,6 +1062,9 @@ const DIGESTS_AFTER = {
   "src/same.ts": "1",
 };
 
+/** A setup file git ignores, which the tracker holds a read of apart from the inputs. */
+const LISTED_SETUP = "gen/setup.ts";
+
 interface Change {
   readonly options: RigOptions;
   /** Lets the first round end, then changes the inputs to `DIGESTS_AFTER` at the next revision and lets the second end. */
@@ -1124,6 +1127,33 @@ describe("a round's selection over the paths that changed", () => {
       return selection.asked;
     });
     expect(asked).toStrictEqual([["src/gone.ts", "src/new.ts", "src/x.ts"]]);
+  });
+
+  it("D3243: selection is asked about a listed file the inputs leave out whose held read changed since the previous round, though the inputs' digests held still", async () => {
+    const selection = new StandInNarrowing(selectionOf([], []));
+    const state = { listed: "1" };
+    const asked = await running(
+      {
+        seed: beforeTheChange("a"),
+        script: {
+          snapshot: () =>
+            inputsOf(DIGESTS_BEFORE, { [LISTED_SETUP]: state.listed }),
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: `${path}-digest-${state.listed}`,
+          }),
+        },
+        narrowing: () => builtAt(2, selection),
+      },
+      async (started) => {
+        await flush();
+        state.listed = "2";
+        started.inputs.moveRevision();
+        await flush();
+        return selection.asked;
+      },
+    );
+    expect(asked).toStrictEqual([[LISTED_SETUP]]);
   });
 
   it("D2665: the round's log names each changed path, its owner and each workspace it selected", async () => {
@@ -3007,6 +3037,26 @@ describe("holding a workspace whose runs keep changing its inputs", () => {
       digests,
       afterRuns: (started) => {
         digests.edit(SOURCE);
+        started.inputs.moveRevision();
+      },
+    });
+    expect(runs).toBe(6);
+  });
+
+  it("D3244: an edit between jobs to a listed file the inputs leave out releases a held workspace, though the inputs' digests held still", async () => {
+    const listed = { digest: "1" };
+    const runs = await runsOfA({
+      options: {
+        script: {
+          snapshot: () =>
+            inputsOf(
+              { [FIXTURE]: "1", [SOURCE]: "1" },
+              { [LISTED_SETUP]: listed.digest },
+            ),
+        },
+      },
+      afterRuns: (started) => {
+        listed.digest = "edited";
         started.inputs.moveRevision();
       },
     });

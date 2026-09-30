@@ -300,7 +300,7 @@ export interface InputsScript {
   readonly snapshot?: () => ProjectInputs | undefined;
   /** Why the tracker cannot vouch for its inputs; undefined while it can. */
   readonly unavailable?: string;
-  /** Why a file the discovery protects by path, which no watch covers, may have changed during the discovery. */
+  /** Why a file the discovery protects by path, which the inputs leave out, may have changed during the discovery. */
   readonly moduleChanged?: string | undefined;
   /** Why a file only protection's walk found may have changed during the discovery, which protection resolves with. */
   readonly walkChanged?: string;
@@ -456,10 +456,13 @@ export class StandInInputs implements TrackedInputs {
     return this.#verdicts.shift() ?? FINGERPRINTED;
   }
 
-  /** The scripted committed digests, none while the tracker is scripted as unable to vouch for its inputs, as the tracker keeps a window's. */
+  /**
+   * The scripted digests a comparison of two moments reads, held listed files included, none while the tracker is
+   * scripted as unable to vouch for its inputs, as the tracker keeps a window's.
+   */
   #vouchedDigests(): InputDigests | undefined {
     if (this.#script.unavailable !== undefined) return undefined;
-    return this.#script.snapshot?.()?.digests;
+    return this.#script.snapshot?.()?.comparedDigests;
   }
 
   /** Records, for each job running, an input that changed, as the tracker records a read that changed one. */

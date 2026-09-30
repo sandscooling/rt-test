@@ -25,7 +25,6 @@ import {
 } from "./input-filter.js";
 import {
   takeInventory,
-  type InputDigests,
   type InventoryResult,
   type InventoryScope,
 } from "./input-inventory.js";
@@ -37,6 +36,7 @@ import {
 } from "./input-jobs.js";
 import { InputState } from "./input-state.js";
 import { InputWatcher } from "./input-watcher.js";
+import { ListedFiles, type ListedReads } from "./listed-files.js";
 import type { QueryNarrowing } from "./narrowed-inputs.js";
 import { NON_INPUTS_FILE, type NonInputsDeclaration } from "./non-inputs.js";
 import { protection } from "./protection.js";
@@ -50,6 +50,8 @@ import {
 const IGNORE_FILE = ".gitignore";
 const CHANGE_EVENT = "change";
 const NON_INPUTS_CHANGED_REASON = `${NON_INPUTS_FILE}, which declares the non-inputs, changed`;
+const LISTED_UNWATCHED_CONSEQUENCE =
+  "so a change to a listed file there is seen at the next reconciliation";
 
 export interface InputTrackerOptions {
   readonly consumerRoot: string;
@@ -72,8 +74,8 @@ export interface CurrentInputs {
   workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
   discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
   /**
-   * Why a file the discovery protects by path that no watch covers may have changed at or after `since`, a time in
-   * ms; undefined when none did.
+   * Why a file the discovery protects by path that the inputs leave out may have changed at or after `since`, a time
+   * in ms; undefined when none did.
    */
   protectedFileChangedSince(
     discovery: TestDiscovery,
@@ -137,6 +139,7 @@ export class InputTracker implements TrackedInputs {
   readonly #state: InputState;
   readonly #watcher: InputWatcher;
   readonly #jobs = new JobWindows();
+  readonly #listed: ListedFiles;
   readonly #ledger = new EventLedger(() => this.#reconciling);
   readonly #queue = new Map<string, WatchEventType>();
   /** Queued only because protection changed whether they count, so reading them marks no job; an event clears one. */
@@ -175,6 +178,7 @@ export class InputTracker implements TrackedInputs {
     this.#log = log;
     this.#declared = new DeclaredNonInputs(this.#root, log);
     this.#state = new InputState(this.#root);
+    this.#listed = new ListedFiles(this.#root);
     this.#firstReconciled = new Promise((resolve) => {
       this.#markFirstReconciled = resolve;
     });
@@ -186,6 +190,8 @@ export class InputTracker implements TrackedInputs {
         ),
       failed: (reason) => this.#watchFailed(reason),
       cannotWatch: (reason) => this.#cannotWatch(reason),
+      cannotWatchListed: (reason) =>
+        log.entry(`warning: ${reason}, ${LISTED_UNWATCHED_CONSEQUENCE}`),
     });
     this.#git = new GitFiles(this.#root, this.#watcher, log);
     this.#reads = new QueuedReads({
@@ -194,6 +200,7 @@ export class InputTracker implements TrackedInputs {
       watcher: this.#watcher,
       git: this.#git,
       jobs: this.#jobs,
+      listed: this.#listed,
       abort: this.#abort,
       quiet: this.#quiet,
       scope: (filter) => this.#scope(filter),
@@ -248,27 +255,21 @@ export class InputTracker implements TrackedInputs {
     return this.#stopped ? Promise.resolve() : this.#ledger.waitForRead();
   }
 
+  /** Each edge of a job reads the digests a round's view compares, only while the view can vouch for them. */
   beginJob(): JobMark {
-    const unavailable = this.#unavailableReason();
-    return this.#jobs.open(unavailable, this.#vouchedDigests(unavailable));
+    const view = this.current();
+    return this.#jobs.open(view.unavailable, view.snapshot?.comparedDigests);
   }
 
   /** Judges the job once every event seen before its end has been read and any reconciliation running has ended. */
   async endJob(mark: JobMark): Promise<JobVerdict> {
     await this.settled();
-    const unavailable = this.#unavailableReason();
+    const view = this.current();
     return this.#jobs.close(
       mark,
-      unavailable,
-      this.#vouchedDigests(unavailable),
+      view.unavailable,
+      view.snapshot?.comparedDigests,
     );
-  }
-
-  /** The committed digests, only while nothing keeps the tracker from vouching for them. */
-  #vouchedDigests(unavailable: string | undefined): InputDigests | undefined {
-    return unavailable === undefined
-      ? this.#state.project().digests
-      : undefined;
   }
 
   /**
@@ -283,9 +284,14 @@ export class InputTracker implements TrackedInputs {
       protection(discovery, this.#root),
       this.#state.project().digests.keys(),
     );
+    const added = this.#listed.list(discovery);
     if (!this.#started || this.#stopped) return undefined;
-    if (change.flipped.length === 0 && !change.walk) return undefined;
-    this.#queueQuietly(change.flipped);
+    const listed = this.#reads.relist(added, this.#filter);
+    if (added !== undefined) this.#commit();
+    if (change.flipped.length === 0 && !change.walk && listed.length === 0) {
+      return undefined;
+    }
+    this.#queueQuietly([...change.flipped, ...listed]);
     const changed = change.walk
       ? await this.#walkReleased(jobStart)
       : undefined;
@@ -353,7 +359,10 @@ export class InputTracker implements TrackedInputs {
       this.#requestReconciliation(NON_INPUTS_CHANGED_REASON);
       return;
     }
-    if (this.#filter?.excludes(path) === true) return;
+    if (this.#filter?.excludes(path) === true) {
+      if (this.#listed.names(path)) this.#queuePath(path, kind);
+      return;
+    }
     if (basename(path) === IGNORE_FILE) {
       this.#requestReconciliation(
         `the ignore rules in ${this.#label(path)} changed`,
@@ -363,6 +372,10 @@ export class InputTracker implements TrackedInputs {
     if (this.#declared.namesFile(this.#label(path), path, knownDirectory)) {
       return;
     }
+    this.#queuePath(path, kind);
+  }
+
+  #queuePath(path: string, kind: WatchEventType): void {
     this.#quiet.delete(path);
     if (this.#queue.get(path) !== RENAME_EVENT) this.#queue.set(path, kind);
     this.#ledger.accept();
@@ -449,19 +462,26 @@ export class InputTracker implements TrackedInputs {
     );
     const inventory = await takeInventory(this.#scope(filter), this.#root);
     await this.#git.follow(filter.nestedRepositories, signal);
+    const listed = await this.#reads.readAllListed(filter);
     this.#filter = filter;
     this.#git.report(filter);
-    this.#settleReconciliation(inventory);
+    this.#settleReconciliation(inventory, listed);
   }
 
-  #settleReconciliation(inventory: InventoryResult): void {
+  #settleReconciliation(inventory: InventoryResult, listed: ListedReads): void {
     if (inventory.ok) {
       this.#watcher.keepDirectories(new Set(inventory.directories));
-      const changed = this.#state.establish(
-        inventory.inputs,
-        inventory.directories,
-        new Set([...this.#queue.keys()].map((path) => this.#label(path))),
+      const unread = new Set(
+        [...this.#queue.keys()].map((path) => this.#label(path)),
       );
+      const changed = [
+        ...this.#state.establish(
+          inventory.inputs,
+          inventory.directories,
+          unread,
+        ),
+        ...this.#state.establishListed(listed, unread),
+      ];
       this.#commit();
       for (const path of changed) this.#jobs.recordPath(path);
       this.#establishFailure = undefined;

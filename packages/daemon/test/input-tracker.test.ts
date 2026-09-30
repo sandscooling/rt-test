@@ -46,7 +46,7 @@ import {
   readEntryDigest,
   type InputRead,
 } from "../src/inputs/input-inventory.js";
-import { JobWindows } from "../src/inputs/input-jobs.js";
+import { JobWindows, type JobVerdict } from "../src/inputs/input-jobs.js";
 import { InputTracker } from "../src/inputs/input-tracker.js";
 import {
   declaredNonInputs,
@@ -456,9 +456,14 @@ const MODEL_POLL_MS = 10;
 
 interface EntryStamp {
   readonly id: string;
-  /** Its size and modification time. */
+  /**
+   * Its size and modification time; nothing for a directory, whose own entries changing inotify reports to no watch
+   * of its parent, though Windows moves the directory's modification time.
+   */
   readonly content: string;
 }
+
+const DIRECTORY_CONTENT = "directory";
 
 type EntryStamps = ReadonlyMap<string, EntryStamp>;
 
@@ -484,7 +489,9 @@ function entryStamps(directory: string): EntryStamps {
       const stats = lstatSync(join(directory, name), { bigint: true });
       stamps.set(name, {
         id: identityOf(stats),
-        content: `${stats.size}:${stats.mtimeNs}`,
+        content: stats.isDirectory()
+          ? DIRECTORY_CONTENT
+          : `${stats.size}:${stats.mtimeNs}`,
       });
     } catch {
       // Removed between the listing and its stat, which the next look reports.
@@ -501,13 +508,43 @@ function directoryIdentity(directory: string): string | undefined {
   }
 }
 
+/** How many directories above a modeled watch's own an ancestor's rename is looked for in, more than any test nests. */
+const MODEL_ANCESTOR_LEVELS = 3;
+
+/**
+ * Where the directory whose identity is `opened` lies now, when an ancestor of `directory` was renamed within its own
+ * parent and carried it along; undefined when no such rename explains its absence from `directory`.
+ */
+function carriedBy(directory: string, opened: string): string | undefined {
+  let ancestor = dirname(directory);
+  let below = basename(directory);
+  for (let level = 0; level < MODEL_ANCESTOR_LEVELS; level += 1) {
+    const parent = dirname(ancestor);
+    let names: string[];
+    try {
+      names = readdirSync(parent);
+    } catch {
+      return undefined;
+    }
+    for (const name of names) {
+      const candidate = join(parent, name, below);
+      if (directoryIdentity(candidate) === opened) return candidate;
+    }
+    below = join(basename(ancestor), below);
+    ancestor = parent;
+  }
+  return undefined;
+}
+
 /**
  * A model of Linux inotify, injected as `fs.watch` on every host so Linux's watch path is proven on Windows too, and
  * the only thing the modeled tests' proof rests on beyond the tracker's own code. A watch is bound to the directory it
  * opened on, told apart by file id and birth time; it reports each entry of that directory added, removed or replaced
- * as `rename` and each changed as `change`, by the entry's bare name, and nothing from deeper down; once that directory
+ * as `rename` and each file changed as `change`, by the entry's bare name, and nothing from deeper down; once that directory
  * is gone, even with a new one at its path, it reports the removal under the directory's own name and reports nothing
- * again. It polls, so it models what inotify reports, not how soon.
+ * again. An ancestor renamed within its own parent carries the directory along, so the watch reports nothing of that
+ * rename and goes on reporting the directory's entries where it now lies. It polls, so it models what inotify
+ * reports, not how soon.
  */
 const inotifyModel = ((
   path: PathLike,
@@ -516,14 +553,19 @@ const inotifyModel = ((
 ) => {
   const directory = String(path);
   const opened = identityOf(statSync(directory, { bigint: true }));
-  let seen = entryStamps(directory);
+  let at = directory;
+  let seen = entryStamps(at);
   const look = setInterval(() => {
-    if (directoryIdentity(directory) !== opened) {
-      clearInterval(look);
-      listener("rename", basename(directory));
-      return;
+    if (directoryIdentity(at) !== opened) {
+      const carried = carriedBy(at, opened);
+      if (carried === undefined) {
+        clearInterval(look);
+        listener("rename", basename(directory));
+        return;
+      }
+      at = carried;
     }
-    const now = entryStamps(directory);
+    const now = entryStamps(at);
     for (const [name, stamp] of now) {
       const before = seen.get(name);
       if (before?.id !== stamp.id) listener("rename", name);
@@ -2382,7 +2424,7 @@ describe(
       expect(print.ok).toBe(true);
     });
 
-    it("D3077: a listed env file no watch covers, created or modified after a job started, is reported as possibly changed during it, naming the file", async () => {
+    it("D3077: a listed env file the inputs leave out, created or modified after a job started, is reported as possibly changed during it, naming the file", async () => {
       const outcome = await inTempDir((dir) => {
         const created = join(dir, "created");
         const modified = join(dir, "modified");
@@ -2417,7 +2459,7 @@ describe(
       expect(changed).toBeUndefined();
     });
 
-    it("D3079: a listed test module no watch covers that cannot be found is still reported as possibly changed during a job", async () => {
+    it("D3079: a listed test module the inputs leave out that cannot be found is still reported as possibly changed during a job", async () => {
       const changed = await inTempDir((root) =>
         protectedFileChangedSince(
           new ProjectInputs(root, new Map()),
@@ -4360,5 +4402,714 @@ describe("the committed digests a job's window keeps", () => {
       }
     });
     expect(digests).toBeUndefined();
+  });
+});
+
+/** A setup file in a directory git ignores, so the inputs leave it out. */
+const IGNORED_SETUP = "gen/setup.ts";
+/** A second file in that directory, which only a later discovery lists. */
+const IGNORED_GLOBAL_SETUP = "gen/global-setup.ts";
+/** A setup file a package ships, three directories below the root, none of which the tree watches. */
+const PACKAGE_SETUP = "node_modules/a/b/setup.js";
+const IGNORE_FILE = ".gitignore";
+const LISTED_UNWATCHED_LINE =
+  "so a change to a listed file there is seen at the next reconciliation";
+/** The verdict of a job during which the tracker read a change to `IGNORED_SETUP`, and to nothing else. */
+const IGNORED_SETUP_CHANGED = {
+  fingerprinted: false,
+  reason: `its inputs changed while it ran: ${IGNORED_SETUP}`,
+  changedWhileRunning: true,
+};
+
+/** A git repository at `root` ignoring `gen/`, holding an input, `IGNORED_SETUP` and `IGNORED_GLOBAL_SETUP`. */
+function ignoredSetupRepository(root: string): void {
+  repository(root, "gen/\n", {
+    "src/a.ts": "",
+    [IGNORED_SETUP]: "export {};\n",
+    [IGNORED_GLOBAL_SETUP]: "export {};\n",
+  });
+}
+
+/** Tracking options whose stored discovery lists `setupFiles` for the root workspace's one project. */
+function listingSetup(root: string, ...setupFiles: string[]): TrackingOptions {
+  return { discovery: setupDiscovery(root, setupFiles) };
+}
+
+/** Runs `write`, then says whether the input revision rose within the settle bound. */
+async function revisionRisesAfter(
+  tracker: InputTracker,
+  write: () => void,
+): Promise<boolean> {
+  const revision = tracker.facts().revision;
+  write();
+  return eventually(() => tracker.facts().revision > revision, SETTLE_MS);
+}
+
+/** Opens a job, runs `write`, waits for the input revision to rise, and returns the job's verdict. */
+async function verdictAcross(
+  tracker: InputTracker,
+  write: () => void,
+): Promise<JobVerdict> {
+  const mark = tracker.beginJob();
+  await revisionRisesAfter(tracker, write);
+  return tracker.endJob(mark);
+}
+
+/** The digest the tracker's view compares for `path` between two moments. */
+function comparedDigestOf(
+  tracker: InputTracker,
+  path: string,
+): string | undefined {
+  return tracker.current().snapshot?.comparedDigests.get(path);
+}
+
+/**
+ * Runs `body` with `process.platform` read as linux over Linux's watches: inotify itself on a Linux host, and the
+ * inotify model on any other, so the listed watches are proven against real inotify wherever it exists.
+ */
+async function onLinuxWatches<T>(body: () => Promise<T>): Promise<T> {
+  if (process.platform !== "linux") {
+    vi.mocked(watch).mockImplementation(inotifyModel);
+  }
+  try {
+    return await onPlatform("linux", body);
+  } finally {
+    vi.mocked(watch).mockReset();
+  }
+}
+
+/**
+ * Silent watches, except that a watch of `refused` throws `code`: `EACCES` as one past a permission would, or `ENOENT`
+ * as one whose directory vanished before it opened.
+ */
+function silentWatchesRefusing(
+  refused: string,
+  code = "EACCES",
+): CapturedWatches {
+  const captured: CapturedWatches = { listeners: [], paths: [] };
+  vi.mocked(watch).mockImplementation(((
+    path: PathLike,
+    _options: unknown,
+    listener: WatchListener<string>,
+  ) => {
+    if (String(path) === refused) {
+      throw Object.assign(new Error(`${code}: watch '${refused}'`), { code });
+    }
+    captured.listeners.push(listener);
+    captured.paths.push(String(path));
+    return silentWatch();
+  }) as typeof watch);
+  return captured;
+}
+
+describe(
+  "listed files the inputs leave out",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3217: with process.platform read as win32, an edit to a listed setup file in a directory git ignores raises the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        ignoredSetupRepository(root);
+        return onPlatform("win32", () =>
+          tracking(
+            root,
+            ({ tracker }) =>
+              revisionRisesAfter(tracker, () =>
+                appendFileSync(join(root, IGNORED_SETUP), "// an edit\n"),
+              ),
+            listingSetup(root, IGNORED_SETUP),
+          ),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3218: with process.platform read as linux, over inotify, an edit to a listed setup file in a directory git ignores raises the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        ignoredSetupRepository(root);
+        return onLinuxWatches(() =>
+          tracking(
+            root,
+            ({ tracker }) =>
+              revisionRisesAfter(tracker, () =>
+                appendFileSync(join(root, IGNORED_SETUP), "// an edit\n"),
+              ),
+            listingSetup(root, IGNORED_SETUP),
+          ),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3219: a job during which a listed setup file git ignores is replaced by content that keeps its modification time is not fingerprinted, naming the file", async () => {
+      const verdict = await inTempDir((root) => {
+        ignoredSetupRepository(root);
+        const setup = join(root, IGNORED_SETUP);
+        const modified = modifiedAt(setup, -AN_HOUR_MS);
+        return tracking(
+          root,
+          ({ tracker }) =>
+            verdictAcross(tracker, () => {
+              const replacement = join(root, "gen", "setup.next");
+              writeFileSync(replacement, "export const replaced = 1;\n");
+              utimesSync(replacement, new Date(), modified);
+              renameSync(replacement, setup);
+            }),
+          listingSetup(root, IGNORED_SETUP),
+        );
+      });
+      expect(verdict).toStrictEqual(IGNORED_SETUP_CHANGED);
+    });
+
+    it("D3220: a job during which a listed setup file git ignores is deleted is not fingerprinted, naming the file", async () => {
+      const verdict = await inTempDir((root) => {
+        ignoredSetupRepository(root);
+        return tracking(
+          root,
+          ({ tracker }) =>
+            verdictAcross(tracker, () => rmSync(join(root, IGNORED_SETUP))),
+          listingSetup(root, IGNORED_SETUP),
+        );
+      });
+      expect(verdict).toStrictEqual(IGNORED_SETUP_CHANGED);
+    });
+
+    it("D3221: deleting a listed setup file git ignores raises the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        ignoredSetupRepository(root);
+        return tracking(
+          root,
+          ({ tracker }) =>
+            revisionRisesAfter(tracker, () =>
+              rmSync(join(root, IGNORED_SETUP)),
+            ),
+          listingSetup(root, IGNORED_SETUP),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3222: an input directory replaced by one whose listed setup file git ignores changed puts that file in the running job's window", async () => {
+      const recorded = await inTempDir(async (root) => {
+        const listed = "src/gen/setup.ts";
+        repository(root, "src/gen/\n", {
+          "src/a.ts": "",
+          [listed]: "export {};\n",
+        });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const mark = tracker.beginJob();
+              rmSync(join(root, "src"), { recursive: true });
+              writeTree(root, {
+                "src/a.ts": "",
+                [listed]: "export const replaced = 1;\n",
+              });
+              deliver(watches, root, "src", "rename");
+              await tracker.endJob(mark);
+              return mark.window.paths.has(listed);
+            },
+            listingSetup(root, listed),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(recorded).toBe(true);
+    });
+
+    it("D3223: a reconciliation that finds a listed setup file git ignores changed, with no event for it, raises the input revision", async () => {
+      const rose = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await withFakeTimeouts(() =>
+            tracking(
+              root,
+              async ({ tracker }) => {
+                const revision = tracker.facts().revision;
+                appendFileSync(join(root, IGNORED_SETUP), "// an edit\n");
+                await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+                await settled(tracker);
+                return tracker.facts().revision > revision;
+              },
+              listingSetup(root, IGNORED_SETUP),
+            ),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3224: a job during which a reconciliation finds a listed setup file git ignores changed, with no event for it, is not fingerprinted, naming the file", async () => {
+      const verdict = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await withFakeTimeouts(() =>
+            tracking(
+              root,
+              async ({ tracker }) => {
+                const mark = tracker.beginJob();
+                appendFileSync(join(root, IGNORED_SETUP), "// an edit\n");
+                await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+                return tracker.endJob(mark);
+              },
+              listingSetup(root, IGNORED_SETUP),
+            ),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(verdict).toStrictEqual(IGNORED_SETUP_CHANGED);
+    });
+
+    it("D3225: the first reconciliation, with a stored discovery listing a setup file git ignores, leaves the input revision where it leaves it with none listed", async () => {
+      const revisions = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          const firstRevision = (options: TrackingOptions): Promise<number> =>
+            tracking(
+              root,
+              async ({ tracker }) => tracker.facts().revision,
+              options,
+            );
+          return {
+            listing: await firstRevision(listingSetup(root, IGNORED_SETUP)),
+            none: await firstRevision(listingSetup(root)),
+          };
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(revisions.listing).toBe(revisions.none);
+    });
+
+    it("D3226: a discovery that comes to list a setup file git ignores raises the input revision", async () => {
+      const rose = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const revision = tracker.facts().revision;
+              await tracker.protectInputs(
+                setupDiscovery(root, [IGNORED_SETUP]),
+              );
+              await drained(tracker);
+              return tracker.facts().revision > revision;
+            },
+            listingSetup(root),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3227: a job during which a new discovery comes to list a setup file git ignores is fingerprinted, since that change is no edit a job made", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const mark = tracker.beginJob();
+              await tracker.protectInputs(
+                setupDiscovery(root, [IGNORED_SETUP]),
+              );
+              return (await tracker.endJob(mark)).fingerprinted;
+            },
+            listingSetup(root),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(true);
+    });
+
+    it("D3228: a job during which a discovery lists a new setup file git ignores while a reconciliation reads the listed files is fingerprinted", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await withFakeTimeouts(() =>
+            tracking(
+              root,
+              async ({ tracker }) => {
+                const mark = tracker.beginJob();
+                const held = holdingReadsOf(basename(IGNORED_SETUP));
+                await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+                await held.entered;
+                const protecting = tracker.protectInputs(
+                  setupDiscovery(root, [IGNORED_SETUP, IGNORED_GLOBAL_SETUP]),
+                );
+                held.release();
+                await protecting;
+                return (await tracker.endJob(mark)).fingerprinted;
+              },
+              listingSetup(root, IGNORED_SETUP),
+            ),
+          );
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(true);
+    });
+
+    it("D3229: a discovery that stops listing a setup file git ignores raises the input revision", async () => {
+      const rose = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const revision = tracker.facts().revision;
+              await tracker.protectInputs(setupDiscovery(root, []));
+              await drained(tracker);
+              return tracker.facts().revision > revision;
+            },
+            listingSetup(root, IGNORED_SETUP),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3230: an event on a directory git ignores that holds listed env files, none of which exists, leaves a running job fingerprinted", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        repository(root, "env/\n", { "src/a.ts": "", "env/keep.txt": "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const mark = tracker.beginJob();
+              deliver(watches, root, "env");
+              return (await tracker.endJob(mark)).fingerprinted;
+            },
+            {
+              discovery: discoveryReporting(root, {
+                reported: true,
+                projects: [projectFacts({ envSources: [envSourceAt("env")] })],
+              }),
+            },
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(true);
+    });
+
+    it("D3231: with process.platform read as linux, over inotify, renaming a package directory between a listed setup file and the root's watch, and creating it again, raises the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "src/a.ts": "", [PACKAGE_SETUP]: "export {};\n" });
+        return onLinuxWatches(() =>
+          tracking(
+            root,
+            ({ tracker }) =>
+              revisionRisesAfter(tracker, () => {
+                renameSync(
+                  join(root, "node_modules/a"),
+                  join(root, "node_modules/a-old"),
+                );
+                writeTree(root, { [PACKAGE_SETUP]: "export const v = 2;\n" });
+              }),
+            listingSetup(root, PACKAGE_SETUP),
+          ),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3232: with process.platform read as linux, over inotify, the directory holding a listed setup file replaced in place is watched again, so a later edit raises the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "src/a.ts": "", [PACKAGE_SETUP]: "export {};\n" });
+        return onLinuxWatches(() =>
+          tracking(
+            root,
+            async ({ tracker }) => {
+              const original = comparedDigestOf(tracker, PACKAGE_SETUP);
+              rmSync(join(root, "node_modules/a/b"), { recursive: true });
+              writeTree(root, { [PACKAGE_SETUP]: "export const v = 2;\n" });
+              await eventually(() => {
+                const now = comparedDigestOf(tracker, PACKAGE_SETUP);
+                return now !== undefined && now !== original;
+              }, SETTLE_MS);
+              return revisionRisesAfter(tracker, () =>
+                appendFileSync(join(root, PACKAGE_SETUP), "// an edit\n"),
+              );
+            },
+            listingSetup(root, PACKAGE_SETUP),
+          ),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3233: with process.platform read as linux, a listed setup file whose directory's watch cannot open leaves the watcher healthy", async () => {
+      const state = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentWatchesRefusing(join(root, "gen"));
+        try {
+          return await onPlatform("linux", () =>
+            tracking(
+              root,
+              async ({ tracker }) => tracker.facts().watcher.state,
+              listingSetup(root, IGNORED_SETUP),
+            ),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(state).toBe("healthy");
+    });
+
+    it("D3234: with process.platform read as linux, a listed setup file's watch that cannot open is logged once as a warning, though a second reconciliation tries it again", async () => {
+      const warnings = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        const watches = silentWatchesRefusing(join(root, "gen"));
+        try {
+          return await onPlatform("linux", () =>
+            tracking(
+              root,
+              async ({ tracker, log }) => {
+                await reconciledAfter(tracker, () =>
+                  deliver(watches, root, IGNORE_FILE),
+                );
+                return log.entries.filter(
+                  (entry) =>
+                    entry.startsWith("warning: ") &&
+                    entry.endsWith(LISTED_UNWATCHED_LINE),
+                ).length;
+              },
+              listingSetup(root, IGNORED_SETUP),
+            ),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(warnings).toBe(1);
+    });
+
+    it("D3235: a job's window keeps the tracker's read of a listed setup file git ignores among the digests at its open", async () => {
+      const kept = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const mark = tracker.beginJob();
+              await tracker.endJob(mark);
+              return mark.window.startDigests?.has(IGNORED_SETUP) === true;
+            },
+            listingSetup(root, IGNORED_SETUP),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(kept).toBe(true);
+    });
+
+    it("D3236: a job's window keeps the tracker's read of a listed setup file git ignores among the digests at its close", async () => {
+      const kept = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const mark = tracker.beginJob();
+              await tracker.endJob(mark);
+              return mark.window.endDigests?.has(IGNORED_SETUP) === true;
+            },
+            listingSetup(root, IGNORED_SETUP),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(kept).toBe(true);
+    });
+
+    it("D3252: with process.platform read as linux, a listed setup file's directory whose watch finds it gone on both tries is logged as a warning that it cannot be watched", async () => {
+      const logged = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        silentWatchesRefusing(join(root, "gen"), "ENOENT");
+        try {
+          return await onPlatform("linux", () =>
+            tracking(
+              root,
+              async ({ log }) =>
+                log.entries.some(
+                  (entry) =>
+                    entry.startsWith("warning: ") &&
+                    entry.includes(
+                      "it vanished twice while its watch was opening",
+                    ),
+                ),
+              listingSetup(root, IGNORED_SETUP),
+            ),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(logged).toBe(true);
+    });
+
+    it("D3253: with process.platform read as linux, over inotify, a listed setup file whose directory git comes to ignore is watched once its tree watch closes, so a later edit raises the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        repository(root, "", { "src/a.ts": "", "src/x.ts": "export {};\n" });
+        return onLinuxWatches(() =>
+          tracking(
+            root,
+            async ({ tracker }) => {
+              await reconciledAfter(tracker, () =>
+                writeFileSync(join(root, IGNORE_FILE), "src/\n"),
+              );
+              return revisionRisesAfter(tracker, () =>
+                appendFileSync(join(root, "src/x.ts"), "// an edit\n"),
+              );
+            },
+            listingSetup(root, "src/x.ts"),
+          ),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+  },
+);
+
+/** The root workspace, its one project naming `setupFiles` and `globalSetupFiles`. */
+function setupEntry(
+  root: string,
+  setupFiles: readonly string[],
+  globalSetupFiles: readonly string[] = [],
+): WorkspaceDiscovery {
+  return workspaceAt(root, [], {
+    reported: true,
+    projects: [projectFacts({ setupFiles, globalSetupFiles })],
+  });
+}
+
+describe("the setup files a fingerprint counts", () => {
+  it("D3237: a workspace's fingerprint reads a listed setup file the inputs leave out afresh, never by the tracker's held read of it", async () => {
+    const same = await inTempDir((root) => {
+      writeTree(root, { [IGNORED_SETUP]: "export {};\n" });
+      const entry = setupEntry(root, [IGNORED_SETUP]);
+      const inputs = new Map([["src/a.ts", "file:1"]]);
+      const afresh = printed(
+        workspaceFingerprint(new ProjectInputs(root, inputs), entry),
+      );
+      const beside = printed(
+        workspaceFingerprint(
+          new ProjectInputs(
+            root,
+            inputs,
+            new Map([[IGNORED_SETUP, "file:stale"]]),
+          ),
+          entry,
+        ),
+      );
+      return afresh !== undefined && beside === afresh;
+    });
+    expect(same).toBe(true);
+  });
+
+  it("D3238: an edit to a listed setup file the inputs leave out changes its workspace's fingerprint", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, { [IGNORED_SETUP]: "export {};\n" });
+      const entry = setupEntry(root, [IGNORED_SETUP]);
+      return movedBy(
+        () => envPrint(root, entry),
+        () => appendFileSync(join(root, IGNORED_SETUP), "// an edit\n"),
+      );
+    });
+    expect(outcome).toStrictEqual(MOVED);
+  });
+
+  it("D3239: an edit to a listed global setup file the inputs leave out changes its workspace's fingerprint", async () => {
+    const outcome = await inTempDir((root) => {
+      writeTree(root, { [IGNORED_SETUP]: "export {};\n" });
+      const entry = setupEntry(root, [], [IGNORED_SETUP]);
+      return movedBy(
+        () => envPrint(root, entry),
+        () => appendFileSync(join(root, IGNORED_SETUP), "// an edit\n"),
+      );
+    });
+    expect(outcome).toStrictEqual(MOVED);
+  });
+
+  it("D3240: creating a listed setup file the inputs leave out changes the discovery's fingerprint", async () => {
+    const outcome = await inTempDir((root) =>
+      movedBy(
+        () =>
+          printed(
+            discoveryFingerprint(
+              new ProjectInputs(root, new Map()),
+              setupDiscovery(root, [IGNORED_SETUP]),
+            ),
+          ),
+        () => writeTree(root, { [IGNORED_SETUP]: "export {};\n" }),
+      ),
+    );
+    expect(outcome).toStrictEqual(MOVED);
+  });
+
+  it("D3241: a listed setup file that cannot be read leaves its workspace with no fingerprint, the reason naming it as a setup file", async () => {
+    const refusal = await inTempDir((root) => {
+      mkdirSync(join(root, IGNORED_SETUP), { recursive: true });
+      const print = workspaceFingerprint(
+        new ProjectInputs(root, new Map()),
+        setupEntry(root, [IGNORED_SETUP]),
+      );
+      return {
+        ok: print.ok,
+        namesSetupFile:
+          !print.ok &&
+          print.reason.startsWith(
+            `the setup file ${IGNORED_SETUP} cannot be read: `,
+          ),
+      };
+    });
+    expect(refusal).toStrictEqual({ ok: false, namesSetupFile: true });
+  });
+
+  it("D3242: a workspace whose listed setup file the selected inputs count keeps the fingerprint it has with no setup file listed", async () => {
+    const same = await inTempDir((root) => {
+      const project = new ProjectInputs(
+        root,
+        new Map([
+          ["src/a.ts", "file:1"],
+          [IGNORED_SETUP, "file:2"],
+        ]),
+      );
+      const listing = printed(
+        workspaceFingerprint(project, setupEntry(root, [IGNORED_SETUP])),
+      );
+      const none = printed(workspaceFingerprint(project, setupEntry(root, [])));
+      return listing !== undefined && listing === none;
+    });
+    expect(same).toBe(true);
   });
 });
