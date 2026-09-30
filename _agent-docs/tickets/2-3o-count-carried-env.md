@@ -323,7 +323,7 @@ Proofs: see § Proof status below.
 #### Proof status
 
 - Proven, 86 records whose test lies outside `input-tracker.test.ts` and `query.test.ts` (D3390 to D3419, and every record mutating a production file this lane edited whose test lies elsewhere), by `node scripts/verify-defects.mjs --ids <the 86>` through the run lease: Windows, Node 24, 06:39 to 06:45, 86/86 detected, exit 0; WSL Node 24.19.0 in `~/rt-t2-3o-tests` (wt/2 HEAD 4a121f0 plus this lane's package files), 06:45 to 06:48, 86/86 detected, exit 0.
-- Waiting on the merge of 2.4d into wt/2, by the orchestrator's ruling at 06:37: every record whose test lies in `input-tracker.test.ts` or `query.test.ts` (305 today, among them D1914, D3068, D3069 and D3072), proven by --ids on the merged tree on Windows and WSL Node 24, with the records 2.4d adds there.
+- Proven on the merged tree a308297 (2.4d merged, orchestrator 07:24), 331 records: every record whose test lies in `input-tracker.test.ts` or `query.test.ts`, 2.4d's included (329, among them D1914, D3068, D3069 and D3072), every record mutating `inputs/input-inventory.ts` (7, one outside those files), and D3113 in `discover-tests.test.ts`, whose test reaches `handBuiltReads` and was not in the 86. By `node scripts/verify-defects.mjs --ids <the 331>` through the run lease: Windows, Node 24, 07:27 to 07:36, 331/331 detected, exit 0; WSL Node 24.19.0 in a fresh clone `~/rt-t2-3o-merged` at a308297, 07:36 to 07:39, 331/331 detected, exit 0.
 
 #### Questions and answers
 
