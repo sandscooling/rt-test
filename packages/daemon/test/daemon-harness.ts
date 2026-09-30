@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { createInterface, type Interface } from "node:readline";
@@ -19,10 +18,6 @@ import {
   type DaemonIdentity,
 } from "../src/client.js";
 import type { DaemonLog } from "../src/daemon/daemon-log.js";
-import {
-  createDaemonKey,
-  type DaemonKey,
-} from "../src/daemon/endpoint-proof.js";
 import {
   clientEndpoint,
   listenOnEndpoint,
@@ -137,46 +132,6 @@ export async function withConnection<T>(
     return await body(connection);
   } finally {
     connection.close();
-  }
-}
-
-/** An endpoint whose key lives in a key directory of its own under `dir`, for a test that needs a key and no daemon. */
-export function keyedEndpoint(dir: string): Endpoint {
-  const keyDirectory = join(dir, "keys");
-  return {
-    path: join(dir, "endpoint"),
-    keyDirectory,
-    keyFile: join(keyDirectory, "daemon.key"),
-  };
-}
-
-/**
- * The proof the daemon's design freezes, written out here rather than imported: the HMAC-SHA256, keyed by the key
- * file's text, of the challenge, the worktree identity and the decimal process id joined by NUL, in hex.
- */
-export function frozenProof(
-  keyText: string,
-  challenge: string,
-  worktreeIdentity: string,
-  pid: number,
-): string {
-  return createHmac("sha256", keyText)
-    .update(`${challenge}\0${worktreeIdentity}\0${pid}`)
-    .digest("hex");
-}
-
-/** Writes a key for `endpoint` as a starting daemon does, hands `body` the key and its file's text, and removes it after. */
-export async function withDaemonKey<T>(
-  endpoint: Endpoint,
-  worktreeIdentity: string,
-  body: (key: DaemonKey, keyText: string) => T | Promise<T>,
-): Promise<T> {
-  const created = createDaemonKey(endpoint, worktreeIdentity);
-  if (!created.ok) throw new Error(created.reason);
-  try {
-    return await body(created.key, readFileSync(endpoint.keyFile, "utf8"));
-  } finally {
-    created.key.remove();
   }
 }
 

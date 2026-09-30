@@ -9119,5 +9119,19 @@
     "file": "packages/daemon/src/query/summary.ts",
     "old": "    latestRuns,\n    refusedRuns,\n    fingerprint: (entry) =>",
     "new": "    latestRuns,\n    refusedRuns: new Map(),\n    fingerprint: (entry) =>"
+  },
+  {
+    "id": "D3285",
+    "defect": "The client's refusal of an answer that does not prove itself drops the verifier's reason, so a user cannot tell a proof made with another key from an answer with none.",
+    "file": "packages/daemon/src/daemon/proven-connection.ts",
+    "old": "  throw notTheDaemon(target, refusal);",
+    "new": "  throw notTheDaemon(target, \"it did not prove itself\");"
+  },
+  {
+    "id": "D3286",
+    "defect": "An answer that carries no proof is refused as a proof that does not match the key, so the refusal points at a stale key rather than a process that cannot prove itself.",
+    "file": "packages/daemon/src/daemon/endpoint-proof.ts",
+    "old": "    return `it answered without a proof: ${JSON.stringify(answer)}`;",
+    "new": "    return \"its proof does not match this worktree's daemon key\";"
   }
 ]
