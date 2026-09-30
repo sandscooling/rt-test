@@ -25,7 +25,7 @@ sprint-2: in-progress
 2-3h-judge-runs: done
 2-3i-schedule-answers: done
 2-3r-make-room: done
-2-3k-hold-self-changing-runs: backlog
+2-3k-hold-self-changing-runs: ready-for-dev
 2-3l-hold-self-changing-discovery: backlog
 2-3m-env-files: done
 2-3q-nested-container-env: done
