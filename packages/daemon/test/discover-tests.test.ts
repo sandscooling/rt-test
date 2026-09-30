@@ -12,6 +12,14 @@ import {
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { crawledLinks } from "../src/inputs/crawl-links.js";
+import { workspaceEnvFiles } from "../src/inputs/env-files.js";
+import {
+  discoveryFingerprint,
+  ProjectInputs,
+  workspaceFingerprint,
+  type FingerprintResult,
+} from "../src/inputs/fingerprint.js";
+import { MAX_NAMED_CHANGES } from "../src/inputs/input-jobs.js";
 import { protection } from "../src/inputs/protection.js";
 import {
   discoverTests,
@@ -21,10 +29,13 @@ import {
 } from "../src/vitest/discover-tests.js";
 import type { RecordedTest } from "../src/vitest/run-states.js";
 import { runWorkspace } from "../src/vitest/run-workspace.js";
-import type {
-  ProjectSelectionFacts,
-  ReportedAlias,
-  SelectionFacts,
+import {
+  isNotKnown,
+  type EnvSource,
+  type EnvSourcesNotKnown,
+  type ProjectSelectionFacts,
+  type ReportedAlias,
+  type SelectionFacts,
 } from "../src/vitest/selection-facts.js";
 import { queueSessionJob } from "../src/vitest/workspace-session.js";
 import {
@@ -37,10 +48,12 @@ import {
   INTERRUPTED,
   linkVitest,
   ranRun,
+  REPO,
   RUN_HOOK,
   runHooks,
   runState,
   runSummary,
+  settle,
   settledRun,
   slashed,
   waitUntil,
@@ -2660,17 +2673,34 @@ const ROOT_ENV_SOURCE = {
   mode: "test",
 };
 
+/** The project's env source at `index`, or why its env sources are not known. */
+function envSourceAt(
+  facts: ProjectSelectionFacts,
+  index: number,
+): EnvSource | EnvSourcesNotKnown | undefined {
+  return isNotKnown(facts.envSources)
+    ? facts.envSources
+    : facts.envSources[index];
+}
+
+/** One field of the project's env source at `index`, or why its env sources are not known. */
+function envSourceField<K extends keyof EnvSource>(
+  facts: ProjectSelectionFacts,
+  index: number,
+  key: K,
+): EnvSource[K] | EnvSourcesNotKnown | undefined {
+  const source = envSourceAt(facts, index);
+  return source === undefined || "notKnown" in source ? source : source[key];
+}
+
 describe("reporting each project's env sources", () => {
   it(
     "D3042: on Vitest 5, a project's own env directory is named relative to the consumer root",
     async () => {
       const discovery = await discoverSelectionFacts("vitest");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "rooted",
-          (facts) => facts.envSources[0]?.envDirectory,
+        projectFact(discovery, ".", "rooted", (facts) =>
+          envSourceField(facts, 0, "envDirectory"),
         ),
       ).toBe("rooted");
     },
@@ -2682,11 +2712,8 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "bare",
-          (facts) => facts.envSources[0]?.envDirectory,
+        projectFact(discovery, ".", "bare", (facts) =>
+          envSourceField(facts, 0, "envDirectory"),
         ),
       ).toBe("../outside-env");
     },
@@ -2698,11 +2725,8 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "pending",
-          (facts) => facts.envSources[0]?.envDirectory,
+        projectFact(discovery, ".", "pending", (facts) =>
+          envSourceField(facts, 0, "envDirectory"),
         ),
       ).toBeNull();
     },
@@ -2714,11 +2738,8 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "pending",
-          (facts) => facts.envSources[0]?.envPrefixes,
+        projectFact(discovery, ".", "pending", (facts) =>
+          envSourceField(facts, 0, "envPrefixes"),
         ),
       ).toStrictEqual(["VITE_"]);
     },
@@ -2730,11 +2751,8 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "rooted",
-          (facts) => facts.envSources[0]?.envPrefixes,
+        projectFact(discovery, ".", "rooted", (facts) =>
+          envSourceField(facts, 0, "envPrefixes"),
         ),
       ).toStrictEqual(["RT_"]);
     },
@@ -2746,11 +2764,8 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
       const ownPrefixes = (projectName: string): unknown =>
-        projectFact(
-          discovery,
-          ".",
-          projectName,
-          (facts) => facts.envSources[0]?.envPrefixes,
+        projectFact(discovery, ".", projectName, (facts) =>
+          envSourceField(facts, 0, "envPrefixes"),
         );
       expect({
         absolute: ownPrefixes("absolute"),
@@ -2765,7 +2780,7 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest");
       expect(
-        projectFact(discovery, ".", "rooted", (facts) => facts.envSources[1]),
+        projectFact(discovery, ".", "rooted", (facts) => envSourceAt(facts, 1)),
       ).toStrictEqual(ROOT_ENV_SOURCE);
     },
     DISCOVERY_TIMEOUT_MS,
@@ -2776,11 +2791,8 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "rooted",
-          (facts) => facts.envSources[0]?.mode,
+        projectFact(discovery, ".", "rooted", (facts) =>
+          envSourceField(facts, 0, "mode"),
         ),
       ).toBe("custom");
     },
@@ -2806,7 +2818,9 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
       expect(
-        projectFact(discovery, ".", "absolute", (facts) => facts.envSources[1]),
+        projectFact(discovery, ".", "absolute", (facts) =>
+          envSourceAt(facts, 1),
+        ),
       ).toStrictEqual(ROOT_ENV_SOURCE);
     },
     DISCOVERY_TIMEOUT_MS,
@@ -2817,13 +2831,362 @@ describe("reporting each project's env sources", () => {
     async () => {
       const discovery = await discoverSelectionFacts("vitest-4");
       expect(
-        projectFact(
-          discovery,
-          ".",
-          "absolute",
-          (facts) => facts.envSources[0]?.mode,
+        projectFact(discovery, ".", "absolute", (facts) =>
+          envSourceField(facts, 0, "mode"),
         ),
       ).toBe("2");
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+const PRESENTED_VERSION_KEY = "RT_FIXTURE_VITEST_VERSION";
+const PRESENTED_RECORD_KEY = "RT_FIXTURE_CONTAINER_RECORD";
+const PRESENTED_KEYS = [PRESENTED_VERSION_KEY, PRESENTED_RECORD_KEY] as const;
+/** The record the nested-projects fixture's plugin reads as removing Vitest's container record. */
+const RECORD_ABSENT = "absent";
+const FLAT_WORKSPACE = "packages/flat";
+const FINGERPRINTED = "fingerprinted";
+/** The reason every project of the nested-projects fixture's root workspace reports on Vitest 5.0. */
+const NESTED_REASON =
+  "a nested projects container declares its projects (app/inner/vitest.config.mjs, app/vitest.config.mjs)";
+/** The flat workspace's own directory, shared by its inline project, then its directory and config file projects. */
+const FLAT_ENV_FILES = [
+  "packages/flat/.env",
+  "packages/flat/.env.local",
+  "packages/flat/.env.test",
+  "packages/flat/.env.test.local",
+  "packages/flat/dir/.env",
+  "packages/flat/dir/.env.local",
+  "packages/flat/dir/.env.test",
+  "packages/flat/dir/.env.test.local",
+  "packages/flat/pkg/.env",
+  "packages/flat/pkg/.env.local",
+  "packages/flat/pkg/.env.test",
+  "packages/flat/pkg/.env.test.local",
+];
+
+/** What the nested-projects fixture's plugin makes the resolved Vitest present in place of its own. */
+interface Presented {
+  readonly name: string;
+  readonly version?: string;
+  /** The container record as JSON, or `RECORD_ABSENT`. */
+  readonly record?: (root: string) => string;
+}
+
+const AS_INSTALLED: Presented = { name: "as installed" };
+/** A Vitest 5 minor later than the newest RT Test verified, recording no container where 5.0 records them. */
+const UNVERIFIED_MINOR: Presented = {
+  name: "unverified minor",
+  version: "5.1.0",
+  record: () => RECORD_ABSENT,
+};
+const RECORD_NOT_A_LIST: Presented = {
+  name: "record not a list",
+  record: () => JSON.stringify("app/vitest.config.mjs"),
+};
+const RECORD_EMPTY: Presented = { name: "record empty", record: () => "[]" };
+/** A Vitest 5 minor later than the newest RT Test verified, recording an empty list of containers. */
+const UNVERIFIED_MINOR_RECORD_EMPTY: Presented = {
+  name: "unverified minor, record empty",
+  version: "5.1.0",
+  record: () => "[]",
+};
+const RECORD_NOT_PATHS: Presented = {
+  name: "record not paths",
+  record: () => JSON.stringify([1]),
+};
+/** One container config file recorded twice, as two containers declaring the same nested container leave it. */
+const RECORD_REPEATED: Presented = {
+  name: "record repeated",
+  record: (root) => {
+    const file = join(
+      root,
+      FLAT_WORKSPACE,
+      containerDirectory(0),
+      "vitest.config.mjs",
+    );
+    return JSON.stringify([file, file]);
+  },
+};
+/** Two more recorded container config files than a reason names, none of them on disk. */
+const RECORD_PAST_BOUND: Presented = {
+  name: "record past the bound",
+  record: (root) =>
+    JSON.stringify(
+      Array.from({ length: MAX_NAMED_CHANGES + 2 }, (_, index) =>
+        join(
+          root,
+          FLAT_WORKSPACE,
+          containerDirectory(index),
+          "vitest.config.mjs",
+        ),
+      ),
+    ),
+};
+
+/** A container's directory, named so the names sort in index order. */
+function containerDirectory(index: number): string {
+  return `c${String(index).padStart(2, "0")}`;
+}
+
+const nestedRuns = new Map<
+  string,
+  Promise<TestDiscovery | { thrown: string }>
+>();
+
+/** Discovers the nested-projects fixture once per install and presentation, set in the environment its plugin reads. */
+function discoverNested(
+  install: VitestInstall,
+  presented: Presented = AS_INSTALLED,
+): Promise<TestDiscovery | { thrown: string }> {
+  const runKey = `${install}:${presented.name}`;
+  const cached = nestedRuns.get(runKey);
+  if (cached !== undefined) return cached;
+  const run = inConsumerCopy("nested-projects", install, async (root) => {
+    const saved = PRESENTED_KEYS.map((name) => process.env[name]);
+    restoreEnv(PRESENTED_KEYS, [presented.version, presented.record?.(root)]);
+    try {
+      return await settledDiscovery(root);
+    } finally {
+      restoreEnv(PRESENTED_KEYS, saved);
+    }
+  });
+  nestedRuns.set(runKey, run);
+  return run;
+}
+
+/** The workspace's env files, sorted, or why they are not known, or what stood in the way. */
+function envFilesOf(
+  discovery: ConsumerRun["discovery"],
+  path: string,
+): unknown {
+  const entry = workspace(discovery, path);
+  if (entry === undefined || !("status" in entry)) return entry;
+  const listed = workspaceEnvFiles(entry);
+  return listed.known ? { known: true, files: sorted(listed.files) } : listed;
+}
+
+function refusal(print: FingerprintResult | { thrown: string }): string {
+  if ("thrown" in print) return print.thrown;
+  return print.ok ? FINGERPRINTED : print.reason;
+}
+
+/** Why the workspace and its discovery have no fingerprint, or that each has one, or what stood in the way. */
+function fingerprintRefusals(
+  discovery: ConsumerRun["discovery"],
+  path: string,
+): unknown {
+  if (!("workspaces" in discovery)) return discovery.thrown;
+  const entry = discovery.workspaces.find(
+    (candidate) => candidate.workspace.path === path,
+  );
+  if (entry === undefined) return `no workspace ${path}`;
+  const inputs = new ProjectInputs(REPO, new Map());
+  return {
+    workspace: refusal(settle(() => workspaceFingerprint(inputs, entry))),
+    discovery: refusal(settle(() => discoveryFingerprint(inputs, discovery))),
+  };
+}
+
+/** Each reported project's env sources by its name, or what stood in the way. */
+function envSourcesByProject(
+  discovery: ConsumerRun["discovery"],
+  path: string,
+): unknown {
+  const facts = selectionFactsOf(discovery, path);
+  if (!isReported(facts)) return facts;
+  return Object.fromEntries(
+    facts.projects.map((project) => [project.projectName, project.envSources]),
+  );
+}
+
+describe("the env sources of a workspace holding a nested projects container", () => {
+  it(
+    "D3113: on Vitest 5.0, a workspace in which a nested projects container declares projects has no fingerprint, nor has its discovery, the reason saying its env files are not known and naming each container's config file",
+    async () => {
+      const discovery = await discoverNested("vitest");
+      const reason = `the env files of the workspace at the consumer root are not known: ${NESTED_REASON}`;
+      expect(fingerprintRefusals(discovery, ".")).toStrictEqual({
+        workspace: reason,
+        discovery: reason,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3114: on Vitest 5.0, every project of such a workspace, a top-level one included, reports its env sources not known, naming each container's config file relative to the consumer root",
+    async () => {
+      const discovery = await discoverNested("vitest");
+      expect(envSourcesByProject(discovery, ".")).toStrictEqual({
+        top: { notKnown: NESTED_REASON },
+        "app (inline)": { notKnown: NESTED_REASON },
+        "app (inner) (deep)": { notKnown: NESTED_REASON },
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3115: on Vitest 5.0, a workspace beside it in the same discovery, whose projects by path, a config file and a directory, declare no projects, lists each project's env files and its root config's",
+    async () => {
+      const discovery = await discoverNested("vitest");
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: true,
+        files: FLAT_ENV_FILES,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3116: on Vitest 4.1, a project whose config declares projects, which 4.1 ignores, reports its own env directory and the root config's",
+    async () => {
+      const discovery = await discoverNested("vitest-4");
+      expect(
+        projectFact(discovery, ".", "app", (facts) => facts.envSources),
+      ).toStrictEqual([
+        { envDirectory: "app/envs", envPrefixes: ["VITE_"], mode: "test" },
+        { envDirectory: ".", envPrefixes: ["VITE_"], mode: "test" },
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3117: on a Vitest 5 minor RT Test has not verified, which records no container, a workspace declaring projects by path has env files not known, the reason naming the missing record and the Vitest version",
+    async () => {
+      const discovery = await discoverNested("vitest", UNVERIFIED_MINOR);
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: false,
+        workspace: FLAT_WORKSPACE,
+        reason:
+          "RT Test has not verified where Vitest 5.1.0 records nested projects containers, and it records none in _containerConfigFiles while the root config declares projects by path",
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3118: on a Vitest 5 minor RT Test has not verified, a workspace declaring only inline projects lists its env files",
+    async () => {
+      const discovery = await discoverNested("vitest", UNVERIFIED_MINOR);
+      expect(envFilesOf(discovery, "packages/inline")).toStrictEqual({
+        known: true,
+        files: [
+          "packages/inline/.env",
+          "packages/inline/.env.local",
+          "packages/inline/.env.test",
+          "packages/inline/.env.test.local",
+        ],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3119: on a Vitest 5 minor RT Test has not verified, a workspace declaring no projects lists its env files",
+    async () => {
+      const discovery = await discoverNested("vitest", UNVERIFIED_MINOR);
+      expect(envFilesOf(discovery, "packages/single")).toStrictEqual({
+        known: true,
+        files: [
+          "packages/single/.env",
+          "packages/single/.env.local",
+          "packages/single/.env.test",
+          "packages/single/.env.test.local",
+        ],
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3120: on Vitest 5, a container record in a shape other than a list of paths leaves a workspace's env files not known, the reason naming the record",
+    async () => {
+      const discovery = await discoverNested("vitest", RECORD_NOT_A_LIST);
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: false,
+        workspace: FLAT_WORKSPACE,
+        reason:
+          "Vitest records its nested projects containers in _containerConfigFiles in a form RT Test does not read",
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3121: on Vitest 5.0, the verified minor, an empty container record reads as no container, so a workspace declaring projects by path lists its env files",
+    async () => {
+      const discovery = await discoverNested("vitest", RECORD_EMPTY);
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: true,
+        files: FLAT_ENV_FILES,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3122: the not-known reason names at most 20 container config files and counts the rest",
+    async () => {
+      const discovery = await discoverNested("vitest", RECORD_PAST_BOUND);
+      const named = Array.from(
+        { length: MAX_NAMED_CHANGES },
+        (_, index) =>
+          `${FLAT_WORKSPACE}/${containerDirectory(index)}/vitest.config.mjs`,
+      ).join(", ");
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: false,
+        workspace: FLAT_WORKSPACE,
+        reason: `a nested projects container declares its projects (${named} and 2 more)`,
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3130: on a Vitest 5 minor RT Test has not verified, an empty container record leaves a workspace declaring projects by path with env files not known, the reason naming the record and the Vitest version",
+    async () => {
+      const discovery = await discoverNested(
+        "vitest",
+        UNVERIFIED_MINOR_RECORD_EMPTY,
+      );
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: false,
+        workspace: FLAT_WORKSPACE,
+        reason:
+          "RT Test has not verified where Vitest 5.1.0 records nested projects containers, and it records none in _containerConfigFiles while the root config declares projects by path",
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3131: on Vitest 5, a container record listing a value that is not a path leaves a workspace's env files not known, the reason naming the record, rather than failing its discovery",
+    async () => {
+      const discovery = await discoverNested("vitest", RECORD_NOT_PATHS);
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: false,
+        workspace: FLAT_WORKSPACE,
+        reason:
+          "Vitest records its nested projects containers in _containerConfigFiles in a form RT Test does not read",
+      });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3132: a container config file Vitest records twice is named once in the not-known reason",
+    async () => {
+      const discovery = await discoverNested("vitest", RECORD_REPEATED);
+      expect(envFilesOf(discovery, FLAT_WORKSPACE)).toStrictEqual({
+        known: false,
+        workspace: FLAT_WORKSPACE,
+        reason:
+          "a nested projects container declares its projects (packages/flat/c00/vitest.config.mjs)",
+      });
     },
     DISCOVERY_TIMEOUT_MS,
   );

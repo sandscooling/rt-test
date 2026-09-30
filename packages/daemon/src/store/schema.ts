@@ -1,7 +1,7 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
 /** Written to `PRAGMA user_version`. A change to the tables below, or a stored value an older version's code cannot read, raises it and gives each older version in `STORE_MIGRATIONS` a path to it, since the opener refuses every version it cannot migrate. */
-export const STORE_SCHEMA_VERSION = 8;
+export const STORE_SCHEMA_VERSION = 9;
 /** Its code never force-stopped a run and never kept a workspace's selection facts. */
 const FORCE_STOP_UNAWARE_SCHEMA_VERSION = 1;
 /** Its code never kept a workspace's selection facts. */
@@ -16,6 +16,8 @@ const VITEST_SPELLING_UNAWARE_SCHEMA_VERSION = 5;
 const CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION = 6;
 /** Its code kept a workspace's selection facts without each project's env sources. */
 const ENV_SOURCES_UNAWARE_SCHEMA_VERSION = 7;
+/** Its code never reported env sources as not known, so its report omits a nested projects container's env and reads complete. */
+const ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION = 8;
 export const STORE_FILE_NAME = "store.sqlite";
 /** How long a write waits for another process's write on the same file before it fails whole. */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -139,7 +141,7 @@ UPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';`;
 /** Each workspace stored before keeps a NULL report, so it reads as not reporting its selection facts. */
 const ADD_SELECTION_FACTS = `
 ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN};`;
-/** A report missing a fact this version reads is dropped rather than given a guessed one, so it reads as never made. */
+/** A report missing a fact this version reads, or one that may read complete without being so, is dropped rather than guessed at, so it reads as never made. */
 const DROP_INCOMPLETE_FACTS = `
 UPDATE discovery_workspaces SET selection_facts = NULL;`;
 const SET_SCHEMA_VERSION = `
@@ -173,6 +175,10 @@ export const STORE_MIGRATIONS: ReadonlyMap<number, string> = new Map([
   ],
   [
     ENV_SOURCES_UNAWARE_SCHEMA_VERSION,
+    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+  ],
+  [
+    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,
     `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
   ],
 ]);

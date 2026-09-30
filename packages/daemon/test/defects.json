@@ -5776,10 +5776,10 @@
   },
   {
     "id": "D2792",
-    "defect": "A new store is created at schema version 7, so a daemon from before the env sources opens it and stores discoveries whose selection facts lack them, which this daemon then refuses to read.",
+    "defect": "A new store is created at schema version 8, so a daemon from before env sources that are not known opens it and refuses as unreadable every discovery holding a report of them.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "export const STORE_SCHEMA_VERSION = 8;",
-    "new": "export const STORE_SCHEMA_VERSION = 7;"
+    "old": "export const STORE_SCHEMA_VERSION = 9;",
+    "new": "export const STORE_SCHEMA_VERSION = 8;"
   },
   {
     "id": "D2793",
@@ -7409,8 +7409,8 @@
     "id": "D3038",
     "defect": "A stored project with no env sources reads back as having none, so a malformed record reads as a project naming no env file instead of being refused.",
     "file": "packages/daemon/src/store/columns.ts",
-    "old": "    envSources: jsonArray(value, \"envSources\", envSource),",
-    "new": "    envSources: jsonField(value, \"envSources\") === undefined ? [] : jsonArray(value, \"envSources\", envSource),"
+    "old": "  return jsonArray(value, \"envSources\", envSource);",
+    "new": "  return field === undefined ? [] : jsonArray(value, \"envSources\", envSource);"
   },
   {
     "id": "D3039",
@@ -7661,8 +7661,8 @@
     "id": "D3074",
     "defect": "A discovered workspace whose selection facts are not reported reads as naming no env file, so it gets a fingerprint without the env files its tests read.",
     "file": "packages/daemon/src/inputs/env-files.ts",
-    "old": "    return { known: false, unreportedWorkspace: entry.workspace.path };",
-    "new": "    return { known: true, files: [] };"
+    "old": "  if (!entry.selectionFacts.reported) return { known: false, workspace };",
+    "new": "  if (!entry.selectionFacts.reported) return { known: true, files: [] };"
   },
   {
     "id": "D3075",
@@ -7796,5 +7796,145 @@
     "file": "packages/daemon/src/daemon/server.ts",
     "old": "  if (clientVersion === PROTOCOL_VERSION) {",
     "new": "  if (typeof clientVersion === \"number\" && clientVersion <= PROTOCOL_VERSION) {"
+  },
+  {
+    "id": "D3113",
+    "defect": "Every project reports its own config's and the root config's env sources even where a nested projects container declares projects, so the workspace and its discovery keep a fingerprint that misses the container's env files, and an edit to one leaves old results current.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    envSources: notKnown ?? [",
+    "new": "    envSources: ["
+  },
+  {
+    "id": "D3114",
+    "defect": "The not-known reason names each nested container's config file by the absolute path Vitest records, unlike every other path an answer names.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  const containers = [...new Set(recorded.map(rootRelative))].sort();",
+    "new": "  const containers = [...new Set(recorded)].sort();"
+  },
+  {
+    "id": "D3115",
+    "defect": "Vitest 5.0, the newest verified minor, is read as unverified, so every Vitest 5.0 workspace declaring projects by path, with no nested container, loses its fingerprint and reruns at every revision.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    release.minor <= VERIFIED_CONTAINER_MINOR",
+    "new": "    release.minor < VERIFIED_CONTAINER_MINOR"
+  },
+  {
+    "id": "D3116",
+    "defect": "Vitest 4.1, which ignores a project config's own projects, is checked for a container record it never keeps, so a Vitest 4.1 workspace declaring projects by path loses its fingerprint.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  if (release !== undefined && release.major < CONTAINER_MAJOR) {",
+    "new": "  if (release !== undefined && release.major < 4) {"
+  },
+  {
+    "id": "D3117",
+    "defect": "A Vitest 5 minor whose source RT Test never checked is treated as verified, so where it records no container a workspace declaring projects by path keeps a fingerprint that may miss a nested container's env files.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "const VERIFIED_CONTAINER_MINOR = 0;",
+    "new": "const VERIFIED_CONTAINER_MINOR = 1;"
+  },
+  {
+    "id": "D3118",
+    "defect": "On an unverified Vitest 5 minor an inline project is read as a projects entry by path, so a workspace declaring only inline projects, none of which can be a container, loses its fingerprint.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    declared.some((entry: unknown) => typeof entry === \"string\");",
+    "new": "    declared.length > 0;"
+  },
+  {
+    "id": "D3119",
+    "defect": "On an unverified Vitest 5 minor a root config that declares no projects is read as declaring them by path, so a workspace with no projects loses its fingerprint.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    Array.isArray(declared) &&\n    declared.some(",
+    "new": "    !Array.isArray(declared) ||\n    declared.some("
+  },
+  {
+    "id": "D3120",
+    "defect": "A container record Vitest keeps in a shape other than a list of paths is read as recording no container, so a workspace whose nested containers Vitest records that way keeps a fingerprint without their env files.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    return {\n      notKnown: `Vitest records its nested projects containers in ${CONTAINER_RECORD} in a form RT Test does not read`,\n    };",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D3121",
+    "defect": "An empty container record is read as recording a container, so on the verified Vitest 5 minor a workspace declaring projects by path, with no nested container, loses its fingerprint.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  if (recorded.length === 0) {\n    return verifiesContainerRecord(release)\n      ? undefined\n      : unrecordedContainers(config.projects, version);\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D3122",
+    "defect": "The not-known reason names every recorded container config file with no bound, so a workspace with many containers puts every path into every answer.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "(${namedList(containers)})",
+    "new": "(${containers.join(\", \")})"
+  },
+  {
+    "id": "D3123",
+    "defect": "Listing the env files of a project whose env sources are not known throws, so protecting the discovery of a workspace holding a nested projects container fails.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "  if (isNotKnown(project.envSources)) return [];\n",
+    "new": ""
+  },
+  {
+    "id": "D3124",
+    "defect": "A workspace whose projects' env sources are not known is refused with the reason of a workspace whose discovery does not report them, so the answer blames an old discovery instead of naming the nested containers or the unverified Vitest version.",
+    "file": "packages/daemon/src/inputs/env-files.ts",
+    "old": "    return { known: false, workspace, reason: notKnown.notKnown };",
+    "new": "    return { known: false, workspace };"
+  },
+  {
+    "id": "D3125",
+    "defect": "The refusal of a workspace whose discovery does not report its projects' env sources ends in undefined instead of saying so.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "${listed.reason ?? ENV_SOURCES_UNREPORTED}",
+    "new": "${listed.reason}"
+  },
+  {
+    "id": "D3126",
+    "defect": "A stored report of env sources that are not known reads back as naming no env file, so after a restart a workspace holding a nested projects container gets a fingerprint and its old results read current.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  if (isRecord(field)) return { notKnown: jsonText(field, \"notKnown\") };",
+    "new": "  if (isRecord(field)) return [];"
+  },
+  {
+    "id": "D3127",
+    "defect": "A stored not-known report whose reason is not a string is read with that value's text as its reason, where every other malformed field is refused as unreadable.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "{ notKnown: jsonText(field, \"notKnown\") }",
+    "new": "{ notKnown: String(jsonField(field, \"notKnown\")) }"
+  },
+  {
+    "id": "D3128",
+    "defect": "The version 8 migration keeps every stored report, so a Vitest 5 workspace whose nested container's env sources the report left out reads complete after the upgrade and its old results read current.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
+    "new": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+  },
+  {
+    "id": "D3129",
+    "defect": "A version 8 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "  [\n    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "new": ""
+  },
+  {
+    "id": "D3130",
+    "defect": "On a Vitest 5 minor RT Test has not verified, an empty container record is read as recording no container, so a workspace declaring projects by path keeps a fingerprint that may miss a nested container's env files.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    return verifiesContainerRecord(release)\n      ? undefined\n      : unrecordedContainers(config.projects, version);",
+    "new": "    return undefined;"
+  },
+  {
+    "id": "D3131",
+    "defect": "A container record listing a value that is not a path is read as a list of paths, so the workspace's discovery throws instead of reporting its env sources not known with a reason naming the record.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "    Array.isArray(value) &&\n    value.every((element: unknown) => typeof element === \"string\")",
+    "new": "    Array.isArray(value)"
+  },
+  {
+    "id": "D3132",
+    "defect": "A container config file Vitest records twice is named twice in the not-known reason and counted twice toward its bound.",
+    "file": "packages/daemon/src/vitest/selection-facts.ts",
+    "old": "  const containers = [...new Set(recorded.map(rootRelative))].sort();",
+    "new": "  const containers = recorded.map(rootRelative).sort();"
   }
 ]

@@ -38,8 +38,9 @@ const ABSENT_FILE = "absent";
 const NO_DECLARED_VARIABLES: readonly string[] = [];
 /** A path `statSync` finds no entry at, a missing file or one below a file. */
 const NOTHING_THERE = null;
-const ENV_FILES_UNKNOWN =
-  "are not known: its discovery does not report the env sources of its projects";
+const ENV_FILES_UNKNOWN = "are not known";
+const ENV_SOURCES_UNREPORTED =
+  "its discovery does not report the env sources of its projects";
 
 export type FingerprintResult =
   | { readonly ok: true; readonly digest: string }
@@ -215,7 +216,7 @@ function envFilesUnknown(
 ): FingerprintResult {
   return {
     ok: false,
-    reason: `the env files of the workspace ${workspaceName(listed.unreportedWorkspace)} ${ENV_FILES_UNKNOWN}`,
+    reason: `the env files of the workspace ${workspaceName(listed.workspace)} ${ENV_FILES_UNKNOWN}: ${listed.reason ?? ENV_SOURCES_UNREPORTED}`,
   };
 }
 

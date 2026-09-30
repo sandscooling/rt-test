@@ -4277,3 +4277,41 @@ describe("a job's verdict", () => {
     );
   });
 });
+
+describe("a workspace whose env files are not known", () => {
+  it("D3124: a workspace one of whose projects' env sources are not known has no fingerprint, the reason saying its env files are not known and giving the reason its discovery stored", () => {
+    const print = workspaceFingerprint(
+      new ProjectInputs(REPO, new Map()),
+      workspaceAt(REPO, [], {
+        reported: true,
+        projects: [
+          projectFacts({ projectName: "flat", envSources: [ROOT_ENV_SOURCE] }),
+          projectFacts({
+            projectName: "nested",
+            envSources: {
+              notKnown:
+                "a nested projects container declares its projects (app/vitest.config.mjs)",
+            },
+          }),
+        ],
+      }),
+    );
+    expect(print).toStrictEqual({
+      ok: false,
+      reason:
+        "the env files of the workspace at the consumer root are not known: a nested projects container declares its projects (app/vitest.config.mjs)",
+    });
+  });
+
+  it("D3125: a discovered workspace whose selection facts are not reported has no fingerprint, the reason saying its discovery does not report its projects' env sources", () => {
+    const print = workspaceFingerprint(
+      new ProjectInputs(REPO, new Map()),
+      workspaceAt(REPO, [], { reported: false }),
+    );
+    expect(print).toStrictEqual({
+      ok: false,
+      reason:
+        "the env files of the workspace at the consumer root are not known: its discovery does not report the env sources of its projects",
+    });
+  });
+});
