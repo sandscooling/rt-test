@@ -142,6 +142,14 @@ _Avoid_: full run
 Running a test again while it holds a current result for the same input fingerprint.
 _Avoid_: rerun
 
+**Edit corpus**:
+The committed synthetic consumer and the sequences of changes saved to it, each replayed against RT Test's own daemon beside a full run by plain Vitest, over which duplicate execution and selection misses are measured.
+_Avoid_: test corpus, benchmark
+
+**Selection miss**:
+A failure that a full run of plain Vitest over the same input snapshot finds and the daemon's current results do not.
+_Avoid_: missed test
+
 **Wait**:
 A query that returns once every test covering the given files has a current result or an explicit non-current state, or earlier as superseded or unsettled.
 _Avoid_: block, poll
