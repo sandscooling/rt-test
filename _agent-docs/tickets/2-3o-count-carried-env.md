@@ -346,6 +346,8 @@ Undisposed tech debt:
 - `packages/daemon/test/query.test.ts`, `viewOf`: passes the host's `process.env` to `handBuiltEnvironment`, though the harness keeps a hand-built environment empty so no variable of the test process reaches a hand-built fingerprint. No effect today, since no query-test workspace reports env sources. Fix: `handBuiltEnvironment()`. Low, internal, pre-existing.
 - `packages/daemon/src/inputs/environment-digest.ts`: `CARRIED_VARIABLE` and `carriedValue` name `NODE_V8_COVERAGE`, which Node copies into a child process, while `carried-variables.ts` uses "carried" for what Vite hands a workspace's tests, in the same import graph. Fix: rename the former, such as `NODE_COPIED_VARIABLE` and `copiedValue`. Low, internal.
 
+Disposed at Step 9 against 4704c36 (07:59): recorded, not fixed, by the owner's 03:25 ruling; none can report a stale result as current.
+
 Denominator: 30 new named-defect tests (D3390 to D3419) and 3 repaired (D1914, D3072, and D3068 and D3069 re-anchored) against the seven criteria; two gaps below. Considered and not raised: the worklist's visited guard (`#referenced`) has no test with start values that reference each other, but its mutant loops forever, and a timeout is not a detection.
 
 #### Test Coverage Gaps
