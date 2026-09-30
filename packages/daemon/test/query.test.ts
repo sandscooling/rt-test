@@ -12,10 +12,14 @@ import type {
   Narrowing,
   NarrowingState,
   QueryNarrowing,
+  WorkspaceNarrowing,
 } from "../src/inputs/narrowed-inputs.js";
 import {
+  DEPENDENCY_BUILD_FAILED,
   DUE_REASON,
   ROUND_WAIT,
+  WAIT_OUTCOME,
+  type WaitAnswer,
   type InputFacts,
   type NoAnswer,
   type PathStatusAnswer,
@@ -24,7 +28,17 @@ import {
 } from "../src/query/answer.js";
 import { resolveCallerPath } from "../src/query/caller-paths.js";
 import { pathStatusAnswer } from "../src/query/path-status.js";
-import { summaryAnswer, type DaemonView } from "../src/query/summary.js";
+import {
+  queryBasis,
+  summaryAnswer,
+  type DaemonView,
+  type QueryBasis,
+} from "../src/query/summary.js";
+import {
+  coverageAt,
+  waitAnswer,
+  type Coverage,
+} from "../src/query/wait-answer.js";
 import type { LatestResults } from "../src/store/open-store.js";
 import type {
   InputFingerprint,
@@ -40,7 +54,13 @@ import type { UnreadWorkspaceSource } from "../src/vitest/find-workspaces.js";
 import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
 import type { TestOutcome } from "@rt-test/core";
-import { handBuiltEnvironment, inTempDir, onPlatform } from "./harness.js";
+import {
+  handBuiltEnvironment,
+  inTempDir,
+  onPlatform,
+  projectFacts,
+} from "./harness.js";
+import { narrowingSelecting } from "./round-fixtures.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 type DiscoveredWorkspace = Extract<
@@ -2251,5 +2271,227 @@ describe("a package workspace with a test script that is not a Vitest workspace"
         "noAnswer" in answer ? answer.noAnswer : answer,
       ),
     ).toMatch(/; it lies in workspace-not-vitest packages\/tooling$/);
+  });
+});
+
+const B_SETUP = `${WORKSPACE_B}/setup.ts`;
+const ENV_LOCAL = ".env.local";
+const ENV_NOT_KNOWN = "a nested projects container gives its tests an env";
+/** The committed inputs at the settled facts' revision: every input of the project. */
+const PROJECT_SNAPSHOT = new ProjectInputs(
+  ROOT,
+  new Map(Object.entries(PROJECT_INPUTS)),
+);
+/** Selection selects no workspace for any path, and each workspace's inputs are its own files. */
+const SELECTING_NOTHING: WorkspaceNarrowing = {
+  kind: "narrowed",
+  narrowing: narrowingSelecting({}, NARROWED_SETS),
+};
+
+/** Workspace `b` of the discovery, reporting one project with `facts`. */
+function workspaceBReporting(
+  facts: Parameters<typeof projectFacts>[0],
+): WorkspaceDiscovery {
+  return discoveredWorkspace(WORKSPACE_B, [], {
+    selectionFacts: { reported: true, projects: [projectFacts(facts)] },
+  });
+}
+
+/** The covering workspaces of `path` at the settled revision under `narrowing`, and the listings that cover it. */
+function coveringOf(
+  entries: readonly WorkspaceDiscovery[],
+  narrowing: WorkspaceNarrowing,
+  path: string,
+): unknown {
+  const coverage = coverageAt(
+    storedDiscovery(entries),
+    narrowing,
+    PROJECT_SNAPSHOT,
+    SETTLED_FACTS.revision,
+    [path],
+  );
+  return coverage === undefined
+    ? coverage
+    : {
+        workspaces: [...coverage.workspaces],
+        listed: coverage.files.get(path)?.listed,
+      };
+}
+
+/** A settled wait's answer over `basis` whose covering workspaces are `coverage`'s, every one's when undefined. */
+function waitOver(
+  basis: QueryBasis,
+  coverage: Coverage | undefined,
+  paths: readonly string[] = [],
+): WaitAnswer {
+  return waitAnswer(basis, {
+    outcome: { outcome: WAIT_OUTCOME.settled },
+    boundRevision: SETTLED_FACTS.revision,
+    paths,
+    unread: [],
+    coverage,
+  });
+}
+
+describe("the workspaces covering a waited file", () => {
+  it("D3439: a file selection selects no workspace for is covered by each discovered workspace whose fingerprint lists it, naming the listing", () => {
+    expect(
+      coveringOf(
+        [ENTRY_A, workspaceBReporting({ setupFiles: [B_SETUP] })],
+        SELECTING_NOTHING,
+        B_SETUP,
+      ),
+    ).toStrictEqual({
+      workspaces: [WORKSPACE_B],
+      listed: {
+        named: [{ workspacePath: WORKSPACE_B, listedAs: "setup-file" }],
+        more: 0,
+      },
+    });
+  });
+
+  it("D3440: a workspace whose env files are not known covers a named .env.local its listing cannot rule out", () => {
+    expect(
+      coveringOf(
+        [
+          ENTRY_A,
+          workspaceBReporting({ envSources: { notKnown: ENV_NOT_KNOWN } }),
+        ],
+        SELECTING_NOTHING,
+        ENV_LOCAL,
+      ),
+    ).toStrictEqual({
+      workspaces: [WORKSPACE_B],
+      listed: {
+        named: [
+          { workspacePath: WORKSPACE_B, listedAs: "env-files-not-known" },
+        ],
+        more: 0,
+      },
+    });
+  });
+
+  it("D3441: with no dependency information every discovered workspace covers every file, and the coverage names the widening and its cause", () => {
+    const coverage = coverageAt(
+      TWO_WORKSPACES,
+      {
+        kind: "widened",
+        notNarrowed: { kind: DEPENDENCY_BUILD_FAILED, reason: BUILD_FAILED },
+      },
+      PROJECT_SNAPSHOT,
+      SETTLED_FACTS.revision,
+      [A_SOURCE],
+    );
+    expect(
+      coverage === undefined
+        ? coverage
+        : { facts: coverage.facts, workspaces: [...coverage.workspaces] },
+    ).toStrictEqual({
+      facts: {
+        state: "widened",
+        revision: SETTLED_FACTS.revision,
+        widenedBy: DEPENDENCY_BUILD_FAILED,
+        reason: { reason: BUILD_FAILED, omittedCharacters: 0 },
+      },
+      workspaces: [WORKSPACE_A, WORKSPACE_B],
+    });
+  });
+});
+
+describe("a wait's answer", () => {
+  it("D3442: the counts take each covering workspace's tests once, however many named files it covers, and no other workspace's", () => {
+    const coverage = coverageAt(
+      TWO_WORKSPACES,
+      {
+        kind: "narrowed",
+        narrowing: narrowingSelecting(
+          { [A_SOURCE]: [WORKSPACE_A], [A_MODULE]: [WORKSPACE_A] },
+          NARROWED_SETS,
+        ),
+      },
+      PROJECT_SNAPSHOT,
+      SETTLED_FACTS.revision,
+      [A_SOURCE, A_MODULE],
+    );
+    const basis = answered(
+      queryBasis(results(TWO_WORKSPACES), IDLE, UNSETTLED),
+    );
+    expect(waitOver(basis, coverage).counts.tests).toBe(1);
+  });
+
+  it("D3443: an answer names 20 covering tests that failed and counts the rest", () => {
+    const failing = Array.from({ length: 21 }, (_, index) =>
+      discovered(`f${index}`),
+    );
+    const basis = answered(
+      queryBasis(
+        results(storedDiscovery([discoveredWorkspace(WORKSPACE_A, failing)]), [
+          storedRun(
+            ranRun([
+              ranModule(failing.map((test) => finished(test, "failed"))),
+            ]),
+          ),
+        ]),
+        IDLE,
+        UNSETTLED,
+      ),
+    );
+    const { namedFailures } = waitOver(basis, undefined);
+    expect({
+      named: namedFailures.named.length,
+      more: namedFailures.more,
+    }).toStrictEqual({ named: 20, more: 1 });
+  });
+
+  it("D3444: a named failure carries the first line of its first error, and a crashed module, which records none, is named with none", () => {
+    const crashedModule = "src/c.test.ts";
+    const basis = answered(
+      queryBasis(
+        results(storedDiscovery([ENTRY_A]), [
+          storedRun(
+            ranRun([
+              ranModule([
+                {
+                  identity: TEST_A.identity,
+                  isDuplicate: false,
+                  execution: "finished",
+                  outcome: "failed",
+                  errors: [
+                    "AssertionError: expected 1 to be 2\n    at src/a.test.ts:3:5",
+                    "a second error",
+                  ],
+                },
+              ]),
+              {
+                projectName: PROJECT,
+                modulePath: crashedModule,
+                state: "crashed",
+              },
+            ]),
+          ),
+        ]),
+        IDLE,
+        UNSETTLED,
+      ),
+    );
+    expect(
+      waitOver(basis, undefined).namedFailures.named.map(
+        ({ modulePath, state, firstError }) => ({
+          modulePath,
+          state,
+          firstError,
+        }),
+      ),
+    ).toStrictEqual([
+      {
+        modulePath: MODULE,
+        state: "failed",
+        firstError: {
+          reason: "AssertionError: expected 1 to be 2",
+          omittedCharacters: 0,
+        },
+      },
+      { modulePath: crashedModule, state: "module-crashed", firstError: null },
+    ]);
   });
 });

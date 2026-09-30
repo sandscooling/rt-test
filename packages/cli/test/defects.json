@@ -810,5 +810,47 @@
     "file": "packages/daemon/src/vitest/discover-tests.ts",
     "old": "    notCovered: withoutDiscoveredModules(\n      notCovered,",
     "new": "    notCovered: withoutDiscoveredModules(\n      [],"
+  },
+  {
+    "id": "D3450",
+    "defect": "rt-test wait sends --limit's seconds as though they were milliseconds, a limit a thousand times shorter than asked.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "  return { limitMs: seconds * MS_PER_SECOND };",
+    "new": "  return { limitMs: seconds };"
+  },
+  {
+    "id": "D3451",
+    "defect": "rt-test wait converts --limit without checking it is written in decimal digits, so 0x4, 1e1 and a padded 4 are sent as limits rather than refused as usage errors.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "  const seconds = DECIMAL_DIGITS.test(limit) ? Number(limit) : Number.NaN;",
+    "new": "  const seconds = Number(limit);"
+  },
+  {
+    "id": "D3452",
+    "defect": "rt-test wait exits 1 for a superseded or unsettled answer, as though RT Test had not answered.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "        return output.succeed(answerFields(answer), waitText(answer));",
+    "new": "        return answer.outcome === WAIT_OUTCOME.settled\n          ? output.succeed(answerFields(answer), waitText(answer))\n          : output.fail(answer.outcome);"
+  },
+  {
+    "id": "D3453",
+    "defect": "The first line of a wait that never bound says it is bound to input revision null.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "    answer.boundRevision === null\n      ? NOT_BOUND\n      : `bound to input revision ${answer.boundRevision}`;",
+    "new": "    `bound to input revision ${answer.boundRevision}`;"
+  },
+  {
+    "id": "D3454",
+    "defect": "A named file no workspace covers is printed with selection's report alone, never saying no test covers it.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "    selection.selected.named.length === 0 && listing.length === 0",
+    "new": "    false"
+  },
+  {
+    "id": "D3455",
+    "defect": "A named failure's test name is printed unescaped, so a line break in it splits the failure across lines.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "`${NAME_PATH_SEPARATOR}${failure.testName.map(oneLine).join(NAME_PATH_SEPARATOR)}`",
+    "new": "`${NAME_PATH_SEPARATOR}${failure.testName.join(NAME_PATH_SEPARATOR)}`"
   }
 ]

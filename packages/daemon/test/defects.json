@@ -1661,7 +1661,7 @@
   {
     "id": "D1459",
     "defect": "A stop does not abort the job in progress, so it waits out a run to its end.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "    void this.#halting(failures, () => executor.abort());\n",
     "new": ""
   },
@@ -1675,7 +1675,7 @@
   {
     "id": "D1462",
     "defect": "The stop closes the store without waiting for the run in progress, so that run's write fails and it is lost.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "    await this.#sequence;",
     "new": ""
   },
@@ -2893,7 +2893,7 @@
   {
     "id": "D1881",
     "defect": "The stop sequence never stops the input tracker, so a job's end waiting on the inputs holds the stop forever.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "    await this.#halting(failures, () => inputs.stop());\n",
     "new": ""
   },
@@ -4643,7 +4643,7 @@
   {
     "id": "D2520",
     "defect": "The stop sequence never stops the dependency builds, so a run waiting for a build holds the stop for good.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "    const buildsStopped = this.#halting(failures, () => this.#builds.stop());\n",
     "new": "    const buildsStopped = Promise.resolve();\n"
   },
@@ -4734,7 +4734,7 @@
   {
     "id": "D2537",
     "defect": "A stop never closes the build executor, so its process outlives the daemon.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "    await this.#closing(\"the dependency build executor\", () =>\n      buildExecutor.close(),\n    );\n",
     "new": ""
   },
@@ -5252,7 +5252,7 @@
   {
     "id": "D2677",
     "defect": "A close that rejects during a stop is swallowed without a log entry, so the error that left a process or a lock behind is never reported.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "      this.#parts.log.error(`closing ${what}`, error);\n",
     "new": ""
   },
@@ -8682,7 +8682,7 @@
   {
     "id": "D3192",
     "defect": "A tracker stop that rejects skips the executor, build executor, store and endpoint closings, so the daemon exits leaving its key and lock files and a build process behind.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/stop-sequence.ts",
     "old": "    await this.#halting(failures, () => inputs.stop());\n",
     "new": "    await inputs.stop();\n"
   },
@@ -9763,5 +9763,194 @@
     "file": "packages/daemon/src/inputs/carried-variables.ts",
     "old": "  if (carried.every) return () => true;",
     "new": "  if (carried.every) return () => false;"
+  },
+  {
+    "id": "D3424",
+    "defect": "A wait request that names no limit waits 120 s rather than the 100 s default, past the two minutes a coding agent's shell tool allows once the client's response bound is added.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "export const WAIT_LIMIT_MS = 100_000;",
+    "new": "export const WAIT_LIMIT_MS = 120_000;"
+  },
+  {
+    "id": "D3425",
+    "defect": "A wait request whose limit is null, which is how a limit that is not a finite number serializes, is taken as the default limit instead of being refused.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "\"limitMs\" in message ? message[\"limitMs\"] : WAIT_LIMIT_MS",
+    "new": "message[\"limitMs\"] ?? WAIT_LIMIT_MS"
+  },
+  {
+    "id": "D3426",
+    "defect": "A wait request naming 1001 paths, one past the bound, is taken rather than refused.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "if (paths.length > MAX_WAIT_PATHS) {",
+    "new": "if (paths.length > MAX_WAIT_PATHS + 1) {"
+  },
+  {
+    "id": "D3427",
+    "defect": "A wait binds after its first read of the named files alone, so a file that read skipped while a reconciliation ran is never read before the bind.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    const unread = await inputs.readNamed(wait.paths);",
+    "new": "    const unread: readonly UnreadPath[] = [];"
+  },
+  {
+    "id": "D3428",
+    "defect": "A wait answers settled while a covering workspace is still queued, before its run gives a current result.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "      workspace.state === EXECUTION_STATE.idle,",
+    "new": "      true,"
+  },
+  {
+    "id": "D3429",
+    "defect": "A wait answers settled while a round is pending, when every covering workspace reads idle only because no plan has yet made the changed ones due.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "  if (schedule.round.state === ROUND.pending) return false;\n",
+    "new": ""
+  },
+  {
+    "id": "D3430",
+    "defect": "A wait answers settled though its read found a named file it could not read, vouching for results no read of that file supports.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    if (now === undefined || wait.unread.length > 0) return;",
+    "new": "    if (now === undefined) return;"
+  },
+  {
+    "id": "D3431",
+    "defect": "A wait whose covering workspace's input changed after the bind never answers superseded, and keeps waiting on the newer revision instead.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    if (before.get(path) !== after.get(path)) into.add(path);",
+    "new": "    if (false) into.add(path);"
+  },
+  {
+    "id": "D3432",
+    "defect": "A change only to an input no covering workspace reads supersedes the wait, as though every input covered it.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "  if (covered === undefined) {",
+    "new": "  if (true) {"
+  },
+  {
+    "id": "D3433",
+    "defect": "A superseded answer whose bound revision's covering set was never known counts only the later revision's covering workspaces, as though the bound set were known.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "        change.everyWorkspace ? undefined : wait.coverage,",
+    "new": "        wait.coverage,"
+  },
+  {
+    "id": "D3434",
+    "defect": "A later revision whose inputs match the bound revision's supersedes the wait, naming no changed path.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "  return paths.size === 0 ? undefined : { paths, everyWorkspace };",
+    "new": "  return { paths, everyWorkspace };"
+  },
+  {
+    "id": "D3435",
+    "defect": "A rediscovery stored at the bound revision leaves the wait's covering workspaces as the replaced discovery gave them, so a wait on a file only the new discovery lists answers settled while the workspace that covers it is queued.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "      known?.revision === revision &&\n      known.discoveryId === discovery.discoveryId",
+    "new": "      known?.revision === revision"
+  },
+  {
+    "id": "D3436",
+    "defect": "A limit that passes before any coverage is known answers with no covering workspace, an empty coverage rather than every workspace's execution state.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "    coverage === undefined || coverage.workspaces.has(workspacePath);",
+    "new": "    coverage !== undefined && coverage.workspaces.has(workspacePath);"
+  },
+  {
+    "id": "D3437",
+    "defect": "A wait whose client left keeps waiting to its limit rather than answering that nobody waits for it.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "      signal.addEventListener(\"abort\", forget, { once: true });\n",
+    "new": ""
+  },
+  {
+    "id": "D3438",
+    "defect": "A wait naming a refused path beside acceptable ones waits on the acceptable ones rather than being refused whole.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    if (refusals.length === 0) return { paths: [...paths] };",
+    "new": "    if (paths.size > 0) return { paths: [...paths] };"
+  },
+  {
+    "id": "D3439",
+    "defect": "A file only a workspace's fingerprint listing names, which selection selects nothing for, is covered by no workspace, so a wait on it settles while the workspace its edit stales is still due.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "    for (const { workspacePath } of listed) workspaces.add(workspacePath);\n",
+    "new": ""
+  },
+  {
+    "id": "D3440",
+    "defect": "A workspace whose env files are not known does not cover a named .env.local, so a wait on it answers covered by no test though its edit may stale that workspace.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "        (!envFilesKnown && isEnvFileName(path)",
+    "new": "        (false && isEnvFileName(path)"
+  },
+  {
+    "id": "D3441",
+    "defect": "With no dependency information a wait's coverage names no workspace instead of widening to every discovered one.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "      entries.filter(isSelectable).map((entry) => entry.workspace.path),",
+    "new": "      [] as string[],"
+  },
+  {
+    "id": "D3442",
+    "defect": "A wait's counts take every discovered test rather than only those of its covering workspaces.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "  const standings = basis.standings.filter((standing) =>\n    covers(standing.test.identity.workspacePath),\n  );",
+    "new": "  const standings = basis.standings;"
+  },
+  {
+    "id": "D3443",
+    "defect": "A wait's answer names 21 failures, one past its bound of 20, instead of counting the 21st.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "    if (named.length < MAX_NAMED_FAILURES) named.push(failure());",
+    "new": "    if (named.length <= MAX_NAMED_FAILURES) named.push(failure());"
+  },
+  {
+    "id": "D3444",
+    "defect": "A named failure carries its whole first error, stack lines and all, rather than that error's first line.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "  const [line = \"\"] = first.split(ERROR_LINE_BREAK);",
+    "new": "  const line = first;"
+  },
+  {
+    "id": "D3445",
+    "defect": "The waits never hear the schedule move, so a wait whose covering workspace's run ends keeps waiting to its limit though nothing more is coming.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    this.#arm(MOVE_SOURCE.schedule, () => schedule.moved());\n",
+    "new": ""
+  },
+  {
+    "id": "D3446",
+    "defect": "A wait binds without reading its named files, so a test file saved before the watcher reports the save is answered settled from its pre-edit result, read as current.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    await inputs.readNamed(wait.paths);\n    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    const unread = await inputs.readNamed(wait.paths);",
+    "new": "    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    const unread: readonly UnreadPath[] = [];"
+  },
+  {
+    "id": "D3447",
+    "defect": "A superseded answer names the revision the wait bound to rather than the newer one its caller should wait on.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "          supersededAt: revision,",
+    "new": "          supersededAt: bound.revision,"
+  },
+  {
+    "id": "D3448",
+    "defect": "queryWait waits for its answer only up to the wait's limit, so a daemon answering unsettled at that limit, with a store wait before it, is abandoned just before its answer.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    waitsMs + RESPONSE_BOUND_MS,",
+    "new": "    waitsMs,"
+  },
+  {
+    "id": "D3449",
+    "defect": "A wait naming a directory is taken as a file rather than refused naming it.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "      else if (isDirectory(path)) refusals.push(`${path} ${DIRECTORY_REASON}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D3456",
+    "defect": "A limit that passes before any discovery is stored composes a wait answer from no basis and fails as a query that threw, instead of answering that there is nothing to answer and why.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "      \"noAnswer\" in basis\n        ? basis\n        : waitAnswer(basis, {",
+    "new": "      waitAnswer(basis as QueryBasis, {"
   }
 ]
