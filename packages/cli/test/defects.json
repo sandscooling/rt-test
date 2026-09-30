@@ -472,8 +472,8 @@
     "id": "D2536",
     "defect": "A daemon's queries read every workspace over the whole project's inputs, so an edit to one workspace stales every other workspace's results.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return this.#parts.inputs.current({\n      ...this.#builds.narrowing(),\n      discoveryId: results.discovery?.discoveryId,\n    });",
-    "new": "    return this.#parts.inputs.current();"
+    "old": "    return this.#parts.inputs.current(this.#queryNarrowing(results));",
+    "new": "    this.#queryNarrowing(results);\n    return this.#parts.inputs.current();"
   },
   {
     "id": "D2562",
@@ -842,16 +842,16 @@
   {
     "id": "D3454",
     "defect": "A named file no workspace covers is printed with selection's report alone, never saying no test covers it.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/answer-text.ts",
     "old": "    selection.selected.named.length === 0 && listing.length === 0",
     "new": "    false"
   },
   {
     "id": "D3455",
     "defect": "A named failure's test name is printed unescaped, so a line break in it splits the failure across lines.",
-    "file": "packages/cli/src/commands/wait.ts",
-    "old": "`${NAME_PATH_SEPARATOR}${failure.testName.map(oneLine).join(NAME_PATH_SEPARATOR)}`",
-    "new": "`${NAME_PATH_SEPARATOR}${failure.testName.join(NAME_PATH_SEPARATOR)}`"
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "`${NAME_PATH_SEPARATOR}${namePath.map(oneLine).join(NAME_PATH_SEPARATOR)}`",
+    "new": "`${NAME_PATH_SEPARATOR}${namePath.join(NAME_PATH_SEPARATOR)}`"
   },
   {
     "id": "D3461",
@@ -863,15 +863,57 @@
   {
     "id": "D3462",
     "defect": "A file only a workspace's fingerprint lists, which selection selects nothing for, is printed as covered by no test though its edit stales that workspace.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/answer-text.ts",
     "old": "selection.selected.named.length === 0 && listing.length === 0",
     "new": "selection.selected.named.length === 0"
   },
   {
     "id": "D3463",
     "defect": "A named file the wait could not read is printed without its reason, so the text never says which file held the wait.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/answer-text.ts",
     "old": "  const unread =\n    file.unread === undefined\n      ? []\n      : [`could not be read: ${cutReasonText(file.unread)}`];",
     "new": "  const unread: string[] = [];"
+  },
+  {
+    "id": "D3503",
+    "defect": "rt-test changes never sends the cursor --since gives, so every answer is a baseline and no change is ever listed.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    const options = changesOptions(values.since);",
+    "new": "    const options = changesOptions(undefined);"
+  },
+  {
+    "id": "D3504",
+    "defect": "An empty --since, as an unset shell variable gives it, is sent as a cursor rather than refused as a usage error.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "  if (since === \"\") throw new UsageError(\"The --since cursor is empty.\");\n",
+    "new": ""
+  },
+  {
+    "id": "D3505",
+    "defect": "rt-test changes --json prints a document without the answer's fields, so a hook reading it finds no cursor and no change.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "        return output.succeed(answerFields(answer), changesText(answer));",
+    "new": "        return output.succeed({}, changesText(answer));"
+  },
+  {
+    "id": "D3506",
+    "defect": "rt-test changes that gets no answer exits 0 as though it had one, so a hook reads a daemon that is not there as nothing having changed.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "          return output.fail(errorText(error), {",
+    "new": "          return output.succeed({ reason: errorText(error) }, errorText(error), {"
+  },
+  {
+    "id": "D3507",
+    "defect": "An answer not determined is headed as listing no change since the given cursor, reading as an all-clear though nothing was compared.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "      `${lead} ${NOT_DETERMINED_LEAD}, since ${notDeterminedText(answer.notDetermined)}`,",
+    "new": "      `${lead} 0 changes since the given cursor`,"
+  },
+  {
+    "id": "D3508",
+    "defect": "A failing change is printed without its first error line, so the text never says why the test failed.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    change.kind === CHANGE_KIND.failing\n      ? [",
+    "new": "    false\n      ? ["
   }
 ]
