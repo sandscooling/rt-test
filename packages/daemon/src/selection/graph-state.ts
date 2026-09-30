@@ -210,7 +210,3 @@ export function uncertain(
 ): void {
   graph.uncertainties.push({ dependent, kind, cause });
 }
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

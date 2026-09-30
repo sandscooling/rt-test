@@ -14,7 +14,8 @@ import {
   subpathImportCause,
   withForwardSlashes,
 } from "./extends-lookup.js";
-import { isRecord, uncertain } from "./graph-state.js";
+import { isRecord, isStringArray } from "../json-guards.js";
+import { uncertain } from "./graph-state.js";
 import { MAX_JSON_DEPTH, readJsonc } from "./jsonc.js";
 import {
   addPackageEdges,
@@ -364,12 +365,6 @@ function followExtends(
   return read.ok
     ? { ok: true, value: read.value, file, key }
     : { ok: false, reason: `${label} ${read.reason}` };
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((entry) => typeof entry === "string")
-  );
 }
 
 function extendsEntries(config: unknown): Checked<string[]> {

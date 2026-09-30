@@ -12,9 +12,9 @@ import {
   type PackageWorkspace,
   type WorkspaceListing,
 } from "../vitest/find-workspaces.js";
+import { isRecord } from "../json-guards.js";
 import {
   edge,
-  isRecord,
   resolveTarget,
   uncertain,
   unlistedWhileIncomplete,

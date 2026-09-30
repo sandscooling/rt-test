@@ -5,7 +5,7 @@ import {
   POSIX_SEPARATOR,
   realPath,
 } from "../vitest/find-workspaces.js";
-import { isRecord } from "./graph-state.js";
+import { isRecord } from "../json-guards.js";
 import { MAX_JSON_DEPTH, readJsonc } from "./jsonc.js";
 import { isFile } from "./source-walk.js";
 import {

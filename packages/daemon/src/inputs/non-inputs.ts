@@ -4,6 +4,7 @@ import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
+import { isRecord, isStringArray } from "../json-guards.js";
 import { CONFIG_FILE_NAME as TYPESCRIPT_CONFIG_NAME } from "../selection/source-walk.js";
 import { errorText } from "../vitest/error-text.js";
 import {
@@ -252,9 +253,7 @@ const VARIABLES_MEMBER: ListMember = {
 };
 
 function declarationProblem(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return "its top level is not a JSON object";
-  }
+  if (!isRecord(value)) return "its top level is not a JSON object";
   return (
     listProblem(value, PATTERNS_MEMBER) ?? listProblem(value, VARIABLES_MEMBER)
   );
@@ -264,13 +263,13 @@ function declarationProblem(value: unknown): string | undefined {
 function listProblem(value: object, rule: ListMember): string | undefined {
   const list = objectField(value, rule.member);
   if (list === undefined) return undefined;
-  if (!Array.isArray(list) || !list.every((item) => typeof item === "string")) {
+  if (!isStringArray(list)) {
     return `its ${rule.member} member is not an array of strings`;
   }
   if (list.length > rule.max) {
     return `its ${rule.member} member holds ${list.length} ${rule.items}, more than the ${rule.max} allowed`;
   }
-  for (const item of list as string[]) {
+  for (const item of list) {
     const problem = rule.problem(item);
     if (problem !== undefined) {
       return `the ${rule.item} ${JSON.stringify(item)} ${problem}`;
