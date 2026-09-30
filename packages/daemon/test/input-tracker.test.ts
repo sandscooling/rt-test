@@ -38,7 +38,6 @@ import {
   discoveryFingerprint,
   ProjectInputs,
   protectedFileChangedSince,
-  SnapshotReads,
   workspaceFingerprint,
   type FingerprintResult,
 } from "../src/inputs/fingerprint.js";
@@ -79,6 +78,7 @@ import {
   discoveredWorkspace,
   fakeVitest,
   fixtureRepository,
+  handBuiltEnvironment,
   handBuiltReads,
   inTempDir,
   onPlatform,
@@ -2050,9 +2050,9 @@ describe("the fingerprint's parts", () => {
   it("D1914: a changed environment variable value changes the workspace fingerprint", () => {
     const project = new ProjectInputs(REPO, new Map([["a.ts", "file:1"]]));
     const digestUnder = (value: string): string | undefined => {
-      const reads = new SnapshotReads(
+      const reads = handBuiltReads(
         REPO,
-        environmentDigest({ [PLANTED_VARIABLE]: value }),
+        handBuiltEnvironment({ [PLANTED_VARIABLE]: value }),
       );
       const print = workspaceFingerprint(project, workspaceAt(REPO), reads);
       return print.ok ? print.digest : undefined;
@@ -2348,31 +2348,25 @@ describe(
       expect(outcome).toStrictEqual(MOVED);
     });
 
-    it("D3072: a listed env file the snapshot holds as a file's content, which the workspace's narrowed inputs leave out, changes its fingerprint by the held digest", async () => {
-      const changed = await inTempDir((root) => {
-        const entry = workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]);
-        const narrowed = new ProjectInputs(root, new Map([["a.ts", "file:1"]]));
-        const digestWith = (envFile: string): string | undefined => {
-          const project = new ProjectInputs(
+    it("D3072: a listed env file the snapshot holds as a file's content, which the workspace's narrowed inputs leave out, is judged by the held digest, so one that is not the content on disk leaves no fingerprint", async () => {
+      const print = await inTempDir((root) =>
+        workspaceFingerprint(
+          new ProjectInputs(
             root,
             new Map([
               ["a.ts", "file:1"],
-              [ENV_FILE, envFile],
+              [ENV_FILE, "file:1"],
             ]),
-          );
-          return printed(
-            workspaceFingerprint(
-              project,
-              entry,
-              handBuiltReads(root),
-              narrowed,
-            ),
-          );
-        };
-        const before = digestWith("file:1");
-        return before !== undefined && before !== digestWith("file:2");
+          ),
+          workspaceWithEnv(root, ROOT_PATH, [ROOT_ENV_SOURCE]),
+          handBuiltReads(root),
+          new ProjectInputs(root, new Map([["a.ts", "file:1"]])),
+        ),
+      );
+      expect(print).toStrictEqual({
+        ok: false,
+        reason: `the env file ${ENV_FILE} changed since the inputs were read`,
       });
-      expect(changed).toBe(true);
     });
 
     it("D3073: a listed env file the inputs hold by type or link target, as a FIFO, socket, device or link to anything but a file, is read as Vite reads it, so an edit there changes the fingerprint", async () => {

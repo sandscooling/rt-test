@@ -47,8 +47,9 @@ function carriedValue(start: StartEnvironment): string | undefined {
 
 /**
  * Each entry names state a shell, terminal, editor, agent or login keeps for one session or process, such as its id.
- * Vitest, Vite and std-env read none's value, at most whether one is set and non-empty, though Vite's `.env`
- * expansion and `envPrefix` can carry one to a test. An entry ending in `*` names every variable it begins.
+ * Vitest, Vite and std-env read none's value, at most whether one is set and non-empty, apart from what Vite's `.env`
+ * expansion and `envPrefix` carry to a workspace's tests, which counts by value for that workspace. An entry ending
+ * in `*` names every variable it begins.
  */
 export const SESSION_VARIABLES: readonly string[] = [
   "_",
@@ -91,21 +92,28 @@ export interface EnvironmentCount {
   readonly digest: string;
   /** Sorted, spelled as the digest compares them. */
   readonly byValue: readonly string[];
-  /** The entries of `SESSION_VARIABLES` that name a variable set now; each counts only as set. */
+  /** The entries of `SESSION_VARIABLES` that name a variable set now; each counts once as set. */
   readonly sessionEntriesSet: readonly string[];
 }
+
+/** Whether a variable an entry names counts by value all the same, given its name as `comparable` spells it. */
+export type CountsByValue = (name: string) => boolean;
+
+const ONLY_AS_SET: CountsByValue = () => false;
 
 /**
  * Counts `environment` with the session entries and the `declared` ones: a variable an entry names leaves the digest,
  * and in its place the entry counts once as set, with whether any variable it names is non-empty. So a session's own
- * identifier moves nothing, while its presence and every other variable's value still do.
+ * identifier moves nothing, while its presence and every other variable's value still do. A variable `countsByValue`
+ * picks also counts by value, as an unnamed one does, and every other line stays as it would be without it.
  */
 export function countEnvironment(
   environment: NodeJS.ProcessEnv,
   declared: readonly string[],
+  countsByValue: CountsByValue = ONLY_AS_SET,
 ): EnvironmentCount {
   const session = SESSION_VARIABLES.map(comparable);
-  const entries = [...new Set([...session, ...declared.map(comparable)])];
+  const entries = variableEntries(declared);
   /** Names Windows keeps apart can fold to one key, so each key keeps every value by the name holding it. */
   const values = new Map<string, Map<string, string>>();
   const set = new Set<string>();
@@ -114,7 +122,7 @@ export function countEnvironment(
     const key = comparable(name);
     const naming = entries.filter((entry) => names(entry, key));
     const held = value ?? "";
-    if (naming.length === 0) {
+    if (naming.length === 0 || countsByValue(key)) {
       values.set(
         key,
         (values.get(key) ?? new Map<string, string>()).set(name, held),
@@ -159,7 +167,23 @@ function byName(held: ReadonlyMap<string, string>): string[] {
     .map(([, value]) => value);
 }
 
-function comparable(name: string): string {
+/** Every entry of the session list and of `declared`, each spelled as `comparable` spells a name. */
+export function variableEntries(declared: readonly string[]): string[] {
+  const session = SESSION_VARIABLES.map(comparable);
+  const entries = [...new Set([...session, ...declared.map(comparable)])];
+  return entries;
+}
+
+/** Whether one of `entries`, from `variableEntries`, names the variable `name`, spelled as `comparable` spells it. */
+export function namedByEntry(
+  entries: readonly string[],
+  name: string,
+): boolean {
+  return entries.some((entry) => names(entry, name));
+}
+
+/** A variable's name as every comparison of names spells it: whatever its case on Windows. */
+export function comparable(name: string): string {
   return FOLDS_CASE ? name.toUpperCase() : name;
 }
 

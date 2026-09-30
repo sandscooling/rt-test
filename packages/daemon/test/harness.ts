@@ -20,6 +20,11 @@ import {
   HELD_RECORD_SEPARATOR,
   removeDirectory,
 } from "./temp-root.js";
+import {
+  CountedEnvironment,
+  type CarriedReport,
+} from "../src/inputs/carried-variables.js";
+import type { StartEnvironment } from "../src/inputs/environment-digest.js";
 import { SnapshotReads } from "../src/inputs/fingerprint.js";
 import type {
   RecordedModule,
@@ -355,12 +360,26 @@ export function settle<T>(run: () => T): T | { thrown: string } {
 /** The consumer root a hand-built discovery reports for when its case names none. */
 export const HAND_BUILT_ROOT = resolve(sep, "consumer");
 
-/** A hand-built fingerprint's environment digest, fixed so no variable of the test process reaches it. */
-const HAND_BUILT_ENVIRONMENT = "hand-built environment";
+const REPORT_NOTHING: CarriedReport = () => undefined;
 
-/** The reads one hand-built fingerprint over `root` takes. */
-export function handBuiltReads(root: string): SnapshotReads {
-  return new SnapshotReads(root, HAND_BUILT_ENVIRONMENT);
+/**
+ * `start` counted under the session list and the `declared` entries, reporting each workspace's carried variables to
+ * `report`. Empty by default, so no variable of the test process reaches a hand-built fingerprint.
+ */
+export function handBuiltEnvironment(
+  start: StartEnvironment = {},
+  declared: readonly string[] = [],
+  report: CarriedReport = REPORT_NOTHING,
+): CountedEnvironment {
+  return new CountedEnvironment(start, declared, report);
+}
+
+/** The reads one hand-built fingerprint over `root` takes, over `environment`. */
+export function handBuiltReads(
+  root: string,
+  environment: CountedEnvironment = handBuiltEnvironment(),
+): SnapshotReads {
+  return new SnapshotReads(root, environment);
 }
 
 /**

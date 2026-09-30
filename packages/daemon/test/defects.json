@@ -7612,15 +7612,15 @@
     "id": "D3068",
     "defect": "An env file's digest does not depend on its content, so an edit that keeps it in place leaves its workspace's results current.",
     "file": "packages/daemon/src/inputs/env-files.ts",
-    "old": "  return { ok: true, digest: wholeDigest(readFileSync(descriptor)) };",
-    "new": "  return { ok: true, digest: wholeDigest(\"\") };"
+    "old": "    digest: wholeDigest(content),",
+    "new": "    digest: wholeDigest(\"\"),"
   },
   {
     "id": "D3069",
     "defect": "A listed env file with nothing at its path refuses the fingerprint, so a workspace whose .env.local does not exist yet, or was deleted, is never current.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
-    "old": "      return read.ok ? { ok: true, digest: read.digest ?? ABSENT_FILE } : read;",
-    "new": "      return read.ok && read.digest !== undefined ? { ok: true, digest: read.digest } : { ok: false, reason: \"nothing there\" };"
+    "old": "      digests.push([path, read.digest ?? ABSENT_FILE]);",
+    "new": "      if (read.digest === undefined) return { ok: false, reason: \"nothing there\" }; digests.push([path, read.digest]);"
   },
   {
     "id": "D3070",
@@ -9322,5 +9322,215 @@
     "file": "packages/daemon/src/inputs/environment-digest.ts",
     "old": "    .sort(([first], [second]) => (first < second ? -1 : 1))\n    .map(([, value]) => value);",
     "new": "    .map(([, value]) => value)\n    .sort();"
+  },
+  {
+    "id": "D3390",
+    "defect": "A bare $NAME is not read as a reference to NAME, so the workspace's decision does not name the declared variable it references.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+))?/g;"
+  },
+  {
+    "id": "D3391",
+    "defect": "A ${NAME} reference is not read as a reference to NAME, so its $ reads as stray and the workspace counts every variable rather than that one.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;"
+  },
+  {
+    "id": "D3392",
+    "defect": "A ${NAME:-default} reference is not read as a reference to NAME, so its $ reads as stray and the workspace counts every variable rather than that one.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;"
+  },
+  {
+    "id": "D3393",
+    "defect": "A ${NAME-default} reference is not read as a reference to NAME, so its $ reads as stray and the workspace counts every variable rather than that one.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;"
+  },
+  {
+    "id": "D3394",
+    "defect": "A ${NAME:+alternate} reference is not read as a reference to NAME, so its $ reads as stray and the workspace counts every variable rather than that one.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;"
+  },
+  {
+    "id": "D3395",
+    "defect": "A ${NAME+alternate} reference is not read as a reference to NAME, so its $ reads as stray and the workspace counts every variable rather than that one.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;"
+  },
+  {
+    "id": "D3396",
+    "defect": "An escaped \\$NAME is skipped, though Vite writes it back unescaped for a later key to expand, so the variable it names reaches the tests counted only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  /\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;",
+    "new": "  /(?<!\\\\)\\$(?:\\{([A-Za-z_][A-Za-z0-9_]*)(?=\\}|:-|-|:\\+|\\+)|([A-Za-z_][A-Za-z0-9_]*))?/g;"
+  },
+  {
+    "id": "D3397",
+    "defect": "The worklist visits only the env file's own references, never those a scanned value adds, so a declared variable reached through the start environment's values counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "    for (const { name, where } of references) {",
+    "new": "    for (const { name, where } of [...references]) {"
+  },
+  {
+    "id": "D3398",
+    "defect": "A reference reaches no set variable whose name begins with it, though a substitution after it can extend the name Vite reads, so that variable counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "            key !== name && (key.startsWith(name) || name.startsWith(key)),",
+    "new": "            key !== name && name.startsWith(key),"
+  },
+  {
+    "id": "D3399",
+    "defect": "A reference reaches no set variable whose name begins it, though Vite reads an operator-less name only up to null, so that variable counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "            key !== name && (key.startsWith(name) || name.startsWith(key)),",
+    "new": "            key !== name && key.startsWith(name),"
+  },
+  {
+    "id": "D3400",
+    "defect": "The workspace's env prefixes are never matched, so a set declared variable a prefix passes to its tests counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "      : this.#withPrefixes(entry, referenced.names);",
+    "new": "      : referenced;"
+  },
+  {
+    "id": "D3401",
+    "defect": "An env prefix is compared as written rather than case-folded on Windows, so a declared variable it begins in another case counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "        name.startsWith(comparable(candidate)),",
+    "new": "        name.startsWith(candidate),"
+  },
+  {
+    "id": "D3402",
+    "defect": "A stray $ in a listed env file is ignored, so a name Vite's expansion builds after it reaches the tests while every listed and declared variable counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "    if (read.stray) return { file };",
+    "new": "    if (read.stray && false) return { file };"
+  },
+  {
+    "id": "D3403",
+    "defect": "A stray $ in a start environment value a reference reaches is ignored, so a name the expansion builds there reaches the tests while every listed and declared variable counts only as set.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "        if (value.stray) return { every: true, where: through };",
+    "new": "        if (value.stray && false) return { every: true, where: through };"
+  },
+  {
+    "id": "D3404",
+    "defect": "A workspace's env prefix counts every set declared variable by value whether or not it begins the name, so a workspace carrying nothing loses the digest it had before the upgrade.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "        name.startsWith(comparable(candidate)),",
+    "new": "        true,"
+  },
+  {
+    "id": "D3405",
+    "defect": "The environment's digests are memoized under one key whatever the carried set, so a workspace carrying other variables takes the digest an earlier set gave.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "      : [...carried.names.keys()].sort().join(NAME_SEPARATOR);",
+    "new": "      : NAME_SEPARATOR;"
+  },
+  {
+    "id": "D3406",
+    "defect": "The workspace fingerprint decides its carried variables without its env files' text, so a change to a declared variable its .env references leaves its results current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "  const carried = reads.carried(entry, listed.envFileTexts);",
+    "new": "  const carried = reads.carried(entry, new Map());"
+  },
+  {
+    "id": "D3407",
+    "defect": "A workspace's references are read from every env file text the snapshot holds rather than its own, so after the discovery's composed, another workspace's reference stales it.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  for (const file of [...workspaceListing(entry).envFiles].sort()) {",
+    "new": "  for (const file of [...texts.keys()].sort()) {"
+  },
+  {
+    "id": "D3408",
+    "defect": "The discovery fingerprint decides its workspaces' carried variables without their env files' text, so a change to a declared variable one references leaves the discovery current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      reads.carried(entry, listed.envFileTexts),",
+    "new": "      reads.carried(entry, new Map()),"
+  },
+  {
+    "id": "D3409",
+    "defect": "The discovery's union skips a workspace that counts every variable by value, so a change to one no reference names leaves the discovery current.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "    if (carried.every) return carried;",
+    "new": "    if (carried.every) continue;"
+  },
+  {
+    "id": "D3410",
+    "defect": "A held env file digest is never compared with the content read, so a fingerprint pairs one content's digest with another content's references.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    } else if (!describesRead(held, read)) {",
+    "new": "    } else if (false) {"
+  },
+  {
+    "id": "D3411",
+    "defect": "An env file whose digest the inputs hold is never read, as before carried variables counted, so a workspace whose env file text cannot be read keeps a fingerprint with its references unscanned.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    const read = reads.envFile(path);",
+    "new": "    const earlier = heldEnvDigest(inputs.project, path); if (earlier !== undefined) { if (!inputs.selected.digests.has(path)) digests.push([path, earlier]); continue; } const read = reads.envFile(path);"
+  },
+  {
+    "id": "D3412",
+    "defect": "A held env file digest is compared with the read's bare content digest rather than the form the inputs hold, so every held env file refuses its workspace a fingerprint.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    read.ok && read.digest !== undefined && heldFileDigest(read.digest) === held",
+    "new": "    read.ok && read.digest !== undefined && read.digest === held"
+  },
+  {
+    "id": "D3413",
+    "defect": "A workspace's log line names the env file but not the variable whose value a reference passed through.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "  return through === undefined",
+    "new": "  return true"
+  },
+  {
+    "id": "D3414",
+    "defect": "A workspace's log line gives a prefix reason as a reference from an env file, never naming the env prefix that begins the variable.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "  return \"prefix\" in reason",
+    "new": "  return false"
+  },
+  {
+    "id": "D3415",
+    "defect": "The line saying every variable counts by value for a workspace is logged at info level, though it reports a degraded count.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "`warning: environment: every variable",
+    "new": "`environment: every variable"
+  },
+  {
+    "id": "D3416",
+    "defect": "A workspace's line is logged again each time a fingerprint is composed, though its decision has not changed.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    if (text === undefined || text === last) return;",
+    "new": "    if (text === undefined) return;"
+  },
+  {
+    "id": "D3417",
+    "defect": "A workspace that falls to no variable counted by value after some logs nothing, so the log still says its variables count by value.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    const text = carriedText(workspace, carried, last !== undefined);",
+    "new": "    const text = carriedText(workspace, carried, false);"
+  },
+  {
+    "id": "D3418",
+    "defect": "A workspace that has never counted a variable by value logs a line saying none counts any longer.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    return loggedBefore",
+    "new": "    return true"
+  },
+  {
+    "id": "D3419",
+    "defect": "Reading rt-test.json again forgets each workspace's last line, so an unchanged decision is logged again at each recount.",
+    "file": "packages/daemon/src/inputs/declared-non-inputs.ts",
+    "old": "    this.#declaration = readNonInputs(this.#root);",
+    "new": "    this.#loggedCarried.clear(); this.#declaration = readNonInputs(this.#root);"
   }
 ]

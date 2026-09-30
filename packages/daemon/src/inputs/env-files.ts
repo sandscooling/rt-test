@@ -36,6 +36,8 @@ const ABSENT_CODES: ReadonlySet<string> = new Set([
 const OPEN_WITHOUT_BLOCKING = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
 const FIFO_REASON = "it is a FIFO, whose read could block";
 const NOTHING_READ: EnvFileDigest = { ok: true, digest: undefined };
+/** How Vite decodes an env file before parsing it. */
+const ENV_FILE_ENCODING = "utf8";
 
 /** Whether the env files listed are known, or the discovered workspace whose projects' env sources are not. */
 export type EnvFilesKnown =
@@ -49,9 +51,17 @@ export type EnvFilesKnown =
 
 const KNOWN: EnvFilesKnown = { known: true };
 
-/** A digest of what Vite reads at a path, undefined when it reads nothing there, or why it cannot be read. */
+/**
+ * A digest of what Vite reads at a path with the text it decodes from the same read, neither when it reads nothing
+ * there, or why it cannot be read.
+ */
 export type EnvFileDigest =
-  | { readonly ok: true; readonly digest: string | undefined }
+  | {
+      readonly ok: true;
+      readonly digest: undefined;
+      readonly text?: undefined;
+    }
+  | { readonly ok: true; readonly digest: string; readonly text: string }
   | { readonly ok: false; readonly reason: string };
 
 /**
@@ -104,9 +114,9 @@ export function discoveryEnvFilesKnown(
 }
 
 /**
- * The digest of what Vite reads at `path`, an absolute path. Vite reads a file or a FIFO and skips anything else. Only
- * a regular file is opened, since opening a FIFO releases a writer waiting on it, and its content is read only when
- * the opened handle is still a regular file.
+ * The digest and text of what Vite reads at `path`, an absolute path. Vite reads a file or a FIFO and skips anything
+ * else. Only a regular file is opened, since opening a FIFO releases a writer waiting on it, and its content is read
+ * only when the opened handle is still a regular file.
  */
 export function envFileDigest(path: string): EnvFileDigest {
   let stats: Stats | undefined;
@@ -146,7 +156,12 @@ function readableKind(stats: Stats | undefined): EnvFileDigest | undefined {
 }
 
 function contentDigest(descriptor: number): EnvFileDigest {
-  return { ok: true, digest: wholeDigest(readFileSync(descriptor)) };
+  const content = readFileSync(descriptor);
+  return {
+    ok: true,
+    digest: wholeDigest(content),
+    text: content.toString(ENV_FILE_ENCODING),
+  };
 }
 
 function refusal(error: unknown): EnvFileDigest {
