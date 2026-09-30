@@ -12,11 +12,11 @@ Order: 3.1 and 3.2 build in parallel, since 3.1 works in the daemon's query, pro
 
 ## Ticket 3.1: Defect definitions and gaps
 
-Scope: read the definition files `rt-test.json`'s `defects` member lists, validate each definition, resolve its test against the latest discovery and its anchor against the file as it is now, and answer `rt-test defects` with each definition's state (never verified, anchor missing, or invalid with its reason), the counts, and the tests no definition names as gaps, bounded like the other answers and without starting a test. Requirements: FR12, FR13, FR14, FR22, FR24.
+Scope: read the definition files `rt-test.json`'s `defects` member lists, validate each definition, resolve its test against the latest discovery and its anchor against the file as it is now, and answer `rt-test defects` with each definition's state (never verified, anchor missing, or invalid with its reason), the counts, and the tests no definition names as gaps, bounded like the other answers and without starting a test. Requirements: FR12, FR13, FR14, FR22, FR24. Ticket file: [3-1-defect-definitions](../tickets/3-1-defect-definitions.md)
 
 ## Ticket 3.2: Transform experiments in a reused instance
 
-Scope: a falsification job in the daemon's executor loads one Vitest instance for a workspace with RT Test's mutation plugin, runs the intended tests' modules as a baseline, each defect's experiment alone, and the restored baseline, behind the stale-transform guard; the plugin places a reach probe at each mutated site, or records that none can be placed, and a setup file RT Test places first marks each test that executed it; the job reads each run's facts only from the modules it executed and returns one raw record per experiment, on Vitest 4.1 and 5, leaving every consumer file byte-identical. Requirements: FR10, FR11, NFR6.
+Scope: a falsification job in the daemon's executor loads one Vitest instance for a workspace with RT Test's mutation plugin, runs the intended tests' modules as a baseline, each defect's experiment alone, and the restored baseline, behind the stale-transform guard; the plugin places a reach probe at each mutated site, or records that none can be placed, and a setup file RT Test places first marks each test that executed it; the job reads each run's facts only from the modules it executed and returns one raw record per experiment, on Vitest 4.1 and 5, leaving every consumer file byte-identical. Requirements: FR10, FR11, NFR6. Ticket file: [3-2-transform-experiments](../tickets/3-2-transform-experiments.md)
 
 ## Ticket 3.3: Verdicts from run facts
 
