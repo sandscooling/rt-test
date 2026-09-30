@@ -135,6 +135,20 @@ interface RigOptions {
   ) => RunResult;
   /** The paths the tracker recorded changing while each discovery ran, given its index from 0. */
   readonly discoveryChanged?: (call: number) => readonly string[];
+  /** What each discovery does beside the options above, given its index from 0; nothing more when absent. */
+  readonly discovered?: (call: number) => DiscoveryJob;
+}
+
+/** What one discovery job the test scripts does. */
+interface DiscoveryJob {
+  /** The paths the tracker recorded changing while it ran, in place of `discoveryChanged`. */
+  readonly changed?: readonly string[];
+  /** Whether the record it stored is not fingerprinted because an input or a listed file changed while it ran. */
+  readonly changedWhileRunning?: boolean;
+  /** Moves the input revision once the job has ended or did not begin, as a write while it ran does. */
+  readonly movesRevision?: boolean;
+  /** Runs once the job's end digests are taken, before `movesRevision`, as a change after the job does. */
+  readonly afterEnd?: () => void;
 }
 
 interface Rig {
@@ -193,21 +207,34 @@ function rig(options: RigOptions = {}): Rig {
       const call = discoveries;
       discoveries += 1;
       calls.push(`discover@${revision}`);
+      const job = options.discovered?.(call) ?? {};
       const startDigests = digests();
       await nextTurn();
       await options.discoveryHeld;
-      if (options.discoveryBegins?.(call) === false) return undefined;
+      if (options.discoveryBegins?.(call) === false) {
+        if (job.movesRevision === true) inputs.moveRevision();
+        return undefined;
+      }
       const stored = options.discoveryStored?.(call) ?? true;
+      const changedWhileRunning = stored && job.changedWhileRunning === true;
       if (stored) {
         store.writeDiscovery(
-          { ...SCOPE, inputFingerprint: digestOf(DISCOVERY_DIGEST) },
+          {
+            ...SCOPE,
+            inputFingerprint: changedWhileRunning
+              ? UNFINGERPRINTED
+              : digestOf(DISCOVERY_DIGEST),
+          },
           options.listed?.(call) ?? discovery(...paths.map(discovered)),
         );
       }
-      return {
-        stored,
-        window: windowOf(startDigests, options.discoveryChanged?.(call)),
-      };
+      const window = windowOf(
+        startDigests,
+        job.changed ?? options.discoveryChanged?.(call),
+      );
+      job.afterEnd?.();
+      if (job.movesRevision === true) inputs.moveRevision();
+      return { stored, changedWhileRunning, window };
     },
     run: async (
       entry,
@@ -1011,7 +1038,7 @@ describe("retrying at a periodic reconciliation", () => {
     expect(calls).toStrictEqual(["idle", "run:a@1", "run:a@2", "idle"]);
   });
 
-  it("D3184: a retried workspace the lifecycle refuses at its planned revision drops its retry, so it runs into no further refusal until the revision moves", async () => {
+  it("D3184: a retried workspace the lifecycle refuses at its planned revision drops its retry, so it is refused no more until the next periodic reconciliation re-arms it", async () => {
     const calls = await running(
       {
         seed: (store) => {
@@ -1683,6 +1710,12 @@ function scheduleOf(
     workspaces: results.discovery?.discovery.workspaces ?? [],
     latestRuns: new Map(
       results.latestRuns.map((run) => [run.run.workspace.path, run]),
+    ),
+    refusedRuns: new Map(
+      results.runRefusals.map((refusal) => [
+        refusal.workspacePath,
+        refusal.reason,
+      ]),
     ),
     fingerprint: (entry) => inputs.workspaceFingerprint(entry),
   });
@@ -2406,6 +2439,7 @@ function readAfter(
     confirmed: () => true,
     storedNothing: () => false,
     heldBy: () => undefined,
+    discoveryHeldBy: () => undefined,
   });
   schedule.planned(
     2,
@@ -2417,6 +2451,7 @@ function readAfter(
     activity: IDLE_ACTIVITY,
     workspaces: due.map(discovered),
     latestRuns: new Map(),
+    refusedRuns: new Map(),
     fingerprint: (entry) => ({
       ok: true,
       digest: `${entry.workspace.path}-digest`,
@@ -3005,6 +3040,11 @@ const REDISCOVERED: InputsScript = {
   discoveryFingerprintOf: () => ({ ok: true, digest: "moved" }),
 };
 
+/** The discovery's current fingerprint cannot be computed, so each input revision rediscovers and no count holds it. */
+const REDISCOVERED_UNCOUNTED: InputsScript = {
+  discoveryFingerprintOf: () => ({ ok: false, reason: WATCHER_FAILED }),
+};
+
 describe("holding a workspace whose runs keep changing its inputs", () => {
   it("D3138: a workspace is held once it became due 3 times in a row through its jobs' changes", () => {
     expect(SELF_CHANGE_HOLD_COUNT).toBe(3);
@@ -3129,7 +3169,7 @@ describe("holding a workspace whose runs keep changing its inputs", () => {
       options: {
         discoveryChanged: () => [FIXTURE],
         script: {
-          ...REDISCOVERED,
+          ...REDISCOVERED_UNCOUNTED,
           fingerprintOf: (path) => ({
             ok: true,
             digest: `${path}-digest-${moves.count}`,
@@ -3324,6 +3364,7 @@ function heldExecution(
     confirmed: () => true,
     storedNothing: () => false,
     heldBy: (path) => (path === "a" ? held : undefined),
+    discoveryHeldBy: () => undefined,
   });
   round(schedule);
   const stored: StoredRun = {
@@ -3338,6 +3379,7 @@ function heldExecution(
     activity: IDLE_ACTIVITY,
     workspaces: [discovered("a")],
     latestRuns: new Map([["a", stored]]),
+    refusedRuns: new Map(),
     fingerprint: () => ({ ok: true, digest: "a-digest" }),
   }).schedule.workspaces;
   return execution;
@@ -3423,7 +3465,7 @@ describe("the jobs a held workspace names", () => {
       options: {
         discoveryChanged: () => [FIXTURE],
         script: {
-          ...REDISCOVERED,
+          ...REDISCOVERED_UNCOUNTED,
           fingerprintOf: (path) => ({
             ok: true,
             digest: `${path}-digest-${moves.count}`,
@@ -3445,5 +3487,416 @@ describe("the jobs a held workspace names", () => {
       ],
       more: 0,
     });
+  });
+});
+
+/** A discovery that writes `paths` as it loads, moving the input revision, as a module that writes an input does. */
+function writesOnLoad(paths: readonly string[] = [FIXTURE]): DiscoveryJob {
+  return { changed: paths, movesRevision: true };
+}
+
+interface Rediscovering {
+  /** What each of the first `REWRITES` discoveries does; `writesOnLoad` when absent. Later ones change nothing. */
+  readonly discovered?: (call: number) => DiscoveryJob;
+  readonly options?: RigOptions;
+  readonly digests?: SteadyDigests;
+  /** Runs once the rounds have run out; the outcome is read once the rounds it starts have too. */
+  readonly afterRounds?: (started: Rig) => void;
+}
+
+interface Rediscovered {
+  readonly discoveries: readonly string[];
+  readonly runs: readonly string[];
+  readonly entries: readonly string[];
+  readonly schedule: ReturnType<ScheduleReader["read"]>["schedule"];
+}
+
+/**
+ * Workspace `a` over digests that hold still, whose discovery in effect never reads current, so each input revision is
+ * rediscovered, and whose first `REWRITES` discoveries each do what `discovered` gives them.
+ */
+function rediscovering(setup: Rediscovering = {}): Promise<Rediscovered> {
+  const digests = setup.digests ?? new SteadyDigests();
+  const job = setup.discovered ?? (() => writesOnLoad());
+  const options = setup.options ?? {};
+  return running(
+    {
+      ...options,
+      script: { ...REDISCOVERED, ...digests.script, ...options.script },
+      discovered: (call) => (call < REWRITES ? job(call) : {}),
+    },
+    async (started) => {
+      await untilQuiet(started);
+      setup.afterRounds?.(started);
+      await untilQuiet(started);
+      return {
+        discoveries: discoveriesIn(started.calls),
+        runs: runsIn(started.calls),
+        entries: [...started.log.entries],
+        schedule: scheduleOf(started).schedule,
+      };
+    },
+  );
+}
+
+/** An edit to `a`'s source between jobs, which moves the input revision. */
+function editedSource(digests: SteadyDigests): (started: Rig) => void {
+  return (started) => {
+    digests.edit(SOURCE);
+    started.inputs.moveRevision();
+  };
+}
+
+/** The held discovery's paths as every answer names them: the one path each discovery wrote, during the discovery. */
+const HELD_BY_THE_DISCOVERY = {
+  named: [{ path: FIXTURE, jobs: { named: [{}], more: 0 } }],
+  more: 0,
+};
+
+describe("holding a discovery whose own jobs keep changing its inputs", () => {
+  it("D3296: a discovery each of whose loads writes the same input is discovered three times and no more", async () => {
+    expect((await rediscovering()).discoveries).toStrictEqual([
+      "discover@1",
+      "discover@2",
+      "discover@3",
+    ]);
+  });
+
+  it("D3297: while the discovery is held, the workspaces are run from the discovery in effect", async () => {
+    expect((await rediscovering()).runs).toStrictEqual(["run:a@4"]);
+  });
+
+  it("D3298: the log says once, as the hold begins, that the discovery is held, naming the path and the discovery as the job", async () => {
+    const { entries } = await rediscovering();
+    expect(
+      entries
+        .filter((entry) => entry.startsWith("held: the discovery "))
+        .map((entry) => ({
+          path: entry.includes(FIXTURE),
+          job: entry.includes("during the discovery"),
+        })),
+    ).toStrictEqual([{ path: true, job: true }]);
+  });
+
+  it("D3299: every answer's schedule names the held discovery's path and the discovery as the job that changed it", async () => {
+    expect(
+      (await rediscovering()).schedule.selfChangingDiscovery,
+    ).toStrictEqual(HELD_BY_THE_DISCOVERY);
+  });
+
+  it("D3300: an edit between jobs releases a held discovery, which is discovered again once", async () => {
+    const digests = new SteadyDigests();
+    const { discoveries } = await rediscovering({
+      digests,
+      discovered: (call) => (call < 3 ? writesOnLoad() : {}),
+      afterRounds: editedSource(digests),
+    });
+    expect(discoveries).toStrictEqual([
+      "discover@1",
+      "discover@2",
+      "discover@3",
+      "discover@5",
+    ]);
+  });
+
+  it("D3301: a released discovery whose one rediscovery writes a path its hold named is held again, costing one discovery", async () => {
+    const digests = new SteadyDigests();
+    const { discoveries } = await rediscovering({
+      digests,
+      afterRounds: editedSource(digests),
+    });
+    expect(discoveries).toStrictEqual([
+      "discover@1",
+      "discover@2",
+      "discover@3",
+      "discover@5",
+    ]);
+  });
+
+  it("D3302: the log says once that an edit released the held discovery", async () => {
+    const digests = new SteadyDigests();
+    const { entries } = await rediscovering({
+      digests,
+      afterRounds: editedSource(digests),
+    });
+    expect(
+      entries.filter((entry) =>
+        entry.startsWith("the discovery is no longer held"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("D3303: an edit between two discoveries starts the discovery's count again from 0", async () => {
+    const digests = new SteadyDigests();
+    const { discoveries } = await rediscovering({
+      digests,
+      discovered: (call) =>
+        call === 1
+          ? { ...writesOnLoad(), afterEnd: () => digests.edit(SOURCE) }
+          : writesOnLoad(),
+    });
+    expect(discoveries).toHaveLength(5);
+  });
+
+  it("D3304: a cause naming no path recorded while a run ran releases a held discovery", async () => {
+    const { discoveries } = await rediscovering({
+      options: {
+        ran: (_path, call) => (call === 0 ? { causes: [WATCHER_FAILED] } : {}),
+      },
+    });
+    expect(discoveries).toStrictEqual([
+      "discover@1",
+      "discover@2",
+      "discover@3",
+      "discover@4",
+    ]);
+  });
+
+  it("D3305: a discovery that shares no written path with the one before it starts the count again at 1", async () => {
+    const { discoveries } = await rediscovering({
+      discovered: (call) => writesOnLoad(call === 0 ? [OTHER] : [FIXTURE]),
+    });
+    expect(discoveries).toHaveLength(4);
+  });
+
+  it("D3306: a discovery that stored nothing sets the count to 0", async () => {
+    const { discoveries } = await rediscovering({
+      options: { discoveryStored: (call) => call !== 1 },
+    });
+    expect(discoveries).toHaveLength(5);
+  });
+
+  it("D3307: a discovery that never began leaves the one before it as the last begun, so the count follows that one", async () => {
+    const { discoveries } = await rediscovering({
+      options: { discoveryBegins: (call) => call !== 1 },
+    });
+    expect(discoveries).toHaveLength(4);
+  });
+
+  it("D3308: a discovery whose current fingerprint cannot be computed is never counted", async () => {
+    const { discoveries } = await rediscovering({
+      options: { script: REDISCOVERED_UNCOUNTED },
+    });
+    expect(discoveries).toHaveLength(NEVER_HELD_RUNS);
+  });
+
+  it("D3309: a periodic reconciliation retries no held discovery, though it lists a failed workspace", async () => {
+    const { entries } = await rediscovering({
+      options: {
+        listed: () =>
+          discovery(discovered("a"), {
+            status: "failed",
+            workspace: workspace("b"),
+            vitestVersion: "5.0.1",
+            error: "Error: config boom",
+          }),
+      },
+      afterRounds: (started) => started.inputs.endPeriodicReconciliation(),
+    });
+    expect(
+      entries.filter((entry) =>
+        entry.startsWith("periodic reconciliation ended"),
+      ),
+    ).toStrictEqual([]);
+  });
+});
+
+/** A discovery stored not fingerprinted because an input changed while it ran, at a revision the change did not move. */
+const CHANGED_AT_UNMOVED: DiscoveryJob = { changedWhileRunning: true };
+
+/** Over a faked clock, runs `body` once the first discovery's rounds have run out, each of the first `changed` discoveries stored as `CHANGED_AT_UNMOVED`. */
+function onceMore<T>(
+  changed: number,
+  body: (started: Rig) => Promise<T>,
+): Promise<T> {
+  fakeClock();
+  return running(
+    { discovered: (call) => (call < changed ? CHANGED_AT_UNMOVED : {}) },
+    async (started) => {
+      await flush();
+      return body(started);
+    },
+  );
+}
+
+/** Moves the faked clock by `ms`, then lets the rounds it starts run out. */
+async function after(ms: number): Promise<void> {
+  vi.advanceTimersByTime(ms);
+  await flush();
+}
+
+describe("discovering once more at an unmoved revision", () => {
+  it("D3310: a discovery stored not fingerprinted because an input changed while it ran, at a revision the change did not move, is discovered once more at that revision", async () => {
+    const discoveries = await onceMore(1, async (started) => {
+      await after(10_000);
+      return discoveriesIn(started.calls);
+    });
+    expect(discoveries).toStrictEqual(["discover@1", "discover@1"]);
+  });
+
+  it("D3311: the once-more discovery begins 2000 ms after the first ended, not 1999 ms", async () => {
+    const discoveries = await onceMore(1, async (started) => {
+      await after(1999);
+      const early = discoveriesIn(started.calls);
+      await after(1);
+      return { early, due: discoveriesIn(started.calls) };
+    });
+    expect(discoveries).toStrictEqual({
+      early: ["discover@1"],
+      due: ["discover@1", "discover@1"],
+    });
+  });
+
+  it("D3312: the log says the discovery is discovered once more at that revision", async () => {
+    const entries = await onceMore(1, async (started) => {
+      await after(10_000);
+      return started.log.entries;
+    });
+    expect(
+      entries.filter((entry) =>
+        entry.includes("so it is discovered once more at that revision"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("D3313: a once-more discovery stored not fingerprinted the same way begins no further discovery at that revision", async () => {
+    const discoveries = await onceMore(2, async (started) => {
+      for (let wait = 0; wait < 5; wait += 1) await after(2000);
+      return discoveriesIn(started.calls);
+    });
+    expect(discoveries).toStrictEqual(["discover@1", "discover@1"]);
+  });
+
+  it("D3314: the log says no discovery begins at that revision again once the once-more discovery failed the same way", async () => {
+    const entries = await onceMore(2, async (started) => {
+      await after(10_000);
+      return started.log.entries;
+    });
+    expect(
+      entries.filter((entry) =>
+        entry.includes("no discovery begins at that revision again"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("D3315: a change that moves the revision during the once-more wait starts the wait again, so the next discovery begins 2000 ms after that change", async () => {
+    const discoveries = await onceMore(1, async (started) => {
+      await after(1000);
+      started.inputs.moveRevision();
+      await flush();
+      await after(1999);
+      const early = discoveriesIn(started.calls);
+      await after(1);
+      return { early, due: discoveriesIn(started.calls) };
+    });
+    expect(discoveries).toStrictEqual({
+      early: ["discover@1"],
+      due: ["discover@1", "discover@2"],
+    });
+  });
+});
+
+const HELD_BY_DISCOVERY: JobsByPath = new Map([
+  [FIXTURE, new Set([undefined])],
+]);
+
+/** The schedule an answer reads while the discovery is held by `HELD_BY_DISCOVERY`, once `round` has set the round. */
+function scheduleWhileHeld(
+  round: (schedule: WorkspaceSchedule) => void,
+): ReturnType<ScheduleReader["read"]>["schedule"] {
+  const schedule = new WorkspaceSchedule({
+    confirmed: () => true,
+    storedNothing: () => false,
+    heldBy: () => undefined,
+    discoveryHeldBy: () => HELD_BY_DISCOVERY,
+  });
+  round(schedule);
+  return schedule.read({
+    revision: 2,
+    activity: IDLE_ACTIVITY,
+    workspaces: [],
+    latestRuns: new Map(),
+    refusedRuns: new Map(),
+    fingerprint: () => ({ ok: true, digest: "a-digest" }),
+  }).schedule;
+}
+
+describe("the answer for a held discovery", () => {
+  it("D3316: while the discovery is held and the round is planned, the schedule names its paths and the discovery as the job", () => {
+    expect(scheduleWhileHeld(plannedAt2).selfChangingDiscovery).toStrictEqual(
+      HELD_BY_THE_DISCOVERY,
+    );
+  });
+
+  it("D3317: while a round is pending, the schedule says nothing of a held discovery", () => {
+    expect("selfChangingDiscovery" in scheduleWhileHeld(() => undefined)).toBe(
+      false,
+    );
+  });
+
+  it("D3318: while the round is held after a failed step, the schedule still names the held discovery", () => {
+    expect(
+      scheduleWhileHeld((schedule) => schedule.held("boom"))
+        .selfChangingDiscovery,
+    ).toStrictEqual(HELD_BY_THE_DISCOVERY);
+  });
+});
+
+const REFUSED_REASON = "a stored row could not be read";
+
+/** A current discovery of `a` whose latest stored run the store refuses as unreadable. */
+function refusedRunOfA(store: RecordingStore): void {
+  store.seedDiscovery(discovery(discovered("a")), digestOf(DISCOVERY_DIGEST));
+  store.seedRun(ranWorkspace("a"), digestOf("a-digest"));
+  store.refuseLatestRun("a", REFUSED_REASON);
+}
+
+/** Why idle workspace `a`, with no latest run and a planned round, is due, when `refusedRuns` holds the refusals. */
+function dueOfIdleA(refusedRuns: ReadonlyMap<string, string>): unknown {
+  const schedule = new WorkspaceSchedule({
+    confirmed: () => true,
+    storedNothing: () => false,
+    heldBy: () => undefined,
+    discoveryHeldBy: () => undefined,
+  });
+  plannedAt2(schedule);
+  const [execution] = schedule.read({
+    revision: 2,
+    activity: IDLE_ACTIVITY,
+    workspaces: [discovered("a")],
+    latestRuns: new Map(),
+    refusedRuns,
+    fingerprint: () => ({ ok: true, digest: "a-digest" }),
+  }).schedule.workspaces;
+  return execution?.state === "idle" ? execution.notRunning?.due : execution;
+}
+
+describe("the due reason of a workspace whose latest stored run was refused", () => {
+  it("D3319: the log's due line says the workspace's latest stored run was refused as unreadable", async () => {
+    const due = await running({ seed: refusedRunOfA }, async (started) => {
+      await flush();
+      return dueEntries(started.log);
+    });
+    expect(due).toStrictEqual([
+      "due: a, its latest stored run was refused as unreadable",
+    ]);
+  });
+
+  it("D3320: a workspace whose latest stored run was refused runs once, as one with no run stored does", async () => {
+    const calls = await running({ seed: refusedRunOfA }, async (started) => {
+      await flush();
+      return [...started.calls];
+    });
+    expect(calls).toStrictEqual(["run:a@1", "idle"]);
+  });
+
+  it("D3321: an idle workspace whose latest stored run was refused is due for the reason run-refused", () => {
+    expect(dueOfIdleA(new Map([["a", REFUSED_REASON]]))).toStrictEqual({
+      kind: "run-refused",
+    });
+  });
+
+  it("D3323: an idle workspace with no run stored and none refused is due for the reason no-run", () => {
+    expect(dueOfIdleA(new Map())).toStrictEqual({ kind: "no-run" });
   });
 });

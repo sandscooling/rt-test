@@ -187,6 +187,7 @@ export const SOURCE_NOT_READ = "source-not-read";
 /** Why the scheduler finds a workspace due: its latest run is not bound to its current fingerprint, or it is retried. */
 export const DUE_REASON = {
   noRun: "no-run",
+  runRefused: "run-refused",
   anotherAdapterVersion: "another-adapter-version",
   notFingerprinted: "not-fingerprinted",
   noCurrentFingerprint: "no-current-fingerprint",
@@ -345,7 +346,7 @@ export type NotSelfChangingReason = Exclude<
   typeof IDLE_REASON.selfChanging
 >;
 
-/** A path the daemon's own runs and discoveries changed each time a held workspace became due. */
+/** A path the daemon's own runs and discoveries changed each time a held workspace or the held discovery became due. */
 export interface SelfChangedPath {
   readonly path: string;
   /** Each job it changed during: the run of a workspace, or the discovery, which names none. */
@@ -392,6 +393,11 @@ export interface ScheduleFacts {
   readonly round: RoundFacts;
   /** Each confirmed workspace the discovery in effect lists. */
   readonly workspaces: readonly WorkspaceExecution[];
+  /**
+   * Present while the discovery is held and no round is pending: the paths that changed each time it became due. No
+   * rediscovery begins until an edit or a change the daemon cannot attribute, which changes no freshness or count.
+   */
+  readonly selfChangingDiscovery?: NamedList<SelfChangedPath>;
 }
 
 type ExplainedNotRunnable = Omit<NotRunnableWorkspace, "reason"> & CutReason;

@@ -20,6 +20,11 @@ import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
+  DiscoveryHistory,
+  type DiscoverReport,
+  type DiscoveryInEffect,
+} from "./discovery-history.js";
+import {
   DUE_REASON_TEXT,
   GROUP_REASON,
   orderQueue,
@@ -57,12 +62,6 @@ const NO_SNAPSHOT_REASON = "the inputs' digests cannot be read now";
 const NO_SNAPSHOT_ENTRY = `warning: no selection was made, because ${NO_SNAPSHOT_REASON}, ${NO_SELECTION_CONSEQUENCE}`;
 const FIRST_ROUND_REASON = "no previous round read the inputs to compare with";
 const FIRST_ROUND_ENTRY = `round without a selection: ${FIRST_ROUND_REASON}`;
-
-/** What a discovery job left. */
-export interface DiscoverReport extends Pick<HistoryReport, "window"> {
-  /** Whether a discovery record was stored. */
-  readonly stored: boolean;
-}
 
 /** What a run job left: with the stored run's id, its verdict when stored not fingerprinted, and what interrupted it. */
 export interface RunReport extends EndedRun, HistoryReport {}
@@ -102,6 +101,8 @@ export interface SchedulerParts {
 interface EligibleWorkspace {
   readonly entry: WorkspaceDiscovery;
   readonly latest: StoredRun | undefined;
+  /** Whether the run stored last was refused as unreadable, which leaves no latest run. */
+  readonly refused: boolean;
 }
 
 interface DueWorkspace extends EligibleWorkspace {
@@ -109,7 +110,9 @@ interface DueWorkspace extends EligibleWorkspace {
 }
 
 type Step =
-  | { readonly kind: "discover"; readonly retry: boolean }
+  | { readonly kind: "discover" }
+  /** A once-more discovery waits out the end check's modification-time tolerance, or the next change of the inputs. */
+  | { readonly kind: "wait"; readonly ms: number }
   | { readonly kind: "run"; readonly queued: QueuedWorkspace }
   | { readonly kind: "idle" }
   /** The inputs moved after the wait ended, so the waits begin again. */
@@ -133,14 +136,12 @@ export class Scheduler {
   /** The inputs the latest round that made or tried a selection read. */
   #snapshot: InputDigests | undefined;
   #directTargets: ReadonlySet<string> = new Set();
-  #discoveryTriedAt: number | undefined;
-  #discoveryNothingStored = false;
   readonly #runs: RunHistory;
+  readonly #discoveries: DiscoveryHistory;
   /** By workspace, the revision and list of test modules its due entry was last logged for. */
   readonly #announced = new Map<string, string>();
   #periodicSeen = 0;
   #periodicOwed = false;
-  #retryDiscovery = false;
   readonly #retryWorkspaces = new Set<string>();
   /** Whether a round has done or found work since the last idle entry. */
   #dirty = true;
@@ -152,10 +153,17 @@ export class Scheduler {
       log: parts.log,
       revision: () => this.#revision(),
     });
+    this.#discoveries = new DiscoveryHistory({
+      log: parts.log,
+      revision: () => this.#revision(),
+      changedAt: () => this.#windowStart,
+      changes: this.#runs,
+    });
     this.#schedule = new WorkspaceSchedule({
       confirmed: (entry) => this.#confirmed(entry),
       storedNothing: (path) => this.#runs.storedNothing(path),
       heldBy: (path) => this.#runs.heldBy(path),
+      discoveryHeldBy: () => this.#discoveries.heldBy(),
     });
   }
 
@@ -190,7 +198,11 @@ export class Scheduler {
     if (revision === undefined) return false;
     const next = this.#plan(revision);
     if (next.kind === "discover") {
-      await this.#discover(revision, next.retry);
+      await this.#discover(revision);
+      return true;
+    }
+    if (next.kind === "wait") {
+      await this.#untilChangeOrStop(next.ms);
       return true;
     }
     if (next.kind === "run") {
@@ -267,15 +279,16 @@ export class Scheduler {
     if (view.inputs.facts.revision !== revision) return { kind: "again" };
     this.#noteRevision(revision);
     this.#runs.observed(view.inputs.snapshot?.comparedDigests);
+    const inEffect = discoveryInEffect(view);
+    this.#discoveries.decide(inEffect);
     const eligible = this.#eligible(view);
     this.#armRetries(view, eligible, revision);
-    if (this.#discoveryDue(revision, view)) {
-      const retry = this.#retryDiscovery;
-      this.#discoveryTriedAt = revision;
-      this.#retryDiscovery = false;
-      this.#dirty = true;
+    const wait = this.#discoveries.due(revision, inEffect);
+    if (wait !== undefined) {
       this.#schedule.pending(ROUND_WAIT.rediscovery);
-      return { kind: "discover", retry };
+      if (wait > 0) return { kind: "wait", ms: wait };
+      this.#dirty = true;
+      return { kind: "discover" };
     }
     const due = this.#due(revision, view, eligible);
     this.#explain(revision, view, eligible, due);
@@ -313,51 +326,46 @@ export class Scheduler {
     }
     if (!this.#periodicOwed) return;
     this.#periodicOwed = false;
-    const stored = view.results.discovery;
-    this.#retryDiscovery =
-      this.#discoveryNothingStored ||
-      stored?.discovery.workspaces.some(
+    const retryDiscovery = this.#discoveries.armRetry(
+      view.results.discovery?.discovery.workspaces.some(
         (entry) => entry.status === "failed",
-      ) === true;
+      ) === true,
+    );
     this.#retryWorkspaces.clear();
-    for (const { entry, latest } of eligible) {
+    for (const { entry, latest, refused } of eligible) {
       const path = entry.workspace.path;
       if (this.#runs.isHeld(path)) continue;
       const stale = staleReason(
         latest,
         fingerprintDigest(view.inputs.workspaceFingerprint(entry)),
+        refused,
       );
       if (retryOwed(latest, stale, this.#runs.storedNothing(path))) {
         this.#retryWorkspaces.add(path);
       }
     }
-    if (!this.#retryDiscovery && this.#retryWorkspaces.size === 0) return;
+    if (!retryDiscovery && this.#retryWorkspaces.size === 0) return;
     this.#dirty = true;
     this.#parts.log.entry(
-      `periodic reconciliation ended at input revision ${revision}: retrying ${this.#retryDiscovery ? "the discovery and " : ""}${this.#retryWorkspaces.size} workspaces`,
+      `periodic reconciliation ended at input revision ${revision}: retrying ${retryDiscovery ? "the discovery and " : ""}${this.#retryWorkspaces.size} workspaces`,
     );
-  }
-
-  /** The discovery in effect is not current at this settled revision, or its retry is owed. */
-  #discoveryDue(revision: number, view: ScheduleView): boolean {
-    if (this.#retryDiscovery) return true;
-    if (this.#discoveryTriedAt === revision) return false;
-    const stored = view.results.discovery;
-    if (stored === undefined) return true;
-    const current = fingerprintDigest(
-      view.inputs.discoveryFingerprint(stored.discovery),
-    );
-    return recordFreshness(stored, current) !== CURRENT;
   }
 
   #eligible(view: ScheduleView): EligibleWorkspace[] {
     const runs = new Map(
       view.results.latestRuns.map((run) => [run.run.workspace.path, run]),
     );
+    const refused = new Set(
+      view.results.runRefusals.map((refusal) => refusal.workspacePath),
+    );
     const workspaces = view.results.discovery?.discovery.workspaces ?? [];
     return workspaces
       .filter((entry) => this.#confirmed(entry))
-      .map((entry) => ({ entry, latest: runs.get(entry.workspace.path) }));
+      .map((entry) => ({
+        entry,
+        latest: runs.get(entry.workspace.path),
+        refused: refused.has(entry.workspace.path),
+      }));
   }
 
   /** The discovery lists the workspace confirmed and the confirmed start holds it, so it can run. */
@@ -379,11 +387,11 @@ export class Scheduler {
   ): DueWorkspace[] {
     const placement = roundPlacement(view.inputs, this.#parts.narrowing());
     const due: DueWorkspace[] = [];
-    for (const { entry, latest } of eligible) {
+    for (const { entry, latest, refused } of eligible) {
       const path = entry.workspace.path;
       const retry = this.#retryWorkspaces.has(path);
       const print = view.inputs.workspaceFingerprint(entry);
-      const stale = staleReason(latest, fingerprintDigest(print));
+      const stale = staleReason(latest, fingerprintDigest(print), refused);
       const reason = stale ?? (retry ? retryReason(latest) : undefined);
       if (reason === undefined) continue;
       const retryOnly = stale === undefined;
@@ -393,7 +401,7 @@ export class Scheduler {
         continue;
       }
       if (!retry && this.#runs.ranAlready(path, revision, entry)) continue;
-      due.push({ entry, latest, reason });
+      due.push({ entry, latest, refused, reason });
     }
     return due;
   }
@@ -464,22 +472,22 @@ export class Scheduler {
     return selection;
   }
 
-  /** A discovery that did not begin keeps its retry; one that throws counts as having stored nothing. */
-  async #discover(revision: number, retry: boolean): Promise<void> {
+  /** A discovery that did not begin leaves the record as it was, its retry kept; one that throws counts as having stored nothing. */
+  async #discover(revision: number): Promise<void> {
     this.#dirty = true;
-    const before = this.#discoveryNothingStored;
-    this.#discoveryNothingStored = true;
-    const report = await this.#schedule.during(
-      this.#parts.discover(revision),
-      revision,
-    );
-    if (report !== undefined) {
-      this.#discoveryNothingStored = !report.stored;
-      this.#runs.discoveryEnded(report.window);
-      return;
+    const begun = this.#discoveries.began(revision);
+    let report: DiscoverReport | undefined;
+    try {
+      report = await this.#schedule.during(
+        this.#parts.discover(revision),
+        revision,
+      );
+    } catch (error) {
+      begun.threw();
+      throw error;
     }
-    this.#discoveryNothingStored = before;
-    this.#retryDiscovery ||= retry;
+    if (report === undefined) begun.notBegun();
+    else begun.ended(report);
   }
 
   async #run(queued: QueuedWorkspace, revision: number): Promise<void> {
@@ -496,7 +504,8 @@ export class Scheduler {
     if (report === undefined) {
       const refusedAtPlan =
         !this.#isStopping() && this.#revision() === revision;
-      // A refused workspace keeps its attempt and drops its retry, so it waits for the revision to move.
+      // Defensive: the lifecycle refuses only what its start does not confirm, which #eligible leaves out. A refused
+      // workspace keeps its attempt as having stored nothing, so each periodic reconciliation re-arms its retry.
       if (refusedAtPlan) return;
       begun.notBegun();
       if (retried) this.#retryWorkspaces.add(path);
@@ -544,4 +553,15 @@ export class Scheduler {
     }
     return false;
   }
+}
+
+/** Undefined when no discovery is in effect: none is stored, or the latest was refused. */
+function discoveryInEffect(view: ScheduleView): DiscoveryInEffect | undefined {
+  const stored = view.results.discovery;
+  if (stored === undefined) return undefined;
+  const print = view.inputs.discoveryFingerprint(stored.discovery);
+  return {
+    current: recordFreshness(stored, fingerprintDigest(print)) === CURRENT,
+    fingerprinted: print.ok,
+  };
 }

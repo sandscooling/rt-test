@@ -8,10 +8,13 @@ import { changedPaths } from "./round-selection.js";
  */
 export const MAX_COUNTED_CHANGES = 1_000;
 
-/** By changed path, the workspace path of each job that changed it; undefined names the discovery. */
-export type JobsByPath = ReadonlyMap<string, ReadonlySet<string | undefined>>;
+/** A job, and the subject whose changes start afresh with it: a run by its workspace path, or the discovery. */
+export type Job = string | undefined;
 
-/** What changed since one subject's last run began, not yet placed in its inputs. */
+/** By changed path, each job that changed it. */
+export type JobsByPath = ReadonlyMap<string, ReadonlySet<Job>>;
+
+/** What changed since one subject's last job began, not yet placed in its inputs. */
 export interface SubjectChanges {
   /** Each path a run or discovery changed while it ran. */
   readonly byJobs: JobsByPath;
@@ -22,12 +25,12 @@ export interface SubjectChanges {
 }
 
 class ChangeSets implements SubjectChanges {
-  readonly byJobs = new Map<string, Set<string | undefined>>();
+  readonly byJobs = new Map<string, Set<Job>>();
   readonly edits = new Set<string>();
   everywhere = false;
   #distinct = 0;
 
-  addJob(paths: readonly string[], job: string | undefined): void {
+  addJob(paths: readonly string[], job: Job): void {
     for (const path of paths) {
       const jobs = this.byJobs.get(path);
       if (jobs !== undefined) jobs.add(job);
@@ -62,16 +65,16 @@ class ChangeSets implements SubjectChanges {
 
 /**
  * Tells each change to an input apart as one a run or discovery made while it ran, or an edit between jobs, and keeps
- * both per subject since that subject's last run began. Every job must be reported in the order the jobs ran, one at
+ * both per subject since that subject's last job began. Every job must be reported in the order the jobs ran, one at
  * a time; a job that threw is never reported, so its changes reach the next interval as edits.
  */
 export class ChangeRecord {
-  readonly #subjects = new Map<string, ChangeSets>();
+  readonly #subjects = new Map<Job, ChangeSets>();
   /** The committed digests at the end of the latest job or reading; undefined when they could not be read. */
   #last: InputDigests | undefined;
 
-  /** What changed for `subject` since its last run began; undefined when none has begun. */
-  of(subject: string): SubjectChanges | undefined {
+  /** What changed for `subject` since its last job began; undefined when none has begun. */
+  of(subject: Job): SubjectChanges | undefined {
     return this.#subjects.get(subject);
   }
 
@@ -81,14 +84,10 @@ export class ChangeRecord {
     this.#last = digests;
   }
 
-  /** A job that began and ended; `begins` names the subject whose run it was, whose changes start afresh with it. */
-  jobEnded(
-    window: JobWindow,
-    job: string | undefined,
-    begins: string | undefined,
-  ): void {
+  /** A job that began and ended, whose own subject's changes start afresh with it. */
+  jobEnded(window: JobWindow, job: Job): void {
     this.#interval(window.startDigests);
-    if (begins !== undefined) this.begun(begins);
+    this.begun(job);
     if (window.causes.size > 0 || window.paths.size > MAX_COUNTED_CHANGES) {
       this.#everywhere();
     } else {
@@ -98,8 +97,8 @@ export class ChangeRecord {
     this.#last = window.endDigests;
   }
 
-  /** The subject's run began, so only what changes from now on is its own. */
-  begun(subject: string): void {
+  /** The subject's job began, so only what changes from now on is its own. */
+  begun(subject: Job): void {
     this.#subjects.set(subject, new ChangeSets());
   }
 
