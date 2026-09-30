@@ -15,6 +15,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
 import {
   crashError,
   listedModules,
@@ -45,7 +46,15 @@ import {
   EXECUTOR_BOUND_MS,
   type ExecutorRequest,
 } from "../src/daemon/executor-jobs.js";
+import { DaemonConnection } from "../src/daemon/daemon-connection.js";
 import { PROTOCOL_VERSION, RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
+import {
+  ERROR_TYPE,
+  PATH_STATUS_TYPE,
+  STOPPING_CODE,
+  SUMMARY_TYPE,
+  type ProtocolMessage,
+} from "../src/daemon/protocol.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
 import {
@@ -141,6 +150,51 @@ function keyFileOf(identity: DaemonIdentity): string {
 /** The lock the daemon holds on its worktree's store, `daemon-<worktree hash>.lock` in the state directory. */
 function storeLockOf(stateDirectory: string, worktreeIdentity: string): string {
   return join(stateDirectory, `daemon-${identityHash(worktreeIdentity)}.lock`);
+}
+
+/** Preloaded, it makes every watch the daemon opens report nothing, so an edit reaches it only through its own reads. */
+const SILENT_WATCH = join(FIXTURES, "silent-watch.mjs");
+
+/** How many tests at the absolute `path` a status reads current, or why it had no answer. */
+async function currentTestsAt(
+  root: string,
+  path: string,
+): Promise<number | { thrown: string }> {
+  const answer = await settled(queryPathStatus(root, path));
+  return "thrown" in answer ? answer : answer.counts.freshness.current;
+}
+
+/**
+ * The bound each summary or path-status request `ask` sends is given, answered by a keyed stand-in as a stopping
+ * daemon; undefined for one given none, which waits the connection's default.
+ */
+function queryBounds(
+  ask: (root: string) => Promise<unknown>,
+): Promise<(number | undefined)[]> {
+  return inTempDir(async (root) => {
+    const daemon = answerAs(exitedPid(), "key");
+    const sent = vi.spyOn(DaemonConnection.prototype, "request");
+    try {
+      await withKeyedStandIn(
+        root,
+        (context) => (request, standIn, connectionClosed) =>
+          request["type"] === SUMMARY_TYPE ||
+          request["type"] === PATH_STATUS_TYPE
+            ? {
+                type: ERROR_TYPE,
+                code: STOPPING_CODE,
+                message: "the daemon is stopping",
+              }
+            : daemon(context)(request, standIn, connectionClosed),
+        () => settled(ask(root)),
+      );
+      return sent.mock.calls
+        .filter(([request]) => (request as ProtocolMessage)["type"] !== "hello")
+        .map(([, bound]) => bound);
+    } finally {
+      sent.mockRestore();
+    }
+  });
 }
 
 /** The id of a process that has already exited, which no running process holds. */
@@ -1537,6 +1591,47 @@ describe("a query to the worktree's daemon", () => {
       expect(outcome.summary).toStrictEqual({
         thrown: expect.stringContaining(outcome.root),
       });
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3379: a status naming a test file saved before the watcher reports the save never reads it current from its pre-edit result",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await withPreload(SILENT_WATCH, () =>
+          started(root, pids, confirmEvery(root)),
+        );
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        const file = join(root, WORKSPACE_B, "passes.test.mjs");
+        const before = await currentTestsAt(root, file);
+        appendFileSync(file, "// an edit\n");
+        return { idle, before, after: await currentTestsAt(root, file) };
+      });
+      expect(outcome).toStrictEqual({ idle: true, before: 1, after: 0 });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3380: a path status waits up to 60000 ms for its answer",
+    async () => {
+      expect(
+        await queryBounds((root) => queryPathStatus(root, join(root, "a"))),
+      ).toStrictEqual([60_000]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3381: a summary waits for its answer up to the connection's default bound",
+    async () => {
+      expect(await queryBounds((root) => querySummary(root))).toStrictEqual([
+        undefined,
+      ]);
     },
     KEY_TEST_TIMEOUT_MS,
   );

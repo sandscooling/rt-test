@@ -108,6 +108,14 @@ export function namedList(descriptions: readonly string[]): string {
   return rest > 0 ? `${named} and ${rest} more` : named;
 }
 
+/** A wait for the events accepted before it to be read. */
+interface LedgerWait {
+  readonly through: number;
+  /** Whether a reconciliation running ends the wait, rather than holding it until the reconciliation ends. */
+  readonly endsAtReconciliation: boolean;
+  readonly resolve: () => void;
+}
+
 /**
  * Counts the events accepted and read, so a job ending waits only for the events seen before its end, never for a
  * stream that keeps arriving after it.
@@ -116,9 +124,12 @@ export class EventLedger {
   readonly #reconciling: () => boolean;
   #accepted = 0;
   #readThrough = 0;
-  #waiters: { readonly through: number; readonly resolve: () => void }[] = [];
+  #waiters: LedgerWait[] = [];
 
-  /** `reconciling` says whether a reconciliation runs, which every wait also waits out. */
+  /**
+   * `reconciling` says whether a reconciliation runs, which a wait for the read waits out and a wait for the read or a
+   * reconciliation ends at.
+   */
   constructor(reconciling: () => boolean) {
     this.#reconciling = reconciling;
   }
@@ -127,8 +138,8 @@ export class EventLedger {
     return this.#accepted;
   }
 
-  accept(): void {
-    this.#accepted += 1;
+  accept(count = 1): void {
+    this.#accepted += count;
   }
 
   /** Records that every event accepted up to `through` has been read. */
@@ -139,19 +150,37 @@ export class EventLedger {
 
   /** Resolves once the events accepted by now are read and no reconciliation runs. */
   waitForRead(): Promise<void> {
-    const through = this.#accepted;
-    if (this.#hasRead(through)) return Promise.resolve();
-    return new Promise((resolve) => this.#waiters.push({ through, resolve }));
+    return this.#wait(false);
   }
 
-  /** Releases each wait that can end now. */
+  /** Resolves once the events accepted by now are read, or at once while a reconciliation runs or once one begins. */
+  waitForReadOrReconciliation(): Promise<void> {
+    return this.#wait(true);
+  }
+
+  /** Releases each wait that can end now; called after each read, and as a reconciliation begins and as one ends. */
   notify(): void {
     const waiting = this.#waiters;
     this.#waiters = [];
     for (const waiter of waiting) {
-      if (this.#hasRead(waiter.through)) waiter.resolve();
+      if (this.#canEnd(waiter)) waiter.resolve();
       else this.#waiters.push(waiter);
     }
+  }
+
+  #wait(endsAtReconciliation: boolean): Promise<void> {
+    const through = this.#accepted;
+    if (this.#canEnd({ through, endsAtReconciliation })) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) =>
+      this.#waiters.push({ through, endsAtReconciliation, resolve }),
+    );
+  }
+
+  #canEnd(wait: Omit<LedgerWait, "resolve">): boolean {
+    if (wait.endsAtReconciliation && this.#reconciling()) return true;
+    return this.#hasRead(wait.through);
   }
 
   #hasRead(through: number): boolean {

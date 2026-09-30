@@ -16,6 +16,7 @@ import type {
   TrackedInputs,
 } from "../src/inputs/input-tracker.js";
 import type { QueryNarrowing } from "../src/inputs/narrowed-inputs.js";
+import type { UnreadPath } from "../src/inputs/queued-reads.js";
 import {
   NON_INPUTS_ABSENT,
   NON_INPUTS_FILE,
@@ -330,6 +331,10 @@ export interface InputsScript {
   readonly settleFails?: string;
   /** Makes each ask for the next change of the inputs throw this text, as only the dependency builds ask. */
   readonly changedFails?: string;
+  /** Holds each read of named paths until the test resolves `namedReadHeld` or the inputs stop. */
+  readonly heldNamedRead?: boolean;
+  /** The paths each read of named paths resolves with as found but not readable; none when absent. */
+  readonly unreadNamed?: readonly UnreadPath[];
 }
 
 export const NO_DECLARATION: NonInputsDeclaration = {
@@ -358,8 +363,11 @@ export class StandInInputs implements TrackedInputs {
   readonly changedSince: number[] = [];
   /** The narrowing each view of the inputs was asked for, in call order. */
   readonly narrowings: (QueryNarrowing | undefined)[] = [];
+  /** The root-relative paths each read of named paths was given, in call order. */
+  readonly namedReads: (readonly string[])[] = [];
   readonly reconciled = new Deferred<void>();
   readonly settleHeld = new Deferred<void>();
+  readonly namedReadHeld = new Deferred<void>();
   readonly #released = new Deferred<void>();
   readonly #script: InputsScript;
   readonly #verdicts: JobVerdict[];
@@ -458,6 +466,12 @@ export class StandInInputs implements TrackedInputs {
     });
   }
 
+  async readNamed(paths: readonly string[]): Promise<readonly UnreadPath[]> {
+    this.namedReads.push(paths);
+    if (this.#script.heldNamedRead === true) await this.namedReadHeld.promise;
+    return this.#script.unreadNamed ?? [];
+  }
+
   beginJob(): JobMark {
     this.jobsBegun += 1;
     return this.#windows.open(undefined, this.#vouchedDigests());
@@ -506,6 +520,7 @@ export class StandInInputs implements TrackedInputs {
     this.#released.resolve();
     this.reconciled.resolve();
     this.settleHeld.resolve();
+    this.namedReadHeld.resolve();
     return Promise.resolve();
   }
 }
