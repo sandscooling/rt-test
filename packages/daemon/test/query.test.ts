@@ -249,8 +249,9 @@ function results(
   discovery: StoredDiscovery | undefined,
   latestRuns: readonly StoredRun[] = [],
   discoveryRefusal?: string,
+  runRefusals: LatestResults["runRefusals"] = [],
 ): LatestResults {
-  return { discovery, discoveryRefusal, latestRuns };
+  return { discovery, discoveryRefusal, latestRuns, runRefusals };
 }
 
 function answered<A extends object>(answer: A | NoAnswer): A {
@@ -464,6 +465,7 @@ describe("each discovered test's one state", () => {
       "run-crashed",
       "run-failed",
       "run-interrupted-before-load",
+      "run-refused",
       "run-unsupported-vitest",
       "skipped",
     ]);
@@ -528,6 +530,111 @@ describe("each discovered test's one state", () => {
       ranModule([finished(otherProject, "passed")], MODULE, "e2e"),
     ]);
     expect(statesOf(test, run)).toStrictEqual({ "not-in-latest-run": 1 });
+  });
+});
+
+describe("a workspace whose latest run the store refused as unreadable", () => {
+  const REFUSAL = 'The store holds an unreadable runs.status: "bogus"';
+  const B_TEST = discovered("b", { workspacePath: WORKSPACE_B });
+
+  /** A summary of tests a and b of workspace A, whose latest run was refused for `reason`, beside `workspaceB`. */
+  function refusedSummary(
+    reason: string,
+    workspaceB: { run?: StoredRun; inputs?: CurrentInputs } = {},
+  ): SummaryAnswer {
+    return answered(
+      summaryAnswer(
+        results(
+          storedDiscovery([
+            discoveredWorkspace(WORKSPACE_A, [
+              discovered("a"),
+              discovered("b"),
+            ]),
+            discoveredWorkspace(WORKSPACE_B, [B_TEST]),
+          ]),
+          workspaceB.run === undefined ? [] : [workspaceB.run],
+          undefined,
+          [{ workspacePath: WORKSPACE_A, reason }],
+        ),
+        IDLE,
+        workspaceB.inputs ?? UNSETTLED,
+      ),
+    );
+  }
+
+  /** Workspace B holding a passed test from a run whose inputs are unchanged, so B's test reads current. */
+  const CURRENT_B = {
+    run: storedRun(
+      ranRun([ranModule([finished(B_TEST, "passed")])], {}, WORKSPACE_B),
+      VITEST_ADAPTER_VERSION,
+      DIGEST,
+    ),
+    inputs: settled({ [WORKSPACE_B]: { ok: true, digest: DIGEST.digest } }),
+  };
+
+  /** Answers `status <path>` over the consumer tree, with workspace A's latest run refused for `REFUSAL`. */
+  function refusedStatus(path: string): Promise<unknown> {
+    return inTempDir((root) => {
+      const answer = pathStatusAnswer(
+        join(root, path),
+        {
+          ...consumerTree(root),
+          runRefusals: [{ workspacePath: WORKSPACE_A, reason: REFUSAL }],
+        },
+        { ...IDLE, consumerRoot: root },
+        UNSETTLED,
+      );
+      return "noAnswer" in answer ? answer : nonZeroCounts(answer.counts);
+    });
+  }
+
+  it("D3271: each test of a refused workspace reads run-refused, never never-run, beside another workspace's own states", () => {
+    expect(
+      nonZero(refusedSummary(REFUSAL, CURRENT_B).counts.states),
+    ).toStrictEqual({ "run-refused": 2, passed: 1 });
+  });
+
+  it("D3272: each test of a refused workspace reads freshness unknown, beside another workspace's current test", () => {
+    expect(
+      nonZero(refusedSummary(REFUSAL, CURRENT_B).counts.freshness),
+    ).toStrictEqual({ unknown: 2, current: 1 });
+  });
+
+  it("D3273: a path status counts each test of a refused workspace under the path as run-refused, with freshness unknown", async () => {
+    expect(await refusedStatus("packages/a/src/a.test.ts")).toStrictEqual({
+      states: { "run-refused": 2 },
+      freshness: { unknown: 2 },
+    });
+  });
+
+  it("D3274: a path status lists run-refused at zero when no test under the path is in it", async () => {
+    expect(
+      await statusIn("packages/a/src/a.test.ts", (answer) =>
+        "noAnswer" in answer ? answer : answer.counts.states["run-refused"],
+      ),
+    ).toBe(0);
+  });
+
+  it("D3275: a refused workspace's facts give no latest run and the refusal", () => {
+    expect(refusedSummary(REFUSAL).workspaces[0]).toStrictEqual({
+      workspacePath: WORKSPACE_A,
+      latestRun: null,
+      refusedRun: { reason: REFUSAL, omittedCharacters: 0 },
+    });
+  });
+
+  it("D3276: a refusal past 1,000 characters is given cut to 1,000, counting the rest", () => {
+    const kept = "r".repeat(1000);
+    expect(
+      refusedSummary(`${kept}#####`).workspaces[0]?.refusedRun,
+    ).toStrictEqual({ reason: kept, omittedCharacters: 5 });
+  });
+
+  it("D3277: a workspace with no run stored is given no refusal, even beside a refused workspace", () => {
+    expect(refusedSummary(REFUSAL).workspaces[1]).toStrictEqual({
+      workspacePath: WORKSPACE_B,
+      latestRun: null,
+    });
   });
 });
 

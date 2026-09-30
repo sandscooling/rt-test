@@ -2481,8 +2481,8 @@
     "id": "D1801",
     "defect": "A test of a workspace with no stored run reads not-in-latest-run instead of never-run.",
     "file": "packages/daemon/src/query/test-states.ts",
-    "old": "      state: NEVER_RUN,",
-    "new": "      state: NOT_IN_LATEST_RUN,"
+    "old": "  if (stored === undefined) return unanswered(tests, NEVER_RUN);",
+    "new": "  if (stored === undefined) return unanswered(tests, NOT_IN_LATEST_RUN);"
   },
   {
     "id": "D1802",
@@ -2915,8 +2915,8 @@
     "id": "D1884",
     "defect": "Every result is compared with the first workspace's current fingerprint, so a result stored under that workspace's digest reads current in another workspace whose inputs differ.",
     "file": "packages/daemon/src/query/test-states.ts",
-    "old": "          current(entry.workspace.path),",
-    "new": "          current(discovery.discovery.workspaces[0]?.workspace.path ?? \"\"),"
+    "old": "      current(path),",
+    "new": "      current(discovery.discovery.workspaces[0]?.workspace.path ?? \"\"),"
   },
   {
     "id": "D1885",
@@ -5324,7 +5324,7 @@
     "defect": "The daemon reads no stored results when it plans, so a restart rediscovers and reruns every workspace though its results read current.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    const results = this.#parts.store.readLatestResults(this.#parts.scope);",
-    "new": "    const results: LatestResults = { discovery: undefined, discoveryRefusal: undefined, latestRuns: [] };"
+    "new": "    const results: LatestResults = { discovery: undefined, discoveryRefusal: undefined, latestRuns: [], runRefusals: [] };"
   },
   {
     "id": "D2692",
@@ -6855,14 +6855,14 @@
   {
     "id": "D2928",
     "defect": "The refusal of the latest discovery is logged at every read of the latest results, so each plan repeats it.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "    if (refusal === this.#loggedRefusal) return;\n",
     "new": ""
   },
   {
     "id": "D2929",
     "defect": "No read of the latest results notes a refused discovery, so the log never names it, not at start, at any plan, or before an answer quotes it cut.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "    this.#noteRefusal(results.discoveryRefusal);\n",
     "new": ""
   },
@@ -6918,14 +6918,14 @@
   {
     "id": "D2960",
     "defect": "The once-only guard keys on having logged a refusal rather than on its text, so a second, different refusal of the latest discovery is never logged.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "    if (refusal === this.#loggedRefusal) return;",
     "new": "    if (refusal === this.#loggedRefusal || (refusal !== undefined && this.#loggedRefusal !== undefined)) return;"
   },
   {
     "id": "D2961",
     "defect": "A readable read does not clear the logged refusal, so a refusal that returns after a readable discovery replaced it is never logged again.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "    this.#loggedRefusal = refusal;",
     "new": "    this.#loggedRefusal = refusal ?? this.#loggedRefusal;"
   },
@@ -8769,5 +8769,131 @@
     "file": "packages/daemon/src/inputs/listed-files.ts",
     "old": "    if (file !== undefined) return filter.excludes(file.path) ? [file] : [];",
     "new": "    if (file !== undefined) return [file];"
+  },
+  {
+    "id": "D3266",
+    "defect": "The read of the latest runs stops at the first refused run, so every workspace whose latest run was stored after it reads as never run.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "      runRefusals.push({ workspacePath, reason: errorText(error) });\n",
+    "new": "      runRefusals.push({ workspacePath, reason: errorText(error) });\n      break;\n"
+  },
+  {
+    "id": "D3267",
+    "defect": "A refused latest run is dropped without a refusal, so its workspace reads as one with no run stored and nothing names why.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "      runRefusals.push({ workspacePath, reason: errorText(error) });\n",
+    "new": ""
+  },
+  {
+    "id": "D3268",
+    "defect": "A refused run's reason is the error's own message alone, so the cause the reader wrapped (the JSON parse failure) is lost.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "reason: errorText(error) });",
+    "new": "reason: error.message });"
+  },
+  {
+    "id": "D3269",
+    "defect": "The latest run of a workspace is its latest readable one, so an older run stands in for a refused latest run and can answer as current when a newer run superseded it.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "  AND r.sequence = (SELECT max(l.sequence) FROM runs l WHERE l.project_identity = r.project_identity",
+    "new": "  AND r.sequence = (SELECT max(l.sequence) FROM runs l WHERE l.status IN ('ran', 'unsupported', 'failed', 'interrupted-before-load', 'crashed') AND l.project_identity = r.project_identity"
+  },
+  {
+    "id": "D3270",
+    "defect": "Every failure reading a latest run is caught as a refusal, so a SQLite or I/O failure of the store reads as one unreadable run instead of failing the read.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "      if (!(error instanceof UnreadableRecordError)) throw error;\n",
+    "new": ""
+  },
+  {
+    "id": "D3271",
+    "defect": "A test of a workspace whose latest run was refused reads never-run, as though no run of it were stored.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "    if (refusedRuns.has(path)) return unanswered(entry.tests, RUN_REFUSED);",
+    "new": "    if (refusedRuns.has(path)) return unanswered(entry.tests, NEVER_RUN);"
+  },
+  {
+    "id": "D3272",
+    "defect": "A test of a workspace whose latest run was refused reads stale rather than unknown, though no readable run says what its inputs were.",
+    "file": "packages/daemon/src/query/test-states.ts",
+    "old": "  return tests.map((test) => ({ test, state, freshness: UNKNOWN }));",
+    "new": "  return tests.map((test) => ({ test, state, freshness: state === RUN_REFUSED ? STALE : UNKNOWN }));"
+  },
+  {
+    "id": "D3273",
+    "defect": "The query basis never hands the run refusals to the standings, so every test of a refused workspace reads never-run in a summary and a path status alike.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      refusedRuns,\n      (path) => fingerprintDigest",
+    "new": "      new Map(),\n      (path) => fingerprintDigest"
+  },
+  {
+    "id": "D3274",
+    "defect": "run-refused is not among the states every answer counts, so an answer with no refused test omits it rather than counting it at zero.",
+    "file": "packages/daemon/src/query/answer.ts",
+    "old": "  [RUN_REFUSED]: true,\n",
+    "new": ""
+  },
+  {
+    "id": "D3275",
+    "defect": "A refused workspace's facts carry no refusal, so the summary shows it as a workspace with no run stored.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    ...(refusal === undefined ? {} : { refusedRun: cutReason(refusal) }),",
+    "new": "    ...{},"
+  },
+  {
+    "id": "D3276",
+    "defect": "A refused workspace's refusal is given whole, so a refusal quoting a huge stored value floods the answer and the count of what the log holds is lost.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "{ refusedRun: cutReason(refusal) }",
+    "new": "{ refusedRun: { reason: refusal, omittedCharacters: 0 } }"
+  },
+  {
+    "id": "D3277",
+    "defect": "A workspace with no run stored is given the first refused workspace's refusal, so it reads as refused when nothing of it was.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  const refusal = basis.refusedRuns.get(workspacePath);",
+    "new": "  const refusal = [...basis.refusedRuns.values()][0];"
+  },
+  {
+    "id": "D3279",
+    "defect": "A refused latest run fails the whole read of the latest results, so no round plans a run of its workspace and the refused row stays its latest until the store file is deleted.",
+    "file": "packages/daemon/src/store/read-runs.ts",
+    "old": "      if (!(error instanceof UnreadableRecordError)) throw error;",
+    "new": "      throw error;"
+  },
+  {
+    "id": "D3280",
+    "defect": "No read of the latest results notes a refused run, so the log never names it and an answer that says the rest of the refusal is in the daemon log points at a log that does not hold it.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "    this.#noteRunRefusals(results.runRefusals);\n",
+    "new": ""
+  },
+  {
+    "id": "D3281",
+    "defect": "A run refusal is logged at every read of the latest results, so each plan and each answer repeats it.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "      if (this.#loggedRunRefusals.get(workspacePath) === reason) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D3282",
+    "defect": "A read that did not refuse a workspace's run keeps its logged refusal, so a refusal that returns after a readable run replaced it is never logged again.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "    this.#loggedRunRefusals = new Map(\n      refusals.map((refusal) => [refusal.workspacePath, refusal.reason]),\n    );",
+    "new": "    this.#loggedRunRefusals = new Map([\n      ...this.#loggedRunRefusals,\n      ...refusals.map((refusal) => [refusal.workspacePath, refusal.reason] as const),\n    ]);"
+  },
+  {
+    "id": "D3283",
+    "defect": "The once-only guard keys on having logged a refusal of the workspace rather than on its text, so a second, different refusal of its latest run is never logged.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "this.#loggedRunRefusals.get(workspacePath) === reason",
+    "new": "this.#loggedRunRefusals.has(workspacePath)"
+  },
+  {
+    "id": "D3284",
+    "defect": "The once-only guard keys on the refusal's text alone, so a second workspace whose run is refused for the reason already logged for another is never logged.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "this.#loggedRunRefusals.get(workspacePath) === reason",
+    "new": "[...this.#loggedRunRefusals.values()].includes(reason)"
   }
 ]

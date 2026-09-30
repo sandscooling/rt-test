@@ -48,7 +48,9 @@ export interface RunRefusal {
 }
 
 export interface LatestRuns {
+  /** The run stored last for each workspace path, in stored order, less each refused one. */
   readonly latestRuns: readonly StoredRun[];
+  /** Each workspace whose run stored last was refused as unreadable; none of its older runs stands in. */
   readonly runRefusals: readonly RunRefusal[];
 }
 

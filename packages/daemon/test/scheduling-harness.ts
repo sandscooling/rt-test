@@ -268,6 +268,7 @@ export class RecordingStore implements RtTestStore {
               },
             ];
       }),
+      runRefusals: [],
     };
   }
 
