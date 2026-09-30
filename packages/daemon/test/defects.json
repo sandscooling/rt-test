@@ -7936,5 +7936,19 @@
     "file": "packages/daemon/src/vitest/selection-facts.ts",
     "old": "  const containers = [...new Set(recorded.map(rootRelative))].sort();",
     "new": "  const containers = recorded.map(rootRelative).sort();"
+  },
+  {
+    "id": "D3133",
+    "defect": "A workspace owed a once-more run at one input revision takes its first run at a later revision as that rerun, so when that run is also stored not fingerprinted by a change that left the revision unmoved it is held rather than run once more.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      before.revision === revision &&\n",
+    "new": "      true &&\n"
+  },
+  {
+    "id": "D3134",
+    "defect": "A workspace owed a once-more run for one list of test modules takes its first run after a rediscovery at the same revision changed that list as the rerun, so when that run is also stored not fingerprinted by an unmoved change it is held rather than run once more.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      before.modules === modules;\n",
+    "new": "      true;\n"
   }
 ]

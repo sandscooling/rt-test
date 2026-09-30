@@ -473,6 +473,77 @@ describe("running each workspace at most once per revision", () => {
       held: 1,
     });
   });
+
+  it("D3133: a workspace owed a once-more run at one revision whose first run at a later revision is also stored not fingerprinted by an unmoved change is run once more there, not held", async () => {
+    const released = new Deferred<void>();
+    const outcome = await running(
+      {
+        ran: () => ({ changedWhileRunning: true }),
+        awaitBuild: heldFrom(3, released.promise),
+      },
+      async (started) => {
+        await flush();
+        started.inputs.moveRevision();
+        released.resolve();
+        await flush();
+        return {
+          runs: runsIn(started.calls),
+          logged: started.log.entries.filter((entry) =>
+            entry.startsWith("the run of a was stored not fingerprinted"),
+          ),
+        };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      runs: ["run:a@1", "run:a@2", "run:a@2"],
+      logged: [
+        "the run of a was stored not fingerprinted because its inputs changed while it ran at input revision 1, which the change did not move, so it runs once more",
+        "the run of a was stored not fingerprinted because its inputs changed while it ran at input revision 2, which the change did not move, so it runs once more",
+        "the run of a was stored not fingerprinted again because its inputs changed while it ran at input revision 2, which the change did not move, so it is held until the input revision or its list of test modules changes",
+      ],
+    });
+  });
+
+  it("D3134: a workspace owed a once-more run whose first run after a rediscovery at the same revision listed a new test module is also stored not fingerprinted by an unmoved change is run once more, not held", async () => {
+    const released = new Deferred<void>();
+    const failedB = {
+      status: "failed" as const,
+      workspace: workspace("b"),
+      vitestVersion: "5.0.1",
+      error: "Error: config boom",
+    };
+    const calls = await running(
+      {
+        workspaces: ["a", "b"],
+        listed: (call) =>
+          discovery(
+            discoveredIn(
+              "a",
+              call === 0 ? ["x.test.ts"] : ["x.test.ts", "y.test.ts"],
+            ),
+            failedB,
+          ),
+        ran: () => ({ changedWhileRunning: true }),
+        awaitBuild: heldFrom(3, released.promise),
+      },
+      async (started) => {
+        await flush();
+        started.inputs.endPeriodicReconciliation();
+        released.resolve();
+        await flush();
+        return started.calls.filter(
+          (call) => call.startsWith("discover@") || call.startsWith("run:a"),
+        );
+      },
+    );
+    expect(calls).toStrictEqual([
+      "discover@1",
+      "run:a@1",
+      "discover@1",
+      "run:a@1",
+      "run:a@1",
+    ]);
+  });
 });
 
 describe("the quiet window", () => {
