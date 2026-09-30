@@ -3,6 +3,7 @@ import { testModuleFile } from "../inputs/non-inputs.js";
 import { crawledLinks } from "../inputs/crawl-links.js";
 import { namedList } from "../inputs/input-jobs.js";
 import { globCwd, patternBase } from "../inputs/vitest-glob.js";
+import { isStringArray } from "../json-guards.js";
 import { releaseLine, type ReleaseLine } from "./load-vitest.js";
 import {
   SNAPSHOT_GUARD_FILE,
@@ -233,7 +234,7 @@ function envSourcesNotKnown(
     return undefined;
   }
   const recorded = CONTAINER_RECORD in config ? config[CONTAINER_RECORD] : [];
-  if (!isStringList(recorded)) {
+  if (!isStringArray(recorded)) {
     return {
       notKnown: `Vitest records its nested projects containers in ${CONTAINER_RECORD} in a form RT Test does not read`,
     };
@@ -276,13 +277,6 @@ function unrecordedContainers(
   return {
     notKnown: `RT Test has not verified where Vitest ${version} records nested projects containers, and it records none in ${CONTAINER_RECORD} while the root config declares projects by path`,
   };
-}
-
-function isStringList(value: unknown): value is readonly string[] {
-  return (
-    Array.isArray(value) &&
-    value.every((element: unknown) => typeof element === "string")
-  );
 }
 
 /**

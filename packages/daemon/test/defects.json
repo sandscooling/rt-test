@@ -3468,7 +3468,7 @@
     "id": "D2007",
     "defect": "A nonInputs array holding a non-string is not refused, so reading the declaration throws rather than declaring nothing with the reason.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "  if (!Array.isArray(list) || !list.every((item) => typeof item === \"string\")) {",
+    "old": "  if (!isStringArray(list)) {",
     "new": "  if (!Array.isArray(list)) {"
   },
   {
@@ -3489,8 +3489,8 @@
     "id": "D2021",
     "defect": "An rt-test.json whose top level is an array is read as an object declaring no pattern, rather than as unusable.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {",
-    "new": "  if (typeof value !== \"object\" || value === null) {"
+    "old": "  if (!isRecord(value)) return \"its top level is not a JSON object\";",
+    "new": "  if (typeof value !== \"object\" || value === null) return \"its top level is not a JSON object\";"
   },
   {
     "id": "D2040",
@@ -6709,7 +6709,7 @@
     "id": "D2952",
     "defect": "A nonInputVariables array holding a non-string is not refused, so reading the declaration throws rather than declaring nothing with the reason.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "  if (!Array.isArray(list) || !list.every((item) => typeof item === \"string\")) {",
+    "old": "  if (!isStringArray(list)) {",
     "new": "  if (!Array.isArray(list)) {"
   },
   {
@@ -6723,7 +6723,7 @@
     "id": "D2957",
     "defect": "A nonInputs or nonInputVariables member that is not an array is not refused, so reading the declaration throws and fails the reconciliation rather than declaring nothing with the reason.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "  if (!Array.isArray(list) || !list.every((item) => typeof item === \"string\")) {",
+    "old": "  if (!isStringArray(list)) {",
     "new": "  if (!list.every((item) => typeof item === \"string\")) {"
   },
   {
@@ -7927,8 +7927,8 @@
     "id": "D3131",
     "defect": "A container record listing a value that is not a path is read as a list of paths, so the workspace's discovery throws instead of reporting its env sources not known with a reason naming the record.",
     "file": "packages/daemon/src/vitest/selection-facts.ts",
-    "old": "    Array.isArray(value) &&\n    value.every((element: unknown) => typeof element === \"string\")",
-    "new": "    Array.isArray(value)"
+    "old": "  if (!isStringArray(recorded)) {",
+    "new": "  if (!Array.isArray(recorded)) {"
   },
   {
     "id": "D3132",

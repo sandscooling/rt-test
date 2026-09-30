@@ -1,5 +1,6 @@
 import type { IdentifiedTest } from "@rt-test/core";
 import type { SQLInputValue, SQLOutputValue } from "node:sqlite";
+import { isRecord, isStringArray } from "../json-guards.js";
 import type { UnreadWorkspaceSource } from "../vitest/find-workspaces.js";
 import type { FailedModule, ModuleReport } from "../vitest/module-tests.js";
 import {
@@ -316,17 +317,6 @@ function jsonRecord(value: unknown, key: string): Record<string, unknown> {
 
 function jsonField(value: unknown, key: string): unknown {
   return isRecord(value) ? value[key] : undefined;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) &&
-    value.every((element): element is string => typeof element === "string")
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isMember<T extends string>(

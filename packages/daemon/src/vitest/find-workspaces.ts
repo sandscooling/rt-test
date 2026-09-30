@@ -6,6 +6,7 @@ import {
   statSync,
 } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
+import { isRecord } from "../json-guards.js";
 import { errorText } from "./error-text.js";
 
 const CONFIG_EXTENSIONS = [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"];
@@ -319,12 +320,8 @@ export function readJson(file: string): JsonRead {
 }
 
 export function objectField(value: unknown, key: string): unknown {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-  return Object.hasOwn(value, key)
-    ? (value as Record<string, unknown>)[key]
-    : undefined;
+  if (!isRecord(value)) return undefined;
+  return Object.hasOwn(value, key) ? value[key] : undefined;
 }
 
 function listDirectory(
