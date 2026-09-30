@@ -146,6 +146,7 @@ export function queryBasis(
     activity: daemon.activity,
     workspaces: discovery.discovery.workspaces,
     latestRuns,
+    refusedRuns,
     fingerprint: (entry) =>
       fingerprints.get(entry.workspace.path) ??
       inputs.workspaceFingerprint(entry),

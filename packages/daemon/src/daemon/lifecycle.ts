@@ -49,7 +49,8 @@ import {
   RunWatch,
   runVerdict,
 } from "./run-judgment.js";
-import { Scheduler, type DiscoverReport, type RunReport } from "./scheduler.js";
+import type { DiscoverReport } from "./discovery-history.js";
+import { Scheduler, type RunReport } from "./scheduler.js";
 import type { DaemonHandlers } from "./server.js";
 import type { EndedRun } from "./workspace-schedule.js";
 
@@ -251,8 +252,9 @@ export class DaemonLifecycle implements DaemonHandlers {
     if (this.#beginsNothing(plannedRevision)) return undefined;
     log.entry("discovery started");
     const mark = inputs.beginJob();
-    const report = (stored: boolean): DiscoverReport => ({
+    const report = (stored: boolean, changed = false): DiscoverReport => ({
       stored,
+      changedWhileRunning: stored && changed,
       window: mark.window,
     });
     const startedAt = Date.now();
@@ -270,6 +272,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);
       return report(false);
     }
+    let movedOnceComposed = false;
     const bindings = this.#bindings(
       "the discovery",
       held,
@@ -278,6 +281,7 @@ export class DaemonLifecycle implements DaemonHandlers {
         const print = now.discoveryFingerprint(discovery);
         // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.
         const moved = now.protectedFileChangedSince(discovery, startedAt);
+        movedOnceComposed = moved !== undefined;
         return moved === undefined ? print : { ok: false, reason: moved };
       },
     );
@@ -286,7 +290,9 @@ export class DaemonLifecycle implements DaemonHandlers {
     );
     if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);
     logMissingConfirmed(discovery, start.workspaces, log);
-    return report(stored);
+    const changed =
+      movedOnceComposed || (!held.fingerprinted && held.changedWhileRunning);
+    return report(stored, changed);
   }
 
   /**
@@ -312,7 +318,13 @@ export class DaemonLifecycle implements DaemonHandlers {
       .current()
       .protectedFileChangedSince(discovery, startedAt);
     const guard = inputs.beginJob();
-    const released = await inputs.protectInputs(discovery, startedAt);
+    let released: string | undefined;
+    try {
+      released = await inputs.protectInputs(discovery, startedAt);
+    } catch (error) {
+      await inputs.endJob(guard);
+      throw error;
+    }
     const guarded = await inputs.endJob(guard);
     if (!verdict.fingerprinted) return verdict;
     const changed = unwatched ?? released;
