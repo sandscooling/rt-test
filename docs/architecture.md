@@ -41,7 +41,7 @@ The daemon is an independent local process and the only component that executes 
 
 ## Identity and freshness
 
-Identify a project by its git repository's common directory, shared by every worktree checked out from it, or by its canonical root outside git; never by package name alone. Distinguish Vitest workspaces, parameterized test cases, duplicate display names, file paths, and run identities. Scope state to a worktree; two worktrees must not overwrite each other's results.
+Identify a project by its git repository's common directory, shared by every worktree checked out from it, or by its canonical root outside git; never by package name alone. Distinguish Vitest workspaces, parameterized test cases, duplicate display names, file paths, and run identities. Scope state to a worktree; two worktrees must not overwrite each other's results. On Windows, Vitest spells a module id with the drive-letter case its job started from (Vitest 4.1 keeps a lowercase `c:`, Vitest 5 gives `C:`), and Vite's `safeRealpathSync` switches from `fs.realpathSync` to `fs.realpathSync.native` partway through a job; RT Test stores each module path relative to its workspace's native real path and derives worktree and project identity from native real paths, so neither spelling reaches a stored identity.
 
 Fingerprint relevant source and test content, fixtures, setup, configuration, the environment less its non-input variables' values, dependency lockfiles, runtime, runner version, adapter version, and selection policy version. Persist digests rather than secret environment values. Content hashes alone cannot establish that the input set is complete; record completeness and reasons for uncertainty.
 
