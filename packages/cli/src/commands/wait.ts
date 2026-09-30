@@ -17,6 +17,7 @@ import {
   contextLines,
   countLines,
   cutReasonText,
+  DETAIL_SEPARATOR,
   executionLines,
   INDENT,
   joinLines,
@@ -44,7 +45,6 @@ const MS_PER_SECOND = 1_000;
 const MIN_LIMIT_SECONDS = 1;
 const MAX_LIMIT_SECONDS = Math.floor(MAX_WAIT_LIMIT_MS / MS_PER_SECOND);
 const DECIMAL_DIGITS = /^[0-9]+$/;
-const LIST_SEPARATOR = "; ";
 const NAME_PATH_SEPARATOR = " > ";
 const FILES_HEADING = "Files:";
 const FAILURES_HEADING = "Failures:";
@@ -169,7 +169,7 @@ function fileText(file: WaitFile, coverage: CoverageState): string {
     file.unread === undefined
       ? []
       : [`could not be read: ${cutReasonText(file.unread)}`];
-  return `${oneLine(file.path)}: ${[coveringText(file, coverage), ...unread].join(LIST_SEPARATOR)}`;
+  return `${oneLine(file.path)}: ${[coveringText(file, coverage), ...unread].join(DETAIL_SEPARATOR)}`;
 }
 
 /** Selection's report, then the workspaces whose fingerprints list the file; a file neither reaches is covered by none. */
@@ -188,7 +188,7 @@ function coveringText(file: WaitFile, coverage: CoverageState): string {
       ? [NOTHING_COVERS]
       : [];
   return [...nothing, pathSelectionText(selection), ...listing].join(
-    LIST_SEPARATOR,
+    DETAIL_SEPARATOR,
   );
 }
 

@@ -117,7 +117,8 @@ const DISCOVERY_HELD_UNTIL_IN_HELD_ROUND = `an edit, a change the daemon cannot 
 const DISCOVERY_SELF_CHANGING_CAUSE = `${KEEP_CHANGING} the inputs`;
 const DISCOVERY_JOB = "the discovery";
 const RUN_JOB = "the run of";
-const DETAIL_SEPARATOR = "; ";
+/** Joins the details of one entry on its line. */
+export const DETAIL_SEPARATOR = "; ";
 const INCOMPLETE_MARK = " (incomplete)";
 const NO_OWNER = "no package workspace";
 const EXECUTION_HEADING = "Execution:";
