@@ -1424,6 +1424,22 @@ function humanAnswer(more: Partial<SummaryResponse>): SummaryResponse {
   };
 }
 
+/** The human summary's line for `workspace`, from a summary whose answer is `humanAnswer` holding it alone. */
+async function scriptedWorkspaceLine(
+  workspace: SummaryResponse["workspaces"][number],
+): Promise<string | undefined> {
+  scripted.summary = humanAnswer({ workspaces: [workspace] });
+  let stdout: string;
+  try {
+    stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
+  } finally {
+    scripted.summary = undefined;
+  }
+  return stdout
+    .split("\n")
+    .find((line) => line.startsWith(`  ${workspace.workspacePath}:`));
+}
+
 const INVALIDATED_REASON = `its inputs changed while it ran: ${WORKSPACE_A}/src/a.ts`;
 
 /** The human answer's lines for an answer whose round planned at its revision left `workspaces` as they say. */
@@ -1792,29 +1808,18 @@ describe("a query", () => {
   );
 
   it("D2798: a human summary shows a cut crash reason with its count of the characters the cut left out", async () => {
-    scripted.summary = humanAnswer({
-      workspaces: [
-        {
-          workspacePath: WORKSPACE_A,
-          latestRun: {
-            runId: "run-1",
-            adapterVersion: 3,
-            adapterVersionCurrent: true,
-            status: "crashed",
-            reason: "the executor process 7 exited",
-            omittedCharacters: 42,
-          },
-        },
-      ],
-    });
-    let stdout: string;
-    try {
-      stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
-    } finally {
-      scripted.summary = undefined;
-    }
     expect(
-      stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
+      await scriptedWorkspaceLine({
+        workspacePath: WORKSPACE_A,
+        latestRun: {
+          runId: "run-1",
+          adapterVersion: 3,
+          adapterVersionCurrent: true,
+          status: "crashed",
+          reason: "the executor process 7 exited",
+          omittedCharacters: 42,
+        },
+      }),
     ).toBe(
       `  ${WORKSPACE_A}: latest run crashed: the executor process 7 exited (42 more characters), adapter version 3`,
     );
@@ -1843,26 +1848,15 @@ describe("a query", () => {
   });
 
   it("D3278: a human summary shows a workspace whose latest run was refused as refused, with its cut reason, in place of no run stored", async () => {
-    scripted.summary = humanAnswer({
-      workspaces: [
-        {
-          workspacePath: WORKSPACE_A,
-          latestRun: null,
-          refusedRun: {
-            reason: 'The store holds an unreadable runs.status: "bogus"',
-            omittedCharacters: 42,
-          },
-        },
-      ],
-    });
-    let stdout: string;
-    try {
-      stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
-    } finally {
-      scripted.summary = undefined;
-    }
     expect(
-      stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
+      await scriptedWorkspaceLine({
+        workspacePath: WORKSPACE_A,
+        latestRun: null,
+        refusedRun: {
+          reason: 'The store holds an unreadable runs.status: "bogus"',
+          omittedCharacters: 42,
+        },
+      }),
     ).toBe(
       `  ${WORKSPACE_A}: latest run refused as unreadable: The store holds an unreadable runs.status: "bogus" (42 more characters)`,
     );
@@ -2556,33 +2550,22 @@ describe("a query", () => {
   });
 
   it("D3029: a human summary shows a workspace's invalidated latest run as invalidated, with the reason, beside its status", async () => {
-    scripted.summary = humanAnswer({
-      workspaces: [
-        {
-          workspacePath: WORKSPACE_A,
-          latestRun: {
-            runId: "run-1",
-            invalidated: { reason: INVALIDATED_REASON, omittedCharacters: 0 },
-            adapterVersion: 3,
-            adapterVersionCurrent: true,
-            status: "ran",
-            execution: "completed",
-            forceStopped: false,
-            nothingRan: null,
-            unhandledErrors: 0,
-            moduleErrors: 0,
-          },
-        },
-      ],
-    });
-    let stdout: string;
-    try {
-      stdout = (await runCli(["summary"], { cwd: REPO })).stdout;
-    } finally {
-      scripted.summary = undefined;
-    }
     expect(
-      stdout.split("\n").find((line) => line.startsWith(`  ${WORKSPACE_A}:`)),
+      await scriptedWorkspaceLine({
+        workspacePath: WORKSPACE_A,
+        latestRun: {
+          runId: "run-1",
+          invalidated: { reason: INVALIDATED_REASON, omittedCharacters: 0 },
+          adapterVersion: 3,
+          adapterVersionCurrent: true,
+          status: "ran",
+          execution: "completed",
+          forceStopped: false,
+          nothingRan: null,
+          unhandledErrors: 0,
+          moduleErrors: 0,
+        },
+      }),
     ).toBe(
       `  ${WORKSPACE_A}: latest run loaded the workspace, completed, invalidated: ${INVALIDATED_REASON}, adapter version 3, 0 unhandled errors, 0 module errors`,
     );
