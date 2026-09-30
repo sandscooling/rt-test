@@ -10,6 +10,8 @@ export interface CliIo {
   readonly stderrIsTerminal: boolean;
   /** Absolute; every path argument resolves against it. */
   readonly cwd: string;
+  /** Ends the process at once, whatever work is pending; absent when a caller drives `main` in process. */
+  readonly exit?: (code: ExitCode) => void;
 }
 
 export type CommandRun = (io: CliIo) => Promise<ExitCode>;

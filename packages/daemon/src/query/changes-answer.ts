@@ -88,7 +88,7 @@ const PASSED = "passed" satisfies TestState;
 const NO_SNAPSHOT_REASON = "no snapshot of the inputs is held";
 
 /** The states that say the test, its module or its run broke; each other state says it has no outcome, or passed. */
-const FAILING_STATES: Readonly<Record<TestState, boolean>> = {
+export const FAILING_STATES: Readonly<Record<TestState, boolean>> = {
   passed: false,
   failed: true,
   skipped: false,

@@ -13,15 +13,15 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: `rt-test hook claude-code [--root <dir>]` reads one Claude Code hook payload from stdin and answers its `PostToolBatch`, `Stop` and `UserPromptSubmit` events; any other event says nothing. The root is `--root`, or the directory the hook runs in. RT Test writes no Claude Code settings file: a consumer opts in by adding the settings block the README gives, three entries that each run this command with `--root "$CLAUDE_PROJECT_DIR"`, and a consumer that adds none gets no hook.
-- [ ] AC2: A session's edited files are the file paths of the `Write`, `Edit` and `NotebookEdit` calls in each batch the hook receives for that session (its `session_id`), the main agent's and each subagent's alike, remembered across the hook's runs, most recently edited first, at most `MAX_CHANGES_PATHS` (ticket 2.6); a path outside the consumer root, judged by its real path while the file exists, is left out. A batch whose calls name no file, such as `Bash` or `PowerShell` calls, adds none, and the hook asks about the files edited so far. A session that has edited no file under the root asks nothing and says nothing.
-- [ ] AC3: After each batch, when the session has edited files, the hook asks the daemon's `changes` query (ticket 2.6) about them, with the cursor the last answer to the same agent returned: the main agent and each subagent keep a cursor of their own, so each hears every change since its own last report, a subagent's edits included. It adds a report to that agent's context only when the answer is determined and lists or counts at least one change since that cursor; when the answer is a baseline because the agent has no cursor yet, or a cursor the hook gave was not issued by the current daemon life or has expired, and a test in scope is failing or not current, it adds one line saying why and giving those counts. It keeps the cursor each answer returns, so after a not-determined answer, which says nothing, the next call asks from the cursor the daemon handed back.
-- [ ] AC4: A report names at most `NAMED_CHANGES` (5) changes, in the order the answer lists them (failing, then recovered, then the rest), each with its test's file and full name, or its not-discovered entry's kind and path, its kind, its standing at the cursor and now (`atCursor` and `now`), and, on a failing change, its first error line cut to `ERROR_LINE_CHARS` (200) characters; it counts the changes it does not name by kind, and adds one line counting the failing tests outside scope when there are any, and one saying how many of the session's edited files it left out when it asked about only the most recent `MAX_CHANGES_PATHS`. It carries no stack, stays within Claude Code's 10,000-character cap on added context, and prints every value read from the consumer's tree on one line with unprintable characters escaped.
-- [ ] AC5: At the end of a turn (`Stop`), when the session has edited files and a test in scope is failing or not current, or the answer is not determined, the hook shows the person one line, which never blocks the stop and never makes the agent take another turn: how many tests in scope are failing and how many are not current, or why RT Test has not decided. At the session's next prompt (`UserPromptSubmit`), the same line, asked afresh, is added to the agent's context. Neither event uses or moves the report's cursor, and each says nothing otherwise.
-- [ ] AC6: When the hook gets no answer (no daemon serves the root, the daemon predates the query or is stopping, it has nothing to answer, the connection closes first, the request is refused, or no answer arrives within the hook's bound), it tells each agent once, at the first batch or prompt of that agent that meets it, naming the root and the reason, and tells the person once, at the first turn end that meets it; it says nothing more about it until an answer arrives, after which the next loss is told again. A request refused for a path the session edited does not leave every later request of the session refused. The hook starts no daemon, discovery or test.
-- [ ] AC7: Every run of the hook ends within `HOOK_BOUND_MS` (a target) of starting to read its payload, plus the process's own start, whatever happens; prints nothing on stdout but one JSON object Claude Code accepts, `{}` when it says nothing; never exits 2, which Claude Code reads as blocking; and exits 0 when it had an answer or nothing to ask, and 1 with the reason on stderr when it had no answer, could not read its payload or its arguments, could not use its user directory, or could not write its memory. A missing memory file is no memory and changes nothing; one that exists but cannot be read or parsed counts as none (AC8), with the reason on stderr. It never blocks a tool call, a stop or a prompt.
-- [ ] AC8: The hook keeps each session's memory (the files its agents edited, and for each agent its cursor and whether it has told that agent, and for the main agent the person, that no answer came) for that session and consumer root in the user's own RT Test directory, which only that user can enter, and writes nothing in the consumer's tree (P41). A memory that cannot be read counts as none; a run never reads a torn memory, and no run loses what another run remembered, including runs of one session that overlap, such as a prompt's during a batch's; an agent's memory untouched for `MEMORY_AGE_MS` (7 days) is removed, so an agent's edited files leave the session's memory 7 days after that agent last wrote them.
-- [ ] AC9: The hook's end-to-end time for a `PostToolBatch` run against a started daemon, process start included, is measured as a p95 against the 100 ms end-to-end CLI target (`docs/plan.md`), recorded with the hardware, OS, runtime, project size and warm or cold state, and stays labeled a target.
+- [x] AC1: `rt-test hook claude-code [--root <dir>]` reads one Claude Code hook payload from stdin and answers its `PostToolBatch`, `Stop` and `UserPromptSubmit` events; any other event says nothing. The root is `--root`, or the directory the hook runs in. RT Test writes no Claude Code settings file: a consumer opts in by adding the settings block the README gives, three entries that each run this command with `--root "$CLAUDE_PROJECT_DIR"`, and a consumer that adds none gets no hook.
+- [x] AC2: A session's edited files are the file paths of the `Write`, `Edit` and `NotebookEdit` calls in each batch the hook receives for that session (its `session_id`), the main agent's and each subagent's alike, remembered across the hook's runs, most recently edited first, at most `MAX_CHANGES_PATHS` (ticket 2.6); a path outside the consumer root, judged by its real path while the file exists, is left out. A batch whose calls name no file, such as `Bash` or `PowerShell` calls, adds none, and the hook asks about the files edited so far. A session that has edited no file under the root asks nothing and says nothing.
+- [x] AC3: After each batch, when the session has edited files, the hook asks the daemon's `changes` query (ticket 2.6) about them, with the cursor the last answer to the same agent returned: the main agent and each subagent keep a cursor of their own, so each hears every change since its own last report, a subagent's edits included. It adds a report to that agent's context only when the answer is determined and lists or counts at least one change since that cursor; when the answer is a baseline because the agent has no cursor yet, or a cursor the hook gave was not issued by the current daemon life or has expired, and a test in scope is failing or not current, it adds one line saying why and giving those counts. It keeps the cursor each determined answer returns; a not-determined answer, which says nothing, leaves the agent's cursor as it was, so a baseline it could not give is given by the next determined answer.
+- [x] AC4: A report names at most `NAMED_CHANGES` (5) changes, in the order the answer lists them (failing, then recovered, then the rest), each with its test's file and full name, or its not-discovered entry's kind and path, its kind, its standing at the cursor and now (`atCursor` and `now`), and, on a failing change, its first error line cut to `ERROR_LINE_CHARS` (200) characters; it counts the changes it does not name by kind, and adds one line counting the failing tests outside scope when there are any, and one saying how many of the session's edited files it left out when it asked about only the most recent `MAX_CHANGES_PATHS`. It carries no stack, stays within Claude Code's 10,000-character cap on added context, and prints every value read from the consumer's tree on one line with unprintable characters escaped.
+- [x] AC5: At the end of a turn (`Stop`), when the session has edited files and a test in scope is failing or not current, or the answer is not determined, the hook shows the person one line, which never blocks the stop and never makes the agent take another turn: how many tests in scope are failing and how many are not current, or why RT Test has not decided. At the session's next prompt (`UserPromptSubmit`), the same line, asked afresh, is added to the agent's context. Neither event uses or moves the report's cursor, and each says nothing otherwise.
+- [x] AC6: When the hook gets no answer (no daemon serves the root, the daemon predates the query or is stopping, it has nothing to answer, the connection closes first, the request is refused, or no answer arrives within the hook's bound), it tells each agent once, at the first batch or prompt of that agent that meets it, naming the root and the reason, and tells the person once, at the first turn end that meets it; it says nothing more about it until an answer arrives, after which the next loss is told again. A request refused for a path the session edited does not leave every later request of the session refused. A connect that stalls before any request is a known limit: the run still ends at its deadline, without this line. The hook starts no daemon, discovery or test.
+- [x] AC7: Every run of the hook ends within `HOOK_BOUND_MS` (a target) of starting to read its payload, plus the process's own start, whatever happens, except while a synchronous Windows system tool of the key check holds the process (a known limit, with Claude Code's entry timeout as the backstop); prints nothing on stdout but one JSON object Claude Code accepts, `{}` when it says nothing; never exits 2, which Claude Code reads as blocking; and exits 0 when it had an answer or nothing to ask, and 1 with the reason on stderr when it had no answer, could not read its payload or its arguments, could not use its user directory, or could not write its memory. A missing memory file is no memory and changes nothing; one that exists but cannot be read or parsed counts as none (AC8), with the reason on stderr. It never blocks a tool call, a stop or a prompt.
+- [x] AC8: The hook keeps each session's memory (the files its agents edited, and for each agent its cursor and whether it has told that agent, and for the main agent the person, that no answer came) for that session and consumer root in the user's own RT Test directory, which only that user can enter, and writes nothing in the consumer's tree (P41). A memory that cannot be read counts as none; a run never reads a torn memory, and no run loses what another run remembered, including runs of one session that overlap, such as a prompt's during a batch's; an agent's memory untouched for `MEMORY_AGE_MS` (7 days) is removed, so an agent's edited files leave the session's memory 7 days after that agent last wrote them.
+- [x] AC9: The hook's end-to-end time for a `PostToolBatch` run against a started daemon, process start included, is measured as a p95 against the 100 ms end-to-end CLI target (`docs/plan.md`), recorded with the hardware, OS, runtime, project size and warm or cold state, and stays labeled a target.
 
 ## Unverified Assumptions
 
@@ -44,18 +44,18 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Before the first edit, re-read the landed code of ticket 2.6 (`queryChanges` and `ChangesOptions` in `query-client.ts`, `ChangesAnswer` and its constants in `query/changes-answer.ts`, and what `client.ts` re-exports of them), and confirm the names § The contract, from ticket 2.6 gives. Report any further rename to the orchestrator before building on it.
-- [ ] (AC2, AC4) Export what the hook reads and 2.6 left private, rather than restating it (C3, C14): the failing states, `FAILING_STATES` in `packages/daemon/src/query/changes-answer.ts` (or the list derived from it, as `CHANGE_KINDS` is from its members), through `client.ts`; `MAX_CHANGES_PATHS` from `daemon/protocol.ts` through `client.ts`; and `CURRENT` from `query/answer.ts` through `client.ts`, which exports `FRESHNESS_VALUES` but not it. `CURRENT` adds no file, since `client.ts` is already modified.
-- [ ] (AC3, AC7) In `packages/daemon/src/query-client.ts`, let `queryChanges`' options also carry a bound in milliseconds the caller gives, using the path status's bound when none is given, so the hook's query ends inside its deadline (C40, C166).
-- [ ] (AC8) Export through `packages/daemon/src/client.ts` the user's own RT Test directory, as `endpoint.ts` places the daemon's key: `~/AppData/Local/rt-test` on Windows, and on Linux the owner-only runtime directory, created owner-only through `runtimeDirectoryRefusal(directory, true)` and refused when it is not the user's alone. Compute it in one place in `endpoint.ts`, which `endpointOf` then reuses, never a second copy of its constants, and export `identityHash` through `client.ts` for a memory file's name (C3, C4, C13, C59).
-- [ ] (AC1, AC7) Create `packages/cli/src/commands/hook.ts`, a `Command` named `hook` taking the harness `claude-code` and `--root`, the root defaulting to the directory the hook runs in, registered in `packages/cli/src/main.ts`. Its `parse` never throws: an argument it cannot parse becomes a run that writes the reason to stderr, prints `{}` and exits 1, since `main` turns a thrown usage error into exit 2 (AC7). Read stdin to its end, take the payload's `session_id`, `hook_event_name` and, for `PostToolBatch`, each `tool_calls` entry's `tool_name` and `tool_input`, and dispatch by event. Start one deadline of `HOOK_BOUND_MS`, a named constant labeled a target, before reading stdin, enforced by a timer that on expiry prints `{}` unless an object was already printed, writes the reason to stderr and exits 1 whatever work is pending; give the daemon's query what is left of it less a named reserve for writing the memory and printing; catch everything, so every path ends in one JSON object on stdout and exit 0 or 1 (C30, C152, C153, C166).
-- [ ] (AC2, AC6, AC8) Create `packages/cli/src/hook-memory.ts`: JSON files in the user's RT Test directory, named by a hash of the session, the consumer root and the file's writer, each written by exactly one kind of run, so no two runs ever write one file: each agent's batches (the payload's `agent_id`, absent for the main agent; an agent's batches run one at a time), the session's prompts, and the session's turn ends (C10). An agent's file holds only the paths it edited, each with the time of its last edit, at most `MAX_CHANGES_PATHS` of them with the most recent kept, and its cursor; every file holds when its writer last told of a loss and when it last got an answer (C147). A writer has already told of the current loss when it told after the latest answer any of the session's files records; the main agent counts as told when its batches or the session's prompts told. The session's edited files are the union over its agents' files, ordered by each path's latest edit time, most recent first, without duplicates, cut to `MAX_CHANGES_PATHS` (C22, C23, C32: the report says how many it left out). Read a missing file as no memory, and an unreadable or malformed one as no memory with the reason on stderr (C172); write through a temporary file and a rename, so a reader never sees a torn file; and, when a run creates a file, remove each hook memory file untouched for `MEMORY_AGE_MS`.
-- [ ] (AC2, AC3, AC6) On `PostToolBatch`: add the batch's `Write` and `Edit` `file_path` and `NotebookEdit` `notebook_path` values that lie under the root, judged by real path while the file exists, to the batch's agent's memory; with no remembered path in the session, print `{}`; otherwise call `queryChanges(root, paths, { since, boundMs })` with that agent's cursor. On an answer, keep its cursor and the answer's time in that agent's memory, and add context per AC3 as `hookSpecificOutput.additionalContext` with `hookEventName` `PostToolBatch`, which also carries AC6's no-answer line. On a rejection, tell the agent once per AC6; when the request was refused, retry once within the deadline leaving out each path in the session's union that no longer names an existing file or whose real path lies outside the root's, and drop those paths from this agent's own memory only, since another agent's file has its own writer; so a path any agent remembered, one that has ended included, cannot refuse the rest of the session (AC6).
-- [ ] (AC5, AC6) On `Stop` and `UserPromptSubmit`: with remembered paths, call `queryChanges` with no cursor, and build the one line from the answer's counts in scope, or its not-determined reason, printing `{}` instead when the answer is determined and no test in scope is failing or not current; `Stop` prints it as `systemMessage`, `UserPromptSubmit` as `hookSpecificOutput.additionalContext` with `hookEventName` `UserPromptSubmit`. Never write that answer's cursor to the memory; on an answer, record its time in the event's own file. A rejection follows AC6, told from the turn ends' file for `Stop` and the prompts' file for `UserPromptSubmit`, and a refused request is retried as on `PostToolBatch`, dropping nothing from any agent's memory.
-- [ ] (AC3, AC4, AC5, AC6) Create `packages/cli/src/hook-report.ts`, the text: the report per AC4 from the answer's `changes`, `omittedChanges` and `outside`, cutting each test's full name, each path and each reason to a named character bound so the longest report and every line stay under a named cap below 10,000 characters (C24, C26, C170); the baseline line of AC3; the turn-end line of AC5; the no-answer line of AC6. Read a change's standings from `atCursor` and `now`, and a failing change's `firstError`, which is `null` when no error was recorded for it (say so). Take the kinds, cursor uses, not-determined kinds, failing states and freshness values from the constants `query/changes-answer.ts` and `query/answer.ts` export through the client, never restated (C3, C14); name each phrase and bound as a constant (C3); route every consumer-derived value through `oneLine`, and a multi-line one through `firstLine` first. No line calls the tests passing as a set (C133).
-- [ ] (AC9) Measure the hook as AC9 says, with a throwaway driver under `_agent-docs/.scratch/2-7/` that starts a daemon over one of the daemon package's fixtures, runs the built `rt-test hook claude-code` a few hundred times on a `PostToolBatch` payload naming one edited file, and prints p50 and p95; delete the driver afterwards (P11). Record the figures and conditions in § Completion Notes, and report them to the orchestrator with the doc text.
-- [ ] (Support) Send the orchestrator the text in § Doc text with the build (C7, C48).
-- [ ] (Support) Lint and typecheck: `bun x oxlint` over the changed files and `bun run typecheck` across the repository (P14).
+- [x] (Support) Before the first edit, re-read the landed code of ticket 2.6 (`queryChanges` and `ChangesOptions` in `query-client.ts`, `ChangesAnswer` and its constants in `query/changes-answer.ts`, and what `client.ts` re-exports of them), and confirm the names § The contract, from ticket 2.6 gives. Report any further rename to the orchestrator before building on it.
+- [x] (AC2, AC4) Export what the hook reads and 2.6 left private, rather than restating it (C3, C14): the failing states, `FAILING_STATES` in `packages/daemon/src/query/changes-answer.ts` (or the list derived from it, as `CHANGE_KINDS` is from its members), through `client.ts`; `MAX_CHANGES_PATHS` from `daemon/protocol.ts` through `client.ts`; and `CURRENT` from `query/answer.ts` through `client.ts`, which exports `FRESHNESS_VALUES` but not it. `CURRENT` adds no file, since `client.ts` is already modified.
+- [x] (AC3, AC6, AC7) In `packages/daemon/src/query-client.ts`, let `queryChanges`' options also carry a bound in milliseconds the caller gives, using the path status's bound when none is given, and spend that one bound across every request the query makes: the proof's hello, which `onProvenConnection` (`daemon/proven-connection.ts`) sends through `provenRequest` with the connection's default bound today, as well as the changes request. So the query rejects with its reason inside the hook's deadline and AC6's no-answer line is told (C40, C166; sanity check F1, 13:21). The connect itself (`DaemonConnection.open`) stays unbounded, a known limit.
+- [x] (AC8) Export through `packages/daemon/src/client.ts` the user's own RT Test directory, as `endpoint.ts` places the daemon's key: `~/AppData/Local/rt-test` on Windows, a missing one created through `windows-acl.ts`' `protectDirectory` as a daemon start builds it, so it never exists with inherited access, and an existing one used as found, since only the user or an administrator can create a folder in the profile's `AppData\Local` and every daemon start and key check protects or checks it (checking it on every run would add an `icacls` run to each batch, against AC9's target; sanity check F3, 13:21); and on Linux the owner-only runtime directory, created owner-only through `runtimeDirectoryRefusal(directory, true)` and refused when it is not the user's alone. Compute it in one place in `endpoint.ts`, which `endpointOf` then reuses, never a second copy of its constants, and export `identityHash` through `client.ts` for a memory file's name (C3, C4, C13, C59).
+- [x] (AC1, AC7) Create `packages/cli/src/commands/hook.ts`, a `Command` named `hook` taking the harness `claude-code` and `--root`, the root defaulting to the directory the hook runs in, registered in `packages/cli/src/main.ts`. Its `parse` never throws: an argument it cannot parse becomes a run that writes the reason to stderr, prints `{}` and exits 1, since `main` turns a thrown usage error into exit 2 (AC7). Read stdin to its end, take the payload's `session_id`, `hook_event_name` and, for `PostToolBatch`, each `tool_calls` entry's `tool_name` and `tool_input`, and dispatch by event. Start one deadline of `HOOK_BOUND_MS`, a named constant labeled a target, before reading stdin, enforced by a timer that on expiry prints `{}` unless an object was already printed, writes the reason to stderr, releases its stdin read, resolves `EXIT_FAILURE`, and ends the process whatever work is pending through an optional `exit` member of `CliIo` (`packages/cli/src/command.ts`), which `packages/cli/src/bin.ts` passes as one calling `process.exit` after stdout's write callback and an in-process caller of `main` leaves out, so a test driving `main` is never killed (sanity check F2, 13:21); give the daemon's query what is left of it less a named reserve for writing the memory and printing; catch everything, so every path ends in one JSON object on stdout and exit 0 or 1 (C30, C152, C153, C166).
+- [x] (AC2, AC6, AC8) Create `packages/cli/src/hook-memory.ts`: JSON files in the user's RT Test directory, named by a hash of the session, the consumer root and the file's writer, each written by exactly one kind of run, so no two runs ever write one file: each agent's batches (the payload's `agent_id`, absent for the main agent; an agent's batches run one at a time), the session's prompts, and the session's turn ends (C10). An agent's file holds only the paths it edited, each with the time of its last edit, at most `MAX_CHANGES_PATHS` of them with the most recent kept, and its cursor; every file holds when its writer last told of a loss and when it last got an answer (C147). A writer has already told of the current loss when it told after the latest answer any of the session's files records; the main agent counts as told when its batches or the session's prompts told. The session's edited files are the union over its agents' files, ordered by each path's latest edit time, most recent first, without duplicates, cut to `MAX_CHANGES_PATHS` (C22, C23, C32: the report says how many it left out). Read a missing file as no memory, and an unreadable or malformed one as no memory with the reason on stderr (C172); write through a temporary file and a rename, so a reader never sees a torn file; and, when a run creates a file, remove each hook memory file untouched for `MEMORY_AGE_MS`.
+- [x] (AC2, AC3, AC6) On `PostToolBatch`: add the batch's `Write` and `Edit` `file_path` and `NotebookEdit` `notebook_path` values that lie under the root, judged by real path while the file exists, to the batch's agent's memory; with no remembered path in the session, print `{}`; otherwise call `queryChanges(root, paths, { since, boundMs })` with that agent's cursor. On an answer, keep the answer's time in that agent's memory, and its cursor only when the answer is determined (AC3), and add context per AC3 as `hookSpecificOutput.additionalContext` with `hookEventName` `PostToolBatch`, which also carries AC6's no-answer line. On a rejection, tell the agent once per AC6; when the request was refused, retry once within the deadline leaving out each path in the session's union that no longer names an existing file or whose real path lies outside the root's, and drop those paths from this agent's own memory only, since another agent's file has its own writer; so a path any agent remembered, one that has ended included, cannot refuse the rest of the session (AC6).
+- [x] (AC5, AC6) On `Stop` and `UserPromptSubmit`: with remembered paths, call `queryChanges` with no cursor, and build the one line from the answer's counts in scope, or its not-determined reason, printing `{}` instead when the answer is determined and no test in scope is failing or not current; `Stop` prints it as `systemMessage`, `UserPromptSubmit` as `hookSpecificOutput.additionalContext` with `hookEventName` `UserPromptSubmit`. Never write that answer's cursor to the memory; on an answer, record its time in the event's own file. A rejection follows AC6, told from the turn ends' file for `Stop` and the prompts' file for `UserPromptSubmit`, and a refused request is retried as on `PostToolBatch`, dropping nothing from any agent's memory.
+- [x] (AC3, AC4, AC5, AC6) Create `packages/cli/src/hook-report.ts`, the text: the report per AC4 from the answer's `changes`, `omittedChanges` and `outside`, cutting each test's full name, each path and each reason to a named character bound so the longest report and every line stay under a named cap below 10,000 characters (C24, C26, C170); the baseline line of AC3; the turn-end line of AC5; the no-answer line of AC6. Read a change's standings from `atCursor` and `now`, and a failing change's `firstError`, which is `null` when no error was recorded for it (say so). Take the kinds, cursor uses, not-determined kinds, failing states and freshness values from the constants `query/changes-answer.ts` and `query/answer.ts` export through the client, never restated (C3, C14); name each phrase and bound as a constant (C3); route every consumer-derived value through `oneLine`, and a multi-line one through `firstLine` first. No line calls the tests passing as a set (C133).
+- [x] (AC9) Measure the hook as AC9 says, with a throwaway driver under `_agent-docs/.scratch/2-7/` that starts a daemon over one of the daemon package's fixtures, runs the built `rt-test hook claude-code` a few hundred times on a `PostToolBatch` payload naming one edited file, and prints p50 and p95; delete the driver afterwards (P11). Record the figures and conditions in § Completion Notes, and report them to the orchestrator with the doc text.
+- [x] (Support) Send the orchestrator the text in § Doc text with the build (C7, C48).
+- [x] (Support) Lint and typecheck: `bun x oxlint` over the changed files and `bun run typecheck` across the repository (P14).
 
 ## Reusable Code
 
@@ -142,7 +142,7 @@ As 2.6 built it (50dc810 on `wt/1`, read at 10:57 on 2026-09-30; reconciled with
 
 2.6's final behavior where this ticket relies on it (2d6bb90 on `wt/1`, after its review; orchestrator, 12:47):
 
-- A not-determined answer hands back the caller's cursor when it is usable, or else the latest one the daemon recorded, which AC3's "keeps the cursor each answer returns" relies on.
+- A not-determined answer hands back the caller's cursor when it is usable, or else the latest one the daemon recorded. The hook keeps neither: adopting the latest one after a `none-given`, `not-issued` or `expired` use would turn the next determined answer from a baseline into `used`, and a covering test already failing would then show no change, so AC3's baseline line would never reach the agent. So only a determined answer moves the agent's cursor (AC3; dev's adversarial review F1, amended at 15:58 on 2026-09-30).
 - `rt-test changes`' headline counts the changes in scope; the hook builds its own report from `changes` and `omittedChanges`, and prints no headline of 2.6's.
 - The journal records at each determined changes answer, stored run or discovery, and ended dependency build, and also after each input change or store wake, so a cursor taken just before an edit meets a recorded moment after it.
 
@@ -178,6 +178,8 @@ Drafted whole, the ticket measured about 20 raw files and 26 estimated, with 10 
 - **A reader of only the agent's final message misses the turn-end line**, since a `systemMessage` shows in Claude Code's interface but never in the transcript's text, such as a lane's report to its orchestrator (orchestrator, 07:58). The agent gets the same line with its next prompt.
 - **A file changed only by a shell call is not among the session's edited files**, so its covering tests are reported only when they also cover a file the session edited.
 - **A misspelled command name in the settings exits 2 through `main`'s usage error**, which Claude Code reads as blocking; the README's block is to be copied as given.
+- **A connect that stalls** (`DaemonConnection.open`, such as a named pipe that never accepts) is not bounded by the query's bound; the deadline's timer still ends the run with `{}`, without AC6's no-answer line (sanity check F1, 13:21).
+- **A synchronous Windows system tool in the key check** (`whoami` and `icacls`, each bounded by `TOOL_TIMEOUT_MS`, 10 s) blocks every timer, the deadline's exit included, so such a run can pass `HOOK_BOUND_MS`; Claude Code's 10 s timeout on each settings entry is the backstop (sanity check F2, 13:21).
 - **A daemon restart loses 2.6's journal**, so changes across it are not listed; AC3's baseline line gives the counts instead.
 
 #### Pending siblings and their routing
@@ -191,7 +193,7 @@ Drafted whole, the ticket measured about 20 raw files and 26 estimated, with 10 
 
 #### Sizing
 
-About 13 raw files and 17 estimated (13 times 1.3 is 16.9); code units 9 (8 criteria needing code, AC9 being a measurement, plus validation). Production: `query-client.ts`, `client.ts`, `daemon/endpoint.ts`, `query/changes-answer.ts` (only to export its failing states, added at 10:57 when 2.6's build left them private), `cli/src/main.ts`, and new `cli/src/commands/hook.ts`, `cli/src/hook-memory.ts` and `cli/src/hook-report.ts`. Tests, for create-tests: new `packages/cli/test/hook.test.ts` (the hook in process against stand-in and real daemons; P42, since no test file covers a hook), `packages/cli/test/cli.test.ts`, `packages/cli/test/defects.json`, `packages/daemon/test/runtime-directory.test.ts` (the exported user directory) and `packages/daemon/test/defects.json`. Over 10 estimated, so dev delegates: the daemon exports (`query-client.ts`, `endpoint.ts`, `changes-answer.ts`, `client.ts`), then the hook (`commands/hook.ts`, `hook-memory.ts`, `hook-report.ts`, `main.ts`).
+About 16 raw files and 21 estimated (16 times 1.3 is 20.8); code units 9 (8 criteria needing code, AC9 being a measurement, plus validation). Production: `query-client.ts`, `client.ts`, `daemon/endpoint.ts`, `daemon/proven-connection.ts` (the hello's bound, sanity check F1), `query/changes-answer.ts` (only to export its failing states, added at 10:57 when 2.6's build left them private), `cli/src/main.ts`, `cli/src/command.ts` and `cli/src/bin.ts` (the deadline's exit, sanity check F2), and new `cli/src/commands/hook.ts`, `cli/src/hook-memory.ts` and `cli/src/hook-report.ts`. Tests, for create-tests: new `packages/cli/test/hook.test.ts` (the hook in process against stand-in and real daemons; P42, since no test file covers a hook), `packages/cli/test/cli.test.ts`, `packages/cli/test/defects.json`, `packages/daemon/test/runtime-directory.test.ts` (the exported user directory) and `packages/daemon/test/defects.json`. Over 10 estimated, so dev delegates: the daemon exports (`query-client.ts`, `proven-connection.ts`, `endpoint.ts`, `changes-answer.ts`, `client.ts`), then the hook (`commands/hook.ts`, `hook-memory.ts`, `hook-report.ts`, `main.ts`, `command.ts`, `bin.ts`).
 
 #### Current structure of the modified files
 
@@ -266,7 +268,10 @@ files_to_modify:
   - packages/daemon/src/client.ts
   - packages/daemon/src/daemon/endpoint.ts
   - packages/daemon/src/query/changes-answer.ts
+  - packages/daemon/src/daemon/proven-connection.ts
   - packages/cli/src/main.ts
+  - packages/cli/src/command.ts
+  - packages/cli/src/bin.ts
 files_to_create:
   - packages/cli/src/commands/hook.ts
   - packages/cli/src/hook-memory.ts
@@ -282,19 +287,32 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 9b274c0d-2818-4b6f-bdc3-1d09a29af762
 
 #### Test Files This Change Broke
 
-None.
+None found. `bun run typecheck` across the repository, test files included, exits 0 (15:57). The usage listing gains `rt-test hook claude-code [--root <dir>]`, but `cli.test.ts` D1741 checks that each expected line is included, not the whole listing, so it still passes and does not cover the hook's line. No test was run (create-tests runs the suite).
 
 #### ACs Owed a Test
 
-None.
+None. Each criterion has traced or observed evidence (§ Completion Notes). The tests below pin what that evidence cannot hold in place.
 
 #### Tests Owed
 
-None.
+The hook is driven in process through `main` with a fake `CliIo` (no `exit` member), against a stand-in or real daemon. Its memory goes to the real user directory unless a test points `userDirectory` elsewhere.
+
+- A not-determined answer to a batch with no usable cursor (none-given, not-issued or expired) does not move the agent's cursor, so the next determined answer is a baseline that speaks its failing counts (AC3; the review's F1). Mutation: `withAnswer` takes `answer.cursor` whatever `answer.determined` says.
+- The main agent and each subagent keep their own cursor: a subagent's report does not consume the main agent's changes (AC3).
+- A batch's edited files are written before the query, so a run that the deadline ends keeps them (AC2; the review's F3).
+- A loss is told once per agent and once to the person, and told again after an answer arrives (AC6). The main agent counts as told when its batches or the prompts told.
+- A request refused for a remembered path that vanished is retried without it and answered. The path leaves only this agent's memory, and only when the retry answered; with no answer, the first reason is told (AC6; the review's F2).
+- `Stop` and `UserPromptSubmit` move no cursor and drop no path (AC5).
+- A path outside the root, by real path, is not remembered; `Bash` calls add none (AC2).
+- The report names at most 5 changes and counts the rest by kind. It cuts a failing change's first error to 200 characters and adds the outside-failing and left-out lines (AC4).
+- A payload whose stdin never ends ends the run by `HOOK_BOUND_MS`, with `{}` on stdout and exit 1. An argument the hook cannot parse exits 1 with `{}`, never 2 (AC7).
+- A memory file that exists but is malformed counts as none, with the reason on stderr; one untouched for 7 days is read as none and pruned (AC7, AC8).
+- `queryChanges` with `boundMs` rejects within the bound when the daemon never answers the hello: `proven-connection.ts` passes the deadline to the hello (AC7; sanity check F1).
+- `userDirectory` on Linux creates the runtime directory owner-only and refuses one open to others (`runtime-directory.test.ts`; AC8).
 
 ### Tests Record
 
@@ -316,9 +334,91 @@ None.
 
 ### Completion Notes
 
+Built by dev (threadId 9b274c0d-2818-4b6f-bdc3-1d09a29af762), 13:22 to 15:58 on 2026-09-30, on wt/1 at 1e2152b.
+
+**Sanity check (13:21).** Three findings went to the author (413a724a); all three were confirmed and the ticket updated at 13:22:
+
+- F1: the query's bound now covers the proof's hello.
+- F2: the deadline exits through an optional `CliIo.exit`.
+- F3: a missing Windows user directory is created through `protectDirectory`.
+
+**Unverified assumptions.** None were listed.
+
+**What was built.**
+
+- `queryChanges` takes `boundMs` and spends one deadline across the hello and the request (`proven-connection.ts`: the `boundUntil` deadline, and `helloDeadline` on `onProvenConnection`). It rejects a `boundMs` that is not a whole number above 0.
+- `endpoint.ts` computes the user directory once (`userDirectoryPath`, which `endpointOf` reuses) and exports `userDirectory()`.
+- The client also exports `FAILING_STATES`, `MAX_CHANGES_PATHS`, `CURRENT`, `identityHash` and `resolveCallerPath`.
+- The hook judges "under the root" with the daemon's own `resolveCallerPath`, so the hook and the daemon never disagree on it (C8).
+- It is split across three files: `commands/hook.ts` (command, payload, deadline, events), `hook-memory.ts` (one file per writer, union, told times, atomic write, pruning) and `hook-report.ts` (the text).
+
+**Adversarial review (13:37, returned 15:53).** 7 findings, 6 fixed:
+
+- F1: only a determined answer moves the agent's cursor. The author confirmed it and amended AC3 and the PostToolBatch task to match (15:58).
+- F2: paths drop only when a retry answered, and a failed retry tells the first reason.
+- F3: the batch's edits are saved before the query.
+- F4: the deadline claims the printer synchronously and exits after both writes flush.
+- F5: `Map` lookups.
+- F7: `boundMs` is validated.
+- Discarded F6 (no named 10,000-character cap check). The per-value bounds keep the worst case near 4,300 code points (about 6.7k UTF-16 units by the reviewer's own arithmetic), so a cap check would be cleanup machinery for an unreachable state (C10).
+
+Post-fix re-validation: `bun run typecheck` exit 0, oxlint 0 diagnostics over the 11 files, prettier clean (15:57).
+
+**Acceptance evidence.** A throwaway driver ran the built CLI over a copy of the `single` fixture with a started daemon, under the run lease, 13:34 to 13:36. Its log is kept at `_agent-docs/.scratch/2-7/drive.log` until the orchestrator closes the run.
+
+- AC1: `PostToolBatch`, `Stop` and `UserPromptSubmit` each answered. `SessionStart` gave `{}` with exit 0. Nothing writes a settings file.
+- AC2 and AC3:
+  - The main agent's first batch after start was a baseline, passing, so it said nothing.
+  - After a breaking edit, the batch reported `failing . a.test.mjs > only: at your last report: passed, current; now: failed, current; first error: expected 2 to be 1`.
+  - After the fix, it reported `recovered`.
+  - A subagent's `Bash`-only batch asked about the main agent's file from its own empty cursor and gave the baseline line.
+- AC4: the format above. Every consumer value goes through `oneLine`, with named per-value bounds.
+- AC5: `Stop` gave `systemMessage` "of the 1 tests covering the files this session edited, 1 is failing and 0 are not current". `UserPromptSubmit` gave the same line as context.
+- AC6:
+  - With no daemon, the first batch told the loss, and the second printed `{}` with exit 1.
+  - `Stop` told the person once.
+  - After an answer and a daemon stop, the loss was told again.
+  - A later smoke (15:57): the next prompt after the main agent's told batch stayed silent, and a second `Stop` stayed silent.
+- AC7:
+  - A payload whose stdin never ended exited 1 after 2,308 ms with `{}` and the reason on stderr.
+  - Bad arguments exited 1 with `{}`, and a bad payload exited 1 with `{}`.
+- AC8: the memory files appeared in `~/AppData/Local/rt-test/` as `hook-<session and root hash>-<writer hash>.json`. The driver's files were removed afterwards.
+
+**AC9 measurement, a target, not a claim.** 300 `PostToolBatch` runs of the built CLI (`node packages/cli/dist/bin.js hook claude-code`), each naming one edited file, against a started, warm daemon over a 1-test project (the `single` fixture plus one source file). Process start is included.
+
+- Result: p50 177.2 ms, p95 537.2 ms, max 1,277.5 ms, against the 100 ms target.
+- Setup: Windows 11 Pro 10.0.26200, Node v24.19.0, AMD Ryzen 7 8700F (16 threads), 32 GiB, under the run lease with no other heavy run.
+- A run that asks nothing (another event, or a bad payload) took 101 to 104 ms. So process start and module load alone use the whole target on Windows. The query adds about 70 ms at p50, most of it the key check's synchronous `whoami` and `icacls` spawns.
+- Not measured on Linux.
+
+**Known limits added by this build.**
+
+- A stalled connect.
+- A synchronous Windows key-check tool blocking the deadline (both recorded by the author in § Known limits).
+- Claude Code gets a hook line only when the process exits.
+
+**README.** This change alters user-visible behavior: the new command and its settings block. Under the lane, the exact text goes to the orchestrator with the § Doc text in the build report; this session edits no README.
+
+**Left undone.** None within scope.
+
+**Change request candidates.**
+
+- The Windows per-query key check spawns `whoami` and `icacls` synchronously on each client call, most of the hook's time beyond process start. Caching the check per process cannot help a one-shot hook. A lighter check is a design fork for the daemon's key protection (ADR-0006), not a defect. Recommendation: leave it until the trial measures whether 170 to 540 ms per batch is felt.
+
 ### File List
 
-- _agent-docs/tickets/2-7-agent-hook.md (created by create-ticket, 08:07 on 2026-09-30)
+- _agent-docs/tickets/2-7-agent-hook.md (created by create-ticket, 08:07 on 2026-09-30; dev's task and criterion ticks and this record, 13:23 to 15:58)
+- packages/daemon/src/query-client.ts (modified)
+- packages/daemon/src/daemon/proven-connection.ts (modified)
+- packages/daemon/src/daemon/endpoint.ts (modified)
+- packages/daemon/src/client.ts (modified)
+- packages/daemon/src/query/changes-answer.ts (modified)
+- packages/cli/src/main.ts (modified)
+- packages/cli/src/command.ts (modified)
+- packages/cli/src/bin.ts (modified)
+- packages/cli/src/commands/hook.ts (created)
+- packages/cli/src/hook-memory.ts (created)
+- packages/cli/src/hook-report.ts (created)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (§ Ticket 2.7's scope line, its sibling line and ticket link, and the new § Ticket 2.7b with the split's reasoning, 08:08 and 08:18, under the orchestrator's 08:04 grant)
 - _agent-docs/sprint-status.yaml (`2-7b-agent-edits-never-hold: backlog` added, 08:08, under the 08:04 grant)
 - _agent-docs/project-context.md (P41 amended by the orchestrator as 6cf1940, 08:03, for this ticket's session memory)

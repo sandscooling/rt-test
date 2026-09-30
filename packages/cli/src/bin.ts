@@ -13,6 +13,7 @@ try {
     stdinIsTerminal: process.stdin.isTTY === true,
     stderrIsTerminal: process.stderr.isTTY === true,
     cwd: process.cwd(),
+    exit: (code) => process.exit(code),
   });
 } catch (error) {
   process.stderr.write(`rt-test failed unexpectedly: ${errorText(error)}\n`);

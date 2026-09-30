@@ -6,6 +6,7 @@ import {
   ERROR_TYPE,
   HELLO_TYPE,
   PROTOCOL_VERSION,
+  RESPONSE_BOUND_MS,
   VERSION_MISMATCH_CODE,
   type ProtocolMessage,
 } from "./protocol.js";
@@ -33,20 +34,36 @@ export function targetOf(
 
 /**
  * Sends a request carrying a fresh challenge, and resolves with the answer only once it proves it came from this
- * user's daemon for the worktree, so no process that took the endpoint can answer in its place.
+ * user's daemon for the worktree, so no process that took the endpoint can answer in its place. The answer may take the
+ * connection's default bound, and never past `deadline`, a `Date.now()` time, when one is given.
  */
 export async function provenRequest(
   target: DaemonTarget,
   connection: DaemonConnection,
   request: (challenge: string) => object,
+  deadline?: number,
 ): Promise<ProtocolMessage> {
   const verifier = daemonVerifier(target.endpoint, target.worktreeIdentity);
   if (!verifier.ok) throw notTheDaemon(target, verifier.reason);
   const challenge = newChallenge();
-  const answer = await connection.request(request(challenge));
+  const answer = await connection.request(
+    request(challenge),
+    deadline === undefined
+      ? undefined
+      : boundUntil(deadline, RESPONSE_BOUND_MS),
+  );
   const refusal = verifier.verifier.refusal(challenge, answer);
   if (refusal === undefined) return answer;
   throw notTheDaemon(target, refusal);
+}
+
+/** The bound that ends a wait at `deadline`, a `Date.now()` time, never longer than `capMs`; throws once it has passed. */
+export function boundUntil(deadline: number, capMs?: number): number {
+  const left = deadline - Date.now();
+  if (left <= 0) {
+    throw new Error("the query's deadline passed before the daemon was asked");
+  }
+  return capMs === undefined ? left : Math.min(left, capMs);
 }
 
 function notTheDaemon(target: DaemonTarget, reason: string): Error {
@@ -57,11 +74,13 @@ function notTheDaemon(target: DaemonTarget, reason: string): Error {
 
 /**
  * Runs `work` on a connection whose hello the daemon proved, so no answer comes from a process that cannot prove it
- * is this user's daemon; undefined when nothing listens on the endpoint.
+ * is this user's daemon; undefined when nothing listens on the endpoint. The hello's answer never comes past
+ * `helloDeadline`, a `Date.now()` time, when one is given.
  */
 export async function onProvenConnection<T>(
   target: DaemonTarget,
   work: (connection: DaemonConnection) => Promise<T>,
+  helloDeadline?: number,
 ): Promise<T | undefined> {
   const { consumerRoot } = target;
   const connected = await DaemonConnection.open(target.endpoint.path);
@@ -75,11 +94,16 @@ export async function onProvenConnection<T>(
   try {
     requireAnswer(
       consumerRoot,
-      await provenRequest(target, connection, (challenge) => ({
-        type: HELLO_TYPE,
-        protocolVersion: PROTOCOL_VERSION,
-        challenge,
-      })),
+      await provenRequest(
+        target,
+        connection,
+        (challenge) => ({
+          type: HELLO_TYPE,
+          protocolVersion: PROTOCOL_VERSION,
+          challenge,
+        }),
+        helloDeadline,
+      ),
       HELLO_TYPE,
     );
     return await work(connection);
