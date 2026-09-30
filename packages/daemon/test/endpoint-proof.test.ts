@@ -275,7 +275,8 @@ describe("the Windows key directory", () => {
   /**
    * Runs `body` as Windows does, with `whoami` naming `TOOL_SID` and `icacls /save` writing `dacl`, whichever
    * platform runs the test. Returns where each `/save` wrote and the arguments of every other `icacls` call, and
-   * puts everything back.
+   * puts everything back. The user's SID is cached per module instance, so on Windows the real-tool tests above cache
+   * the machine's SID first and this `whoami` may never run: match the SID by pattern, never as `TOOL_SID`.
    */
   function withAclTools<T>(
     dacl: string,
