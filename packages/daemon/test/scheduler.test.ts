@@ -4098,3 +4098,17 @@ describe("an agent's reported edits and the holds", () => {
     expect(runs).toHaveLength(3);
   });
 });
+
+describe("an agent's reported edits for every subject", () => {
+  it("D3601: a discovery holding a report counts its change to the reported file as an edit for workspace a too, never as its own change there", () => {
+    expect(
+      recordedForA((record) => {
+        record.jobBegan("a");
+        record.jobEnded(stillWindow([]), "a");
+        record.jobBegan(undefined);
+        record.reportEdits([FIXTURE]).read();
+        record.jobEnded(stillWindow([FIXTURE]), undefined);
+      }),
+    ).toStrictEqual({ byJobs: [], edits: [FIXTURE] });
+  });
+});

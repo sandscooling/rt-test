@@ -1091,3 +1091,21 @@ describe("the kinds of the other states and entries", () => {
     ]);
   });
 });
+
+describe("a report whose named read fails", () => {
+  it("D3602: a changes query whose named read rejects still closes its report of edited files", async () => {
+    const outcome = await inWorld(async (world) => {
+      world.inputs.readNamed = () =>
+        Promise.reject(new Error("the input tracker has stopped"));
+      const rejected = await world.ask([A_SOURCE], undefined, [A_SOURCE]).then(
+        () => false,
+        () => true,
+      );
+      return { rejected, reports: world.reports };
+    });
+    expect(outcome).toStrictEqual({
+      rejected: true,
+      reports: [`reported ${A_SOURCE}`, "closed"],
+    });
+  });
+});

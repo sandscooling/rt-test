@@ -7,7 +7,7 @@ const FILE_PATH_INPUTS: ReadonlyMap<string, string> = new Map([
   ["Edit", "file_path"],
   ["NotebookEdit", "notebook_path"],
 ]);
-/** How Claude Code begins the result of a call that failed or that the user rejected, either of which saved nothing. */
+/** How Claude Code begins the result of a call it wrapped as an error, or that the user rejected; other unsaved calls read as saved. */
 const UNSAVED_RESULT_STARTS: readonly string[] = [
   "<tool_use_error>",
   "The user doesn't want to proceed with this tool use",
@@ -17,7 +17,7 @@ const UNSAVED_RESULT_STARTS: readonly string[] = [
 export interface BatchEdits {
   /** Each file a call named. */
   readonly named: string[];
-  /** Each file a call named whose result says no failure or rejection; a call with no result counts as saved. */
+  /** Each file a call named whose result begins with none of `UNSAVED_RESULT_STARTS`; a call with no result counts as saved. */
   readonly saved: string[];
 }
 

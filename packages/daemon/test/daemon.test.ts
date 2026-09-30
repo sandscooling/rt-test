@@ -2200,3 +2200,34 @@ describe("the changes for files", () => {
     KEY_TEST_TIMEOUT_MS,
   );
 });
+
+describe("the files a changes query names as edited among those it asks about", () => {
+  it(
+    "D3600: queryChanges sends as edited only the files given as edited, never every file it asks about",
+    async () => {
+      const sent = await inTempDir(async (root) => {
+        const daemon = answerAs(exitedPid(), "key");
+        const edited: unknown[] = [];
+        const [a, b] = [join(root, "a.ts"), join(root, "b.ts")];
+        await withKeyedStandIn(
+          root,
+          (context) => (request, standIn, connectionClosed) => {
+            if (request["type"] !== CHANGES_TYPE) {
+              return daemon(context)(request, standIn, connectionClosed);
+            }
+            edited.push(request["edited"]);
+            return {
+              type: ERROR_TYPE,
+              code: STOPPING_CODE,
+              message: "the daemon is stopping",
+            };
+          },
+          () => settled(queryChanges(root, [a, b], { edited: [b] })),
+        );
+        return { edited, b };
+      });
+      expect(sent.edited).toStrictEqual([[sent.b]]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+});

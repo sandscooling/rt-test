@@ -112,7 +112,7 @@ The orchestrator split the original ticket 2.7 at 08:04 by outcome: 2.7 keeps th
 
 - **A failed or rejected call is told apart by its result's text.** In Claude Code 2.1.286 a `PostToolBatch` entry's `tool_response` carries the result's content without `is_error`, so the hook leaves out a call whose result begins `<tool_use_error>` or "The user doesn't want to proceed with this tool use" (§ Completion Notes). A Claude Code release that rewords either sends such a call as edited again, which can release a hold or reset a count wrongly: a rerun too many, never a result read current. The hook fails toward vouching when unsure, since missing a real save could hold the agent's own workspace (orchestrator's ruling, 17:36 on 2026-09-30, on the dev's adversarial review F1).
 - **A batch whose request the hook never sends** (no time left in its deadline, or no answer from the daemon) names none of its files as edited, so their changes are judged by timing. That costs at most one count, like a late report, and three in a row would hold (dev's adversarial review F2).
-- **A call a `PreToolUse` hook denied** is vouched for unless its result uses one of the two forms above, which was not measured.
+- **A call that saved nothing but whose result uses neither form is vouched for** (measured in the Claude Code 2.1.286 bundle by the review, 18:34 on 2026-09-30): a `Write` or `Edit` error thrown while writing (such as "File content has changed since it was last read"), every `NotebookEdit` failure, every `PreToolUse` hook denial, a rejection inside a subagent ("Permission for this tool use was denied"), permission-rule and auto-mode denials, and a staged write to a Claude Code settings file ("Staged for review"). Each can release a hold or reset a count only when its file is one a daemon job rewrites: a rerun too many, never a result read current. `tool_response` carries no error flag; the transcript at `transcript_path` records one per call, which a later change could read if this ever bites. An interrupted batch never reaches `PostToolBatch`.
 - **A report that reaches the daemon after the round following the change has counted it** lets that one count rise; the change's later edits then reset it, so a hold would need three such late reports in a row. The hook sends it within its 2,000 ms bound (ticket 2.7), and a round first waits the 1,000 ms quiet window.
 - **A person's own saves are still judged by timing** (ticket 2.3k's known limit, owner, 22:42 on 2026-09-29): the hook vouches only for its agent's edits.
 - **A change a shell call made is judged by timing** (owner, 2026-09-29 09:16), since a shell call names no file.
@@ -148,11 +148,14 @@ As of main at a697fa4, read at 07:57 to 08:19 on 2026-09-30, before 2.4b, 2.6 an
 
 #### Doc text
 
-Dev reports this text with the build; the orchestrator writes it (C7).
+Dev reports this text with the build; the orchestrator writes it (C7). Final as of the review (18:36 on 2026-09-30), checked against the code as built.
 
-- `docs/architecture.md`, the hook paragraph 2.7 adds: "It names the files each batch's `Write`, `Edit` and `NotebookEdit` calls saved, and the daemon counts a change to them as an edit, never as one its own runs or discoveries made, so those edits never hold a workspace or the discovery as self-changing when the request arrives before the round that counts them. A call that failed or was rejected names nothing. A change a shell call makes is still judged by when it happened."
-- `docs/architecture.md`'s known limits: the self-changing hold's limit that names the hook keeps its wording, and gains: "A report that reaches the daemon after the round following the change has counted it, or one the hook could not send, lets that one count rise, so a hold would need three such reports in a row."
-- `README.md`'s agent hook section gains: "It also tells the daemon which files the agent's `Write`, `Edit` and `NotebookEdit` calls saved, so such a save made while a run is going does not count as the run's own change. A call that failed or was rejected names nothing. A file a shell command changed, or one you save yourself, is still judged by when the change happened."
+- `docs/architecture.md`, § Claude Code agent hook, after its first sentence: "Each request also names, as edited, the files among those it asks about that the batch's own `Write`, `Edit` and `NotebookEdit` calls saved, counting a call as saved unless its result begins as Claude Code's wrapped error or the user's rejection does. The daemon counts every change to a named file as an edit, never as one its own runs or discoveries made, so the agent's saves never hold a workspace or the discovery as self-changing when the request reaches the daemon before the round that counts them, and they release a hold as any edit does. A change a shell call makes is still judged by when it happened."
+- `docs/architecture.md`, § Holds on self-changing workspaces and discoveries, its second sentence becomes: "A change the tracker records while a run or discovery runs is the daemon's own, whichever workspace it reaches, unless a `changes` request names its file as edited; an edit is a path whose digest differs between the end of one such job and the start of the next, or a change to a file a `changes` request names as edited, recorded before that request or during a job running when it arrives or beginning before its named read ends."
+- `docs/architecture.md`, § Changes query, before its last sentence: "A request may also name, among its files and spelled as one of them, those the caller edited, whose changes the daemon then counts as edits; a request naming any other file as edited is refused whole."
+- `docs/architecture.md`, § Input tracker known limits: replace the clause from "an agent or a person that saves the same input of a workspace" through "ticket 2.7b's hook will vouch only for an agent's edits;" with: "a change to the same input of a workspace while a run or discovery runs, in each of three rounds in a row with no edit between jobs, made by a person's save, by an agent's shell call, or by an agent's save whose hook report reached the daemon only after the round following the change had counted it or was never sent, which holds that workspace: the hold shows in every answer, never reads a result current, and lifts at the next edit to its inputs, one landing while no job runs or a change to a file a `changes` request names as edited; a `Write`, `Edit` or `NotebookEdit` call that saved nothing though its result begins neither as Claude Code's wrapped error nor as the user's rejection, such as a `PreToolUse` hook's denial, a rejection inside a subagent or an error thrown while writing, whose file the hook still names as edited, so a daemon job's change to that file counts as an edit, costing a run, never a result read current;".
+- `README.md`, § Agent hook, after its first sentence: "It also tells the daemon which files the agent's `Write`, `Edit` and `NotebookEdit` calls saved, so a save it makes while a run is going counts as an edit rather than as the run's own change: a workspace whose tests rewrite their own inputs is never held for the agent's saves, and a held one runs again, as long as the hook's report reaches the daemon before the daemon's next round counts the change. A file a shell command changed, or one you save yourself, is still judged by when the change happened."
+- `README.md`, § Status (the paragraph opening "Milestone M1 is in its last ticket."): with 2.7b done, sprint 2, the last of M1's sprints (`docs/roadmap.md` § M1), is done, so that opening sentence is no longer true; the orchestrator words its replacement.
 
 #### Previous ticket
 
@@ -279,11 +282,17 @@ Tests session: threadId 7308bf78-b554-492a-9370-75a85ae73ea9
 - D3597: A report counts a named file as an edit though no change reached it, so a request naming an unchanged file releases a held workspace. (AC2)
 - D3598: The lifecycle never hands a changes request's edited files to the scheduler, so an agent's saves during a run count as the run's own changes and hold its workspace. (AC2)
 - D3599: `queryChanges` never sends the files named as edited, so the daemon never hears of the agent's saves. (AC4)
+- D3600: `queryChanges` sends every file it asks about as edited, not only the ones given as edited, so the daemon counts its own runs' changes to every file asked about as edits and releases holds wrongly. (AC4; review gap)
+- D3601: A job that held a report counts the reported paths it changed as edits only for its own subject and as its own changes for every other, so a discovery's change to a file the agent saved during it still adds to a workspace's count. (AC2; review gap)
+- D3602: A changes query closes its report only after a named read that resolves, so a rejected read leaves the report open for the daemon's life, and every later job's own changes to those files count as edits. (AC2; review gap)
+- D3603: A changes request whose `edited` is an empty list is refused as invalid, so a `queryChanges` caller that passes `edited: []` gets no answer. (AC1; review gap)
 - D3550 (existing, 2.7): its test now expects the options `boundMs` and `edited` for a batch that wrote a file, since the batch's saved file is now named; its record keeps its own defect (no bound), re-anchored to the options as built now.
 
 Where the tests differ from the handoff: AC2's end-to-end guarantee is pinned in `lifecycle.test.ts` (D3598), which drives the real `DaemonLifecycle`, `Changes`, scheduler and change record over a scripted executor and inputs, rather than on a real daemon in `daemon.test.ts`, which has no fixture whose runs rewrite their own inputs. The join to the tracker is pinned by D3576: the key reported is the key the named read reads, which the tracker records unchanged. The record's arms for a job that threw, never began or was refused are inert (below).
 
 Proof, by id through the run lease, of the 359 records that mutate a file this build edited or whose test file this round edited other than by adding: 359/359 detected on Windows under Node 24.19.0 (18:05 to 18:18) and on WSL Ubuntu under Node 24.19.0 (18:18 to 18:24), baseline green before and after on both. `scheduler.test.ts`, `lifecycle.test.ts` and `daemon.test.ts` only gained lines, so their other records were not re-proved.
+
+Review gaps (four rows, 18:36): each confirmed absent and covered by a new test in a new top-level block, so `changes.test.ts`, `server.test.ts`, `scheduler.test.ts` and `daemon.test.ts` only gained lines. Proof of D3600 to D3603 by id through the run lease: 4/4 detected on Windows under Node 24.19.0 (18:38 to 18:45) and on WSL Ubuntu under Node 24.19.0 (18:45 to 18:48), over HEAD 58724a8 with the review's uncommitted edits, baseline green before and after on both.
 
 Re-anchored, defect unchanged: D3184, D3438, D3449, D3460 (now `request-fields.ts`), D3476, D3477, D3529, D3550, D3554 (now `hook-edits.ts`), D3556, D3564. `changes.test.ts`' stand-in parts gained `reportEdits` and its query literal `edited: []`, which repaired D3476 to D3485, D3509 and D3518.
 
@@ -300,9 +309,27 @@ Re-anchored, defect unchanged: D3184, D3438, D3449, D3460 (now `request-fields.t
 
 ### Review Record
 
+Review session: threadId 69f7345f-2c85-422e-94c8-9566f9581364
+
+Reviewed `git diff main wt/2` (build a31ef49, tests 24d1b6e8) and the doc changes of 56b26e5 and bd572e0, 18:25 to 18:36 on 2026-09-30.
+
+**Question and ruling.** The review measured the Claude Code 2.1.286 bundle and found that `<tool_use_error>` wraps only some failures. It asked whether to widen `UNSAVED_RESULT_STARTS`. The orchestrator ruled KEEP at 18:35 on 2026-09-30: no prefixes are added, since a wrongly vouched call costs at most one extra run and never reports a stale result as current. Reading `is_error` or `toolDenialKind` per `tool_use_id` from `transcript_path` is the robust fix if this ever bites. It is not planned.
+
+**Undisposed tech debt** (pre-existing code, for Step 9):
+
+- `packages/daemon/src/daemon/request-fields.ts` `namedPaths` (moved unchanged from `server.ts`) refuses non-absolute paths by echoing them (`notAbsolute.map((path) => JSON.stringify(path)).join(", ")`), which `valueShape`'s comment in the same module rules out: a request line near 1 MiB of relative Windows paths can push the refusal past the line limit, so the client reads a too-long line instead of the reason. The same echo shape sits in `server.ts`' unknown-type error and path-status refusal (`got ${JSON.stringify(path ?? null)}`).
+- `packages/daemon/src/daemon/request-fields.ts` `valueShape(null)` answers "a value of type object", so a caller that sent `since: null` or `edited: null` reads that it sent an object.
+
 #### Test Coverage Gaps
 
-None.
+- `packages/daemon/src/query-client.ts` (AC4, MEDIUM, daemon-state): `queryChanges` sends every file it asks about as edited, not only the ones given as edited, so the daemon counts its own runs' changes to every file asked about as edits and releases holds wrongly. D3599 asks about one file and names that same file as edited, so this mutation passes it. Expected test: `daemon.test.ts`, `queryChanges(root, [a, b], { edited: [b] })` sends `edited` `[b]`.
+- `packages/daemon/src/daemon/change-record.ts` `jobEnded` (AC2, MEDIUM, daemon-state): a job that held a report counts the reported paths it changed as edits only for its own subject and as its own changes for every other, so a discovery's change to a file the agent saved during it still adds to a workspace's count. D3588 to D3591 each end a job of `a` and read `a`. Expected test: `scheduler.test.ts` at the record level. Seed `a` with an ended job, begin the discovery, report and read the file, end the discovery with a window naming it, then expect `record.of("a")` to hold the file in `edits` and not in `byJobs`.
+- `packages/daemon/src/daemon/changes.ts` `answer` (AC2, LOW, daemon-state): a changes query closes its report only after a named read that resolves, so a rejected read leaves the report open for the daemon's life, and every later job's own changes to those files count as edits. D3574 closes only after a read that resolves, and the stand-in inputs' `readNamed` cannot reject. Expected test: `changes.test.ts`, with a named read that rejects, then expect the report closed.
+- `packages/daemon/src/daemon/request-fields.ts` `editedPaths` (AC1, LOW, consumer): a changes request whose `edited` is an empty list is refused as invalid, so a `queryChanges` caller that passes `edited: []` gets no answer. D3587 sends no `edited` member. Expected test: `server.test.ts` beside D3587, a request with `edited: []` reaches the query with `edited` `[]`.
+
+Denominator: 27 named-defect tests added (D3573 to D3599) and D3550 updated, across the 6 touched test files, against about 21 behaviors the four criteria name. The 4 rows above are that gap.
+
+Note for the tests session, not a gap: `lifecycle.test.ts`' D3598 helper doc says the agent names `INSIDE` "having saved that file", but the block sends the request before `inputs.recordPath(INSIDE)`. Both orders take the same path while the job runs.
 
 ### Completion Notes
 
@@ -393,3 +420,8 @@ Dev, 17:16 to 17:35 on 2026-09-30, Tree 2 (`wt/2` at 14a7e32).
 - packages/cli/test/hook.test.ts (modified, tests: D3550 updated, D3577 to D3583)
 - packages/cli/test/defects.json (modified, tests: 7 records added, 5 re-anchored)
 - _agent-docs/tickets/2-7b-agent-edits-never-hold.md (tests: AC2 and AC4 ticked, Tests Record, File List)
+- packages/daemon/test/changes.test.ts, server.test.ts, scheduler.test.ts, daemon.test.ts and defects.json (modified, tests, review gaps: add-only, D3600 to D3603)
+- packages/daemon/src/daemon/change-record.ts (modified, review: the private `#begun` renamed `#startAfresh`, since it runs at a job's end)
+- packages/daemon/src/daemon/changes.ts (modified, review: `answer`'s doc comment names which jobs hold a report)
+- packages/cli/src/hook-edits.ts (modified, review: the `UNSAVED_RESULT_STARTS` and `BatchEdits.saved` comments no longer claim every unsaved call is caught)
+- _agent-docs/tickets/2-7b-agent-edits-never-hold.md (review: § Known limits' measured unwrapped failures, § Doc text made final, Review Record, File List)

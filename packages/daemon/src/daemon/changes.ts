@@ -69,8 +69,8 @@ export class Changes {
 
   /**
    * Refuses the query whole when any path is one a wait refuses. Otherwise reports its edited files before reading the
-   * paths, so a job beginning before the read holds them too, and once `signal` aborts reads nothing more, since a stop
-   * may have closed the store; then answers in one turn with what the read found.
+   * paths, so a job running now, or beginning before the read resolves, holds them, and once `signal` aborts reads
+   * nothing more, since a stop may have closed the store; then answers in one turn with what the read found.
    */
   async answer(
     query: ChangesQuery,

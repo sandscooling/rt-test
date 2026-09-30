@@ -109,7 +109,7 @@ export class ChangeRecord {
   /** The subject's job began and threw, so it holds no report and only what changes from now on is its own. */
   jobThrew(subject: Job): void {
     this.#running.delete(subject);
-    this.#begun(subject);
+    this.#startAfresh(subject);
   }
 
   /**
@@ -140,7 +140,7 @@ export class ChangeRecord {
     const reported = this.#running.get(job);
     this.#running.delete(job);
     this.#interval(window.startDigests);
-    this.#begun(job);
+    this.#startAfresh(job);
     if (window.causes.size > 0 || window.paths.size > MAX_COUNTED_CHANGES) {
       this.#everywhere();
     } else {
@@ -156,7 +156,7 @@ export class ChangeRecord {
   }
 
   /** Only what changes from now on is the subject's own. */
-  #begun(subject: Job): void {
+  #startAfresh(subject: Job): void {
     this.#subjects.set(subject, new ChangeSets());
   }
 

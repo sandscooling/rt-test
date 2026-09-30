@@ -1461,3 +1461,11 @@ describe("the files a changes request names as edited", () => {
     });
   });
 });
+
+describe("an empty list of edited files", () => {
+  it("D3603: a changes request whose edited is an empty list reaches the query naming none, never refused", async () => {
+    expect(
+      await editedAnswered(changesRequest([WAITED_FILE], { edited: [] })),
+    ).toStrictEqual({ kinds: [REACHED], edited: [[]] });
+  });
+});

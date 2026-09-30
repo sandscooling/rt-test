@@ -10428,5 +10428,33 @@
     "file": "packages/daemon/src/query-client.ts",
     "old": "    ...(edited === undefined ? {} : { edited }),\n",
     "new": ""
+  },
+  {
+    "id": "D3600",
+    "defect": "queryChanges sends every file it asks about as edited, not only the ones given as edited, so the daemon counts its own runs' changes to every file asked about as edits and releases holds wrongly.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    ...(edited === undefined ? {} : { edited }),",
+    "new": "    ...(edited === undefined ? {} : { edited: paths }),"
+  },
+  {
+    "id": "D3601",
+    "defect": "A job that held a report counts the reported paths it changed as edits only for its own subject and as its own changes for every other, so a discovery's change to a file the agent saved during it still adds to a workspace's count.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "      for (const sets of this.#subjects.values()) {\n        sets.addJob(caused, job);\n        sets.addEdits(edits);\n      }",
+    "new": "      for (const [subject, sets] of this.#subjects) {\n        sets.addJob(subject === job ? caused : paths, job);\n        if (subject === job) sets.addEdits(edits);\n      }"
+  },
+  {
+    "id": "D3602",
+    "defect": "A changes query closes its report only after a named read that resolves, so a rejected read leaves the report open for the daemon's life, and every later job's own changes to those files count as edits.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    try {\n      await inputs.readNamed(paths);\n    } finally {\n      report?.read();\n    }",
+    "new": "    await inputs.readNamed(paths);\n    report?.read();"
+  },
+  {
+    "id": "D3603",
+    "defect": "A changes request whose edited is an empty list is refused as invalid, so a queryChanges caller that passes edited: [] gets no answer.",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
+    "old": "  if (!Array.isArray(edited)) {",
+    "new": "  if (!Array.isArray(edited) || edited.length === 0) {"
   }
 ]
