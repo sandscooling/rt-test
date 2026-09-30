@@ -18,7 +18,8 @@ const MAX_INVENTORY_DEPTH = 64;
 const MAX_INVENTORY_ENTRIES = 200_000;
 /** Files hashed at once, so a large tree neither holds every file open nor starves the answers. */
 const HASH_CONCURRENCY = 16;
-const MISSING_CODE = "ENOENT";
+/** Nothing at the path: no entry, or one below a file, which Linux reports as ENOTDIR and Windows as ENOENT. */
+const MISSING_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"]);
 const FILE_KIND = "file";
 const LINK_KIND = "link";
 const SPECIAL_KIND = "special";
@@ -335,7 +336,9 @@ function failedRead(error: unknown): EntryDigest {
 }
 
 function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | undefined)?.code === MISSING_CODE;
+  return MISSING_CODES.has(
+    (error as NodeJS.ErrnoException | undefined)?.code ?? "",
+  );
 }
 
 function label(walk: Walk, path: string): string {

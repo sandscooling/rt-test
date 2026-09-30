@@ -1,15 +1,12 @@
 import { statSync, type Stats } from "node:fs";
-import { basename, dirname, join, posix } from "node:path";
+import { posix } from "node:path";
 import { testModuleFile } from "../inputs/non-inputs.js";
+import type { FingerprintResult } from "../inputs/fingerprint.js";
+import { namedList } from "../inputs/input-jobs.js";
 import type { CurrentInputs } from "../inputs/input-tracker.js";
+import type { UnreadPath } from "../inputs/queued-reads.js";
 import type { LatestResults } from "../store/open-store.js";
-import {
-  liesInside,
-  POSIX_SEPARATOR,
-  realPath,
-  relativePosixPath,
-  ROOT_PATH,
-} from "../vitest/find-workspaces.js";
+import { POSIX_SEPARATOR, ROOT_PATH } from "../vitest/find-workspaces.js";
 import {
   FAILED_MODULE,
   FILE_PATH,
@@ -27,24 +24,21 @@ import {
   type NotDiscoveredEntry,
   type PathStatusAnswer,
 } from "./answer.js";
+import type { CallerPath } from "./caller-paths.js";
 import { queryBasis, type DaemonView } from "./summary.js";
 import { countStandings, type TestStanding } from "./test-states.js";
 
 const ENTRY_SEPARATOR = ", ";
+const UNREAD_REASON = "the status could not read what it names";
 
-type Resolved =
-  | { readonly ok: true; readonly path: string }
-  | { readonly ok: false; readonly reason: string };
-
-/** Answers for the discovered tests and not-discovered entries at or under `absolutePath`, a path inside the consumer root. */
+/** Answers for the discovered tests and not-discovered entries at or under `target`, a path inside the consumer root. */
 export function pathStatusAnswer(
-  absolutePath: string,
+  target: CallerPath,
   results: LatestResults,
   daemon: DaemonView,
   inputs: CurrentInputs,
 ): PathStatusAnswer | NoAnswer {
-  const target = rootRelativePath(absolutePath, daemon.consumerRoot);
-  if (!target.ok) return { noAnswer: target.reason };
+  const absolutePath = target.given;
   const basis = queryBasis(results, daemon, inputs);
   if ("noAnswer" in basis) return basis;
   const standings = basis.standings.filter((standing) =>
@@ -92,43 +86,21 @@ function isModuleEntry(entry: NotDiscoveredEntry): boolean {
   return entry.kind === FAILED_MODULE || entry.kind === TYPECHECK_MODULE;
 }
 
-/** The path relative to the root's canonical real path; a missing path resolves through its nearest existing ancestor. */
-function rootRelativePath(
-  absolutePath: string,
-  consumerRoot: string,
-): Resolved {
-  const root = realPath(consumerRoot);
-  if (!root.ok) {
-    return {
-      ok: false,
-      reason: `the consumer root ${consumerRoot} ${root.reason}`,
-    };
-  }
-  const path = canonicalPath(absolutePath);
-  if (!path.ok) {
-    return { ok: false, reason: `${absolutePath} ${path.reason}` };
-  }
-  if (!liesInside(root.path, path.path)) {
-    return {
-      ok: false,
-      reason: `${absolutePath} lies outside the consumer root ${consumerRoot}`,
-    };
-  }
-  const relative = relativePosixPath(root.path, path.path);
-  return { ok: true, path: relative === "" ? ROOT_PATH : relative };
-}
-
-function canonicalPath(path: string): Resolved {
-  const missing: string[] = [];
-  let current = path;
-  for (;;) {
-    const real = realPath(current);
-    if (real.ok) return { ok: true, path: join(real.path, ...missing) };
-    const parent = dirname(current);
-    if (parent === current) return real;
-    missing.unshift(basename(current));
-    current = parent;
-  }
+/** `inputs`, less every fingerprint when `unread` names a path, since no read vouches for what that path holds. */
+export function withoutFingerprints(
+  inputs: CurrentInputs,
+  unread: readonly UnreadPath[],
+): CurrentInputs {
+  if (unread.length === 0) return inputs;
+  const reason = `${UNREAD_REASON}: ${namedList(unread.map(({ path, reason }) => `${path} (${reason})`))}`;
+  const none: FingerprintResult = { ok: false, reason };
+  return {
+    ...inputs,
+    snapshot: undefined,
+    workspaceFingerprint: () => none,
+    discoveryFingerprint: () => none,
+    protectedFileChangedSince: () => reason,
+  };
 }
 
 /** Both relative to the consumer root, `/`-separated. */

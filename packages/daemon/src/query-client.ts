@@ -20,6 +20,12 @@ import {
 } from "./daemon/protocol.js";
 import { errorText } from "./vitest/error-text.js";
 
+/**
+ * How long a path status may take to answer, a target until measured: the daemon first reads the path, which for a
+ * folder is every input it holds under it and for the root every input.
+ */
+const PATH_STATUS_BOUND_MS = 60_000;
+
 /** What the worktree's daemon's stored runs say about the whole worktree; it starts nothing. */
 export async function querySummary(
   consumerRoot: string,
@@ -42,18 +48,26 @@ export async function queryPathStatus(
     protocolVersion: PROTOCOL_VERSION,
     path,
   };
-  const answer = await query(targetOf(consumerRoot, "query"), request);
+  const answer = await query(
+    targetOf(consumerRoot, "query"),
+    request,
+    PATH_STATUS_BOUND_MS,
+  );
   return answer as unknown as PathStatusResponse;
 }
 
-/** The daemon's answer to a query, or a rejection saying why it has none. */
+/**
+ * The daemon's answer to a query, or a rejection saying why it has none; `boundMs` is how long it may take, the
+ * connection's default when absent.
+ */
 async function query(
   target: DaemonTarget,
   request: SummaryRequest | PathStatusRequest,
+  boundMs?: number,
 ): Promise<ProtocolMessage> {
   const { consumerRoot } = target;
   const answer = await onProvenConnection(target, (connection) =>
-    connection.request(request).catch((failure: unknown) => {
+    connection.request(request, boundMs).catch((failure: unknown) => {
       throw new Error(
         `Cannot get an answer from the daemon for ${consumerRoot}: ${errorText(failure)}.`,
         { cause: failure },
