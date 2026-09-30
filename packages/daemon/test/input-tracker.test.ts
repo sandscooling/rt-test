@@ -3235,60 +3235,64 @@ describe(
   },
 );
 
-describe("the git files a reconciliation watches", () => {
-  it("D1963: a relative core.excludesFile is resolved against the repository's top level, with the consumer root in a subdirectory", async () => {
-    const outcome = await inTempDir(async (dir) => {
-      const git = repository(dir, "", { "sub/a.ts": "" });
-      git("config", "core.excludesFile", "rules");
-      const sources = await gitSources(
-        join(dir, "sub"),
-        [],
-        new AbortController().signal,
-      );
-      return sources.ok
-        ? sources.files.includes(resolve(realpathSync.native(dir), "rules"))
-        : sources.reason;
-    });
-    expect(outcome).toBe(true);
-  });
-
-  it("D1964: on Windows with HOME set, the user's git config files are read under HOME, not the profile directory", async () => {
-    const outcome = await inTempDir(async (dir) => {
-      const home = join(dir, "home");
-      const profile = join(dir, "profile");
-      mkdirSync(home);
-      mkdirSync(profile);
-      repository(join(dir, "repo"), "", { "a.ts": "" });
-      vi.mocked(homedir).mockReturnValue(profile);
-      const saved = {
-        HOME: process.env["HOME"],
-        XDG_CONFIG_HOME: process.env["XDG_CONFIG_HOME"],
-      };
-      process.env["HOME"] = home;
-      delete process.env["XDG_CONFIG_HOME"];
-      try {
-        const sources = await onPlatform("win32", () =>
-          gitSources(join(dir, "repo"), [], new AbortController().signal),
+describe(
+  "the git files a reconciliation watches",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D1963: a relative core.excludesFile is resolved against the repository's top level, with the consumer root in a subdirectory", async () => {
+      const outcome = await inTempDir(async (dir) => {
+        const git = repository(dir, "", { "sub/a.ts": "" });
+        git("config", "core.excludesFile", "rules");
+        const sources = await gitSources(
+          join(dir, "sub"),
+          [],
+          new AbortController().signal,
         );
         return sources.ok
-          ? {
-              config: sources.files.includes(join(home, ".gitconfig")),
-              xdg: sources.files.includes(
-                join(home, ".config", "git", "config"),
-              ),
-            }
+          ? sources.files.includes(resolve(realpathSync.native(dir), "rules"))
           : sources.reason;
-      } finally {
-        for (const [name, value] of Object.entries(saved)) {
-          if (value === undefined) delete process.env[name];
-          else process.env[name] = value;
-        }
-        vi.mocked(homedir).mockReset();
-      }
+      });
+      expect(outcome).toBe(true);
     });
-    expect(outcome).toStrictEqual({ config: true, xdg: true });
-  });
-});
+
+    it("D1964: on Windows with HOME set, the user's git config files are read under HOME, not the profile directory", async () => {
+      const outcome = await inTempDir(async (dir) => {
+        const home = join(dir, "home");
+        const profile = join(dir, "profile");
+        mkdirSync(home);
+        mkdirSync(profile);
+        repository(join(dir, "repo"), "", { "a.ts": "" });
+        vi.mocked(homedir).mockReturnValue(profile);
+        const saved = {
+          HOME: process.env["HOME"],
+          XDG_CONFIG_HOME: process.env["XDG_CONFIG_HOME"],
+        };
+        process.env["HOME"] = home;
+        delete process.env["XDG_CONFIG_HOME"];
+        try {
+          const sources = await onPlatform("win32", () =>
+            gitSources(join(dir, "repo"), [], new AbortController().signal),
+          );
+          return sources.ok
+            ? {
+                config: sources.files.includes(join(home, ".gitconfig")),
+                xdg: sources.files.includes(
+                  join(home, ".config", "git", "config"),
+                ),
+              }
+            : sources.reason;
+        } finally {
+          for (const [name, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[name];
+            else process.env[name] = value;
+          }
+          vi.mocked(homedir).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({ config: true, xdg: true });
+    });
+  },
+);
 
 describe("declared non-inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
   it("D1991: a job open while a declared test module is protected stays fingerprinted, and the protection raises the input revision", async () => {
@@ -4118,125 +4122,129 @@ describe("the declared patterns", () => {
   });
 });
 
-describe("the count of periodic reconciliations", () => {
-  it("D2680: the count is 0 once the first reconciliation has ended, and rises by one when the periodic reconciliation ends", async () => {
-    const outcome = await inTempDir((root) => {
-      writeTree(root, { "src/a.ts": "" });
-      return withFakeElapsed(() =>
-        tracking(root, async ({ tracker }) => {
-          const before = tracker.periodicReconciliations();
-          await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
-          await settled(tracker);
-          return { before, after: tracker.periodicReconciliations() };
-        }),
-      );
-    });
-    expect(outcome).toStrictEqual({ before: 0, after: 1 });
-  });
-
-  it("D2681: a reconciliation an edit to an ignore file started does not count as a periodic one", async () => {
-    const count = await inTempDir((root) => {
-      repository(root, "*.log\n", { "src/a.ts": "" });
-      return trackingOwnGitHome(root, async ({ tracker, log }) => {
-        appendFileSync(join(root, ".gitignore"), "*.tmp\n");
-        await eventually(
-          () => log.entries.includes(IGNORE_RULES_CHANGED_STARTED),
-          SETTLE_MS,
-        );
-        await eventually(
-          () =>
-            log.entries.filter((entry) =>
-              entry.startsWith(RECONCILIATION_ENDED),
-            ).length >= 2,
-          SETTLE_MS,
-        );
-        return tracker.periodicReconciliations();
-      });
-    });
-    expect(count).toBe(0);
-  });
-
-  /** Counts each reconciliation's end from the log; the count moves before the reconciliation is settled, so a test polls it. */
-  const endsIn = (log: MemoryLog): number =>
-    log.entries.filter((entry) => entry.startsWith(RECONCILIATION_ENDED))
-      .length;
-
-  /** Resolves once the log holds `count` ends, polling on `setImmediate`, which fake `setTimeout` leaves real. */
-  async function untilEnds(log: MemoryLog, count: number): Promise<void> {
-    const deadline = Date.now() + SETTLE_MS;
-    while (endsIn(log) < count && Date.now() < deadline) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-  }
-
-  it("D2737: a reconciliation an edit to the declaration started, after the periodic one, does not count as a periodic one", async () => {
-    const outcome = await inTempDir(async (root) => {
-      writeTree(root, { "src/a.ts": "" });
-      const watches = silentCapturedWatches();
-      try {
-        return await withFakeElapsed(() =>
-          tracking(root, async ({ tracker, log }) => {
+describe(
+  "the count of periodic reconciliations",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D2680: the count is 0 once the first reconciliation has ended, and rises by one when the periodic reconciliation ends", async () => {
+      const outcome = await inTempDir((root) => {
+        writeTree(root, { "src/a.ts": "" });
+        return withFakeElapsed(() =>
+          tracking(root, async ({ tracker }) => {
+            const before = tracker.periodicReconciliations();
             await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
-            await untilEnds(log, 2);
-            const afterPeriodic = tracker.periodicReconciliations();
-            deliver(watches, root, DECLARATION_FILE);
-            await untilEnds(log, 3);
-            return {
-              afterPeriodic,
-              afterEdit: tracker.periodicReconciliations(),
-            };
+            await settled(tracker);
+            return { before, after: tracker.periodicReconciliations() };
           }),
         );
-      } finally {
-        vi.mocked(watch).mockReset();
-      }
+      });
+      expect(outcome).toStrictEqual({ before: 0, after: 1 });
     });
-    expect(outcome).toStrictEqual({ afterPeriodic: 1, afterEdit: 1 });
-  });
 
-  it("D2738: a periodic reconciliation the timer requests while another reconciliation runs is counted once they have ended", async () => {
-    const count = await inTempDir(async (root) => {
-      writeTree(root, { "src/a.ts": "" });
-      const watches = silentCapturedWatches();
-      try {
-        return await withFakeElapsed(() =>
-          tracking(root, async ({ tracker, log }) => {
-            deliver(watches, root, DECLARATION_FILE);
-            vi.advanceTimersByTime(RECONCILE_INTERVAL);
-            await untilEnds(log, 2);
-            return tracker.periodicReconciliations();
-          }),
-        );
-      } finally {
-        vi.mocked(watch).mockReset();
-      }
+    it("D2681: a reconciliation an edit to an ignore file started does not count as a periodic one", async () => {
+      const count = await inTempDir((root) => {
+        repository(root, "*.log\n", { "src/a.ts": "" });
+        return trackingOwnGitHome(root, async ({ tracker, log }) => {
+          appendFileSync(join(root, ".gitignore"), "*.tmp\n");
+          await eventually(
+            () => log.entries.includes(IGNORE_RULES_CHANGED_STARTED),
+            SETTLE_MS,
+          );
+          await eventually(
+            () =>
+              log.entries.filter((entry) =>
+                entry.startsWith(RECONCILIATION_ENDED),
+              ).length >= 2,
+            SETTLE_MS,
+          );
+          return tracker.periodicReconciliations();
+        });
+      });
+      expect(count).toBe(0);
     });
-    expect(count).toBe(1);
-  });
 
-  it("D2878: reconciliations another cause starts more often than the interval still count one as periodic once the interval has passed since the last one counted", async () => {
-    const count = await inTempDir(async (root) => {
-      writeTree(root, { "src/a.ts": "" });
-      const watches = silentCapturedWatches();
-      try {
-        return await withFakeElapsed(() =>
-          tracking(root, async ({ tracker, log }) => {
-            await vi.advanceTimersByTimeAsync(SOONER_THAN_INTERVAL);
-            deliver(watches, root, DECLARATION_FILE);
-            await untilEnds(log, 2);
-            await vi.advanceTimersByTimeAsync(SOONER_THAN_INTERVAL);
-            deliver(watches, root, DECLARATION_FILE);
-            await untilEnds(log, 3);
-            return tracker.periodicReconciliations();
-          }),
-        );
-      } finally {
-        vi.mocked(watch).mockReset();
+    /** Counts each reconciliation's end from the log; the count moves before the reconciliation is settled, so a test polls it. */
+    const endsIn = (log: MemoryLog): number =>
+      log.entries.filter((entry) => entry.startsWith(RECONCILIATION_ENDED))
+        .length;
+
+    /** Resolves once the log holds `count` ends, polling on `setImmediate`, which fake `setTimeout` leaves real. */
+    async function untilEnds(log: MemoryLog, count: number): Promise<void> {
+      const deadline = Date.now() + SETTLE_MS;
+      while (endsIn(log) < count && Date.now() < deadline) {
+        await new Promise((resolve) => setImmediate(resolve));
       }
+    }
+
+    it("D2737: a reconciliation an edit to the declaration started, after the periodic one, does not count as a periodic one", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await withFakeElapsed(() =>
+            tracking(root, async ({ tracker, log }) => {
+              await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+              await untilEnds(log, 2);
+              const afterPeriodic = tracker.periodicReconciliations();
+              deliver(watches, root, DECLARATION_FILE);
+              await untilEnds(log, 3);
+              return {
+                afterPeriodic,
+                afterEdit: tracker.periodicReconciliations(),
+              };
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({ afterPeriodic: 1, afterEdit: 1 });
     });
-    expect(count).toBe(1);
-  });
-});
+
+    it("D2738: a periodic reconciliation the timer requests while another reconciliation runs is counted once they have ended", async () => {
+      const count = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await withFakeElapsed(() =>
+            tracking(root, async ({ tracker, log }) => {
+              deliver(watches, root, DECLARATION_FILE);
+              vi.advanceTimersByTime(RECONCILE_INTERVAL);
+              await untilEnds(log, 2);
+              return tracker.periodicReconciliations();
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(count).toBe(1);
+    });
+
+    it("D2878: reconciliations another cause starts more often than the interval still count one as periodic once the interval has passed since the last one counted", async () => {
+      const count = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await withFakeElapsed(() =>
+            tracking(root, async ({ tracker, log }) => {
+              await vi.advanceTimersByTimeAsync(SOONER_THAN_INTERVAL);
+              deliver(watches, root, DECLARATION_FILE);
+              await untilEnds(log, 2);
+              await vi.advanceTimersByTimeAsync(SOONER_THAN_INTERVAL);
+              deliver(watches, root, DECLARATION_FILE);
+              await untilEnds(log, 3);
+              return tracker.periodicReconciliations();
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(count).toBe(1);
+    });
+  },
+);
 
 describe("a job's verdict", () => {
   it("D2728: a job during which a watcher failure was recorded, and that ended with no fingerprint computable, is not judged as having had its inputs change while it ran", () => {
@@ -4337,53 +4345,58 @@ describe("a workspace whose env files are not known", () => {
   });
 });
 
-describe("the committed digests a job's window keeps", () => {
-  it("D3172: a job's window keeps the committed digests at its open and at its close", async () => {
-    const kept = await inTempDir(async (root) => {
-      writeTree(root, { "src/a.ts": "" });
-      const watches = silentCapturedWatches();
-      try {
-        return await tracking(root, async ({ tracker }) => {
-          const digestNow = (): string | undefined =>
-            tracker.current().snapshot?.digests.get("src/a.ts");
-          const opened = digestNow();
-          const mark = tracker.beginJob();
-          appendFileSync(join(root, "src", "a.ts"), "export {};\n");
-          deliver(watches, root, join("src", "a.ts"));
-          await tracker.endJob(mark);
-          const closed = digestNow();
-          const { startDigests, endDigests } = mark.window;
-          return {
-            start:
-              opened !== undefined && startDigests?.get("src/a.ts") === opened,
-            end: closed !== opened && endDigests?.get("src/a.ts") === closed,
-          };
-        });
-      } finally {
-        vi.mocked(watch).mockReset();
-      }
-    });
-    expect(kept).toStrictEqual({ start: true, end: true });
-  });
-
-  it("D3173: a job's window opened before the first reconciliation has ended keeps no digests", async () => {
-    const digests = await inTempDir(async (root) => {
-      writeTree(root, { "src/a.ts": "" });
-      const tracker = new InputTracker({
-        consumerRoot: root,
-        exclusions: [join(root, STATE_DIRECTORY)],
-        log: memoryLog(),
-        startEnvironment: takeStartEnvironment(),
+describe(
+  "the committed digests a job's window keeps",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3172: a job's window keeps the committed digests at its open and at its close", async () => {
+      const kept = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const digestNow = (): string | undefined =>
+              tracker.current().snapshot?.digests.get("src/a.ts");
+            const opened = digestNow();
+            const mark = tracker.beginJob();
+            appendFileSync(join(root, "src", "a.ts"), "export {};\n");
+            deliver(watches, root, join("src", "a.ts"));
+            await tracker.endJob(mark);
+            const closed = digestNow();
+            const { startDigests, endDigests } = mark.window;
+            return {
+              start:
+                opened !== undefined &&
+                startDigests?.get("src/a.ts") === opened,
+              end: closed !== opened && endDigests?.get("src/a.ts") === closed,
+            };
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
       });
-      try {
-        return tracker.beginJob().window.startDigests;
-      } finally {
-        await tracker.stop();
-      }
+      expect(kept).toStrictEqual({ start: true, end: true });
     });
-    expect(digests).toBeUndefined();
-  });
-});
+
+    it("D3173: a job's window opened before the first reconciliation has ended keeps no digests", async () => {
+      const digests = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const tracker = new InputTracker({
+          consumerRoot: root,
+          exclusions: [join(root, STATE_DIRECTORY)],
+          log: memoryLog(),
+          startEnvironment: takeStartEnvironment(),
+        });
+        try {
+          return tracker.beginJob().window.startDigests;
+        } finally {
+          await tracker.stop();
+        }
+      });
+      expect(digests).toBeUndefined();
+    });
+  },
+);
 
 /** A watch that never reports and whose close throws, as closing a handle the system already released can. */
 function throwingCloseWatch(): FSWatcher {

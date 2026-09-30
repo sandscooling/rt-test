@@ -14,6 +14,7 @@ import { isRunning } from "../src/daemon/runtime-directory.js";
 import {
   DAEMON_FIXTURE,
   DAEMON_TEST_TIMEOUT_MS,
+  FIRST_RUN_SETUP,
   IDLE_ENTRY,
   WORKSPACE_A,
   eventually,
@@ -69,6 +70,17 @@ function fixtureFilesNamed(root: string, prefix: string): string[] {
 /** How many heartbeat children have started: each writes its file in the daemon fixture's `packages/a`. */
 function heartbeatCount(root: string): number {
   return fixtureFilesNamed(root, HEARTBEAT_PREFIX).length;
+}
+
+/** The process id of the executor or worker that started a heartbeat child, which ends the child's name after its kind. */
+const STARTER_PID_SUFFIX = /-\d+$/;
+
+/** Which kinds of heartbeat child have started, such as `setup` or `b-test`, each named once however many started. */
+function startedKinds(root: string): string[] {
+  const kinds = fixtureFilesNamed(root, HEARTBEAT_PREFIX).map((name) =>
+    name.slice(HEARTBEAT_PREFIX.length).replace(STARTER_PID_SUFFIX, ""),
+  );
+  return [...new Set(kinds)].toSorted();
 }
 
 /** The reason of each heartbeat child that could not connect to the test or lost its connection. */
@@ -428,13 +440,16 @@ describe("what a job starts ends with the job", () => {
         const status = await settled(daemonStatus(root));
         return {
           idle,
-          spawned: heartbeatCount(root),
+          started: startedKinds(root),
           alive,
           serving: !("thrown" in status),
         };
       }),
     );
   }
+
+  /** A child from each workspace's global setup and from its test: `packages/a` runs in a thread, `packages/b` forked. */
+  const EVERY_KIND = ["b-setup", "b-test", "setup", "test"];
 
   it(
     "D1665: a global setup stuck in synchronous code, which started a child through a shell, is ended at the executor bound with that child",
@@ -443,7 +458,7 @@ describe("what a job starts ends with the job", () => {
         withDaemonConsumer(async (root, pids) => {
           writeFileSync(fixtureFile(root, CHILD_ENDPOINT), endpoint);
           writeFileSync(fixtureFile(root, SPAWN_CHILDREN), "shell");
-          writeFileSync(fixtureFile(root, STICK_AT), "2");
+          writeFileSync(fixtureFile(root, STICK_AT), FIRST_RUN_SETUP);
           const identity = await started(root, pids, confirmEvery(root));
           if ("thrown" in identity) return identity;
           await until(
@@ -480,7 +495,7 @@ describe("what a job starts ends with the job", () => {
     async () => {
       expect(await childrenAfterIdle("shell")).toStrictEqual({
         idle: true,
-        spawned: 6,
+        started: EVERY_KIND,
         alive: [],
         serving: true,
       });
@@ -493,7 +508,7 @@ describe("what a job starts ends with the job", () => {
     async () => {
       expect(await childrenAfterIdle("")).toStrictEqual({
         idle: true,
-        spawned: 6,
+        started: EVERY_KIND,
         alive: [],
         serving: true,
       });
