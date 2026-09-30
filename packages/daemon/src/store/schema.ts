@@ -1,7 +1,7 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
 /** Written to `PRAGMA user_version`. A change to the tables below, or a stored value an older version's code cannot read, raises it and gives each older version in `STORE_MIGRATIONS` a path to it, since the opener refuses every version it cannot migrate. */
-export const STORE_SCHEMA_VERSION = 9;
+export const STORE_SCHEMA_VERSION = 10;
 /** Its code never force-stopped a run and never kept a workspace's selection facts. */
 const FORCE_STOP_UNAWARE_SCHEMA_VERSION = 1;
 /** Its code never kept a workspace's selection facts. */
@@ -18,6 +18,8 @@ const CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION = 6;
 const ENV_SOURCES_UNAWARE_SCHEMA_VERSION = 7;
 /** Its code never reported env sources as not known, so its report omits a nested projects container's env and reads complete. */
 const ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION = 8;
+/** Its code never kept a discovery's workspaces that have a test script but are not Vitest workspaces. */
+const NOT_COVERED_UNAWARE_SCHEMA_VERSION = 9;
 export const STORE_FILE_NAME = "store.sqlite";
 /** How long a write waits for another process's write on the same file before it fails whole. */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -31,6 +33,8 @@ export const NOT_FORCE_STOPPED = 0;
 const FORCE_STOPPED_COLUMN = `force_stopped INTEGER CHECK (force_stopped IN (${NOT_FORCE_STOPPED}, ${FORCE_STOPPED}))`;
 /** Last in `discovery_workspaces`, so a new store and a migrated one hold the same columns in the same order. NULL on a discovered workspace is a report never made. */
 const SELECTION_FACTS_COLUMN = "selection_facts TEXT";
+/** Last in `discoveries`, so a new store and a migrated one hold the same columns in the same order. NULL is a report never made. */
+const NOT_COVERED_COLUMN = "not_covered TEXT";
 
 /** A NULL column is a value the record never held. JSON columns hold arrays and objects the record carries whole. */
 export const STORE_SCHEMA = `
@@ -96,6 +100,7 @@ CREATE TABLE discoveries (
   fingerprint_digest TEXT,
   adapter_version INTEGER NOT NULL,
   not_read TEXT NOT NULL,
+  ${NOT_COVERED_COLUMN},
   CHECK ((fingerprint_kind = '${FINGERPRINT_DIGEST}') = (fingerprint_digest IS NOT NULL AND fingerprint_digest <> ''))
 ) STRICT;
 CREATE INDEX discoveries_by_worktree ON discoveries (project_identity, worktree_identity, sequence);
@@ -144,6 +149,9 @@ ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN};`;
 /** A report missing a fact this version reads, or one that may read complete without being so, is dropped rather than guessed at, so it reads as never made. */
 const DROP_INCOMPLETE_FACTS = `
 UPDATE discovery_workspaces SET selection_facts = NULL;`;
+/** Each discovery stored before keeps a NULL report, so it reads as not reporting them. */
+const ADD_NOT_COVERED = `
+ALTER TABLE discoveries ADD COLUMN ${NOT_COVERED_COLUMN};`;
 const SET_SCHEMA_VERSION = `
 PRAGMA user_version = ${STORE_SCHEMA_VERSION};`;
 
@@ -151,34 +159,38 @@ PRAGMA user_version = ${STORE_SCHEMA_VERSION};`;
 export const STORE_MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
     FORCE_STOP_UNAWARE_SCHEMA_VERSION,
-    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,
+    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     SELECTION_FACTS_UNAWARE_SCHEMA_VERSION,
-    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,
+    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     VITE_ROOT_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     CRASH_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     ENV_SOURCES_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
   [
     ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+  ],
+  [
+    NOT_COVERED_UNAWARE_SCHEMA_VERSION,
+    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
   ],
 ]);

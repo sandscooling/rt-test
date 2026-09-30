@@ -796,5 +796,19 @@
     "file": "packages/cli/src/answer-text.ts",
     "old": "  [DUE_REASON.runRefused]: \"its latest stored run was refused as unreadable\",",
     "new": "  [DUE_REASON.runRefused]: \"it has no stored run\","
+  },
+  {
+    "id": "D3358",
+    "defect": "A start lists the --state-dir it was given but starts the daemon on the default state directory, so the store and log land under the consumer root's .rt-test.",
+    "file": "packages/cli/src/commands/start.ts",
+    "old": "      start: plan.start,\n      stateDirectory: plan.stateDirectory,\n    });",
+    "new": "      start: plan.start,\n    });"
+  },
+  {
+    "id": "D3359",
+    "defect": "A discovery stores none of the not-covered workspaces its listing found, so neither the summary nor status names a package whose tests RT Test does not run.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    notCovered: withoutDiscoveredModules(\n      notCovered,",
+    "new": "    notCovered: withoutDiscoveredModules(\n      [],"
   }
 ]

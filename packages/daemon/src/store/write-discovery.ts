@@ -34,8 +34,9 @@ interface DiscoveryStatements {
 }
 
 const INSERT_DISCOVERY = `INSERT INTO discoveries
-  (discovery_id, project_identity, worktree_identity, fingerprint_kind, fingerprint_digest, adapter_version, not_read)
-  VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  (discovery_id, project_identity, worktree_identity, fingerprint_kind, fingerprint_digest, adapter_version, not_read,
+   not_covered)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const INSERT_WORKSPACE = `INSERT INTO discovery_workspaces
   (discovery_sequence, workspace_index, status, workspace_path, workspace_directory, vitest_version, unsupported_vitest,
@@ -81,6 +82,9 @@ export function writeDiscovery(
         fingerprintDigest,
         VITEST_ADAPTER_VERSION,
         JSON.stringify(discovery.notRead),
+        discovery.notCovered === undefined
+          ? null
+          : JSON.stringify(discovery.notCovered),
       );
     writeWorkspaces(database, lastInsertRowid, discovery.workspaces);
     return readBack(

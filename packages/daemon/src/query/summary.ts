@@ -20,6 +20,7 @@ import {
   UNSUPPORTED_PROJECT,
   WORKSPACE_DISCOVERY_FAILED,
   WORKSPACE_NOT_CONFIRMED,
+  WORKSPACE_NOT_VITEST,
   WORKSPACE_UNHANDLED_ERRORS,
   WORKSPACE_UNSUPPORTED_VITEST,
   type AdapterVersionFacts,
@@ -214,6 +215,11 @@ function unfingerprinted(
 function notDiscoveredEntries(discovery: TestDiscovery): NotDiscoveredEntry[] {
   return [
     ...discovery.workspaces.flatMap(workspaceEntries),
+    ...(discovery.notCovered ?? []).map((workspace): NotDiscoveredEntry => ({
+      kind: WORKSPACE_NOT_VITEST,
+      workspacePath: workspace.path,
+      ...cutReason(workspace.reason),
+    })),
     ...discovery.notRead.map((unread): NotDiscoveredEntry => ({
       kind: SOURCE_NOT_READ,
       source: unread.source,

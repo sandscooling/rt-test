@@ -108,8 +108,8 @@
     "id": "D1033",
     "defect": "Any vite.config directory is taken for a Vitest workspace, whatever its dependencies.",
     "file": "packages/daemon/src/vitest/find-workspaces.ts",
-    "old": "if (!dependsOnVitest(manifest.value)) return false;",
-    "new": ""
+    "old": "if (!dependsOnVitest(manifest.value)) {",
+    "new": "if (false) {"
   },
   {
     "id": "D1034",
@@ -1249,8 +1249,8 @@
     "id": "D1300",
     "defect": "A discovery whose signal aborted before its turn still loads its first workspace's config before rejecting.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "  signal.throwIfAborted();\n  const { workspaces, notRead }",
-    "new": "  const { workspaces, notRead }"
+    "old": "  signal.throwIfAborted();\n  const { workspaces, notRead, notCovered }",
+    "new": "  const { workspaces, notRead, notCovered }"
   },
   {
     "id": "D1301",
@@ -3769,15 +3769,15 @@
     "id": "D2097",
     "defect": "The version 2 migration never raises the header, so the migrated store still claims version 2.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_SELECTION_FACTS}`,"
+    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}`,"
   },
   {
     "id": "D2098",
     "defect": "The version 1 migration never adds the selection facts column, so a version 1 store's discoveries cannot be read once migrated.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_FORCE_STOPPED}${SET_SCHEMA_VERSION}`,"
+    "old": "    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_FORCE_STOPPED}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2099",
@@ -3944,8 +3944,8 @@
     "id": "D2122",
     "defect": "The version 2 migration marks each ran run not force-stopped, so a force-stopped run stored at version 2 reads back not force-stopped.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_SELECTION_FACTS}\nUPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';${SET_SCHEMA_VERSION}`,"
+    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}\nUPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2123",
@@ -4385,8 +4385,8 @@
     "id": "D2260",
     "defect": "The version 3 migration keeps each stored report without its Vite root, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${SET_SCHEMA_VERSION}`,"
+    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2261",
@@ -5771,15 +5771,15 @@
     "id": "D2791",
     "defect": "A version 4 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
     "id": "D2792",
-    "defect": "A new store is created at schema version 8, so a daemon from before env sources that are not known opens it and refuses as unreadable every discovery holding a report of them.",
+    "defect": "A new store is created at schema version 9, so a daemon from before not-covered workspaces opens it and stores discoveries that read back as never reporting them.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "export const STORE_SCHEMA_VERSION = 9;",
-    "new": "export const STORE_SCHEMA_VERSION = 8;"
+    "old": "export const STORE_SCHEMA_VERSION = 10;",
+    "new": "export const STORE_SCHEMA_VERSION = 9;"
   },
   {
     "id": "D2793",
@@ -6114,21 +6114,21 @@
     "id": "D2829",
     "defect": "The version 4 migration keeps each stored report, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+    "old": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2830",
     "defect": "The version 5 migration keeps each stored report, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+    "old": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2831",
     "defect": "A version 5 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
@@ -6149,8 +6149,8 @@
     "id": "D2846",
     "defect": "The version 3 migration never raises the header, so the store stays at version 3 and every open drops the selection facts stored since the last one, and no discovery's facts survive a restart.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}`,"
+    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}`,"
   },
   {
     "id": "D2847",
@@ -6499,8 +6499,8 @@
     "id": "D2859",
     "defect": "The version 6 migration keeps the stored selection facts, which lack crawled links, so reading any discovery stored before it fails.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${SET_SCHEMA_VERSION}`,"
+    "old": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2860",
@@ -7423,14 +7423,14 @@
     "id": "D3040",
     "defect": "The version 7 migration keeps the stored selection facts, which lack env sources, so reading any discovery stored before it fails.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+    "old": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D3041",
     "defect": "A version 7 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
@@ -7906,14 +7906,14 @@
     "id": "D3128",
     "defect": "The version 8 migration keeps every stored report, so a Vitest 5 workspace whose nested container's env sources the report left out reads complete after the upgrade and its old results read current.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,",
-    "new": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    SET_SCHEMA_VERSION,"
+    "old": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D3129",
     "defect": "A version 8 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
@@ -9140,5 +9140,152 @@
     "file": "packages/daemon/src/daemon/discovery-history.ts",
     "old": "    if (again.size > 0) this.#hold(again, HELD_AGAIN_ENTRY);",
     "new": "    if (again.size > 0) this.#hold(count.shared, HELD_AGAIN_ENTRY);"
+  },
+  {
+    "id": "D3337",
+    "defect": "A package workspace with a test script and no Vitest is listed nowhere, so the tests it holds are never named as not run.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    if (notVitest !== undefined) notCovered.push(notVitest);",
+    "new": "    void notVitest;"
+  },
+  {
+    "id": "D3338",
+    "defect": "A not-covered workspace's reason does not quote its test script, so the user cannot tell what RT Test does not run.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "has a test script, ${JSON.stringify(script)}, but",
+    "new": "has a test script, but"
+  },
+  {
+    "id": "D3339",
+    "defect": "A workspace holding a Vitest config whose Vitest the root installs is read for a Vitest dependency first, so it is listed as not covered.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  if (VITEST_CONFIG_FILES.some((file) => files.has(file))) return true;\n  if (!files.has(PACKAGE_JSON)) return false;",
+    "new": "  if (!files.has(PACKAGE_JSON)) {\n    return VITEST_CONFIG_FILES.some((file) => files.has(file));\n  }"
+  },
+  {
+    "id": "D3340",
+    "defect": "A workspace's test script is checked before its Vitest dependency, so a workspace depending on Vitest is listed as not covered.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "  if (!dependsOnVitest(manifest.value)) {\n    const notVitest = notCoveredCandidate(path, manifest.value);\n    if (notVitest !== undefined) notCovered.push(notVitest);\n    return false;\n  }",
+    "new": "  const notVitest = notCoveredCandidate(path, manifest.value);\n  if (notVitest !== undefined) notCovered.push(notVitest);\n  if (!dependsOnVitest(manifest.value)) {\n    return false;\n  }"
+  },
+  {
+    "id": "D3341",
+    "defect": "A workspace with no test script is listed as not covered, so every plain library reads as holding tests RT Test does not run.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (path === ROOT_PATH || typeof script !== \"string\") return undefined;",
+    "new": "if (path === ROOT_PATH || (script !== undefined && typeof script !== \"string\")) return undefined;"
+  },
+  {
+    "id": "D3342",
+    "defect": "A workspace whose test script is not a string is listed as not covered, with a reason quoting a value that is no script.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (path === ROOT_PATH || typeof script !== \"string\") return undefined;",
+    "new": "if (path === ROOT_PATH || script === undefined) return undefined;"
+  },
+  {
+    "id": "D3343",
+    "defect": "The consumer root is listed as not covered when it has a test script and no Vitest of its own, though a monorepo root's test script runs its workspaces'.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "if (path === ROOT_PATH || typeof script !== \"string\") return undefined;",
+    "new": "if (typeof script !== \"string\") return undefined;"
+  },
+  {
+    "id": "D3344",
+    "defect": "A not-covered workspace is also reported as a source not read, so selection's counts and its did-not-read notes change.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    if (notVitest !== undefined) notCovered.push(notVitest);",
+    "new": "    if (notVitest !== undefined) {\n      notCovered.push(notVitest);\n      notRead.push({ source: path, reason: notVitest.reason });\n    }"
+  },
+  {
+    "id": "D3345",
+    "defect": "A candidate listed by two patterns is examined each time, so a not-covered workspace is listed twice.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    if (visited.has(path)) continue;\n    visited.add(path);",
+    "new": "    if (workspaces.has(path)) continue;"
+  },
+  {
+    "id": "D3346",
+    "defect": "A rejected candidate listed by two patterns is examined each time, so its not-read entry is reported twice.",
+    "file": "packages/daemon/src/vitest/find-workspaces.ts",
+    "old": "    if (visited.has(path)) continue;\n    visited.add(path);",
+    "new": "    if (workspaces.has(path)) continue;"
+  },
+  {
+    "id": "D3347",
+    "defect": "A discovery's not-covered workspaces are never written, so after a restart the summary names none of them.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "        discovery.notCovered === undefined\n          ? null\n          : JSON.stringify(discovery.notCovered),",
+    "new": "        null,"
+  },
+  {
+    "id": "D3348",
+    "defect": "A stored empty not-covered list reads back as a report never made, so a discovery that found none reads like one stored before they were kept.",
+    "file": "packages/daemon/src/store/read-discovery.ts",
+    "old": "  if (column(row, NOT_COVERED) === null) return {};",
+    "new": "  if (column(row, NOT_COVERED) === null || column(row, NOT_COVERED) === \"[]\") return {};"
+  },
+  {
+    "id": "D3349",
+    "defect": "A discovery written without a not-covered list is stored as an empty one, so a report never made reads back as one that found none.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "        discovery.notCovered === undefined\n          ? null\n          : JSON.stringify(discovery.notCovered),",
+    "new": "        JSON.stringify(discovery.notCovered ?? []),"
+  },
+  {
+    "id": "D3350",
+    "defect": "The migration to version 10 fills the new column with an empty list, so each discovery stored before reads as having found no not-covered workspace rather than as never reporting them.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "ALTER TABLE discoveries ADD COLUMN ${NOT_COVERED_COLUMN};",
+    "new": "ALTER TABLE discoveries ADD COLUMN ${NOT_COVERED_COLUMN} DEFAULT '[]';"
+  },
+  {
+    "id": "D3351",
+    "defect": "The version 2 migration never adds the not-covered column, so a version 2 store's discoveries cannot be read once migrated.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D3352",
+    "defect": "A discovery keeps every not-covered candidate, so a package whose tests a root Vitest config runs is named as holding tests RT Test does not run.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    return !moduleFiles.some((file) => liesInside(directory, file));",
+    "new": "    return true;"
+  },
+  {
+    "id": "D3353",
+    "defect": "A discovery checks its test modules against the consumer root rather than each candidate's directory, so any discovered test drops every not-covered workspace.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    return !moduleFiles.some((file) => liesInside(directory, file));",
+    "new": "    return !moduleFiles.some((file) => liesInside(consumerRoot, file));"
+  },
+  {
+    "id": "D3354",
+    "defect": "A discovery drops a candidate only for its discovered tests, so a package whose collected module failed to load is still named as not covered.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    ...entry.failedModules.map((module) => module.modulePath),\n",
+    "new": ""
+  },
+  {
+    "id": "D3355",
+    "defect": "The summary never lists a stored not-covered workspace, so a package whose tests RT Test does not run is named nowhere.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    ...(discovery.notCovered ?? []).map(",
+    "new": "    ...[].map("
+  },
+  {
+    "id": "D3356",
+    "defect": "Path status reads a not-Vitest workspace entry as a module entry, so status for the workspace fails instead of listing it.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "    case WORKSPACE_NOT_VITEST:\n",
+    "new": ""
+  },
+  {
+    "id": "D3357",
+    "defect": "A not-Vitest workspace is never taken to enclose a path inside it, so status for such a path names nothing it lies in.",
+    "file": "packages/daemon/src/query/path-status.ts",
+    "old": "  if (isModuleEntry(entry)) return false;",
+    "new": "  if (isModuleEntry(entry) || entry.kind === WORKSPACE_NOT_VITEST) return false;"
   }
 ]
