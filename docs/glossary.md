@@ -27,7 +27,7 @@ The local process that alone executes a started consumer's tests and answers que
 _Avoid_: server, watcher
 
 **Executor process**:
-A child process of the daemon that runs one job, a discovery, a run or a dependency build, and ends with it; only an executor process hosts Vitest.
+A child process of the daemon that runs one job, a discovery, a run, a dependency build or a falsification job, and ends with it; only an executor process hosts Vitest.
 _Avoid_: worker, runner
 
 **Confirmed start**:
@@ -203,6 +203,10 @@ _Avoid_: stale anchor, skipped defect
 **Invalid definition**:
 A defect definition RT Test cannot apply as written, such as one naming no discovered test, or a test it shares a name with.
 _Avoid_: bad defect, broken spec
+
+**Falsification job**:
+One executor job that runs a Vitest workspace's baseline, each of its defects' experiments and the restored baseline in one Vitest instance.
+_Avoid_: mutation run, falsification run
 
 **Experiment**:
 One run of a defect's test with its mutation applied, inside a falsification job.

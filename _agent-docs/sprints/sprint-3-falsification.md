@@ -20,15 +20,15 @@ Scope: a falsification job in the daemon's executor loads one Vitest instance fo
 
 ## Ticket 3.3: Verdicts from run facts
 
-Scope: turn each experiment record into the facts ADR-0008 names (the intended test's state by stable identity, its error kinds including declared ones, hook states, module, suite and unhandled errors, whether the mutated site executed during that test, and both baselines), decide detected, survived, invalid experiment or unclear from them alone, and confirm each would-be detection by one confirming run in the same instance, over canary fixtures committed for both Vitest lines that each fail in one known way, including a test that fails an assertion without executing the mutated site. Requirements: FR11, NFR7.
+Scope: turn each experiment record into the facts ADR-0008 names (the intended test's state by stable identity, its error kinds including declared ones, hook states, module, suite and unhandled errors, whether the mutated site executed during that test, and both baselines), decide detected, survived, invalid experiment or unclear from them alone, and confirm each would-be detection by one confirming run in the same instance, over canary fixtures committed for both Vitest lines that each fail in one known way, including a test that fails an assertion without executing the mutated site. 3.2's job runs each experiment once, running only its intended test, and keeps one experiment callable again in the same instance before the restored baseline; 3.3 adds the confirming run there. Requirements: FR11, NFR7.
 
 ## Ticket 3.4: Defect evidence
 
-Scope: store each verdict with its facts in the local store, bound to the definition's digest, the workspace's input fingerprint, the Vitest version and the falsifier version, keep it across a restart as unconfirmed until reconciliation, and extend `rt-test defects` and the summary with each defect's evidence state, its freshness, and the verified, eligible and total counts. Requirements: FR12, FR15, FR22.
+Scope: store each verdict with its facts in the local store, bound to the definition's digest, the workspace's input fingerprint, the Vitest version and the falsifier version, keep it across a restart as unconfirmed until reconciliation, and extend `rt-test defects` and the summary with each defect's evidence state, its freshness, and the verified, eligible and total counts. Strip source text (code frames, and mutated text above all) from every error message in an experiment record before storing it (C147, NFR6); 3.2's record keeps messages raw. Requirements: FR12, FR15, FR22.
 
 ## Ticket 3.5: Schedule falsification
 
-Scope: once no ordinary job is due or running, the daemon runs a falsification job for each workspace holding eligible defects whose evidence is not current, yields to ordinary work when it becomes due, stores nothing for an experiment whose inputs moved, and says in every answer what falsification is doing and why a defect is waiting. Requirements: FR10, FR13, FR15.
+Scope: once no ordinary job is due or running, the daemon runs a falsification job for each workspace holding eligible defects whose evidence is not current, yields to ordinary work when it becomes due, stores nothing for an experiment whose inputs moved, and says in every answer what falsification is doing and why a defect is waiting. 3.2's job takes each mutation's file as an absolute path; it forces per-file isolation; when aborted it replies interrupted with only its finished runs and no restored baseline; when its executor process dies it returns nothing, with the reason. Requirements: FR10, FR13, FR15.
 
 ## Ticket 3.6: Canary gate on the consumer's Vitest
 
