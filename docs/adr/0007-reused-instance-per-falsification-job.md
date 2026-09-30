@@ -1,0 +1,15 @@
+# Falsify each workspace's defects in one reused Vitest instance per job
+
+Status: accepted
+
+ADR-0003 applies each mutation as an in-memory transform in a separate Vitest instance. The daemon runs one job at a time, each in an executor process of its own (ADR-0002, ADR-0006 § Process tree). Starting Vitest dominates a mutated run's cost: over 103 of this repository's named defects, a fresh instance per mutation took a median of 8.47 s, and one reused instance 1.33 s, with the same verdict for every defect ([falsification-instance-reuse](../design-decisions/falsification-instance-reuse/FINDINGS.md)).
+
+A falsification job covers one Vitest workspace: the defects in it whose evidence is not current and whose test holds a current pass at the workspace's current input fingerprint. Its executor loads one Vitest instance with RT Test's mutation plugin and runs the tests' modules unmutated (the baseline), then each defect's experiment alone, repeating once any experiment that would be a detection (ADR-0008), then the baseline again (the restored baseline). Before each run it invalidates the mutated file and every module a stale-transform guard finds cached from another source, so no run reads a transform an earlier run left. Each run's facts are read only from the modules of the specifications that run executed, since `runTestSpecifications` also returns the modules earlier runs left, with their old results. Global setup runs once per instance, so once per job.
+
+An experiment's evidence is bound to the definition's digest (its id, test identity and mutation), the workspace's input fingerprint the experiment ran at (the one its ordinary results use), the Vitest version and the falsifier version; a change to any of them makes it stale. An experiment whose inputs moved while it ran stores nothing. The baseline and experiments never become ordinary results. A job starts only while no ordinary job is due or running, and yields when one becomes due.
+
+The premise held on 2026-09-30 on Vitest 4.1.11 and 5.0.1, Node 24.19 on Windows 11: a plugin passed through `createVitest`'s Vite overrides rewrote the module a test imports, one instance ran the baseline to pass, the experiment to fail with an `AssertionError` and the restored baseline to pass, a mutation of a module the test never imports left that module untransformed, and every source file stayed byte-identical. A warm experiment on a three-test fixture took 130 to 280 ms.
+
+Known limits: code a test runs in a child process it spawns is read from disk, so a mutation there is never reached and the experiment is invalid, never a detection or a survivor. Evidence freshness has workspace granularity, so any change to a workspace's inputs stales every defect in it until file-level dependencies (M3) narrow it.
+
+Rejected: a fresh instance per experiment, for the cost above. Rejected: a disposable copy per experiment, which ADR-0003 rejects. Rejected: storing the baseline as an ordinary result, which would mix the falsifier's runs into the results agents read.
