@@ -133,7 +133,7 @@ Sibling files: 2.4b and 2.6 write `query-client.ts`, `client.ts` and `cli/src/ma
 
 ## Ticket 2.7b: An agent's edits never hold a workspace
 
-Scope: the agent hook (2.7) tells the daemon the files each batch of tool calls edited, and the daemon counts a change to them as an edit, never as one its own jobs made, so an agent's edits never hold a workspace under ticket 2.3k or a discovery under ticket 2.3l; a shell call names no file, so its changes are still judged by timing (owner, 2026-09-29 09:16). It builds after 2.7. Requirements: FR8, FR20.
+Scope: the agent hook (2.7) tells the daemon the files each batch of tool calls edited, and the daemon counts a change to them as an edit, never as one its own jobs made, so an agent's edits never hold a workspace under ticket 2.3k or a discovery under ticket 2.3l; a shell call names no file, so its changes are still judged by timing (owner, 2026-09-29 09:16). A report that reaches the daemon after the round following the change has counted it lets that one count rise, a known limit, since a hold never reads a result current (create-ticket, 2026-09-30 08:20). It builds after 2.7. Requirements: FR8, FR20. Ticket file: [2-7b-agent-edits-never-hold](../tickets/2-7b-agent-edits-never-hold.md)
 
 Sibling files: 2.6 creates the `changes` request, route and handler (`protocol.ts`, `server.ts`, `lifecycle.ts`) this ticket extends, and 2.7 creates `commands/hook.ts`, whose request this ticket widens; both land first. 2.4b writes `scheduler.ts` before it; no unbuilt ticket writes `run-history.ts` or `change-record.ts`.
 
