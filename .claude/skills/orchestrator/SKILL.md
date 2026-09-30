@@ -114,10 +114,10 @@ Escalate a problem the table's model has already failed on by spawning a NEW ses
 **Gate on Linux before every push, under Node 24 and Node 22**: a path, link, or process behavior can pass on Windows and fail on Linux, and Node 22 is the oldest line the project supports. These local gates are the project's only pre-push validation; it runs no hosted CI. WSL Ubuntu holds a clone at `~/rt-test` whose `origin` is this checkout, so it can check out a commit not yet pushed, and Node 24 at `~/.local/node` and the latest Node 22 at `~/.local/node22`, each an official tarball. Commit the lane locally after the Windows gate passes, then run in the background:
 
 ```
-node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- wsl.exe -e bash -lc 'cd ~/rt-test && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; export TMPDIR="$HOME/.rt-test-runs/wsl-$v-$$"; mkdir -p "$TMPDIR"; date; node --version; bun install --frozen-lockfile; bun run check; code=$?; [ "$code" -eq 0 ] && rm -rf "$TMPDIR"; echo "CHECK_EXIT_$v:$code $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
+node scripts/run-lease.mjs run --lane orchestrator --thread <threadId> -- wsl.exe -e bash -lc 'cd ~/rt-test && test -z "$(git status --porcelain)" && git fetch -q origin && git checkout -q --detach <sha> && for v in node node22; do ( export PATH="$HOME/.local/$v/bin:$HOME/.bun/bin:$PATH"; export TMPDIR="$HOME/.rt-test-runs/wsl-$v-$$"; mkdir -p "$TMPDIR"; date; node --version; bun install --frozen-lockfile; bun run check; code=$?; [ "$code" -eq 0 ] && rm -rf "$TMPDIR"; echo "CHECK_EXIT_$v:$code $(node --version)"; date ); done' > _agent-docs/.scratch/check-linux-<lane>.log 2>&1
 ```
 
-Both legs run the same `bun run check`.
+Both legs run the same `bun run check`. The clean-tree test comes first because a checkout carries a leftover edit into a file the two commits share, so a dirty clone can gate code no commit holds; a member proves in a clone of its own (`_agent-docs/crew.md`).
 
 **One unexplained Windows flake has a rerun rule.** A Vitest worker exit 3221225477 during `packages/daemon/test/force-stop.test.ts` is the known flake `docs/testing.md` § Known flakes describes: add its row there, then rerun the gate once. Any other red, or this one twice in a row, is investigated before a rerun.
 
