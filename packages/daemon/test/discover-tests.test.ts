@@ -12,7 +12,7 @@ import {
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { crawledLinks } from "../src/inputs/crawl-links.js";
-import { workspaceEnvFiles } from "../src/inputs/env-files.js";
+import { workspaceEnvFilesKnown } from "../src/inputs/env-files.js";
 import {
   discoveryFingerprint,
   ProjectInputs,
@@ -20,7 +20,7 @@ import {
   type FingerprintResult,
 } from "../src/inputs/fingerprint.js";
 import { MAX_NAMED_CHANGES } from "../src/inputs/input-jobs.js";
-import { protection } from "../src/inputs/protection.js";
+import { protection, workspaceListing } from "../src/inputs/protection.js";
 import {
   discoverTests,
   type DiscoveredTest,
@@ -2963,8 +2963,10 @@ function envFilesOf(
 ): unknown {
   const entry = workspace(discovery, path);
   if (entry === undefined || !("status" in entry)) return entry;
-  const listed = workspaceEnvFiles(entry);
-  return listed.known ? { known: true, files: sorted(listed.files) } : listed;
+  const known = workspaceEnvFilesKnown(entry);
+  return known.known
+    ? { known: true, files: sorted(workspaceListing(entry).envFiles) }
+    : known;
 }
 
 function refusal(print: FingerprintResult | { thrown: string }): string {

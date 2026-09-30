@@ -9,10 +9,10 @@ import type {
 import { errorText } from "../vitest/error-text.js";
 import { resolveWorkspaceVitest } from "../vitest/load-vitest.js";
 import {
-  discoveryEnvFiles,
+  discoveryEnvFilesKnown,
   envFileDigest,
-  workspaceEnvFiles,
-  type ListedEnvFiles,
+  workspaceEnvFilesKnown,
+  type EnvFilesKnown,
 } from "./env-files.js";
 import { countEnvironment } from "./environment-digest.js";
 import { absoluteInputPath } from "./input-filter.js";
@@ -33,7 +33,8 @@ import {
 } from "./protection.js";
 
 const ENTRY_SEPARATOR = "\n";
-const MISSING_CODE = "ENOENT";
+/** Nothing at the path: no entry, or one below a file, which Linux reports as ENOTDIR and Windows as ENOENT. */
+const MISSING_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"]);
 /** Stands for a listed file that does not exist, so its creation or deletion changes the digest. */
 const ABSENT_FILE = "absent";
 const TEST_MODULE = "test module";
@@ -168,7 +169,7 @@ export function workspaceFingerprint(
   narrowed?: ProjectInputs,
 ): FingerprintResult {
   const { vitestVersion } = reads;
-  const envFiles = workspaceEnvFiles(entry);
+  const envFiles = workspaceEnvFilesKnown(entry);
   if (!envFiles.known) return envFilesUnknown(envFiles);
   const inputs = workspaceInputs(project, workspaceListing(entry), narrowed);
   const listed = listedDigests(inputs, reads);
@@ -192,7 +193,7 @@ export function discoveryFingerprint(
   reads = new SnapshotReads(project.root),
 ): FingerprintResult {
   const { vitestVersion } = reads;
-  const envFiles = discoveryEnvFiles(discovery);
+  const envFiles = discoveryEnvFilesKnown(discovery);
   if (!envFiles.known) return envFilesUnknown(envFiles);
   const listings = discovery.workspaces.map(workspaceListing);
   const inputs = workspaceInputs(
@@ -222,7 +223,7 @@ export function discoveryFingerprint(
 }
 
 function envFilesUnknown(
-  listed: Extract<ListedEnvFiles, { known: false }>,
+  listed: Extract<EnvFilesKnown, { known: false }>,
 ): FingerprintResult {
   return {
     ok: false,
@@ -338,7 +339,7 @@ function moduleDigest(path: string): FingerprintResult {
   try {
     return { ok: true, digest: wholeDigest(readFileSync(path)) };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === MISSING_CODE) {
+    if (MISSING_CODES.has((error as NodeJS.ErrnoException).code ?? "")) {
       return { ok: true, digest: ABSENT_FILE };
     }
     return { ok: false, reason: errorText(error) };

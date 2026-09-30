@@ -418,3 +418,45 @@ describe("a project whose env sources are not known", () => {
     expect(settle(() => projectEnvFiles(project))).toStrictEqual([]);
   });
 });
+
+describe("a listed setup file whose path runs through a file", () => {
+  it("D3265: a listed setup file whose read fails with ENOTDIR, as Linux reports a path below a file, digests as absent, leaving its workspace the fingerprint it has with nothing there", async () => {
+    const same = await inTempDir((root) => {
+      const setup = "gen/setup.ts";
+      const entry = discoveredWorkspace(
+        { path: ROOT_PATH, directory: root },
+        [],
+        {
+          reported: true,
+          projects: [projectFacts({ setupFiles: [setup] })],
+        },
+      );
+      const printOf = (): string | undefined => {
+        const print = workspaceFingerprint(
+          new ProjectInputs(root, new Map()),
+          entry,
+        );
+        return print.ok ? print.digest : undefined;
+      };
+      restoreReads();
+      try {
+        const absent = printOf();
+        writeFileSync(join(root, "gen"), "a file where a directory would be\n");
+        vi.mocked(readFileSync).mockImplementation(((
+          target: PathLike,
+          options?: Parameters<typeof actualFs.readFileSync>[1],
+        ) => {
+          if (samePath(target, join(root, setup))) {
+            throw systemError("ENOTDIR", `open '${join(root, setup)}'`);
+          }
+          return actualFs.readFileSync(target, options);
+        }) as typeof readFileSync);
+        const belowAFile = printOf();
+        return absent !== undefined && belowAFile === absent;
+      } finally {
+        restoreReads();
+      }
+    });
+    expect(same).toBe(true);
+  });
+});

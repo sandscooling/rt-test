@@ -37,15 +37,17 @@ const OPEN_WITHOUT_BLOCKING = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0);
 const FIFO_REASON = "it is a FIFO, whose read could block";
 const NOTHING_READ: EnvFileDigest = { ok: true, digest: undefined };
 
-/** Root-relative, `/`-separated env files, or the discovered workspace whose projects' env sources are not known. */
-export type ListedEnvFiles =
-  | { readonly known: true; readonly files: readonly string[] }
+/** Whether the env files listed are known, or the discovered workspace whose projects' env sources are not. */
+export type EnvFilesKnown =
+  | { readonly known: true }
   | {
       readonly known: false;
       readonly workspace: string;
       /** As its projects' facts store it; absent when its discovery does not report their env sources. */
       readonly reason?: string;
     };
+
+const KNOWN: EnvFilesKnown = { known: true };
 
 /** A digest of what Vite reads at a path, undefined when it reads nothing there, or why it cannot be read. */
 export type EnvFileDigest =
@@ -74,9 +76,11 @@ function sourceEnvFiles(source: EnvSource): string[] {
   ].map((name) => posix.join(envDirectory, name));
 }
 
-/** A workspace that was not discovered loaded no config, so it names none. */
-export function workspaceEnvFiles(entry: WorkspaceDiscovery): ListedEnvFiles {
-  if (entry.status !== "discovered") return { known: true, files: [] };
+/** A workspace that was not discovered loaded no config, so it names none, which is known. */
+export function workspaceEnvFilesKnown(
+  entry: WorkspaceDiscovery,
+): EnvFilesKnown {
+  if (entry.status !== "discovered") return KNOWN;
   const workspace = entry.workspace.path;
   if (!entry.selectionFacts.reported) return { known: false, workspace };
   const notKnown = entry.selectionFacts.projects
@@ -85,21 +89,18 @@ export function workspaceEnvFiles(entry: WorkspaceDiscovery): ListedEnvFiles {
   if (notKnown !== undefined) {
     return { known: false, workspace, reason: notKnown.notKnown };
   }
-  return {
-    known: true,
-    files: [...new Set(entry.selectionFacts.projects.flatMap(projectEnvFiles))],
-  };
+  return KNOWN;
 }
 
-/** Every env file the discovery's workspaces name, unknown when any discovered workspace's are. */
-export function discoveryEnvFiles(discovery: TestDiscovery): ListedEnvFiles {
-  const files = new Set<string>();
+/** Whether the env files the discovery's workspaces list are known: not when any discovered workspace's are not. */
+export function discoveryEnvFilesKnown(
+  discovery: TestDiscovery,
+): EnvFilesKnown {
   for (const entry of discovery.workspaces) {
-    const listed = workspaceEnvFiles(entry);
+    const listed = workspaceEnvFilesKnown(entry);
     if (!listed.known) return listed;
-    for (const file of listed.files) files.add(file);
   }
-  return { known: true, files: [...files] };
+  return KNOWN;
 }
 
 /**
