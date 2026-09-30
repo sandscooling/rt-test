@@ -28,7 +28,7 @@ Scope: store each verdict with its facts in the local store, bound to the defini
 
 ## Ticket 3.5: Schedule falsification
 
-Scope: once no ordinary job is due or running, the daemon runs a falsification job for each workspace holding eligible defects whose evidence is not current, yields to ordinary work when it becomes due, stores nothing for an experiment whose inputs moved, and says in every answer what falsification is doing and why a defect is waiting. 3.2's job takes each mutation's file as an absolute path; it forces per-file isolation; when aborted it replies interrupted with only its finished runs and no restored baseline; when its executor process dies it returns nothing, with the reason. Requirements: FR10, FR13, FR15.
+Scope: once no ordinary job is due or running, the daemon runs a falsification job for each workspace holding eligible defects whose evidence is not current, yields to ordinary work when it becomes due, stores nothing for an experiment whose inputs moved, and says in every answer what falsification is doing and why a defect is waiting. 3.2's job takes each mutation's file as an absolute path; it forces per-file isolation; when aborted it replies interrupted with only its finished runs and no restored baseline; when its executor process dies it returns nothing, with the reason. The daemon tells the change record of each falsification job's begin and every way it ends, as it does for runs and discoveries, so a job that writes its own inputs cannot escape the self-change counts (2.7b's review). Requirements: FR10, FR13, FR15.
 
 ## Ticket 3.6: Canary gate on the consumer's Vitest
 
