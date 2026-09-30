@@ -9749,5 +9749,19 @@
     "file": "packages/daemon/src/query/path-status.ts",
     "old": "  if (unread.length === 0) return inputs;",
     "new": "  return inputs;"
+  },
+  {
+    "id": "D3421",
+    "defect": "A listed env file the inputs hold as a file's content, which the workspace's narrowed inputs leave out, is left out of the workspace's fingerprint, so an edit to that .env leaves a narrowed workspace's results current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      digests.push([path, held]);",
+    "new": "      void held;"
+  },
+  {
+    "id": "D3422",
+    "defect": "A workspace that counts every listed and declared variable by value gets the digest that counts them only as set, so a changed value of a declared variable no reference names leaves its results current.",
+    "file": "packages/daemon/src/inputs/carried-variables.ts",
+    "old": "  if (carried.every) return () => true;",
+    "new": "  if (carried.every) return () => false;"
   }
 ]

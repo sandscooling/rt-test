@@ -464,3 +464,43 @@ describe("the daemon log's line per workspace", () => {
     expect(lines).toHaveLength(1);
   });
 });
+
+describe("the fingerprint's env file digests and every variable by value", () => {
+  it("D3421: an edit to a listed env file the inputs hold, which the workspace's narrowed inputs leave out, changes its fingerprint", async () => {
+    const outcome = await inTempDir(async (root) => {
+      const entry = envWorkspace(APP, [VITE_PREFIX], root);
+      const printOf = async (text: string): Promise<string | undefined> => {
+        writeFiles(root, { [APP_ENV]: text });
+        const read = await readEntryDigest(join(root, APP_ENV));
+        if (read.kind !== "input") return undefined;
+        return printed(
+          workspaceFingerprint(
+            new ProjectInputs(root, new Map([[APP_ENV, read.read.digest]])),
+            entry,
+            handBuiltReads(root),
+            new ProjectInputs(root, new Map()),
+          ),
+        );
+      };
+      const before = await printOf("VITE_A=1\n");
+      const after = await printOf("VITE_A=2\n");
+      return {
+        computed: before !== undefined && after !== undefined,
+        moved: before !== after,
+      };
+    });
+    expect(outcome).toStrictEqual({ computed: true, moved: true });
+  });
+
+  it("D3422: a change to a declared variable no reference names changes the fingerprint of a workspace whose env file holds a stray $", async () => {
+    const outcome = await inTempDir((root) => {
+      writeFiles(root, { [APP_ENV]: "DB_PASS=pa$$word\n" });
+      const project = new ProjectInputs(root, new Map());
+      const entry = envWorkspace(APP, [VITE_PREFIX], root);
+      return movedByValue((value) =>
+        printed(workspaceFingerprint(project, entry, readsWith(root, value))),
+      );
+    });
+    expect(outcome).toStrictEqual({ computed: true, moved: true });
+  });
+});

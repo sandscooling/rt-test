@@ -310,6 +310,8 @@ Tests session: threadId 598af859-c880-4f7a-a4db-87fbd2d42160
 - D3417: A workspace that falls to no variable counted by value after some logs nothing, so the log still says its variables count by value. (AC7)
 - D3418: A workspace that has never counted a variable by value logs a line saying none counts any longer. (AC7)
 - D3419: Reading rt-test.json again forgets each workspace's last line, so an unchanged decision is logged again at each recount. (AC7)
+- D3421: A listed env file the inputs hold as a file's content, which the workspace's narrowed inputs leave out, is left out of the workspace's fingerprint, so an edit to that .env leaves a narrowed workspace's results current. (AC6; review gap G1)
+- D3422: A workspace that counts every listed and declared variable by value gets the digest that counts them only as set, so a changed value of a declared variable no reference names leaves its results current. (AC3; review gap G2)
 - Repaired: D1914 now builds its reads over `handBuiltEnvironment`, the harness's one builder of a `CountedEnvironment`. D3072's test was stale under AC6 (it held `file:1` and `file:2` for a `.env` not on disk), so it now pins no fingerprint for a narrowed-out held env file whose digest is not the content on disk; its record and mutation (`const held = undefined`) are unchanged. D3068 and D3069 were re-anchored to `contentDigest`'s `digest:` line and `envFileDigests`' nothing-there mapping, defects unchanged.
 
 Proofs: see § Proof status below.
@@ -324,6 +326,7 @@ Proofs: see § Proof status below.
 
 - Proven, 86 records whose test lies outside `input-tracker.test.ts` and `query.test.ts` (D3390 to D3419, and every record mutating a production file this lane edited whose test lies elsewhere), by `node scripts/verify-defects.mjs --ids <the 86>` through the run lease: Windows, Node 24, 06:39 to 06:45, 86/86 detected, exit 0; WSL Node 24.19.0 in `~/rt-t2-3o-tests` (wt/2 HEAD 4a121f0 plus this lane's package files), 06:45 to 06:48, 86/86 detected, exit 0.
 - Proven on the merged tree a308297 (2.4d merged, orchestrator 07:24), 331 records: every record whose test lies in `input-tracker.test.ts` or `query.test.ts`, 2.4d's included (329, among them D1914, D3068, D3069 and D3072), every record mutating `inputs/input-inventory.ts` (7, one outside those files), and D3113 in `discover-tests.test.ts`, whose test reaches `handBuiltReads` and was not in the 86. By `node scripts/verify-defects.mjs --ids <the 331>` through the run lease: Windows, Node 24, 07:27 to 07:36, 331/331 detected, exit 0; WSL Node 24.19.0 in a fresh clone `~/rt-t2-3o-merged` at a308297, 07:36 to 07:39, 331/331 detected, exit 0.
+- Review gaps G1 and G2, D3421 and D3422 in `carried-variables.test.ts` (add-only), over 04dbe31, whose `packages/` tree is a308297's: by `node scripts/verify-defects.mjs --ids D3421,D3422` through the run lease, Windows 07:55, 2/2 detected, exit 0; WSL Node 24.19.0 in `~/rt-t2-3o-merged` with the two edited files copied in, 07:55, 2/2 detected, exit 0.
 
 #### Questions and answers
 
@@ -331,9 +334,26 @@ Proofs: see § Proof status below.
 
 ### Review Record
 
+Review session: threadId e39ed898-1b78-4ac2-9f16-d2d6369eee99
+
+Reviewed `git diff main...wt/2` without what the merge a308297 brought from main, and e2e29b2's doc lines, 07:40 to 07:53. Two fresh-eyes batches, a doc check, and an installed-source check of Vite 8.0.16 and 8.3.1 and Vitest 4.1.11 and 5.0.1. All seven criteria hold in the code. The installed source confirms U1 and shows no way for Vite to read a name that does not follow a `$` the scan sees: a start value Vite takes for a key an env file also defines stays unexpanded, and `loadEnv` copies prefixed `process.env` keys raw. C172 holds for the env file reads: `envFileDigest`'s `statSync` with `throwIfNoEntry: false` returns undefined for a path below a file on Linux Node 24.13.1 (probe, 07:45), and a failed open's `ENOTDIR` is in `ABSENT_CODES`.
+
+Fixed: the File List now names the seven test files create-tests created or modified.
+
+Undisposed tech debt:
+
+- `packages/daemon/src/inputs/input-inventory.ts`: `heldFileDigest` (its `${FILE_KIND}${KIND_SEPARATOR}${content}`) restates the spelling `inputDigest` writes for a file's content, its `${kind}${KIND_SEPARATOR}${digest}` with `kind` as `FILE_KIND`. If they drift, every held env file refuses its workspace a fingerprint (the safe direction, and D3412 goes red). Fix: have `inputDigest` build a file's content digest through `heldFileDigest`, or share one formatter. Low, internal.
+- `packages/daemon/test/query.test.ts`, `viewOf`: passes the host's `process.env` to `handBuiltEnvironment`, though the harness keeps a hand-built environment empty so no variable of the test process reaches a hand-built fingerprint. No effect today, since no query-test workspace reports env sources. Fix: `handBuiltEnvironment()`. Low, internal, pre-existing.
+- `packages/daemon/src/inputs/environment-digest.ts`: `CARRIED_VARIABLE` and `carriedValue` name `NODE_V8_COVERAGE`, which Node copies into a child process, while `carried-variables.ts` uses "carried" for what Vite hands a workspace's tests, in the same import graph. Fix: rename the former, such as `NODE_COPIED_VARIABLE` and `copiedValue`. Low, internal.
+
+Denominator: 30 new named-defect tests (D3390 to D3419) and 3 repaired (D1914, D3072, and D3068 and D3069 re-anchored) against the seven criteria; two gaps below. Considered and not raised: the worklist's visited guard (`#referenced`) has no test with start values that reference each other, but its mutant loops forever, and a timeout is not a detection.
+
 #### Test Coverage Gaps
 
-None.
+| #   | Source                                                                                                                                                     | Defect                                                                                                                                                                                                                       | Expected test                                                                                                                                                                                                                                                                                                                                                | Severity                                                                                                                                        |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | `packages/daemon/src/inputs/fingerprint.ts`, `envFileDigests`, the branch `} else if (!inputs.selected.digests.has(path)) { digests.push([path, held]); }` | A listed env file the inputs hold as a file's content, which the workspace's narrowed inputs leave out, is left out of the workspace's fingerprint, so an edit to that `.env` leaves a narrowed workspace's results current. | Over a real `.env` whose held digest is the one `readEntryDigest` reads (as D3412 builds it), with narrowed inputs that leave it out: edit the file, take its held digest again, and assert both fingerprints are computed and differ. Mutation: delete `digests.push([path, held]);`. D3072 proved this before its repair, which now pins only the refusal. | CRITICAL (consumer; reach unknown; narrowed inputs never hold an env file, so every narrowed workspace with a tracked `.env` takes this branch) |
+| G2  | `packages/daemon/src/inputs/carried-variables.ts`, `countsByValue` (`if (carried.every) return () => true;`) and `digest`                                  | A workspace that counts every listed and declared variable by value gets the digest that counts them only as set, so a changed value of a declared variable no reference names leaves its results current.                   | Like D3406 (`movedByValue`), over a `.env` holding `DB_PASS=pa$$word`: a change to a declared variable nothing references moves the workspace fingerprint, both computed. Mutation: `if (carried.every) return () => true;` to `if (carried.every) return () => false;`. D3402, D3403 and D3409 assert only the decision.                                    | CRITICAL (consumer; reach unknown)                                                                                                              |
 
 ### Completion Notes
 
@@ -386,3 +406,10 @@ None.
 - _agent-docs/tickets/2-3o-count-carried-env.md (created by create-ticket; modified by dev: task and criterion boxes, U1 resolution, Dev Handoff, Completion Notes, File List)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (modified by create-ticket: § Ticket 2.3o's scope line and ticket link)
 - _agent-docs/sprint-status.yaml (modified by create-ticket: the 2-3o line)
+- packages/daemon/test/carried-variables.test.ts (created by create-tests)
+- packages/daemon/test/defects.json (modified by create-tests)
+- packages/daemon/test/env-files.test.ts (modified by create-tests)
+- packages/daemon/test/harness.ts (modified by create-tests)
+- packages/daemon/test/input-tracker.test.ts (modified by create-tests)
+- packages/daemon/test/query.test.ts (modified by create-tests)
+- packages/daemon/test/required-start-environment.ts (modified by create-tests)
