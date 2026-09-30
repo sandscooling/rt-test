@@ -264,6 +264,7 @@ Tests session: threadId a81de227-0f90-4c2a-b04b-09f085ce6007
 - D2941 retired: its mutant (`new SnapshotReads(inputs.root)`) relied on the live-environment default the build deleted, and is now a compile error. `packages/daemon/test/required-start-environment.ts` pins that with `@ts-expect-error` lines, which `tsc` checks, for each omitted start environment or `reads`. A declared variable's value moving the fingerprint is detected by D2942's mutation (the declaration's entries dropped from the count).
 - D1914 rewritten (stale): it moved a live variable and fingerprinted through the deleted default; it now fingerprints over two environment digests passed through `SnapshotReads`, against its unchanged mutation (AC1).
 - Proof: `node scripts/verify-defects.mjs --edited` through the run lease selected 676 of 2635 and detected 676 of 676, with the baseline green before and after. On Windows under Node 24.19.0 it ran 03:55 to 04:25, queued behind 2.3l. On Linux under WSL Node 24.19.0 it ran 04:26 to 04:33, in a clone at `d1c0b20` with the lane's patch applied and each file's hash matching Tree 1, with `TMPDIR` at `~/.rt-test-runs/wsl-2-3n-tests`.
+- Review gap (D3335): the preload now matches the daemon entry as `.ts` or `.js`. Each daemon fork records whether the daemon's environment already held `RT_GAINED_AFTER_START`, and D3335 also asserts that one fork began holding it, so a patch that stops firing fails the test instead of passing it. Same record, re-proved with D3331 to D3333 by `node scripts/verify-defects.mjs --ids D3331,D3332,D3333,D3335` through the lease: 4 of 4 detected on Windows (queued 04:43, ended 04:54) and on Linux under WSL Node 24.19.0 (04:54 to 04:56, clone at `5a61b5a` with the round's patch applied).
 - The `executor-crash` fixture reads its crash kind from a `crash` file and holds on a `hold-point` directory the test writes, since a variable set after an executor is built no longer reaches its jobs (AC2). That repairs `stoppedWhileHeld`'s callers (D2778, D2779, D2780, D2909) and D2780's second job.
 
 #### Deliberately Untested
@@ -271,7 +272,7 @@ Tests session: threadId a81de227-0f90-4c2a-b04b-09f085ce6007
 - packages/daemon/src/inputs/declared-non-inputs.ts: the constructor's count of the start environment. No fingerprint exists before the first reconciliation (D1912), and that reconciliation's `read()` recounts it, so the constructor's count is never observed.
 - packages/daemon/src/inputs/environment-digest.ts: `carriedValue`'s Windows fold for a NODE_V8_COVERAGE spelled other than all upper case. Such a spelling is unlikely, and a wrong value changes only where V8 writes coverage, never a test result.
 - packages/daemon/src/inputs/environment-digest.ts: `Object.freeze` in `takeStartEnvironment`. Nothing writes into the copy, `StartEnvironment`'s `Readonly` type rejects a write at compile time, and each executor process gets a fresh object.
-- packages/daemon/src/daemon/daemon-main.ts: the copy handed to the tracker and to the build executor. A live environment in the tracker fails toward staleness, the build executor runs no test, and nothing in the daemon process writes its environment.
+- packages/daemon/src/daemon/daemon-main.ts: the copy handed to the tracker and to the build executor. Nothing in the daemon process writes its environment, so a live environment there counts or starts with the same variables as the copy; the owner's 03:25 ruling leaves that a known limit.
 - packages/daemon/src/inputs/fingerprint.ts, input-tracker.ts, executor.ts: the required start environment and `reads` are a type-level guard, pinned by `packages/daemon/test/required-start-environment.ts` rather than by a named defect.
 
 #### Questions
@@ -280,9 +281,24 @@ Tests session: threadId a81de227-0f90-4c2a-b04b-09f085ce6007
 
 ### Review Record
 
+Review session: threadId fc53dc2e-2d89-496f-af8b-c3df2abe1e2e
+
+Reviewed f528b31 (build and tests) and e2ac766's doc changes, 04:36 to 04:41: two fresh-eyes batches (inputs, executor), one assumptions pass, the checklist pass. U1 re-checked against the installed Node v24.19.0 (`process.binding('natives')`): every claim CONFIRMED, with two details the row leaves out: a live `NODE_V8_COVERAGE` is carried only when non-empty, and the permission-model flags come from the parent's own `execArgv`. Fixed here: `carriedValue`'s docblock now states the rule on every platform before the Windows fold; this File List gained the tests session's files.
+
+Tech debt, for triage once the change is committed:
+
+- `packages/daemon/src/inputs/environment-digest.ts`, `countEnvironment` (the per-key `values` Set and the sorted `held` list in its `BY_VALUE` line): on Windows, names that fold together keep their values as a sorted set, so a swap of values between two spellings (`Path=a`, `PATH=b` at one start, `Path=b`, `PATH=a` at the next) leaves the digest unmoved while the child, which receives the value under the first spelling in sort order, sees a different one. A stale result could read as current. It needs two spellings of one variable in the daemon's environment and a swap between daemon starts. Fix: count each folded key's values in the sort order of their spellings rather than as a sorted set, which keeps a lone respelled variable's digest unchanged. Pre-existing code; AC2's last sentence claims the case it misses.
+
+Known limits (owner ruling, 2026-09-30 03:25: no chasing edge cases):
+
+- On Windows, libuv's native spawn is known to add a fixed set of system variables (`SYSTEMROOT`, `PATH`, `TEMP` and others) from the daemon's live environment when the block it is given lacks them. From libuv knowledge, not read in installed source (it is C). It matters only when one was unset as the daemon began serving.
+- AC2's clause for the dependency build executor holds by construction (`serve` hands both executors one copy), with no named defect; only a daemon that writes its own environment could make the two differ, and none does.
+
 #### Test Coverage Gaps
 
-None.
+| Source file                                                                              | Named defect                                                                                                                                                                                                                                                                                                                                                                                                         | Expected test                                                                                                                                                                                     | Severity                          |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| test/fixtures/daemon/report-environment.mjs, with packages/daemon/src/daemon/executor.ts | D3335's test passes whether or not the job executor starts from the start environment once the preload's daemon-side `fork` patch stops firing (the daemon entry check is `endsWith("daemon-main.ts")` where the executor's is `/executor-main\.[jt]s$/`, and nothing asserts the daemon's live environment gained `RT_GAINED_AFTER_START`), so a job executor built from the live `process.env` would go undetected | D3335's test also asserts the daemon-side patch fired (a marker the patch writes, or the gained variable recorded as set in the daemon), and the daemon entry check matches `.ts` and `.js` alike | LOW (daemon-state, reach unknown) |
 
 ### Completion Notes
 
@@ -308,3 +324,17 @@ Built in Tree 1 on `wt/1` at `d1c0b20`, 03:24 to 03:33.
 - _agent-docs/tickets/2-3n-env-snapshot.md (created by create-ticket; modified by dev: U1 resolution, checkboxes, Dev Handoff, Completion Notes, File List)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (modified by create-ticket: § Ticket 2.3n's scope line and ticket link)
 - _agent-docs/sprint-status.yaml (modified by create-ticket: the 2-3n line)
+- packages/daemon/test/daemon-harness.ts (modified by create-tests)
+- packages/daemon/test/daemon.test.ts (modified by create-tests)
+- packages/daemon/test/defects.json (modified by create-tests)
+- packages/daemon/test/discover-tests.test.ts (modified by create-tests)
+- packages/daemon/test/env-files.test.ts (modified by create-tests)
+- packages/daemon/test/executor.test.ts (modified by create-tests)
+- packages/daemon/test/harness.ts (modified by create-tests)
+- packages/daemon/test/input-tracker.test.ts (modified by create-tests)
+- packages/daemon/test/lifecycle.test.ts (modified by create-tests)
+- packages/daemon/test/required-start-environment.ts (created by create-tests)
+- test/fixtures/daemon/executor-crash/a.test.mjs (modified by create-tests)
+- test/fixtures/daemon/executor-crash/global-setup.mjs (modified by create-tests)
+- test/fixtures/daemon/report-environment.mjs (created by create-tests)
+- test/fixtures/daemon/report-environment.d.mts (created by create-tests)

@@ -33,8 +33,9 @@ export function executorEnvironment(
 }
 
 /**
- * On Windows, the value under the first name in sort order among those that fold to the carried one, the name Node
- * keeps; the all-upper-case spelling sorts before every other, so Node keeps the key added in its place.
+ * The carried variable's value in `start`, undefined when unset. On Windows it is the value under the first name in
+ * sort order among those that fold to it, the name Node keeps; the all-upper-case spelling sorts before every other,
+ * so Node keeps the key added in its place.
  */
 function carriedValue(start: StartEnvironment): string | undefined {
   const carried = comparable(CARRIED_VARIABLE);

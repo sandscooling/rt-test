@@ -23,7 +23,9 @@ import {
   type ChildEnd,
 } from "../../../test/scripts/child-end.js";
 import {
+  DAEMON_FORKS_SUFFIX,
   GAINED_VARIABLE,
+  HELD_AT_FORK,
   REPORT_VARIABLE,
 } from "../../../test/fixtures/daemon/report-environment.mjs";
 import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
@@ -1673,15 +1675,24 @@ describe("the environment a daemon's executor processes start with", () => {
           logged(identity.logFile, IDLE_ENTRY),
         );
         const environments = reportedEnvironments(report);
+        const forks = `${report}${DAEMON_FORKS_SUFFIX}`;
         return {
           idle,
           reported: environments.length > 0,
+          forkedHoldingIt:
+            existsSync(forks) &&
+            readFileSync(forks, "utf8").split("\n").includes(HELD_AT_FORK),
           gained: environments.filter(
             (environment) => environment[GAINED_VARIABLE] !== undefined,
           ).length,
         };
       });
-      expect(outcome).toStrictEqual({ idle: true, reported: true, gained: 0 });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        reported: true,
+        forkedHoldingIt: true,
+        gained: 0,
+      });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
