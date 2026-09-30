@@ -1,10 +1,37 @@
 # RT Test
 
-Test execution and falsification for Vitest projects, taken off coding agents.
+```text
+██████╗ ████████╗   ████████╗███████╗███████╗████████╗
+██╔══██╗╚══██╔══╝   ╚══██╔══╝██╔════╝██╔════╝╚══██╔══╝
+██████╔╝   ██║         ██║   █████╗  ███████╗   ██║
+██╔══██╗   ██║         ██║   ██╔══╝  ╚════██║   ██║
+██║  ██║   ██║         ██║   ███████╗███████║   ██║
+╚═╝  ╚═╝   ╚═╝         ╚═╝   ╚══════╝╚══════╝   ╚═╝
+_______________/\_____/\/\___________________________
+   every save tested · every result known · tests with teeth
+```
 
-Coding agents spend most of their time running and falsifying the tests they write. RT Test is meant to do that work for them: a local daemon runs each edit's tests and proves them against their named defects, and agents query the answers instead of running anything. It answers three questions: does the code pass, are the results still current, and have the tests shown that they detect their intended defects?
+Real-time test runs and defect proofs for Vitest projects, done for your coding agents instead of by them.
 
-**Status: foundation only.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, and an `rt-test` CLI that starts and stops that daemon, asks it what its stored runs say about the worktree or a path, waits until the tests covering given files have current results or none coming, and lists what changed for the tests covering given files since an earlier answer, and runs as an opt-in Claude Code hook that tells a coding agent, after each batch of its tool calls, what changed for the tests covering the files it edited. The daemon watches the worktree's inputs, leaving out the files the consumer declares no test reads, and reports a result current only while the inputs its run started from are unchanged. After an edit it waits until the inputs have held still for 1,000 ms (a target), discovers again when its stored discovery is no longer current, and reruns each workspace whose latest run is no longer bound to its current input fingerprint; a restart reruns nothing that still reads current. An edit inside the inputs of a workspace whose run is in progress interrupts that run once the edited revision's dependency build has ended; the run stores nothing and runs again once the inputs settle, while an edit only outside them leaves its results current. It does not yet show its schedule in every answer, or falsify defects. It is not published to npm.
+## What it does
+
+### Real-time tests, so the code is always in a known state
+
+A local daemon watches your project. The moment a file is saved, every result that save could affect is marked stale, and the affected tests run in the background. Each result is bound to the exact inputs that produced it, so RT Test never passes off an old green as current: a result is current, stale, running or unknown, and an edit made while a run is going throws that run away and runs it again.
+
+That changes how a coding agent works. Without RT Test, an agent either spends minutes running the suite after each change or skips it and guesses. With RT Test, the agent never runs a test. It asks: `status <path>` for the state of a file or folder, `wait <files>` to block until the tests covering its edits have current results, and `changes <files>` for what broke or recovered since it last asked. An opt-in Claude Code hook does the asking for it, telling the agent after each batch of edits which tests its changes broke or fixed. The agent always knows whether the code it just wrote works, and never builds on a break it has not seen.
+
+### Named defects and falsification: tests with teeth
+
+Test-driven development proves a test can fail once, before the code exists. It does not prove the test catches the bug it was written for, and after the next refactor nobody checks again. Agent-written tests are especially prone to this: a test that asserts too little passes whatever the code does, and looks exactly like one that works.
+
+RT Test holds every test to a stronger bar. Each test names the specific wrong behavior it exists to reject, its **named defect**, such as "a quantity above the maximum is accepted", along with a small mutation of the code that introduces exactly that bug. RT Test then **falsifies** the test: it applies the mutation in memory, never touching your files, and runs the test against it. The defect counts as detected only when the unmutated test passes, the mutated line actually ran during the test, the test failed at an assertion rather than crashing in setup or timing out, the failure repeats on a confirming run, and the test passes again once the mutation is removed.
+
+The result is a suite in which every test is proven to catch the bug it names, and a test that cannot fail is reported as a gap. The proof goes stale when the code or the test changes, and RT Test proves it again at low priority, behind ordinary test runs. Falsification is being built now (milestone M2, sprint 3); until it lands, this repository proves its own tests with a bootstrap version of the same idea (`docs/testing.md` § Bootstrap falsification).
+
+## Status
+
+**Milestone M1 is in its last ticket.** This repository contains the product plan, architecture, requirements, decision records, the agent workflow that builds it, a small tested core that assesses result freshness and gives each test a stable identity, a daemon package that discovers and runs a consumer's Vitest tests, records each test's state, stores runs and discoveries in a local `node:sqlite` store, and runs them in a background daemon for one trusted worktree, and an `rt-test` CLI that starts and stops that daemon, asks it what its stored runs say about the worktree or a path, waits until the tests covering given files have current results or none coming, and lists what changed for the tests covering given files since an earlier answer, and runs as an opt-in Claude Code hook that tells a coding agent, after each batch of its tool calls, what changed for the tests covering the files it edited. The daemon watches the worktree's inputs, leaving out the files the consumer declares no test reads, and reports a result current only while the inputs its run started from are unchanged. After an edit it waits until the inputs have held still for 1,000 ms (a target), discovers again when its stored discovery is no longer current, and reruns each workspace whose latest run is no longer bound to its current input fingerprint; a restart reruns nothing that still reads current. An edit inside the inputs of a workspace whose run is in progress interrupts that run once the edited revision's dependency build has ended; the run stores nothing and runs again once the inputs settle, while an edit only outside them leaves its results current. Every answer also says what the daemon is doing: its round, each workspace's execution state and the latest selection. It does not yet falsify defects. It is not published to npm.
 
 ## Intended experience
 
