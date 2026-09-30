@@ -80,6 +80,8 @@ P44. **Build fixture git repositories from the shared settings**: A root test th
 
 P45. **Give a daemon test that writes or checks a key the key budget**: A test under `packages/daemon/test/` that writes a daemon key, or points a client at a listener on an endpoint, with the real system tools unmocked, runs under `KEY_TEST_OPTIONS` on its `describe` or with `KEY_TEST_TIMEOUT_MS` as its own timeout, both from `test/daemon-key.ts`, unless a longer timeout such as `DAEMON_TEST_TIMEOUT_MS` already covers it. On Windows each key write runs `whoami` and `icacls` and each check runs `icacls`, and Vitest's 5000 ms default fails such a test under a loaded run.
 
+P46. **Give a daemon test that spawns git or runs a real tracker the daemon budget**: A `describe` under `packages/daemon/test/` whose tests spawn git, start a real input tracker or watcher, or wait on real settle timing passes `{ timeout: DAEMON_TEST_TIMEOUT_MS }`, as the file's other process-spawning `describe` blocks do, since Vitest's 5000 ms default fails such a test under a loaded run.
+
 ## Product direction
 
 P31. **Keep RT Test generic**: Fleet Cooling is the proving ground, not a dependency. Nothing application- or backend-specific enters the core; Convex support lives in an adapter.
