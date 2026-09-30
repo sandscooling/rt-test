@@ -378,10 +378,19 @@ Tests session: threadId b54c2bff-28aa-4b85-8811-83348d97af2e
 - D3454: A named file no workspace covers is printed with selection's report alone, never saying no test covers it. (AC13, AC2)
 - D3455: A named failure's test name is printed unescaped, so a line break in it splits the failure across lines. (AC13)
 - D3456: A limit that passes before any discovery is stored composes a wait answer from no basis and fails as a query that threw, instead of answering that there is nothing to answer and why (the orchestrator's 08:09 ruling). (AC5)
+- D3457: A wait takes the unread entries its second read resolved with, which a reconciliation beginning mid-read returns before the wait's own read has run, so a file that read then found busy lets the wait settle on results no read of it supports. (AC3, AC1; review gap G1)
+- D3458: A plan that makes nothing due never signals the waits, so a wait judged while the round was pending runs to its limit, since the scheduler then idles with no further move. (AC3; review gap G2)
+- D3459: A wait settles only once every workspace is idle rather than only its covering ones, so a wait on a file one workspace covers stalls while an unrelated workspace is queued. (AC3; review gap G3)
+- D3460: A wait request whose paths are an empty list is taken, and settles over no file, a zero-test answer read as settled. (AC7; review gap G4)
+- D3461: rt-test wait sends only its first file, so it answers settled while the other files' covering workspaces are queued. (AC9; review gap G5)
+- D3462: A file only a workspace's fingerprint lists, which selection selects nothing for, is printed as covered by no test though its edit stales that workspace. (AC2, AC13; review gap G6)
+- D3463: A named file the wait could not read is printed without its reason, so the text never says which file held the wait. (AC3, AC13; review gap G7)
+
+Review repairs: `StandInInputs` gains `unreadNamed`, returning the script's new `unreadOnceRead` or else its `unreadNamed`, and `readNamed` is unchanged; D3427 and D3446 are re-anchored on the review's new `#read`; D3430 reaches the unread entries through `unreadNamed` with no change to its test.
 
 Inert mutation: dropping the schedule's signal in `WorkspaceSchedule.runEnded` survived D3445, since another schedule move after a run's end reaches the wait; D3445 is anchored on the waits' arming of the schedule's signal instead.
 
-Asked by this session: more defect ids (08:19; the orchestrator allocated D3454-D3458 at 08:20); whether this session may write this record in the ticket its dev had left uncommitted (08:37; yes, the orchestrator at 08:38); whether D3456 may be kept for the 08:09 ruling's test (08:39; yes, the orchestrator at 08:39). D3457 and D3458 go back unused.
+Asked by this session: more defect ids (08:19; the orchestrator allocated D3454-D3458 at 08:20); whether this session may write this record in the ticket its dev had left uncommitted (08:37; yes, the orchestrator at 08:38); whether D3456 may be kept for the 08:09 ruling's test (08:39; yes, the orchestrator at 08:39); ids for the review's seven gaps (09:21; the orchestrator allocated D3457-D3465 at 09:21). D3464 and D3465 go back unused.
 
 #### Deliberately Untested
 
@@ -398,9 +407,39 @@ Asked by this session: more defect ids (08:19; the orchestrator allocated D3454-
 
 ### Review Record
 
+Review session: threadId 6005a315-a6d5-47b5-a956-8aba2e10d6fb
+
+**Fixed in review** (09:19 on 2026-09-30):
+
+- CRITICAL, reach unknown (`waits.ts` `#read`): the wait kept the unread entries its second `readNamed` resolved with, but `readNamed` resolves as soon as a reconciliation begins, before its own queued read has run (`EventLedger.waitForReadOrReconciliation`, `#processQueue` held while reconciling). So a wait could bind with no unread file after that queued read found the file busy and dropped it from the inputs, and answer settled on results no read of the file supports; or hold to its limit on a stale entry from an earlier read. `TrackedInputs.unreadNamed(paths)` (new, `inputs/input-tracker.ts`) gives each path's latest read's entry, and the wait takes it after its final `settled()`, once its own read has run.
+- `ScheduleReader.moved()`'s comment named only some of the moves; it now names every one (`workspace-schedule.ts`).
+- `MAX_NAMED_FAILURES` is module-private (C59: no importer).
+- Completion Notes' `statSync` note and the File List corrected.
+
+Recorded, not fixed (owner ruling, 03:25 on 2026-09-30): an input set that is not established at either of the wait's reads leaves no read of its own, so an unread entry an earlier read left for the same file holds the wait to its limit, which answers unsettled naming that file; it never answers current.
+
+Tech debt (existing or duplicated code, triaged after the commit):
+
+- `packages/cli/src/commands/wait.ts:47` `LIST_SEPARATOR = "; "` duplicates `packages/cli/src/answer-text.ts`' `DETAIL_SEPARATOR`, joining one entry's details in both.
+- `packages/cli/src/main.ts` `usageError` writes the unknown command's name and `parseArgs`' message, which quote the user's argument, to stderr unescaped, unlike `Output`'s terminal escaping; the wait's `--limit` message joins it.
+
 #### Test Coverage Gaps
 
-None.
+Repairs this review's fix calls for (not gaps): `StandInInputs` (`packages/daemon/test/scheduling-harness.ts`) implements `TrackedInputs.unreadNamed`, returning the script's `unreadNamed` (the daemon typecheck's 5 errors, all TS2741/TS2420 on it); D3427's `old` no longer exists in `waits.ts` and D3446's changed, so both are re-anchored on the new `#read` and re-proven; D3430's test reaches the unread entries through `unreadNamed` now. Every record whose mutated file this review edited (`waits.ts`, `wait-answer.ts`, `inputs/input-tracker.ts`) is re-proven (`verify-defects.mjs --edited`).
+
+| #   | Source                                                         | Defect                                                                                                                                                                                                                                                  | Expected test                                                                                                                                                                                                                    | Severity |
+| --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| G1  | `packages/daemon/src/daemon/waits.ts` `#read`                  | A wait takes the unread entries `readNamed` resolved with, which a reconciliation beginning mid-read returns before the wait's own read has run, so a file that read then found busy lets the wait settle on results no read of it supports. (AC3, AC1) | `waits.test.ts`: a stand-in whose `readNamed` resolves with none while `unreadNamed` after the settle names the file; the wait does not settle and its limit names the file's reason. Mutation: take `readNamed`'s return again. | CRITICAL |
+| G2  | `packages/daemon/src/daemon/workspace-schedule.ts` `planned()` | A plan that makes nothing due never signals the waits, so a wait judged while the round was pending runs to its limit and answers unsettled where it settles, since the scheduler then idles with no further move. (AC3)                                | Over the real `WorkspaceSchedule`: a wait pending on a pending round settles once `planned()` makes nothing due, with no other move. Mutation: drop `planned()`'s `this.#move()`.                                                | HIGH     |
+| G3  | `packages/daemon/src/query/wait-answer.ts` `settles`           | `settles` requires every workspace idle rather than only the covering ones, so a wait on a file only one workspace covers stalls to its limit while an unrelated workspace is queued or running. (AC3)                                                  | A settled case with a non-covering workspace queued throughout. Mutation: drop `!covering.has(workspace.workspacePath) \|\|`.                                                                                                    | HIGH     |
+| G4  | `packages/daemon/src/daemon/server.ts` `waitResponse`          | A wait request with an empty `paths` array is taken, and settles over no file, a zero-test answer read as settled. (AC7)                                                                                                                                | `server.test.ts`: `paths: []` is refused with the invalid-request error and the handler is never called. Mutation: drop `\|\| paths.length === 0`.                                                                               | HIGH     |
+| G5  | `packages/cli/src/commands/wait.ts` `parse`                    | `rt-test wait` sends only its first file, so it answers settled while the other files' covering workspaces are queued. (AC9)                                                                                                                            | `wait-command.test.ts`: two files, one relative in a subfolder, both sent absolute and in order. Mutation: send `fileArguments.slice(0, 1)`.                                                                                     | HIGH     |
+| G6  | `packages/cli/src/commands/wait.ts` `coveringText`             | A file only a workspace's fingerprint lists, which selection selects nothing for, is printed "covered by no test" though its edit stales that workspace. (AC2, AC13)                                                                                    | A file with selection selecting nothing and `listed` naming an env file: its line names the listing and not "covered by no test". Mutation: drop `&& listing.length === 0`.                                                      | MEDIUM   |
+| G7  | `packages/cli/src/commands/wait.ts` `fileText`                 | A named file the wait could not read is printed without its reason, so the text never says which file held the wait. (AC3, AC13)                                                                                                                        | A file with `unread`: its line carries "could not be read:" and the reason. Mutation: drop the `unread` branch.                                                                                                                  | MEDIUM   |
+
+Denominator: 33 named-defect tests (D3424 to D3456) over the 13 criteria; each criterion's guarantee has a named test except the seven rows above.
+
+Post-fix suite (Windows, after the tests session's D3457 to D3463 at 09:32): `node scripts/run-lease.mjs run --lane t2-4b --thread 6005a315-a6d5-47b5-a956-8aba2e10d6fb -- bun run test:run`, 09:32 to 09:37 on 2026-09-30, exit 0, 72 of 72 test files and 2797 of 2797 tests passed; log `_agent-docs/.scratch/2-4b-suite.log`. `bun run typecheck` exit 0 at 09:32.
 
 ### Completion Notes
 
@@ -408,7 +447,7 @@ None.
 
 **Sanity check** (07:32, answered by create-ticket at 07:34, all six CONFIRMED and applied to the ticket by its author): F1 bind at the first snapshot; F2 the stop-sequence move; F3 the per-file `ExplainedPath` bound and the size error's per-type hint; F4 a crashed module named with no error; F5 recorded in § Known limits; F6 `MAX_NAMED_CHANGES` reused, `MAX_NAMED_FAILURES` declared in `wait-answer.ts`.
 
-**Unverified assumptions.** The table has no row. One third-party behavior was met and settled from Node's documented `statSync` contract as the codebase already uses it (`query/path-status.ts` `statsOf`): `throwIfNoEntry: false` returns undefined only for a missing entry, so `waits.ts`' `isDirectory` catches every other error (ENOTDIR included) and treats the path as no directory, leaving it to the named read, which reports what it cannot read.
+**Unverified assumptions.** The table has no row. One third-party behavior was met and settled from Node's documented `statSync` contract as the codebase already uses it (`query/path-status.ts` `statsOf`): `throwIfNoEntry: false` returns undefined for a missing entry and for a path under a file (ENOTDIR, probed by the review at 09:14 on 2026-09-30), and `waits.ts`' `isDirectory` catches every other error, so each such path is treated as no directory, leaving it to the named read, which reports what it cannot read.
 
 **Design decisions taken in the build.**
 
@@ -434,4 +473,8 @@ None.
 - docs/requirements.md (FR9 amended), docs/glossary.md (Wait amended, Unsettled added), docs/architecture.md (§ Query surface): written by the orchestrator at 13:19 from this lane's drafts
 - Created by dev-ticket: packages/daemon/src/daemon/waits.ts, packages/daemon/src/daemon/stop-sequence.ts, packages/daemon/src/query/wait-answer.ts, packages/cli/src/commands/wait.ts
 - Modified by dev-ticket: packages/daemon/src/daemon/protocol.ts, packages/daemon/src/daemon/server.ts, packages/daemon/src/daemon/lifecycle.ts, packages/daemon/src/daemon/workspace-schedule.ts, packages/daemon/src/query/answer.ts, packages/daemon/src/query-client.ts, packages/daemon/src/client.ts, packages/cli/src/main.ts, packages/cli/src/answer-text.ts, _agent-docs/tickets/2-4b-wait-for-files.md (task and criterion boxes, Dev Handoff, Completion Notes, File List)
+- Created by create-tests: packages/daemon/test/waits.test.ts, packages/cli/test/wait-command.test.ts
+- Modified by create-tests: packages/daemon/test/server.test.ts, packages/daemon/test/lifecycle.test.ts, packages/daemon/test/query.test.ts, packages/daemon/test/daemon.test.ts, packages/daemon/test/round-fixtures.ts, packages/daemon/test/defects.json, packages/cli/test/defects.json, _agent-docs/tickets/2-4b-wait-for-files.md (Tests Record)
+- Modified by review-changes: packages/daemon/src/daemon/waits.ts (`#read` takes the unread entries after its reads settle), packages/daemon/src/inputs/input-tracker.ts (`TrackedInputs.unreadNamed`), packages/daemon/src/query/wait-answer.ts (`MAX_NAMED_FAILURES` private), packages/daemon/src/daemon/workspace-schedule.ts (the `moved()` comment), _agent-docs/tickets/2-4b-wait-for-files.md (Review Record, Completion Notes' `statSync` note, File List)
+- _agent-docs/sprint-status.yaml: 2-4b-wait-for-files set to review by the orchestrator
 - No dependency change.

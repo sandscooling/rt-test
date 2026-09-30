@@ -172,16 +172,19 @@ export class Waits {
     return { refused: `${REFUSAL_LEAD}: ${refusals.join(REFUSAL_SEPARATOR)}` };
   }
 
-  /** A first read may read nothing while a reconciliation runs or before an input set is established, so it reads again. */
+  /**
+   * A first read may read nothing while a reconciliation runs or before an input set is established, so it reads again,
+   * and takes what it could not read only once that read has run.
+   */
   async #read(wait: PendingWait): Promise<void> {
     const { inputs } = this.#parts;
     await inputs.readNamed(wait.paths);
     await inputs.settled();
     if (!this.#pending.has(wait)) return;
-    const unread = await inputs.readNamed(wait.paths);
+    await inputs.readNamed(wait.paths);
     await inputs.settled();
     if (!this.#pending.has(wait)) return;
-    wait.unread = unread;
+    wait.unread = inputs.unreadNamed(wait.paths);
     wait.read = true;
     this.#judge([wait]);
   }

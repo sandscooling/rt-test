@@ -852,5 +852,26 @@
     "file": "packages/cli/src/commands/wait.ts",
     "old": "`${NAME_PATH_SEPARATOR}${failure.testName.map(oneLine).join(NAME_PATH_SEPARATOR)}`",
     "new": "`${NAME_PATH_SEPARATOR}${failure.testName.join(NAME_PATH_SEPARATOR)}`"
+  },
+  {
+    "id": "D3461",
+    "defect": "rt-test wait sends only its first file, so it answers settled while the other files' covering workspaces are queued.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "const files = fileArguments.map((file) => absolutePath(io, file));",
+    "new": "const files = fileArguments.slice(0, 1).map((file) => absolutePath(io, file));"
+  },
+  {
+    "id": "D3462",
+    "defect": "A file only a workspace's fingerprint lists, which selection selects nothing for, is printed as covered by no test though its edit stales that workspace.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "selection.selected.named.length === 0 && listing.length === 0",
+    "new": "selection.selected.named.length === 0"
+  },
+  {
+    "id": "D3463",
+    "defect": "A named file the wait could not read is printed without its reason, so the text never says which file held the wait.",
+    "file": "packages/cli/src/commands/wait.ts",
+    "old": "  const unread =\n    file.unread === undefined\n      ? []\n      : [`could not be read: ${cutReasonText(file.unread)}`];",
+    "new": "  const unread: string[] = [];"
   }
 ]

@@ -335,6 +335,8 @@ export interface InputsScript {
   readonly heldNamedRead?: boolean;
   /** The paths each read of named paths resolves with as found but not readable; none when absent. */
   readonly unreadNamed?: readonly UnreadPath[];
+  /** The paths the latest reads found but could not read, as asked once they have run; `unreadNamed` when absent. */
+  readonly unreadOnceRead?: readonly UnreadPath[];
 }
 
 export const NO_DECLARATION: NonInputsDeclaration = {
@@ -470,6 +472,10 @@ export class StandInInputs implements TrackedInputs {
     this.namedReads.push(paths);
     if (this.#script.heldNamedRead === true) await this.namedReadHeld.promise;
     return this.#script.unreadNamed ?? [];
+  }
+
+  unreadNamed(): readonly UnreadPath[] {
+    return this.#script.unreadOnceRead ?? this.#script.unreadNamed ?? [];
   }
 
   beginJob(): JobMark {

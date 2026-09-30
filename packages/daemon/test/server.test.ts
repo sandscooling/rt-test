@@ -1315,3 +1315,12 @@ describe("a wait request", () => {
     });
   });
 });
+
+describe("a wait request naming no path", () => {
+  it("D3460: one whose paths are an empty list is refused as invalid, and never reaches the wait", async () => {
+    expect(await waitsAnswered(waitRequest([]))).toStrictEqual({
+      kinds: [{ type: "error", code: "invalid-request" }],
+      asked: [],
+    });
+  });
+});

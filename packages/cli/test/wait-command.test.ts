@@ -138,6 +138,24 @@ async function runWait(
   }
 }
 
+/** Selection's report for a change of `path` that selects no workspace, since none depends on it. */
+function selectingNothing(path: string): ExplainedPath {
+  return {
+    path,
+    owner: undefined,
+    triggers: ["changed-path"],
+    selected: { named: [], more: 0 },
+    notRunnable: { named: [], more: 0 },
+    nothingSelected: {
+      kind: "no-dependent-vitest-workspace",
+      detail: {
+        reason: "no Vitest workspace depends on it",
+        omittedCharacters: 0,
+      },
+    },
+  };
+}
+
 /** The indented lines under `heading` in `output`. */
 function linesUnder(output: string, heading: string): string[] {
   const lines = output.split("\n");
@@ -230,25 +248,17 @@ describe("the answer to a wait", () => {
   });
 
   it("D3454: a named file no workspace covers is printed as covered by no test", async () => {
-    const selection: ExplainedPath = {
-      path: README,
-      owner: undefined,
-      triggers: ["changed-path"],
-      selected: { named: [], more: 0 },
-      notRunnable: { named: [], more: 0 },
-      nothingSelected: {
-        kind: "no-dependent-vitest-workspace",
-        detail: {
-          reason: "no Vitest workspace depends on it",
-          omittedCharacters: 0,
-        },
-      },
-    };
     const run = await runWait(
       [README],
       waitResponse(SETTLED, {
         coverage: { state: "selected", revision: 4 },
-        files: [{ path: README, selection, listed: { named: [], more: 0 } }],
+        files: [
+          {
+            path: README,
+            selection: selectingNothing(README),
+            listed: { named: [], more: 0 },
+          },
+        ],
       }),
     );
     expect(linesUnder(run.stdout, "Files:")[0]).toMatch(
@@ -272,6 +282,60 @@ describe("the answer to a wait", () => {
     );
     expect(linesUnder(run.stdout, "Failures:")).toStrictEqual([
       "  packages/a unit src/a.test.ts > outer > inner\\u000aline: failed, current: boom",
+    ]);
+  });
+
+  it("D3462: a file only a workspace's fingerprint lists, which selection selects nothing for, is printed with that listing and not as covered by no test", async () => {
+    const envFile = ".env.local";
+    const run = await runWait(
+      [envFile],
+      waitResponse(SETTLED, {
+        coverage: { state: "selected", revision: 4 },
+        files: [
+          {
+            path: envFile,
+            selection: selectingNothing(envFile),
+            listed: {
+              named: [{ workspacePath: "packages/a", listedAs: "env-file" }],
+              more: 0,
+            },
+          },
+        ],
+      }),
+    );
+    const line = linesUnder(run.stdout, "Files:")[0] ?? "";
+    expect({
+      coveredByNone: line.includes("covered by no test"),
+      listed: line.includes("listed by packages/a (env-file)"),
+    }).toStrictEqual({ coveredByNone: false, listed: true });
+  });
+
+  it("D3463: a named file the wait could not read is printed with the reason", async () => {
+    const run = await runWait(
+      [FILE],
+      waitResponse(UNSETTLED, {
+        files: [
+          {
+            path: FILE,
+            unread: {
+              reason: "EBUSY: resource busy or locked",
+              omittedCharacters: 0,
+            },
+          },
+        ],
+      }),
+    );
+    expect(linesUnder(run.stdout, "Files:")).toStrictEqual([
+      "  src/a.ts: its covering workspaces are not yet known; could not be read: EBUSY: resource busy or locked",
+    ]);
+  });
+});
+
+describe("the files a wait sends", () => {
+  it("D3461: every named file is sent, each resolved against the current directory, in the order given", async () => {
+    const run = await runWait([FILE, "sub/b.ts"], waitResponse(SETTLED));
+    expect(run.calls.map((call) => call[1])).toStrictEqual([
+      [join(CWD, "src", "a.ts"), join(CWD, "sub", "b.ts")],
     ]);
   });
 });

@@ -9789,8 +9789,8 @@
     "id": "D3427",
     "defect": "A wait binds after its first read of the named files alone, so a file that read skipped while a reconciliation ran is never read before the bind.",
     "file": "packages/daemon/src/daemon/waits.ts",
-    "old": "    const unread = await inputs.readNamed(wait.paths);",
-    "new": "    const unread: readonly UnreadPath[] = [];"
+    "old": "    await inputs.readNamed(wait.paths);\n    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    wait.unread =",
+    "new": "    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    wait.unread ="
   },
   {
     "id": "D3428",
@@ -9922,8 +9922,8 @@
     "id": "D3446",
     "defect": "A wait binds without reading its named files, so a test file saved before the watcher reports the save is answered settled from its pre-edit result, read as current.",
     "file": "packages/daemon/src/daemon/waits.ts",
-    "old": "    await inputs.readNamed(wait.paths);\n    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    const unread = await inputs.readNamed(wait.paths);",
-    "new": "    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    const unread: readonly UnreadPath[] = [];"
+    "old": "    await inputs.readNamed(wait.paths);\n    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    await inputs.readNamed(wait.paths);\n",
+    "new": "    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n"
   },
   {
     "id": "D3447",
@@ -9952,5 +9952,33 @@
     "file": "packages/daemon/src/daemon/waits.ts",
     "old": "      \"noAnswer\" in basis\n        ? basis\n        : waitAnswer(basis, {",
     "new": "      waitAnswer(basis as QueryBasis, {"
+  },
+  {
+    "id": "D3457",
+    "defect": "A wait takes the unread entries its second read resolved with, which a reconciliation beginning mid-read returns before the wait's own read has run, so a file that read then found busy lets the wait settle on results no read of it supports.",
+    "file": "packages/daemon/src/daemon/waits.ts",
+    "old": "    await inputs.readNamed(wait.paths);\n    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    wait.unread = inputs.unreadNamed(wait.paths);",
+    "new": "    const unread = await inputs.readNamed(wait.paths);\n    await inputs.settled();\n    if (!this.#pending.has(wait)) return;\n    wait.unread = unread;"
+  },
+  {
+    "id": "D3458",
+    "defect": "A plan that makes nothing due never signals the waits, so a wait judged while the round was pending runs to its limit, since the scheduler then idles with no further move.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    this.#interrupted.clear();\n    this.#move();\n",
+    "new": "    this.#interrupted.clear();\n"
+  },
+  {
+    "id": "D3459",
+    "defect": "A wait settles only once every workspace is idle rather than only its covering ones, so a wait on a file one workspace covers stalls while an unrelated workspace is queued.",
+    "file": "packages/daemon/src/query/wait-answer.ts",
+    "old": "      !covering.has(workspace.workspacePath) ||\n",
+    "new": ""
+  },
+  {
+    "id": "D3460",
+    "defect": "A wait request whose paths are an empty list is taken, and settles over no file, a zero-test answer read as settled.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "if (!Array.isArray(paths) || paths.length === 0) {",
+    "new": "if (!Array.isArray(paths)) {"
   }
 ]

@@ -93,7 +93,10 @@ export interface ScheduleReader {
   round(revision: number): RoundFacts;
   /** The invalidated label's reason, only for the very run this daemon stored and held the verdict for. */
   invalidation(run: StoredRun): CutReason | undefined;
-  /** Resolves at the next change of the record: a round begins, is planned or held, or a job begins or ends. */
+  /**
+   * Resolves at the next change of the record: a round begins, waits, is planned or held, its selection is explained,
+   * or a job begins, ends or throws.
+   */
   moved(): Promise<void>;
 }
 

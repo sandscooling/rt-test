@@ -53,7 +53,7 @@ import { cutReason, type QueryBasis } from "./summary.js";
 import { countStandings } from "./test-states.js";
 
 /** How many covering tests and modules that failed an answer names. */
-export const MAX_NAMED_FAILURES = 20;
+const MAX_NAMED_FAILURES = 20;
 
 const ENV_FILE_NAME = ".env";
 const ENV_MODE_PREFIX = `${ENV_FILE_NAME}.`;

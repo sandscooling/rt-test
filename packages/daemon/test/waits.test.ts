@@ -1,7 +1,10 @@
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Waits } from "../src/daemon/waits.js";
-import type { ScheduleReader } from "../src/daemon/workspace-schedule.js";
+import {
+  WorkspaceSchedule,
+  type ScheduleReader,
+} from "../src/daemon/workspace-schedule.js";
 import type { ProjectInputs } from "../src/inputs/fingerprint.js";
 import type {
   Narrowing,
@@ -170,13 +173,14 @@ class WaitWorld {
   readonly #requests: AbortController[] = [];
   #scheduleMoves: (() => void)[] = [];
 
-  constructor(root: string, script: InputsScript) {
+  /** `schedule` is the reader answers take the schedule from; one that serves `this.schedule` when absent. */
+  constructor(root: string, script: InputsScript, schedule?: ScheduleReader) {
     this.root = root;
     this.inputs = new StandInInputs({
       ...script,
       snapshot: () => this.project,
     });
-    const reader: ScheduleReader = {
+    const reader: ScheduleReader = schedule ?? {
       read: () => ({
         schedule: this.schedule,
         latestSelection: { state: ROUND_SELECTION.noRoundYet },
@@ -253,9 +257,10 @@ class WaitWorld {
 function inWorld<T>(
   script: InputsScript,
   body: (world: WaitWorld) => Promise<T>,
+  schedule?: ScheduleReader,
 ): Promise<T> {
   return inTempDir(async (root) => {
-    const world = new WaitWorld(root, script);
+    const world = new WaitWorld(root, script, schedule);
     try {
       return await body(world);
     } finally {
@@ -583,5 +588,81 @@ describe("a wait's limit", () => {
       }),
     );
     expect(outcome).toBe("nothing to answer, with the reason");
+  });
+});
+
+describe("what a wait reads once it has run", () => {
+  it("D3457: a named file the wait's own read found busy holds it from settling, though the read it awaited resolved naming none, and its limit names the file's reason", async () => {
+    const outcome = await inWorld(
+      { unreadOnceRead: [{ path: A_SOURCE, reason: BUSY }] },
+      (world) =>
+        withFakedLimit(async () => {
+          world.schedule = plannedAt(1, idle(WORKSPACE_A), idle(WORKSPACE_B));
+          const waited = world.wait([A_SOURCE]);
+          await flush();
+          const beforeLimit = waited.answer;
+          await vi.advanceTimersByTimeAsync(LIMIT_MS);
+          await flush();
+          const answer = waited.answer;
+          return {
+            beforeLimit,
+            atLimit:
+              answer !== WAITING && "outcome" in answer
+                ? {
+                    outcome: answer.outcome,
+                    unread: answer.files.map((file) => file.unread),
+                  }
+                : answer,
+          };
+        }),
+    );
+    expect(outcome).toStrictEqual({
+      beforeLimit: WAITING,
+      atLimit: {
+        outcome: "unsettled",
+        unread: [{ reason: BUSY, omittedCharacters: 0 }],
+      },
+    });
+  });
+});
+
+describe("the schedule a wait settles on", () => {
+  it("D3458: a wait pending on a pending round settles once the daemon's schedule plans a round that makes nothing due, with no other move", async () => {
+    const schedule = new WorkspaceSchedule({
+      confirmed: () => true,
+      storedNothing: () => false,
+      heldBy: () => undefined,
+      discoveryHeldBy: () => undefined,
+    });
+    const outcome = await inWorld(
+      {},
+      async (world) => {
+        const waited = world.wait([A_SOURCE]);
+        await flush();
+        const whilePending = waited.answer;
+        schedule.planned(1, new Map());
+        await flush();
+        return { whilePending, after: outcomeOf(waited.answer) };
+      },
+      schedule,
+    );
+    expect(outcome).toStrictEqual({
+      whilePending: WAITING,
+      after: { outcome: "settled", boundRevision: 1, givenAt: 1 },
+    });
+  });
+
+  it("D3459: a wait on a file one workspace covers settles while a workspace that does not cover it stays queued", async () => {
+    const outcome = await inWorld({}, async (world) => {
+      world.schedule = plannedAt(1, idle(WORKSPACE_A), queued(WORKSPACE_B));
+      const waited = world.wait([A_SOURCE]);
+      await flush();
+      return outcomeOf(waited.answer);
+    });
+    expect(outcome).toStrictEqual({
+      outcome: "settled",
+      boundRevision: 1,
+      givenAt: 1,
+    });
   });
 });
