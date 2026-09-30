@@ -2167,4 +2167,36 @@ describe("the changes for files", () => {
     },
     KEY_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3599: queryChanges sends the files named as edited when given, and no edited member otherwise",
+    async () => {
+      const sent = await inTempDir(async (root) => {
+        const daemon = answerAs(exitedPid(), "key");
+        const edited: unknown[] = [];
+        const file = join(root, "a.ts");
+        await withKeyedStandIn(
+          root,
+          (context) => (request, standIn, connectionClosed) => {
+            if (request["type"] !== CHANGES_TYPE) {
+              return daemon(context)(request, standIn, connectionClosed);
+            }
+            edited.push("edited" in request ? request["edited"] : "none");
+            return {
+              type: ERROR_TYPE,
+              code: STOPPING_CODE,
+              message: "the daemon is stopping",
+            };
+          },
+          async () => {
+            await settled(queryChanges(root, [file], { edited: [file] }));
+            await settled(queryChanges(root, [file]));
+          },
+        );
+        return { edited, file };
+      });
+      expect(sent.edited).toStrictEqual([[sent.file], "none"]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
 });

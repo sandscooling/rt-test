@@ -70,6 +70,7 @@ import {
 import type { JobWindow } from "../src/inputs/input-jobs.js";
 import type { InputDigests } from "../src/inputs/input-inventory.js";
 import type { QueryNarrowing } from "../src/inputs/narrowed-inputs.js";
+import { ChangeRecord } from "../src/daemon/change-record.js";
 
 /** What one run job the test scripts leaves. */
 interface RunResult {
@@ -3911,5 +3912,189 @@ describe("the due reason of a workspace whose latest stored run was refused", ()
 
   it("D3323: an idle workspace with no run stored and none refused is due for the reason no-run", () => {
     expect(dueOfIdleA(new Map())).toStrictEqual({ kind: "no-run" });
+  });
+});
+
+/** Committed digests that never move, so each job's window alone says what changed. */
+const STILL_DIGESTS = inputsOf({
+  [FIXTURE]: "1",
+  [SOURCE]: "1",
+}).comparedDigests;
+
+/** A job's window that recorded `paths` changing, over digests that held still. */
+function stillWindow(paths: readonly string[]): JobWindow {
+  return {
+    paths: new Set(paths),
+    causes: new Set(),
+    startDigests: STILL_DIGESTS,
+    endDigests: STILL_DIGESTS,
+  };
+}
+
+/** What a fresh record holds for workspace `a` once `steps` have run: the paths its jobs changed, and its edits. */
+function recordedForA(steps: (record: ChangeRecord) => void): unknown {
+  const record = new ChangeRecord();
+  record.observed(STILL_DIGESTS);
+  steps(record);
+  const changes = record.of("a");
+  return {
+    byJobs: [...(changes?.byJobs.keys() ?? [])],
+    edits: [...(changes?.edits ?? [])],
+  };
+}
+
+describe("an agent's reported edits in the change record", () => {
+  it("D3588: a key reported while a job runs, which that job then records changing, is an edit once the job ends, never the job's", () => {
+    expect(
+      recordedForA((record) => {
+        record.jobBegan("a");
+        record.reportEdits([FIXTURE]).read();
+        record.jobEnded(stillWindow([FIXTURE]), "a");
+      }),
+    ).toStrictEqual({ byJobs: [], edits: [FIXTURE] });
+  });
+
+  it("D3589: a job that begins while a report's named read is still open holds its keys, so its change to them is an edit", () => {
+    expect(
+      recordedForA((record) => {
+        const report = record.reportEdits([FIXTURE]);
+        record.jobBegan("a");
+        report.read();
+        record.jobEnded(stillWindow([FIXTURE]), "a");
+      }),
+    ).toStrictEqual({ byJobs: [], edits: [FIXTURE] });
+  });
+
+  it("D3590: a job that begins after a report's named read resolved holds none of its keys, so its own change to them stays the job's", () => {
+    expect(
+      recordedForA((record) => {
+        record.reportEdits([FIXTURE]).read();
+        record.jobBegan("a");
+        record.jobEnded(stillWindow([FIXTURE]), "a");
+      }),
+    ).toStrictEqual({ byJobs: [FIXTURE], edits: [] });
+  });
+
+  it("D3591: a job holding a report of one key counts its change to another key as its own", () => {
+    expect(
+      recordedForA((record) => {
+        record.jobBegan("a");
+        record.reportEdits([SOURCE]).read();
+        record.jobEnded(stillWindow([FIXTURE, SOURCE]), "a");
+      }),
+    ).toStrictEqual({ byJobs: [FIXTURE], edits: [SOURCE] });
+  });
+});
+
+/** Reports `keys` as a changes request edited them, its named read resolving at once. */
+type Reporter = (keys: readonly string[]) => void;
+
+/**
+ * Runs `body` over a rig built from `options`, whose callbacks may report edits through the rig's own scheduler; the
+ * scheduler is taken before any job begins.
+ */
+function reporting<T>(
+  options: (report: Reporter) => RigOptions,
+  body: (started: Rig) => Promise<T>,
+): Promise<T> {
+  const at: { scheduler?: Scheduler } = {};
+  const report: Reporter = (keys) => {
+    if (at.scheduler === undefined)
+      throw new Error("no scheduler to report to");
+    at.scheduler.reportEdits(keys).read();
+  };
+  return running(options(report), async (started) => {
+    at.scheduler = started.scheduler;
+    return body(started);
+  });
+}
+
+/** The runs of `a` once the rounds have run out. */
+async function runsOfAOnceQuiet(started: Rig): Promise<number> {
+  await untilQuiet(started);
+  return runsIn(started.calls).length;
+}
+
+/** Reports `FIXTURE` edited through `started`'s scheduler, then moves the input revision with no digest changed. */
+function reportedFixture(started: Rig): void {
+  started.scheduler.reportEdits([FIXTURE]).read();
+  started.inputs.moveRevision();
+}
+
+describe("an agent's reported edits and the holds", () => {
+  it("D3592: a workspace each of whose runs rewrites an input the agent reports it edited while the run runs is never held", async () => {
+    const runs = await reporting(
+      (report) => ({
+        script: new SteadyDigests().script,
+        ran: (_path, call, reason) => {
+          if (call >= REWRITES) return {};
+          report([FIXTURE]);
+          return rewrote(reason);
+        },
+      }),
+      runsOfAOnceQuiet,
+    );
+    expect(runs).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3593: a discovery each of whose loads writes an input the agent reports it edited while the discovery runs is never held", async () => {
+    const discoveries = await reporting(
+      (report) => ({
+        script: { ...REDISCOVERED, ...new SteadyDigests().script },
+        discovered: (call) => {
+          if (call >= REWRITES) return {};
+          report([FIXTURE]);
+          return writesOnLoad();
+        },
+      }),
+      async (started) => {
+        await untilQuiet(started);
+        return discoveriesIn(started.calls).length;
+      },
+    );
+    expect(discoveries).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3594: a report arriving after the run that changed the file ended, before the round that counts it, sets the count to 0, so the workspace is never held", async () => {
+    const runs = await reporting(
+      (report) => ({
+        script: new SteadyDigests().script,
+        awaitBuild: () => {
+          report([FIXTURE]);
+          return Promise.resolve();
+        },
+        ran: (_path, call, reason) => (call < REWRITES ? rewrote(reason) : {}),
+      }),
+      runsOfAOnceQuiet,
+    );
+    expect(runs).toBe(NEVER_HELD_RUNS);
+  });
+
+  it("D3595: a held workspace is released once the agent reports the file its runs changed, logging the release, and runs again", async () => {
+    const { runs, entries } = await rewriting({ afterRuns: reportedFixture });
+    expect({
+      runs: runs.length,
+      released: entries.filter((entry) =>
+        entry.startsWith("a is no longer held"),
+      ).length,
+    }).toStrictEqual({ runs: 6, released: 1 });
+  });
+
+  it("D3596: a held discovery is released once the agent reports the file its discoveries wrote, and is discovered again once", async () => {
+    const { discoveries } = await rediscovering({
+      discovered: (call) => (call < 3 ? writesOnLoad() : {}),
+      afterRounds: reportedFixture,
+    });
+    expect(discoveries).toHaveLength(4);
+  });
+
+  it("D3597: a report naming a file no change reached does not release a held workspace", async () => {
+    const { runs } = await rewriting({
+      afterRuns: (started) => {
+        started.scheduler.reportEdits([OTHER]).read();
+        started.inputs.moveRevision();
+      },
+    });
+    expect(runs).toHaveLength(3);
   });
 });

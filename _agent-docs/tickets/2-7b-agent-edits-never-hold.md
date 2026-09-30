@@ -14,9 +14,9 @@ them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review 
 -->
 
 - [x] AC1: A `changes` request (ticket 2.6) may name, as edited, files that are among its paths. A request whose edited files are not a list of strings each equal to one of its paths is refused whole as invalid, with a reason, before any path is read. A request naming no edited file is answered exactly as before.
-- [ ] AC2: The daemon counts each change it records to a file a request names as edited as an edit, never as a change its own run or discovery made, whether the tracker recorded it while a job ran or between jobs, and whether it recorded it before the request arrived or, during the job running then, after; this holds when the request reaches the daemon before the round that follows the change decides its counts. So such a change never adds to ticket 2.3k's count of a workspace whose inputs hold the file, nor to ticket 2.3l's count of the discovery, and, like any edit, it sets those counts back to 0. Naming a file that no change reached counts nothing.
+- [x] AC2: The daemon counts each change it records to a file a request names as edited as an edit, never as a change its own run or discovery made, whether the tracker recorded it while a job ran or between jobs, and whether it recorded it before the request arrived or, during the job running then, after; this holds when the request reaches the daemon before the round that follows the change decides its counts. So such a change never adds to ticket 2.3k's count of a workspace whose inputs hold the file, nor to ticket 2.3l's count of the discovery, and, like any edit, it sets those counts back to 0. Naming a file that no change reached counts nothing.
 - [x] AC3: A workspace held as self-changing (ticket 2.3k) is released at the next round when a change to a file a request named as edited reaches its inputs, and a held discovery (ticket 2.3l) is released at the next round by such a change to any input; the log says so as it does for any edit.
-- [ ] AC4: After each batch, the agent hook's `changes` request (ticket 2.7) names as edited the files among those it sends that the batch's own `Write`, `Edit` and `NotebookEdit` calls saved: every such call counts as saved unless its result says it failed or was rejected, and a call with no result counts as saved (orchestrator's ruling, 17:36 on 2026-09-30). It names none for a batch whose calls name no file; its `Stop` and `UserPromptSubmit` requests name none. A change a shell call made, or a person's save, is named by no request and stays judged by when it happened, as today.
+- [x] AC4: After each batch, the agent hook's `changes` request (ticket 2.7) names as edited the files among those it sends that the batch's own `Write`, `Edit` and `NotebookEdit` calls saved: every such call counts as saved unless its result says it failed or was rejected, and a call with no result counts as saved (orchestrator's ruling, 17:36 on 2026-09-30). It names none for a batch whose calls name no file; its `Stop` and `UserPromptSubmit` requests name none. A change a shell call made, or a person's save, is named by no request and stays judged by when it happened, as today.
 
 ## Unverified Assumptions
 
@@ -248,15 +248,55 @@ Dev session: threadId d03e8244-075a-47e0-85f6-bd9db5715f69
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 7308bf78-b554-492a-9370-75a85ae73ea9
 
 #### Named Defects
 
-None.
+- D3573: A changes query hands over its edited files only once its named read has resolved, so a job that began while the read ran records the agent's change as its own. (AC2)
+- D3574: A changes query never closes its report of edited files, so every job that begins later holds them and the daemon's own later changes to those files count as edits. (AC2)
+- D3575: A changes query reports every file it names as edited, not only the ones named as edited, so a daemon job's change to a file the agent did not save counts as an edit. (AC2)
+- D3576: A changes query reports the edited files as the caller spelled them, absolute, which match no key the tracker records, so the agent's change still counts as the job's. (AC2)
+- D3577: Every request names every file the session edited as edited, so a daemon job's later change to a file an earlier batch saved counts as the agent's edit. (AC4)
+- D3578: The hook no longer recognizes Claude Code's `<tool_use_error>` result, so a call that failed and saved nothing is named as edited. (AC4)
+- D3579: The hook no longer recognizes Claude Code's rejection result ("The user doesn't want to proceed with this tool use"), so a call the user rejected, which saved nothing, is named as edited. (AC4)
+- D3580: A result given as a list of text blocks is never read, so a failed call reported that way is named as edited. (AC4)
+- D3581: A call with no result counts as having saved nothing, so the agent's real save goes unnamed and its change is judged by timing. (AC4)
+- D3582: A turn end's and a prompt's requests name the session's files as edited, though no call saved them then, so a daemon job's change to them counts as an edit. (AC4)
+- D3583: The request asked again without a vanished file still names that file as edited, which the daemon refuses whole, so the retry never gets an answer. (AC4, AC1)
+- D3584: A changes request whose edited is not a list is taken as naming none rather than refused, so a malformed report is silently dropped. (AC1)
+- D3585: A changes request naming as edited a file it does not name among its paths is taken, so a file no named read reads is counted as edited. (AC1)
+- D3586: The daemon drops a changes request's edited files before its query, so the agent's reported edits are never counted as edits. (AC1, AC2)
+- D3587: A changes request naming no edited file is refused as invalid, so every client that names none, and every daemon client from before, gets no answer. (AC1)
+- D3588: A report of edited keys never reaches the jobs running at it, so a change the running job then records to a reported key counts as the job's own. (AC2)
+- D3589: A job that begins while a report's named read is still open holds none of its keys, so the change that read records inside the job counts as the job's own. (AC2)
+- D3590: A report stays open after its named read resolved, so every job beginning later holds its keys and the daemon's own later changes to them count as edits. (AC2)
+- D3591: A job that held any report counts every path it changed as an edit, so the daemon's own change to a file the agent did not report never counts toward a hold. (AC2)
+- D3592: The run history never tells the change record that a run began, so an agent's reported edit during the run counts as the run's own change and its own saves hold the workspace. (AC2)
+- D3593: The discovery history never tells the change record that a discovery began, so an agent's reported edit during the discovery counts as the discovery's own change and its own saves hold the discovery. (AC2)
+- D3594: A report arriving after the job that changed the file ended leaves the change as the job's, so the agent's save still counts toward a hold of the workspace. (AC2)
+- D3595: A report of a file a job changed drops the change rather than counting it as an edit, so it never releases a workspace held as self-changing. (AC3)
+- D3596: A report moves a job's change to the workspaces' edits but never the discovery's, so an agent's save never releases a held discovery. (AC3)
+- D3597: A report counts a named file as an edit though no change reached it, so a request naming an unchanged file releases a held workspace. (AC2)
+- D3598: The lifecycle never hands a changes request's edited files to the scheduler, so an agent's saves during a run count as the run's own changes and hold its workspace. (AC2)
+- D3599: `queryChanges` never sends the files named as edited, so the daemon never hears of the agent's saves. (AC4)
+- D3550 (existing, 2.7): its test now expects the options `boundMs` and `edited` for a batch that wrote a file, since the batch's saved file is now named; its record keeps its own defect (no bound), re-anchored to the options as built now.
+
+Where the tests differ from the handoff: AC2's end-to-end guarantee is pinned in `lifecycle.test.ts` (D3598), which drives the real `DaemonLifecycle`, `Changes`, scheduler and change record over a scripted executor and inputs, rather than on a real daemon in `daemon.test.ts`, which has no fixture whose runs rewrite their own inputs. The join to the tracker is pinned by D3576: the key reported is the key the named read reads, which the tracker records unchanged. The record's arms for a job that threw, never began or was refused are inert (below).
+
+Proof, by id through the run lease, of the 359 records that mutate a file this build edited or whose test file this round edited other than by adding: 359/359 detected on Windows under Node 24.19.0 (18:05 to 18:18) and on WSL Ubuntu under Node 24.19.0 (18:18 to 18:24), baseline green before and after on both. `scheduler.test.ts`, `lifecycle.test.ts` and `daemon.test.ts` only gained lines, so their other records were not re-proved.
+
+Re-anchored, defect unchanged: D3184, D3438, D3449, D3460 (now `request-fields.ts`), D3476, D3477, D3529, D3550, D3554 (now `hook-edits.ts`), D3556, D3564. `changes.test.ts`' stand-in parts gained `reportEdits` and its query literal `edited: []`, which repaired D3476 to D3485, D3509 and D3518.
 
 #### Deliberately Untested
 
-None.
+- packages/daemon/src/daemon/scheduler.ts: `Scheduler.reportEdits` is a one-line delegate to `RunHistory.reportEdits`, itself one to the record; breaking either is the defect D3592 and D3594 name, and both go red.
+- packages/daemon/src/daemon/change-record.ts: the `#running.delete` in `jobNotBegun` and `jobThrew` is inert: a subject's stale running entry is replaced whole by its next `jobBegan` and read only at its own `jobEnded`, so no count changes without it.
+- packages/daemon/src/daemon/run-history.ts: `BegunRun.refused` and `notBegun`'s call of `jobNotBegun`, and `scheduler.ts`' `begun.refused()`, are inert for the same reason.
+- packages/daemon/src/daemon/discovery-history.ts: `notBegun`'s call of `discoveryNotBegun` is inert for the same reason.
+- packages/daemon/src/daemon/changes.ts: `#reportEdits`' early return for no edited file is inert, since an empty report changes nothing.
+- packages/daemon/src/daemon/request-fields.ts: `editedPaths`' `typeof path !== "string"` operand is redundant, since a non-string is never among `paths` and `named.has` refuses it; the refusal's wording is static copy.
+- packages/cli/src/hook-edits.ts: the `trimStart()` before the prefix check guards leading whitespace no Claude Code result was observed to carry, an edge case not chased.
+- packages/daemon/src/daemon/protocol.ts, packages/daemon/src/query-client.ts `ChangesOptions.edited`, packages/daemon/src/daemon/server.ts `ChangesQuery.edited`: type-only.
 
 ### Review Record
 
@@ -344,3 +384,12 @@ Dev, 17:16 to 17:35 on 2026-09-30, Tree 2 (`wt/2` at 14a7e32).
 - packages/cli/src/commands/hook.ts (modified, dev)
 - packages/cli/src/hook-edits.ts (created, dev: the batch-edit parsing moved out of hook.ts, with the saved-call check)
 - _agent-docs/tickets/2-7b-agent-edits-never-hold.md (dev: checkboxes, Dev Handoff, Completion Notes, File List)
+- packages/daemon/test/changes.test.ts (modified, tests: repaired, D3573 to D3576)
+- packages/daemon/test/server.test.ts (modified, tests: D3584 to D3587)
+- packages/daemon/test/scheduler.test.ts (modified, tests: add-only, D3588 to D3597)
+- packages/daemon/test/lifecycle.test.ts (modified, tests: add-only, D3598)
+- packages/daemon/test/daemon.test.ts (modified, tests: add-only, D3599)
+- packages/daemon/test/defects.json (modified, tests: 20 records added, 6 re-anchored)
+- packages/cli/test/hook.test.ts (modified, tests: D3550 updated, D3577 to D3583)
+- packages/cli/test/defects.json (modified, tests: 7 records added, 5 re-anchored)
+- _agent-docs/tickets/2-7b-agent-edits-never-hold.md (tests: AC2 and AC4 ticked, Tests Record, File List)
