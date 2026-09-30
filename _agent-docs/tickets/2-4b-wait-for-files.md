@@ -189,7 +189,7 @@ Asked by `session_wake` at 12:18 on 2026-09-28, answered at 12:18; decider the o
 
 `node scripts/list-unbuilt-work.mjs --except 2.4b --except 2.4c` over this ticket's production files and `cli/src/command.ts` (01:56 on 2026-09-30) named 2.3l, 2.3n and 2.4d. 2.3f, 2.3g, 2.3h, 2.3i, 2.3k, 2.3m, 2.3p, 2.3q and 2.4 have landed, and this ticket builds on their code as the first task re-reads it.
 
-- **2.3l** (ready-for-dev, builds before this ticket): writes `lifecycle.ts`, `workspace-schedule.ts`, `query/answer.ts`, `protocol.ts` (raising `PROTOCOL_VERSION`), `client.ts` and `cli/src/answer-text.ts`, and holds the discovery; the hold is in `AnswerContext`, the schedule and a `contextLines` line, which AC3, AC6 and AC13 read.
+- **2.3l** (done): writes `lifecycle.ts`, `workspace-schedule.ts`, `query/answer.ts`, `protocol.ts` (raising `PROTOCOL_VERSION`), `client.ts` and `cli/src/answer-text.ts`, and holds the discovery; the hold is in `AnswerContext`, the schedule and a `contextLines` line, which AC3, AC6 and AC13 read.
 - **2.4d** (ready-for-dev, builds before this ticket): the caller-path resolution with the Windows refusals, and the tracker's named read; it writes `lifecycle.ts` (`pathStatus`) and `query-client.ts`.
 - **2.3n** (ready-for-dev): names these files only by folder; it writes none of them.
 - **2.6** (backlog): the `changes` query, whose cursor binds to this ticket's input revision.

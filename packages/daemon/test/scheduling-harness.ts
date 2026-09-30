@@ -164,6 +164,8 @@ export class RecordingStore implements RtTestStore {
   readonly discoveryVersions: number[] = [];
   closed = false;
   readonly #failingRuns: ReadonlySet<string>;
+  /** Why each refused run, by its index in `runs`, was refused as unreadable. */
+  readonly #refused = new Map<number, string>();
 
   constructor(failingRuns: readonly string[] = []) {
     this.#failingRuns = new Set(failingRuns);
@@ -219,6 +221,15 @@ export class RecordingStore implements RtTestStore {
     this.discoveryVersions.push(adapterVersion);
   }
 
+  /**
+   * Makes the run stored last for `path` read as refused as unreadable, as the store refuses a row it cannot read,
+   * until a later run of the workspace replaces it.
+   */
+  refuseLatestRun(path: string, reason: string): void {
+    const index = this.runs.map((run) => run.workspace.path).lastIndexOf(path);
+    this.#refused.set(index, reason);
+  }
+
   readRuns(): StoredRun[] {
     return [];
   }
@@ -254,7 +265,7 @@ export class RecordingStore implements RtTestStore {
       discoveryRefusal: undefined,
       latestRuns: [...latest.values()].flatMap((index) => {
         const run = this.runs[index];
-        return run === undefined
+        return run === undefined || this.#refused.has(index)
           ? []
           : [
               {
@@ -268,7 +279,10 @@ export class RecordingStore implements RtTestStore {
               },
             ];
       }),
-      runRefusals: [],
+      runRefusals: [...latest].flatMap(([workspacePath, index]) => {
+        const reason = this.#refused.get(index);
+        return reason === undefined ? [] : [{ workspacePath, reason }];
+      }),
     };
   }
 

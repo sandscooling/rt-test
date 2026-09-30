@@ -79,6 +79,8 @@ export interface ScheduleQuery {
   /** The discovery in effect's workspaces; empty when none is stored. */
   readonly workspaces: readonly WorkspaceDiscovery[];
   readonly latestRuns: ReadonlyMap<string, StoredRun>;
+  /** Why each workspace's run stored last was refused as unreadable, by workspace path; none of them is in `latestRuns`. */
+  readonly refusedRuns: ReadonlyMap<string, string>;
   readonly fingerprint: (entry: WorkspaceDiscovery) => FingerprintResult;
 }
 
@@ -100,6 +102,8 @@ export interface ScheduleParts {
   readonly storedNothing: (path: string) => boolean;
   /** The paths that changed each time a held workspace became due, with their jobs; undefined when it is not held. */
   readonly heldBy: (path: string) => JobsByPath | undefined;
+  /** The paths that changed each time the held discovery became due, with their jobs; undefined when it is not held. */
+  readonly discoveryHeldBy: () => JobsByPath | undefined;
 }
 
 /** The scheduler's record of what it is doing with each confirmed workspace, and the one read every answer gives of it. */
@@ -206,8 +210,16 @@ export class WorkspaceSchedule implements ScheduleReader {
     const workspaces = query.workspaces
       .filter((entry) => this.#parts.confirmed(entry))
       .map((entry) => this.#execution(entry, round, query));
+    const held =
+      round.state === ROUND.pending ? undefined : this.#parts.discoveryHeldBy();
     return {
-      schedule: { round, workspaces },
+      schedule: {
+        round,
+        workspaces,
+        ...(held === undefined
+          ? {}
+          : { selfChangingDiscovery: selfChangedList(held) }),
+      },
       latestSelection: this.#latestSelection(),
     };
   }
@@ -286,7 +298,7 @@ export class WorkspaceSchedule implements ScheduleReader {
     return {
       workspacePath,
       state: EXECUTION_STATE.idle,
-      ...this.#notRunning(workspacePath, round, latest, print),
+      ...this.#notRunning(workspacePath, round, latest, print, query),
     };
   }
 
@@ -305,10 +317,15 @@ export class WorkspaceSchedule implements ScheduleReader {
     round: RoundFacts,
     latest: StoredRun | undefined,
     print: () => FingerprintResult,
+    { refusedRuns }: Pick<ScheduleQuery, "refusedRuns">,
   ): Pick<IdleExecution, "notRunning"> {
     if (round.state === ROUND.pending) return {};
     const current = print();
-    const stale = staleReason(latest, fingerprintDigest(current));
+    const stale = staleReason(
+      latest,
+      fingerprintDigest(current),
+      refusedRuns.has(path),
+    );
     const due = stale ?? retryReason(latest);
     if (due === undefined) return {};
     const dueFacts = this.#dueFacts(due, latest, () => current);

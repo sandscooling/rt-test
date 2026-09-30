@@ -2866,3 +2866,55 @@ describe("the human answer for a held workspace", () => {
     );
   });
 });
+
+const HELD_DISCOVERY_PATHS = {
+  named: [{ path: SELF_CHANGED_PATH, jobs: { named: [{}], more: 0 } }],
+  more: 0,
+};
+
+/** The human answer's discovery freshness line and the line after it, while the discovery is held, in a round `round`. */
+function heldDiscoveryLines(
+  round: RoundFacts = { state: "planned", revision: SETTLED_INPUTS.revision },
+): string[] {
+  const lines = contextLines(
+    humanAnswer({
+      schedule: {
+        round,
+        workspaces: [],
+        selfChangingDiscovery: HELD_DISCOVERY_PATHS,
+      },
+    }),
+  );
+  const freshness = lines.indexOf("Discovery freshness: stale");
+  return lines.slice(freshness, freshness + 2);
+}
+
+describe("the human answer for a held discovery", () => {
+  it("D3324: a human answer says, beside the discovery's freshness, that the discovery is held until an edit, why, and each path with the job that changed it", () => {
+    expect(heldDiscoveryLines()).toStrictEqual([
+      "Discovery freshness: stale",
+      `Discovery: self-changing, no rediscovery comes until an edit or a change the daemon cannot attribute, because the daemon's own runs and discoveries keep changing the inputs; the same inputs changed each time it became due: ${SELF_CHANGED_PATH} (during the discovery)`,
+    ]);
+  });
+
+  it("D3325: while the round is held, a human answer says the held round's next try may release the held discovery", () => {
+    expect(heldDiscoveryLines(HELD_ROUND)).toStrictEqual([
+      "Discovery freshness: stale",
+      `Discovery: self-changing, no rediscovery comes until an edit, a change the daemon cannot attribute, or the daemon tries the held round again at the next input event or reconciliation, which may release it, because the daemon's own runs and discoveries keep changing the inputs; the same inputs changed each time it became due: ${SELF_CHANGED_PATH} (during the discovery)`,
+    ]);
+  });
+});
+
+describe("the human answer for a workspace whose latest stored run was refused", () => {
+  it("D3326: a human answer says a queued workspace is due because its latest stored run was refused as unreadable", () => {
+    const lines = linesWith({
+      workspacePath: WORKSPACE_A,
+      state: "queued",
+      due: { kind: "run-refused" },
+      chosenBy: { named: [], more: 0 },
+    });
+    expect(lines).toContain(
+      `  ${WORKSPACE_A}: queued: its latest stored run was refused as unreadable`,
+    );
+  });
+});

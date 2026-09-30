@@ -72,6 +72,7 @@ function freshSchedule(): WorkspaceSchedule {
     confirmed: () => true,
     storedNothing: () => false,
     heldBy: () => undefined,
+    discoveryHeldBy: () => undefined,
   });
 }
 
@@ -621,6 +622,29 @@ describe("a workspace whose latest run the store refused as unreadable", () => {
       latestRun: null,
       refusedRun: { reason: REFUSAL, omittedCharacters: 0 },
     });
+  });
+
+  it("D3322: an answer's schedule gives a refused workspace, idle in a planned round, the due reason run-refused", () => {
+    const schedule = freshSchedule();
+    schedule.planned(SETTLED_FACTS.revision, new Map());
+    const answer = answered(
+      summaryAnswer(
+        results(
+          storedDiscovery([
+            discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+          ]),
+          [],
+          undefined,
+          [{ workspacePath: WORKSPACE_A, reason: REFUSAL }],
+        ),
+        { ...IDLE, schedule },
+        settled({}),
+      ),
+    );
+    const [execution] = answer.schedule.workspaces;
+    expect(
+      execution?.state === "idle" ? execution.notRunning?.due : execution,
+    ).toStrictEqual({ kind: "run-refused" });
   });
 
   it("D3276: a refusal past 1,000 characters is given cut to 1,000, counting the rest", () => {

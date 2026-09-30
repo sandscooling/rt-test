@@ -86,6 +86,10 @@ _Avoid_: cycle, pass, tick
 A Vitest workspace that became due three times in a row only through changes the daemon's own runs and discoveries made to the same input, which the daemon holds, running it no more until an edit reaches its inputs.
 _Avoid_: looping workspace, flapping workspace
 
+**Self-changing discovery**:
+The discovery, when it became due three times in a row only through changes the daemon's own runs and discoveries made to the same input, which the daemon holds, discovering no more until an edit, while runs are planned from the discovery in effect.
+_Avoid_: looping discovery
+
 **Force-stopped run**:
 An interrupted run whose Vitest workers were stopped without waiting, because the grace period after the interrupt passed with the run still going, so the project's `afterAll` hooks and teardown did not run.
 _Avoid_: killed run

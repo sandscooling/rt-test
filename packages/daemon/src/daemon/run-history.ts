@@ -3,6 +3,7 @@ import { namedList, type JobWindow } from "../inputs/input-jobs.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import {
   ChangeRecord,
+  type Job,
   type JobsByPath,
   type SubjectChanges,
 } from "./change-record.js";
@@ -15,12 +16,14 @@ import {
 } from "./run-judgment.js";
 import type { EndedRun } from "./workspace-schedule.js";
 
-/** How many times in a row a workspace becomes due only through its jobs' changes to the same input before it is held. */
+/** How many times in a row a workspace or the discovery becomes due only through the daemon's own jobs' changes to the same input before it is held. */
 export const SELF_CHANGE_HOLD_COUNT = 3;
 /** The count whose run no change interrupts, so the run before a hold runs to its end. */
 const UNINTERRUPTIBLE_COUNT = SELF_CHANGE_HOLD_COUNT - 1;
 const HELD_ENTRY = `runs no more until an edit reaches its inputs, since the daemon's own runs and discoveries changed the same inputs each of the ${SELF_CHANGE_HOLD_COUNT} times in a row it became due`;
 const RELEASED_ENTRY = "is no longer held, since an edit reached its inputs";
+/** The discovery's subject in the change record, which no workspace path can equal. */
+const DISCOVERY: Job = undefined;
 
 /** The fields of a run job's report the run history reads. */
 export interface HistoryReport extends Pick<
@@ -67,13 +70,13 @@ interface RunHistoryParts {
   readonly revision: () => number;
 }
 
-/** How many times in a row a workspace became due through its jobs' changes, and the paths every such time changed. */
-interface SelfChangeCount {
+/** How many times in a row a subject became due through its jobs' changes, and the paths every such time changed. */
+export interface SelfChangeCount {
   readonly count: number;
   readonly shared: JobsByPath;
 }
 
-const NO_COUNT: SelfChangeCount = { count: 0, shared: new Map() };
+export const NO_COUNT: SelfChangeCount = { count: 0, shared: new Map() };
 
 /** What the record holds of the last run begun for a workspace. */
 interface Attempt {
@@ -142,7 +145,17 @@ export class RunHistory {
   }
 
   discoveryEnded(window: JobWindow): void {
-    this.#changes.jobEnded(window, undefined, undefined);
+    this.#changes.jobEnded(window, DISCOVERY);
+  }
+
+  /** The discovery began and threw, so no count follows it. */
+  discoveryThrew(): void {
+    this.#changes.begun(DISCOVERY);
+  }
+
+  /** What changed since the last discovery began; undefined when none has begun. */
+  discoveryChanges(): SubjectChanges | undefined {
+    return this.#changes.of(DISCOVERY);
   }
 
   isHeld(path: string): boolean {
@@ -200,7 +213,7 @@ export class RunHistory {
     });
     return {
       ended: (report) => {
-        this.#changes.jobEnded(report.window, path, path);
+        this.#changes.jobEnded(report.window, path);
         return this.#ended({ path, modules, isRerun, startCount }, report);
       },
       notBegun: () => {
@@ -293,20 +306,27 @@ function qualifies(report: HistoryReport): boolean {
 }
 
 /** One more than `base` when a path it shares also changed this time; otherwise this time starts the count at 1. */
-function followOn(base: SelfChangeCount, caused: JobsByPath): SelfChangeCount {
-  const shared = new Map<string, ReadonlySet<string | undefined>>();
-  if (base.count > 0) {
-    for (const [path, jobs] of caused) {
-      const before = base.shared.get(path);
-      if (before !== undefined) shared.set(path, new Set([...before, ...jobs]));
-    }
-  }
+export function followOn(
+  base: SelfChangeCount,
+  caused: JobsByPath,
+): SelfChangeCount {
+  const shared = base.count > 0 ? sharedPaths(base.shared, caused) : new Map();
   return shared.size > 0
     ? { count: base.count + 1, shared }
-    : { count: 1, shared: caused };
+    : { count: 1, shared: new Map(caused) };
 }
 
-function changesText(shared: JobsByPath): string {
+/** Each path of `base` that also changed this time, with the jobs of both. */
+export function sharedPaths(base: JobsByPath, caused: JobsByPath): JobsByPath {
+  const shared = new Map<string, ReadonlySet<Job>>();
+  for (const [path, jobs] of caused) {
+    const before = base.get(path);
+    if (before !== undefined) shared.set(path, new Set([...before, ...jobs]));
+  }
+  return shared;
+}
+
+export function changesText(shared: JobsByPath): string {
   return namedList(
     [...shared].map(
       ([path, jobs]) => `${path} (during ${namedList([...jobs].map(jobText))})`,
@@ -314,7 +334,7 @@ function changesText(shared: JobsByPath): string {
   );
 }
 
-function jobText(workspacePath: string | undefined): string {
+function jobText(workspacePath: Job): string {
   return workspacePath === undefined
     ? "the discovery"
     : `the run of ${workspacePath}`;

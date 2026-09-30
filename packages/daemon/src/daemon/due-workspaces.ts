@@ -12,6 +12,7 @@ import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 /** How the log's `due:` line gives each due reason. */
 export const DUE_REASON_TEXT: Readonly<Record<DueReason, string>> = {
   [DUE_REASON.noRun]: "it has no stored run",
+  [DUE_REASON.runRefused]: "its latest stored run was refused as unreadable",
   [DUE_REASON.anotherAdapterVersion]:
     "its latest run was stored under another adapter version",
   [DUE_REASON.notFingerprinted]: "its latest run was stored not fingerprinted",
@@ -87,13 +88,17 @@ export interface QueuedWorkspace {
 
 /**
  * Why the workspace's latest stored run is not bound to its current fingerprint, compared as an answer rates a finished
- * result; undefined when it is bound to it, even when its tests read unknown because the run finished none.
+ * result; undefined when it is bound to it, even when its tests read unknown because the run finished none. `refused`
+ * says the run stored last was refused as unreadable, which leaves no latest run.
  */
 export function staleReason(
   latest: StoredRun | undefined,
   currentDigest: string | undefined,
+  refused: boolean,
 ): DueReason | undefined {
-  if (latest === undefined) return DUE_REASON.noRun;
+  if (latest === undefined) {
+    return refused ? DUE_REASON.runRefused : DUE_REASON.noRun;
+  }
   if (recordFreshness(latest, currentDigest) === CURRENT) return undefined;
   if (!isCurrentAdapterVersion(latest.adapterVersion)) {
     return DUE_REASON.anotherAdapterVersion;

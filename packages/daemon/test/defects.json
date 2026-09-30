@@ -3328,15 +3328,15 @@
     "id": "D1987",
     "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    const bindings = this.#bindings(\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
-    "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
+    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    let movedOnceComposed = false;\n    const bindings = this.#bindings(\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        movedOnceComposed = moved !== undefined;\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
+    "new": "    let movedOnceComposed = false;\n    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
   },
   {
     "id": "D1988",
     "defect": "The check for test modules the inputs left out runs after protection has moved them into the inputs, so a declared module edited during the discovery's job is skipped and the discovery is stored under a digest.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    const released = await inputs.protectInputs(discovery, startedAt);\n",
-    "new": "    const guard = inputs.beginJob();\n    const released = await inputs.protectInputs(discovery, startedAt);\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n"
+    "old": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    let released: string | undefined;\n    try {\n      released = await inputs.protectInputs(discovery, startedAt);\n    } catch (error) {\n      await inputs.endJob(guard);\n      throw error;\n    }\n",
+    "new": "    const guard = inputs.beginJob();\n    let released: string | undefined;\n    try {\n      released = await inputs.protectInputs(discovery, startedAt);\n    } catch (error) {\n      await inputs.endJob(guard);\n      throw error;\n    }\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n"
   },
   {
     "id": "D1989",
@@ -5113,15 +5113,15 @@
     "id": "D2658",
     "defect": "A discovery that is not current at a settled revision is not rediscovered, so the due runs are taken from a discovery of another revision.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    return recordFreshness(stored, current) !== CURRENT;",
-    "new": "    return false;"
+    "old": "    current: recordFreshness(stored, fingerprintDigest(print)) === CURRENT,",
+    "new": "    current: true,"
   },
   {
     "id": "D2659",
     "defect": "A discovery whose record stays not current is attempted again at the same input revision, so it repeats in a loop with no input change.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    if (this.#discoveryTriedAt === revision) return false;\n",
-    "new": ""
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    return this.#retry ? 0 : undefined;",
+    "new": "    return this.#retry || notCurrent ? 0 : undefined;"
   },
   {
     "id": "D2660",
@@ -5147,9 +5147,9 @@
   {
     "id": "D2663",
     "defect": "A discovery that ended with nothing stored is not retried when a periodic reconciliation ends.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      this.#discoveryNothingStored ||\n",
-    "new": ""
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "      (this.#attempt?.stored === false || listsFailed);",
+    "new": "      listsFailed;"
   },
   {
     "id": "D2664",
@@ -5364,8 +5364,8 @@
   {
     "id": "D2732",
     "defect": "A discovery's periodic retry is dropped when the discovery does not begin because the revision moved, so a current discovery listing a failed workspace waits for the next periodic reconciliation.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    this.#retryDiscovery ||= retry;\n",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "        this.#retry ||= retry;\n",
     "new": ""
   },
   {
@@ -6982,8 +6982,8 @@
     "id": "D2975",
     "defect": "A plan that returns a rediscovery leaves the round naming the dependency build it already waited for, so an answer never says a rediscovery is what the round waits on.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      this.#schedule.pending(ROUND_WAIT.rediscovery);\n      return { kind: \"discover\", retry };",
-    "new": "      return { kind: \"discover\", retry };"
+    "old": "      this.#schedule.pending(ROUND_WAIT.rediscovery);\n",
+    "new": ""
   },
   {
     "id": "D2976",
@@ -7353,8 +7353,8 @@
     "id": "D3096",
     "defect": "A discovery begun at an earlier revision leaves the round naming a rediscovery rather than the job in progress once the revision moves.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    const report = await this.#schedule.during(\n      this.#parts.discover(revision),\n      revision,\n    );",
-    "new": "    const report = await this.#parts.discover(revision);"
+    "old": "      report = await this.#schedule.during(\n        this.#parts.discover(revision),\n        revision,\n      );",
+    "new": "      report = await this.#parts.discover(revision);"
   },
   {
     "id": "D3097",
@@ -7962,7 +7962,7 @@
     "id": "D3139",
     "defect": "A change a run makes while it runs never reaches its workspace's record of changes, so a workspace whose runs keep rewriting its own inputs is never held.",
     "file": "packages/daemon/src/daemon/run-history.ts",
-    "old": "        this.#changes.jobEnded(report.window, path, path);\n",
+    "old": "        this.#changes.jobEnded(report.window, path);\n",
     "new": ""
   },
   {
@@ -8017,8 +8017,8 @@
   {
     "id": "D3147",
     "defect": "A discovery's changes never reach the record of changes, so a workspace whose inputs each discovery rewrites is never held.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      this.#runs.discoveryEnded(report.window);\n",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "        this.#changes.discoveryEnded(report.window);\n",
     "new": ""
   },
   {
@@ -8207,8 +8207,8 @@
     "id": "D3180",
     "defect": "A held workspace names only the jobs that changed its shared path in the latest counted time, dropping the jobs of earlier times.",
     "file": "packages/daemon/src/daemon/run-history.ts",
-    "old": "      if (before !== undefined) shared.set(path, new Set([...before, ...jobs]));",
-    "new": "      if (before !== undefined) shared.set(path, new Set(jobs));"
+    "old": "    if (before !== undefined) shared.set(path, new Set([...before, ...jobs]));",
+    "new": "    if (before !== undefined) shared.set(path, new Set(jobs));"
   },
   {
     "id": "D3181",
@@ -8221,8 +8221,8 @@
     "id": "D3182",
     "defect": "The lifecycle's discovery report carries none of the paths its window recorded, so a discovery's own changes are never job-caused.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      stored,\n      window: mark.window,",
-    "new": "      stored,\n      window: { ...mark.window, paths: new Set<string>() },"
+    "old": "      changedWhileRunning: stored && changed,\n      window: mark.window,",
+    "new": "      changedWhileRunning: stored && changed,\n      window: { ...mark.window, paths: new Set<string>() },"
   },
   {
     "id": "D3217",
@@ -8464,7 +8464,7 @@
   },
   {
     "id": "D3184",
-    "defect": "A retried workspace the lifecycle refuses at its planned revision keeps its retry, so each plan runs it into another refusal at the same revision until the revision moves.",
+    "defect": "A retried workspace the lifecycle refuses at its planned revision keeps its retry, so each plan runs it into another refusal at the same revision with no periodic reconciliation between.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
     "old": "      if (refusedAtPlan) return;\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
     "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) return;\n      begun.notBegun();\n"
@@ -8904,6 +8904,223 @@
     "new": "const MISSING_CODES: ReadonlySet<string> = new Set([\"ENOENT\"]);"
   },
   {
+    "id": "D3296",
+    "defect": "A discovery each of whose loads writes the same input is held only past three counted times, so it is discovered a fourth time before the hold.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (count.count >= SELF_CHANGE_HOLD_COUNT) {",
+    "new": "    if (count.count > SELF_CHANGE_HOLD_COUNT) {"
+  },
+  {
+    "id": "D3297",
+    "defect": "A held discovery holds the runs too, so the round waits on a rediscovery that never begins and no workspace runs from the discovery in effect.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (this.#held !== undefined) return undefined;",
+    "new": "    if (this.#held !== undefined) return MODIFIED_TIME_RESOLUTION_MS;"
+  },
+  {
+    "id": "D3298",
+    "defect": "The log never says the discovery is held, or which path and job held it.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    this.#log.entry(`${entry}: ${changesText(shared)}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D3299",
+    "defect": "The scheduler never hands the discovery's hold to the schedule, so no answer says the discovery is held.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      discoveryHeldBy: () => this.#discoveries.heldBy(),",
+    "new": "      discoveryHeldBy: () => undefined,"
+  },
+  {
+    "id": "D3300",
+    "defect": "An edit between jobs does not release a held discovery, so a test module an agent adds is never discovered.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "  return unedited(changes) ? undefined : EDITED_CAUSE;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D3301",
+    "defect": "A released discovery is not held again at a count of 1 that writes a path its latest hold named, so each edit batch costs three rediscoveries rather than one.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (again.size > 0) this.#hold(again, HELD_AGAIN_ENTRY);\n",
+    "new": ""
+  },
+  {
+    "id": "D3302",
+    "defect": "The log never says a held discovery was released.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "      this.#log.entry(`${RELEASED_ENTRY} ${cause}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D3303",
+    "defect": "An edit since the last discovery began does not start the discovery's count again, so a person's edits between discoveries still hold it.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (!unedited(changes) || changes.byJobs.size === 0) return NO_COUNT;",
+    "new": "    if (changes === undefined || changes.byJobs.size === 0) return NO_COUNT;"
+  },
+  {
+    "id": "D3304",
+    "defect": "A change naming no path, such as a watcher failure, does not count as an edit, so it never releases a held discovery.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    changes !== undefined && !changes.everywhere && changes.edits.size === 0",
+    "new": "    changes !== undefined && changes.edits.size === 0"
+  },
+  {
+    "id": "D3305",
+    "defect": "The discovery's count grows on every job-caused change whatever path it names, so discoveries that each write a different path are held.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    return followOn(attempt.startCount, changes.byJobs);",
+    "new": "    return { count: attempt.startCount.count + 1, shared: changes.byJobs };"
+  },
+  {
+    "id": "D3306",
+    "defect": "A discovery that stored nothing is counted as if it stored a record, so a discovery whose executor keeps failing is held.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (attempt?.stored !== true || !inEffect.fingerprinted) return NO_COUNT;",
+    "new": "    if (attempt === undefined || !inEffect.fingerprinted) return NO_COUNT;"
+  },
+  {
+    "id": "D3307",
+    "defect": "A discovery that never began replaces the last discovery begun, so its count starts again from 0.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "        this.#attempt = before;\n",
+    "new": ""
+  },
+  {
+    "id": "D3308",
+    "defect": "A discovery whose current fingerprint cannot be computed is counted, so it is held while the daemon cannot tell its own changes from an edit.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (attempt?.stored !== true || !inEffect.fingerprinted) return NO_COUNT;",
+    "new": "    if (attempt?.stored !== true) return NO_COUNT;"
+  },
+  {
+    "id": "D3309",
+    "defect": "A periodic reconciliation arms the retry of a held discovery and logs it as retried, though no discovery begins while it is held.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "      this.#held === undefined &&\n      (this.#attempt?.stored === false || listsFailed);",
+    "new": "      this.#attempt?.stored === false || listsFailed;"
+  },
+  {
+    "id": "D3310",
+    "defect": "A discovery stored not fingerprinted by a change while it ran, at a revision the change did not move, is never discovered once more, so its test list stays not current until an unrelated edit.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "      onceMoreFrom:\n        unmoved && !isOnceMore\n          ? performance.now() + MODIFIED_TIME_RESOLUTION_MS\n          : undefined,",
+    "new": "      onceMoreFrom: undefined,"
+  },
+  {
+    "id": "D3311",
+    "defect": "The once-more discovery begins at once rather than 2000 ms after the first ended, so a codegen write inside the end check's tolerance fails it again.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "          ? performance.now() + MODIFIED_TIME_RESOLUTION_MS\n",
+    "new": "          ? performance.now()\n"
+  },
+  {
+    "id": "D3312",
+    "defect": "The log never says the discovery is discovered once more at the unmoved revision.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    } else if (unmoved) {",
+    "new": "    } else if (unmoved && isOnceMore) {"
+  },
+  {
+    "id": "D3313",
+    "defect": "A once-more discovery stored not fingerprinted the same way is owed another, so the discovery repeats at the unmoved revision without end.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "        unmoved && !isOnceMore\n",
+    "new": "        unmoved\n"
+  },
+  {
+    "id": "D3314",
+    "defect": "The log never says that no discovery begins at the unmoved revision again once the once-more discovery failed the same way.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (unmoved && isOnceMore) {",
+    "new": "    if (unmoved && isOnceMore && !unmoved) {"
+  },
+  {
+    "id": "D3315",
+    "defect": "A change that moves the revision during the once-more wait begins the next discovery at once, inside that change's modification-time tolerance.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    return from !== undefined && changedAt < from\n      ? untilTime(changedAt + MODIFIED_TIME_RESOLUTION_MS)\n      : 0;",
+    "new": "    return 0;"
+  },
+  {
+    "id": "D3316",
+    "defect": "The schedule never carries the discovery's hold, so no answer says the discovery is held.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      round.state === ROUND.pending ? undefined : this.#parts.discoveryHeldBy();",
+    "new": "      undefined;"
+  },
+  {
+    "id": "D3317",
+    "defect": "The schedule names a held discovery while a round is pending, though that round may be the edit that releases it.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      round.state === ROUND.pending ? undefined : this.#parts.discoveryHeldBy();",
+    "new": "      this.#parts.discoveryHeldBy();"
+  },
+  {
+    "id": "D3318",
+    "defect": "The schedule drops a held discovery while the round is held after a failed step, though no rediscovery comes then either.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      round.state === ROUND.pending ? undefined : this.#parts.discoveryHeldBy();",
+    "new": "      round.state !== ROUND.planned ? undefined : this.#parts.discoveryHeldBy();"
+  },
+  {
+    "id": "D3319",
+    "defect": "The scheduler never passes a workspace's refused run to the due rule, so the log's due line says it has no stored run.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        refused: refused.has(entry.workspace.path),",
+    "new": "        refused: false,"
+  },
+  {
+    "id": "D3320",
+    "defect": "A workspace whose latest stored run was refused is not due, so it is never run again and its tests stay run-refused.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "    return refused ? DUE_REASON.runRefused : DUE_REASON.noRun;",
+    "new": "    return refused ? undefined : DUE_REASON.noRun;"
+  },
+  {
+    "id": "D3321",
+    "defect": "The schedule's idle execution reads a workspace whose latest stored run was refused as due for no-run.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      refusedRuns.has(path),",
+    "new": "      false,"
+  },
+  {
+    "id": "D3323",
+    "defect": "A workspace with no run stored and none refused is answered as due for run-refused.",
+    "file": "packages/daemon/src/daemon/due-workspaces.ts",
+    "old": "    return refused ? DUE_REASON.runRefused : DUE_REASON.noRun;",
+    "new": "    return DUE_REASON.runRefused;"
+  },
+  {
+    "id": "D3327",
+    "defect": "The discovery's report drops the change its own job window named, so a discovery stored not fingerprinted by a codegen write while it ran is never discovered once more.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (!verdict.fingerprinted) return verdict;",
+    "new": "    if (!verdict.fingerprinted) return { ...verdict, changedWhileRunning: false };"
+  },
+  {
+    "id": "D3328",
+    "defect": "The discovery's report drops a change protection's check found, so a discovery stored not fingerprinted by it is never discovered once more.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        reason: changed,\n        changedWhileRunning: true,",
+    "new": "        reason: changed,\n        changedWhileRunning: false,"
+  },
+  {
+    "id": "D3329",
+    "defect": "The discovery's report drops a change the check once the fingerprint is composed found, so a discovery stored not fingerprinted by it is never discovered once more.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        movedOnceComposed = moved !== undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D3322",
+    "defect": "The answer's schedule is read without the store's run refusals, so a refused workspace's due reason reads no-run beside its tests' run-refused state.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    latestRuns,\n    refusedRuns,\n    fingerprint: (entry) =>",
+    "new": "    latestRuns,\n    refusedRuns: new Map(),\n    fingerprint: (entry) =>"
+  },
+  {
     "id": "D3285",
     "defect": "The client's refusal of an answer that does not prove itself drops the verifier's reason, so a user cannot tell a proof made with another key from an answer with none.",
     "file": "packages/daemon/src/daemon/proven-connection.ts",
@@ -8916,5 +9133,12 @@
     "file": "packages/daemon/src/daemon/endpoint-proof.ts",
     "old": "    return `it answered without a proof: ${JSON.stringify(answer)}`;",
     "new": "    return \"its proof does not match this worktree's daemon key\";"
+  },
+  {
+    "id": "D3330",
+    "defect": "A discovery held again names every path its re-holding rediscovery wrote, not only those its latest hold named, in the log and in every answer.",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
+    "old": "    if (again.size > 0) this.#hold(again, HELD_AGAIN_ENTRY);",
+    "new": "    if (again.size > 0) this.#hold(count.shared, HELD_AGAIN_ENTRY);"
   }
 ]

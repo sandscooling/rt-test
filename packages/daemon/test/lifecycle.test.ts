@@ -589,6 +589,15 @@ async function begun(started: Daemon): Promise<Daemon> {
   return started;
 }
 
+/** Stops the daemon, then gives each log entry saying a discovery is owed a discovery once more at its revision. */
+async function onceMoreEntries(started: Daemon): Promise<string[]> {
+  started.lifecycle.stop();
+  await started.lifecycle.stopped();
+  return started.log.entries.filter((entry) =>
+    entry.includes("so it is discovered once more at that revision"),
+  );
+}
+
 /** A daemon whose run of `path` is held until the returned deferred settles. */
 function heldAt(
   path: string,
@@ -785,7 +794,7 @@ describe("the start sequence", () => {
     expect({
       discovery: store.discoveryFingerprints,
       logged: log.entries.filter((entry) =>
-        entry.includes("stored not fingerprinted"),
+        entry.startsWith("the discovery is stored not fingerprinted"),
       ),
     }).toStrictEqual({
       discovery: [{ kind: "not-fingerprinted" }],
@@ -854,12 +863,53 @@ describe("the start sequence", () => {
     expect({
       discovery: store.discoveryFingerprints,
       logged: log.entries.filter((entry) =>
-        entry.includes("stored not fingerprinted"),
+        entry.startsWith("the discovery is stored not fingerprinted"),
       ),
     }).toStrictEqual({
       discovery: [{ kind: "not-fingerprinted" }],
       logged: [`the discovery is stored not fingerprinted: ${walkChanged}`],
     });
+  });
+
+  it("D3327: a discovery whose job window named an input changing while it ran, at a revision the change did not move, is owed a discovery once more", async () => {
+    const started = await begun(
+      scripted({
+        verdicts: [
+          {
+            fingerprinted: false,
+            reason: "its inputs changed while it ran: packages/a/gen/a.ts",
+            changedWhileRunning: true,
+          },
+        ],
+      }),
+    );
+    expect(await onceMoreEntries(started)).toHaveLength(1);
+  });
+
+  it("D3328: a discovery during which a file only protection's walk found may have changed is owed a discovery once more", async () => {
+    const started = await begun(
+      scripted({
+        walkChanged:
+          "docs/new.test.ts, an input the tracker had not read before protection changed, may have changed while the job ran",
+      }),
+    );
+    expect(await onceMoreEntries(started)).toHaveLength(1);
+  });
+
+  it("D3329: a discovery during which a listed module the inputs leave out changed after protection's check, before the fingerprint, is owed a discovery once more", async () => {
+    const held: { daemon?: Daemon } = {};
+    held.daemon = scripted({
+      // The edit lands once the discovery's protection has begun, after its own check of the module and before the fingerprint.
+      get moduleChanged() {
+        return held.daemon?.inputs.protected.some(
+          (protectedDiscovery) => protectedDiscovery !== undefined,
+        ) === true
+          ? "packages/a/gen/a.test.ts, which the discovery protects and the inputs leave out, may have changed while the job ran"
+          : undefined;
+      },
+    });
+    const started = await begun(held.daemon);
+    expect(await onceMoreEntries(started)).toHaveLength(1);
   });
 
   it("D2163: protection of the new discovery is given the discovery job's start, and protection of the stored one is given none", async () => {
@@ -4290,7 +4340,10 @@ interface Rewrites {
   readonly modules?: readonly string[];
   /** The env directory of `a`'s one project, root-relative; no project is reported when absent. */
   readonly envDirectory?: string;
-  /** A path each discovery changes while it runs; each input revision is then rediscovered. */
+  /**
+   * A path each discovery changes while it runs. The discovery's current fingerprint cannot be computed, so each input
+   * revision is rediscovered and no count holds the discovery itself.
+   */
   readonly discoveryChanges?: string;
   /** Runs once the runs have ended, with the committed digests by path, which the test may edit. */
   readonly afterRuns?: (
@@ -4324,8 +4377,8 @@ function rewritingDaemon<T>(
         ? {}
         : {
             discoveryFingerprintOf: (): FingerprintResult => ({
-              ok: true,
-              digest: `discovery-digest-${inputs.revision}`,
+              ok: false,
+              reason: `the input set at revision ${inputs.revision} cannot be established`,
             }),
           }),
     });

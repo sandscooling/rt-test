@@ -80,6 +80,7 @@ const NO_SELECTION_CAUSES: Record<NoRoundSelection, string> = {
 };
 const DUE_PHRASES: Record<ScheduleDueReason, string> = {
   [DUE_REASON.noRun]: "it has no stored run",
+  [DUE_REASON.runRefused]: "its latest stored run was refused as unreadable",
   [DUE_REASON.anotherAdapterVersion]:
     "its latest run was stored under another adapter version",
   [DUE_REASON.notFingerprinted]: "its latest run was stored not fingerprinted",
@@ -92,8 +93,11 @@ const DUE_PHRASES: Record<ScheduleDueReason, string> = {
   [DUE_REASON.failedRun]: "its latest run failed",
   [DUE_REASON.crashedRun]: "its latest run crashed",
 };
-const SELF_CHANGING_CAUSE =
-  "because the daemon's own runs and discoveries keep changing its inputs";
+const KEEP_CHANGING =
+  "because the daemon's own runs and discoveries keep changing";
+const SELF_CHANGING_CAUSE = `${KEEP_CHANGING} its inputs`;
+const HELD_ROUND_RETRY =
+  "the daemon tries the held round again at the next input event or reconciliation, which may release it";
 const IDLE_PHRASES: Record<IdleReason, string> = {
   [IDLE_REASON.retryPending]: "a retry is pending",
   [IDLE_REASON.noRunUntilInputChange]:
@@ -102,8 +106,14 @@ const IDLE_PHRASES: Record<IdleReason, string> = {
   [IDLE_REASON.selfChanging]: `no run comes until an edit reaches its inputs or the daemon sees a change it cannot attribute, ${SELF_CHANGING_CAUSE}`,
 };
 /** Trying a held round again decides the hold again, so it may release a held workspace. */
-const SELF_CHANGING_IN_HELD_ROUND = `no run comes until an edit reaches its inputs, the daemon sees a change it cannot attribute, or the daemon tries the held round again at the next input event or reconciliation, which may release it, ${SELF_CHANGING_CAUSE}`;
+const SELF_CHANGING_IN_HELD_ROUND = `no run comes until an edit reaches its inputs, the daemon sees a change it cannot attribute, or ${HELD_ROUND_RETRY}, ${SELF_CHANGING_CAUSE}`;
 const SELF_CHANGED_LEAD = "the same inputs changed each time it became due";
+const DISCOVERY_HELD_LEAD =
+  "Discovery: self-changing, no rediscovery comes until";
+const DISCOVERY_HELD_UNTIL = "an edit or a change the daemon cannot attribute";
+/** Trying a held round again decides the discovery's hold again, so it may release it. */
+const DISCOVERY_HELD_UNTIL_IN_HELD_ROUND = `an edit, a change the daemon cannot attribute, or ${HELD_ROUND_RETRY}`;
+const DISCOVERY_SELF_CHANGING_CAUSE = `${KEEP_CHANGING} the inputs`;
 const DISCOVERY_JOB = "the discovery";
 const RUN_JOB = "the run of";
 const DETAIL_SEPARATOR = "; ";
@@ -134,7 +144,7 @@ export function countLines(counts: TestCounts): string[] {
 }
 
 /**
- * The discovery's adapter version when it is not current and its freshness, the inputs the answer was given from,
+ * The discovery's adapter version when it is not current, its freshness and its hold, the inputs the answer was given from,
  * then the daemon's activity, its round, each workspace's execution state, each job it stored nothing for, and the
  * latest selection.
  */
@@ -155,6 +165,7 @@ export function contextLines(answer: Answer): string[] {
   return [
     ...adapter,
     `Discovery freshness: ${discovery.freshness}`,
+    ...selfChangingDiscoveryLines(answer.schedule),
     ...inputLines(answer.inputs),
     ...(answer.nonInputsUnusable === undefined
       ? []
@@ -177,6 +188,19 @@ export function contextLines(answer: Answer): string[] {
       ? []
       : ["Ended with nothing stored:", ...unstored]),
     ...selectionLines(answer.latestSelection),
+  ];
+}
+
+/** The held discovery's line, only while the answer carries its hold. */
+function selfChangingDiscoveryLines(schedule: Answer["schedule"]): string[] {
+  const held = schedule.selfChangingDiscovery;
+  if (held === undefined) return [];
+  const until =
+    schedule.round.state === ROUND.held
+      ? DISCOVERY_HELD_UNTIL_IN_HELD_ROUND
+      : DISCOVERY_HELD_UNTIL;
+  return [
+    `${DISCOVERY_HELD_LEAD} ${until}, ${DISCOVERY_SELF_CHANGING_CAUSE}; ${SELF_CHANGED_LEAD}: ${namedText(held, selfChangedText)}`,
   ];
 }
 

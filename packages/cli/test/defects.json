@@ -775,5 +775,26 @@
     "file": "packages/cli/src/commands/summary.ts",
     "old": "  if (refusal === undefined) return [NO_RUN_PHRASE];",
     "new": "  return [NO_RUN_PHRASE];"
+  },
+  {
+    "id": "D3324",
+    "defect": "The human answer never prints the held discovery, so a reader sees no reason the test list stays not current.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    ...selfChangingDiscoveryLines(answer.schedule),\n",
+    "new": ""
+  },
+  {
+    "id": "D3325",
+    "defect": "While the round is held, the human answer for a held discovery omits the held round's retry, which may release it.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "    schedule.round.state === ROUND.held\n      ? DISCOVERY_HELD_UNTIL_IN_HELD_ROUND",
+    "new": "    false\n      ? DISCOVERY_HELD_UNTIL_IN_HELD_ROUND"
+  },
+  {
+    "id": "D3326",
+    "defect": "The human answer phrases a workspace due for a refused run as one with no stored run.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  [DUE_REASON.runRefused]: \"its latest stored run was refused as unreadable\",",
+    "new": "  [DUE_REASON.runRefused]: \"it has no stored run\","
   }
 ]

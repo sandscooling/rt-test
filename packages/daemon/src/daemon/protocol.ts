@@ -18,7 +18,7 @@ export const MAX_LINE_BYTES = 1024 * 1024;
 const NEWLINE_BYTE = 0x0a;
 const LINE_END = "\n";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** The daemon's event loop runs no Vitest code; its longest wait is one store write held by another worktree's daemon, and the second wait is margin. */
 const STORE_WAITS_PER_RESPONSE = 2;
