@@ -133,7 +133,7 @@ About 6 raw files and 8 estimated; code units 7 (6 criteria plus validation). Pr
 
 #### Current structure of the modified files
 
-Ticket 2.3r, built next (orchestrator, 19:16 on 2026-09-29), moves `lifecycle.ts`'s `#awaitBuild` into `DependencyBuilds` and the scheduler's per-workspace attempt record into a new module; read `lifecycle.ts` and the scheduler as 2.3r leaves them. This ticket's one lifecycle edit, the stop signal in `stop()`, touches neither.
+The build wait is `DependencyBuilds.awaitBuild` (`daemon/dependency-builds.ts`), and the scheduler's per-workspace run record is `RunHistory` (`daemon/run-history.ts`). This ticket's one lifecycle edit, the stop signal in `stop()`, touches neither.
 
 As of wt/1 at 8d03112, before 2.3g to 2.3i land.
 

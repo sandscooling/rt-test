@@ -39,11 +39,11 @@ A digest of every input, the environment, and the runtime and tool versions that
 _Avoid_: hash, cache key
 
 **Input**:
-A file whose edit RT Test treats as able to change a test's result.
+A file whose content RT Test treats as able to change a test's result.
 _Avoid_: source, dependency
 
 **Declared non-input**:
-A file the consumer lists in `rt-test.json` as read by no test, so its edit changes no input fingerprint and selects nothing.
+A file the consumer lists in `rt-test.json` as read by no test, so a change to it changes no input fingerprint and selects nothing.
 _Avoid_: ignored file, excluded file
 
 **Non-input variable**:

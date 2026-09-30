@@ -34,6 +34,8 @@ const BUILDS_ENDED_CONSEQUENCE = `${WIDENED_CONSEQUENCE} for the rest of the dae
 
 /** A target until measured: a real build parses every source file of the consumer once. */
 const DEPENDENCY_BUILD_BOUND_MS = 120_000;
+/** The build a run waited on and one rebuild; a run waits through no more discards than these. */
+const DISCARDS_A_RUN_WAITS_THROUGH = 2;
 
 interface Discards {
   readonly total: number;
@@ -150,6 +152,29 @@ export class DependencyBuilds {
   ended(): Promise<void> {
     if (!this.pending()) return Promise.resolve();
     return new Promise((resolve) => this.#waits.push(resolve));
+  }
+
+  /**
+   * Waits for the dependency build at the settled revision, through one rebuild: a second build discarded in a row
+   * while `subject` waits means its inputs keep moving, so it proceeds without the build.
+   */
+  async awaitBuild(subject: string): Promise<void> {
+    const waitedFrom = this.discards().total;
+    while (this.pending()) {
+      const discards = this.discards();
+      const inARow = Math.min(
+        discards.total - waitedFrom,
+        discards.consecutive,
+      );
+      if (inARow >= DISCARDS_A_RUN_WAITS_THROUGH) {
+        this.#parts.log.entry(
+          `${subject} proceeds without its dependency build, discarded ${inARow} times in a row while it waited: ${discards.reason}`,
+        );
+        return;
+      }
+      await this.ended();
+      await this.#parts.inputs.settled();
+    }
   }
 
   /** Ends the build in progress, which is never recorded, and resolves once the builds have ended. */

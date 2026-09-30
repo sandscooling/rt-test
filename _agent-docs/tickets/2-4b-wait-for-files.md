@@ -175,7 +175,7 @@ About 14 raw files and 18 estimated; code units 9 (8 criteria plus validation). 
 
 #### Current structure of the modified files
 
-Ticket 2.3r, built next (orchestrator, 19:16 on 2026-09-29), moves `lifecycle.ts`'s `#awaitBuild` into `DependencyBuilds` and the scheduler's per-workspace attempt record into a new module; read `lifecycle.ts`, `daemon/dependency-builds.ts` and the scheduler as 2.3r leaves them, and take the dependency builds' end signal (the signal task) from `DependencyBuilds` there.
+The build wait is `DependencyBuilds.awaitBuild` (`daemon/dependency-builds.ts`), the scheduler's per-workspace run record is `RunHistory` (`daemon/run-history.ts`), and the list of jobs that stored nothing is `UnstoredJobs` (`daemon/job-endings.ts`), which `lifecycle.ts`' `#nothingStored` fills; take the dependency builds' end signal (the signal task) from `DependencyBuilds`.
 
 As of wt/1 at 47e8d89, before 2.3g to 2.4d land; each is re-read at the first task.
 

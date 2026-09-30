@@ -28,10 +28,13 @@ import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
 import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
 import {
+  discoverySummary,
   interruptedRun,
+  logMissingConfirmed,
   runToStore,
   storeFailureReason,
   threwOutcome,
+  UnstoredJobs,
 } from "./job-endings.js";
 import type {
   DaemonActivity,
@@ -53,8 +56,6 @@ const DISCOVERY_STOPPED_REASON =
   "the stop arrived during the discovery, so it was not stored";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
-/** The build a run waited on and one rebuild; a run waits through no more discards than these. */
-const DISCARDS_A_RUN_WAITS_THROUGH = 2;
 const DISCOVERY_REFUSED_ENTRY =
   "warning: the latest stored discovery was refused as unreadable, so a discovery is due as if none were stored, and no workspace runs until it is stored";
 
@@ -90,7 +91,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #builds: DependencyBuilds;
   readonly #scheduler: Scheduler;
   #activity: DaemonActivity = { state: "discovering" };
-  readonly #unstored: UnstoredJob[] = [];
+  readonly #unstored: UnstoredJobs;
   #loggedRefusal: string | undefined;
   #sequence: Promise<void> = Promise.resolve();
   #stopping: Promise<void> | undefined;
@@ -100,6 +101,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   constructor(parts: LifecycleParts) {
     this.identity = parts.identity;
     this.#parts = parts;
+    this.#unstored = new UnstoredJobs(parts.log);
     this.#builds = new DependencyBuilds({
       inputs: parts.inputs,
       executor: parts.buildExecutor,
@@ -118,7 +120,7 @@ export class DaemonLifecycle implements DaemonHandlers {
         return { results, inputs: this.#queryInputs(results) };
       },
       narrowing: () => this.#builds.narrowing(),
-      awaitBuild: (subject) => this.#awaitBuild(subject),
+      awaitBuild: (subject) => this.#builds.awaitBuild(subject),
       discover: (revision) => this.#idleAfter(this.#discover(revision)),
       run: (entry, revision) => this.#idleAfter(this.#run(entry, revision)),
       idle: () => {
@@ -152,7 +154,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     return {
       activity: this.#activity,
       stopping: this.isStopping(),
-      unstoredJobs: [...this.#unstored],
+      unstoredJobs: this.#unstored.jobs(),
     };
   }
 
@@ -278,7 +280,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#builds.use(this.#parts.store.writeDiscovery(bindings, discovery)),
     );
     if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);
-    this.#logMissingConfirmed(discovery);
+    logMissingConfirmed(discovery, start.workspaces, log);
     return { stored };
   }
 
@@ -402,7 +404,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       return report(false, changedWhileRunning(watch.judge(this.#runInputs())));
     }
     const { run } = left;
-    await this.#awaitBuild(`the verdict on ${job}`);
+    await this.#builds.awaitBuild(`the verdict on ${job}`);
     const judgment = watch.judge(this.#runInputs());
     const bindings = this.#bindings(
       job,
@@ -441,30 +443,6 @@ export class DaemonLifecycle implements DaemonHandlers {
     }
   }
 
-  /**
-   * Waits for the dependency build at the settled revision, through one rebuild: a second build discarded in a row
-   * while `subject` waits means its inputs keep moving, so it proceeds and a run is stored not fingerprinted.
-   */
-  async #awaitBuild(subject: string): Promise<void> {
-    const builds = this.#builds;
-    const waitedFrom = builds.discards().total;
-    while (builds.pending()) {
-      const discards = builds.discards();
-      const inARow = Math.min(
-        discards.total - waitedFrom,
-        discards.consecutive,
-      );
-      if (inARow >= DISCARDS_A_RUN_WAITS_THROUGH) {
-        this.#parts.log.entry(
-          `${subject} proceeds without its dependency build, discarded ${inARow} times in a row while it waited: ${discards.reason}`,
-        );
-        return;
-      }
-      await builds.ended();
-      await this.#parts.inputs.settled();
-    }
-  }
-
   /** A run is fingerprinted over the builds' narrowing for the discovery they build over, as answers compare it. */
   #runInputs(): CurrentInputs {
     return this.#parts.inputs.current(this.#builds.narrowing());
@@ -498,7 +476,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   ): boolean {
     try {
       write();
-      this.#unlist(workspacePath);
+      this.#unstored.unlist(workspacePath);
       return true;
     } catch (error) {
       this.#parts.log.error(`storing ${what}`, error);
@@ -507,37 +485,8 @@ export class DaemonLifecycle implements DaemonHandlers {
     }
   }
 
-  /** Each job is listed once, by its latest ending, so a job retried at every periodic reconciliation cannot grow the list. */
   #nothingStored(workspacePath: string | undefined, reason: string): void {
-    this.#unlist(workspacePath);
-    this.#unstored.push(
-      workspacePath === undefined ? { reason } : { workspacePath, reason },
-    );
-    this.#parts.log.entry(
-      `${workspacePath === undefined ? "the discovery" : `the run of ${workspacePath}`} ended with nothing stored: ${reason}`,
-    );
-  }
-
-  /** A job no longer listed as one that stored nothing: undefined names the discovery. */
-  #unlist(workspacePath: string | undefined): void {
-    const kept = this.#unstored.filter(
-      (job) => job.workspacePath !== workspacePath,
-    );
-    this.#unstored.length = 0;
-    this.#unstored.push(...kept);
-  }
-
-  #logMissingConfirmed(discovery: TestDiscovery): void {
-    const found = new Set(
-      discovery.workspaces.map((entry) => entry.workspace.path),
-    );
-    for (const confirmed of this.#parts.start.workspaces) {
-      if (!found.has(confirmed.path)) {
-        this.#parts.log.entry(
-          `the confirmed workspace ${confirmed.path} was not found, so nothing of it was loaded`,
-        );
-      }
-    }
+    this.#unstored.list(workspacePath, reason);
   }
 
   async #stopSequence(): Promise<void> {
@@ -571,10 +520,4 @@ export class DaemonLifecycle implements DaemonHandlers {
       this.#parts.log.error(`closing ${what}`, error);
     }
   }
-}
-
-function discoverySummary(discovery: TestDiscovery): string {
-  return discovery.workspaces
-    .map((entry) => `${entry.workspace.path} ${entry.status}`)
-    .join(", ");
 }

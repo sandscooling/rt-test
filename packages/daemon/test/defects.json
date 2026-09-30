@@ -1690,7 +1690,7 @@
     "id": "D1464",
     "defect": "A confirmed workspace the daemon no longer finds goes unmentioned in the log.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    this.#logMissingConfirmed(discovery);",
+    "old": "    logMissingConfirmed(discovery, start.workspaces, log);",
     "new": ""
   },
   {
@@ -4629,14 +4629,14 @@
   {
     "id": "D2518",
     "defect": "A run proceeds after one discarded build, so a single edit mid-build leaves the run unfingerprinted.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
     "old": "const DISCARDS_A_RUN_WAITS_THROUGH = 2;",
     "new": "const DISCARDS_A_RUN_WAITS_THROUGH = 1;"
   },
   {
     "id": "D2519",
     "defect": "A run waits for its build however many are discarded, so steady input churn holds the run for good.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
     "old": "      if (inARow >= DISCARDS_A_RUN_WAITS_THROUGH) {",
     "new": "      if (false) {"
   },
@@ -4776,8 +4776,8 @@
   {
     "id": "D2559",
     "defect": "A run counts every discard since the daemon started, so the next workspace's run proceeds at once after the first gave up waiting.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const waitedFrom = builds.discards().total;",
+    "file": "packages/daemon/src/daemon/dependency-builds.ts",
+    "old": "    const waitedFrom = this.discards().total;",
     "new": "    const waitedFrom = 0;"
   },
   {
@@ -5042,29 +5042,29 @@
   {
     "id": "D2648",
     "defect": "A workspace whose run ended with nothing stored is run again at the same input revision, so it runs in a loop with no input change.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "file": "packages/daemon/src/daemon/run-history.ts",
     "old": "      attempt.revision === revision &&\n",
     "new": "      false &&\n"
   },
   {
     "id": "D2649",
     "defect": "A workspace is not run again when a rediscovery at an unchanged revision lists new test modules for it, so a test added to it stays unrun.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "file": "packages/daemon/src/daemon/run-history.ts",
     "old": "      attempt.modules === testModulesKey(entry) &&\n",
     "new": "      true &&\n"
   },
   {
     "id": "D2650",
     "defect": "A run stored not fingerprinted by a change that left the revision unmoved is not run again, so a save of identical bytes leaves the workspace unknown.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      rerunOwed: unmoved && !isRerun,",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      rerunOwed: owedAgain,",
     "new": "      rerunOwed: false,"
   },
   {
     "id": "D2651",
     "defect": "The run repeated for an unmoved change is itself repeated when it is stored not fingerprinted again, so a test that rewrites its own input with identical bytes reruns without end.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      rerunOwed: unmoved && !isRerun,",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      rerunOwed: owedAgain,",
     "new": "      rerunOwed: unmoved,"
   },
   {
@@ -5259,9 +5259,9 @@
   {
     "id": "D2678",
     "defect": "Each ending of a job that stored nothing is appended to the list, so a job retried at every periodic reconciliation grows it without end.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const kept = this.#unstored.filter(\n      (job) => job.workspacePath !== workspacePath,\n    );",
-    "new": "    const kept = [...this.#unstored];"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "    this.#jobs = this.#jobs.filter(\n      (job) => job.workspacePath !== workspacePath,\n    );",
+    "new": "    this.#jobs = [...this.#jobs];"
   },
   {
     "id": "D2679",
@@ -5337,7 +5337,7 @@
     "id": "D2693",
     "defect": "A workspace whose run ended with nothing stored and is still due is not retried when a periodic reconciliation ends, so it stays without a result until an input changes.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "retryOwed(latest, stale, this.#storedNothing(path))",
+    "old": "retryOwed(latest, stale, this.#runs.storedNothing(path))",
     "new": "retryOwed(latest, stale, false)"
   },
   {
@@ -5371,7 +5371,7 @@
   {
     "id": "D2733",
     "defect": "A run whose job throws is not counted as having stored nothing, so a periodic reconciliation does not retry it while it stays due.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "file": "packages/daemon/src/daemon/run-history.ts",
     "old": "      nothingStored: true,\n",
     "new": "      nothingStored: false,\n"
   },
@@ -5413,7 +5413,7 @@
   {
     "id": "D2743",
     "defect": "A run stored not fingerprinted by a change that moved the input revision is logged as running once more at its revision, though no rerun is owed.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "file": "packages/daemon/src/daemon/run-history.ts",
     "old": "      report.changedWhileRunning && report.revision === this.#revision();",
     "new": "      report.changedWhileRunning;"
   },
@@ -5470,7 +5470,7 @@
     "id": "D2730",
     "defect": "A job that ended with nothing stored stays listed after a later attempt of it stores its record, so status lists as unstored a workspace, or a discovery, whose latest record was stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      write();\n      this.#unlist(workspacePath);\n",
+    "old": "      write();\n      this.#unstored.unlist(workspacePath);\n",
     "new": "      write();\n"
   },
   {
@@ -6373,7 +6373,7 @@
     "id": "D2905",
     "defect": "A run's verdict is taken before its end revision's build has ended, so a run whose inputs moved just before it returned, only by changes outside its workspace's inputs, is stored not fingerprinted.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await this.#awaitBuild(`the verdict on ${job}`);\n",
+    "old": "    await this.#builds.awaitBuild(`the verdict on ${job}`);\n",
     "new": ""
   },
   {
@@ -7360,7 +7360,7 @@
     "id": "D3097",
     "defect": "A run stored not fingerprinted and owed once more at an unmoved revision leaves the due list, so until the next plan it reads idle with no run coming, although it is about to run again.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "this.#schedule.runEnded(path, report, unmoved && !isRerun);",
+    "old": "this.#schedule.runEnded(path, report, owedAgain);",
     "new": "this.#schedule.runEnded(path, report, false);"
   },
   {
