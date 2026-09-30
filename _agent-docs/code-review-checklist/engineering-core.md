@@ -89,6 +89,8 @@ C33. **Let a wrapper's own fields win**: A wrapper that spreads caller-supplied 
 
 C34. **Treat an expected absence as expected**: In layered cleanup, a later layer finding the resource already gone skips quietly; it is not reported as a failure.
 
+C171. **Run every release step of a shutdown**: A shutdown runs each of its release steps whatever an earlier step did, collecting or logging each failure rather than letting it skip a later close, and still waits for in-flight writers before closing what they write to. FAIL on a rejected or thrown step that leaves a later close, a lock or a key file unreleased.
+
 C35. **Report derived values, not the caller's claim**: When code derives a value that replaces a caller-supplied argument, the record and the log carry the derived value.
 
 C36. **Return whether a guarded operation applied**: An operation that can no-op (guard refusal, already terminal, replay) returns an explicit applied flag, and callers gate every success signal on it.
