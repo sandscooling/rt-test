@@ -2724,3 +2724,136 @@ describe("the CLI's own process", () => {
     DAEMON_TEST_TIMEOUT_MS,
   );
 });
+
+const SELF_CHANGED_PATH = `${WORKSPACE_A}/fixture.json`;
+const HELD_LEAD = `  ${WORKSPACE_A}: idle: no run comes until an edit reaches its inputs or the daemon sees a change it cannot attribute, because the daemon's own runs and discoveries keep changing its inputs, since its latest run is invalidated: ${INVALIDATED_REASON}; the same inputs changed each time it became due: `;
+
+type NotRunning = NonNullable<
+  Extract<WorkspaceExecution, { state: "idle" }>["notRunning"]
+>;
+type SelfChanged = NonNullable<NotRunning["selfChanged"]>;
+type RoundFacts = NonNullable<SummaryResponse["schedule"]>["round"];
+
+const INVALIDATED_DUE = {
+  kind: "invalidated",
+  detail: { reason: INVALIDATED_REASON, omittedCharacters: 0 },
+} as const;
+const HELD_ROUND: RoundFacts = {
+  state: "held",
+  failure: { reason: "boom", omittedCharacters: 0 },
+};
+const HELD_BY_A: SelfChanged = {
+  named: [
+    {
+      path: SELF_CHANGED_PATH,
+      jobs: { named: [{ workspacePath: WORKSPACE_A }], more: 0 },
+    },
+  ],
+  more: 0,
+};
+
+/** The human answer's lines for idle workspace `a`, saying `notRunning`, in a round `round`. */
+function idleLines(notRunning: NotRunning, round: RoundFacts): string[] {
+  return contextLines(
+    humanAnswer({
+      schedule: {
+        round,
+        workspaces: [{ workspacePath: WORKSPACE_A, state: "idle", notRunning }],
+      },
+    }),
+  );
+}
+
+/** The human answer's lines for workspace `a`, held by `selfChanged` with its latest run invalidated. */
+function heldLines(
+  selfChanged: SelfChanged,
+  round: RoundFacts = { state: "planned", revision: SETTLED_INPUTS.revision },
+): string[] {
+  return idleLines(
+    { why: "self-changing", due: INVALIDATED_DUE, selfChanged },
+    round,
+  );
+}
+
+describe("the human answer for a held workspace", () => {
+  it("D3174: a human answer prints a held workspace's reason with each path its runs changed and the run that changed it", () => {
+    const lines = heldLines({
+      named: [
+        {
+          path: SELF_CHANGED_PATH,
+          jobs: { named: [{ workspacePath: WORKSPACE_A }], more: 0 },
+        },
+      ],
+      more: 0,
+    });
+    expect(lines).toContain(
+      `${HELD_LEAD}${SELF_CHANGED_PATH} (during the run of ${WORKSPACE_A})`,
+    );
+  });
+
+  it("D3175: a human answer names the discovery as a job that changed a held workspace's path, and counts the jobs and paths it leaves out", () => {
+    const lines = heldLines({
+      named: [
+        {
+          path: SELF_CHANGED_PATH,
+          jobs: { named: [{}, { workspacePath: WORKSPACE_B }], more: 2 },
+        },
+      ],
+      more: 3,
+    });
+    expect(lines).toContain(
+      `${HELD_LEAD}${SELF_CHANGED_PATH} (during the discovery, the run of ${WORKSPACE_B} and 2 more) and 3 more`,
+    );
+  });
+
+  it("D3176: a human answer escapes a line break in a held workspace's path, keeping its reason on one line", () => {
+    const lines = heldLines({
+      named: [
+        {
+          path: `${WORKSPACE_A}/x\ny.json`,
+          jobs: { named: [{ workspacePath: WORKSPACE_A }], more: 0 },
+        },
+      ],
+      more: 0,
+    });
+    expect(lines).toContain(
+      `${HELD_LEAD}${WORKSPACE_A}/x\\u000ay.json (during the run of ${WORKSPACE_A})`,
+    );
+  });
+
+  it("D3177: while the round is held, a human answer says the held round's next try may release a held workspace", () => {
+    expect(heldLines(HELD_BY_A, HELD_ROUND)).toContain(
+      `  ${WORKSPACE_A}: idle: no run comes until an edit reaches its inputs, the daemon sees a change it cannot attribute, or the daemon tries the held round again at the next input event or reconciliation, which may release it, because the daemon's own runs and discoveries keep changing its inputs, since its latest run is invalidated: ${INVALIDATED_REASON}; the same inputs changed each time it became due: ${SELF_CHANGED_PATH} (during the run of ${WORKSPACE_A})`,
+    );
+  });
+
+  it("D3178: while the round is planned, a human answer for a held workspace names no held round's try", () => {
+    const lines = heldLines(HELD_BY_A);
+    expect(
+      lines.filter((line) => line.includes("tries the held round again")),
+    ).toStrictEqual([]);
+  });
+
+  it("D3179: while the round is held, a workspace idle for another reason keeps its own phrase", () => {
+    expect(
+      idleLines({ why: "round-held", due: INVALIDATED_DUE }, HELD_ROUND),
+    ).toContain(
+      `  ${WORKSPACE_A}: idle: no run comes until the held round is tried again, since its latest run is invalidated: ${INVALIDATED_REASON}`,
+    );
+  });
+
+  it("D3183: a human answer escapes a line break in the workspace of a run that changed a held workspace's path", () => {
+    const lines = heldLines({
+      named: [
+        {
+          path: SELF_CHANGED_PATH,
+          jobs: { named: [{ workspacePath: `${WORKSPACE_B}\nx` }], more: 0 },
+        },
+      ],
+      more: 0,
+    });
+    expect(lines).toContain(
+      `${HELD_LEAD}${SELF_CHANGED_PATH} (during the run of ${WORKSPACE_B}\\u000ax)`,
+    );
+  });
+});

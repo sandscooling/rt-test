@@ -15,7 +15,7 @@ C114. **Compute freshness, never store it**: Freshness is derived at query time 
 
 C115. **Invalidate on an edit you cannot attribute**: A watcher overflow, missed event, branch switch or startup before reconciliation marks every result it could affect as unconfirmed or stale, never none.
 
-C116. **Never promote a run whose inputs moved**: A run whose inputs changed while it ran is recorded as invalidated and rerun from stable inputs; a generation token stops a late completion from replacing a newer result.
+C116. **Never promote a run whose inputs moved**: A run whose inputs changed while it ran is recorded as invalidated and rerun from stable inputs, unless its workspace is held as a self-changing workspace, which reruns only after an edit; a generation token stops a late completion from replacing a newer result.
 
 C117. **Fingerprint every input that can change a result**: A new input kind (config, setup file, fixture, lockfile, declared environment input, runtime or runner version) joins the fingerprint in the change that starts depending on it.
 

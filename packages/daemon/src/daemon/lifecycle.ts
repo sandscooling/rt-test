@@ -54,6 +54,8 @@ import type { EndedRun } from "./workspace-schedule.js";
 
 const DISCOVERY_STOPPED_REASON =
   "the stop arrived during the discovery, so it was not stored";
+const NOT_INTERRUPTED =
+  "will not be interrupted by a change, so it runs to its end, and a change inside its inputs while it runs leaves the run it stores invalidated";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
 const DISCOVERY_REFUSED_ENTRY =
@@ -122,7 +124,8 @@ export class DaemonLifecycle implements DaemonHandlers {
       narrowing: () => this.#builds.narrowing(),
       awaitBuild: (subject) => this.#builds.awaitBuild(subject),
       discover: (revision) => this.#idleAfter(this.#discover(revision)),
-      run: (entry, revision) => this.#idleAfter(this.#run(entry, revision)),
+      run: (entry, revision, uninterruptible) =>
+        this.#idleAfter(this.#run(entry, revision, uninterruptible)),
       idle: () => {
         this.#activity = { state: "idle" };
       },
@@ -250,6 +253,10 @@ export class DaemonLifecycle implements DaemonHandlers {
     if (this.#beginsNothing(plannedRevision)) return undefined;
     log.entry("discovery started");
     const mark = inputs.beginJob();
+    const report = (stored: boolean): DiscoverReport => ({
+      stored,
+      window: mark.window,
+    });
     const startedAt = Date.now();
     const outcome = await executor
       .discover(start)
@@ -257,13 +264,13 @@ export class DaemonLifecycle implements DaemonHandlers {
     const verdict = await inputs.endJob(mark);
     if (!outcome.ended) {
       this.#nothingStored(undefined, outcome.reason);
-      return { stored: false };
+      return report(false);
     }
     const discovery = outcome.value;
     const held = await this.#protectDiscovered(discovery, verdict, startedAt);
     if (this.isStopping()) {
       this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);
-      return { stored: false };
+      return report(false);
     }
     const bindings = this.#bindings(
       "the discovery",
@@ -281,7 +288,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     );
     if (stored) log.entry(`discovery ended: ${discoverySummary(discovery)}`);
     logMissingConfirmed(discovery, start.workspaces, log);
-    return { stored };
+    return report(stored);
   }
 
   /**
@@ -321,10 +328,14 @@ export class DaemonLifecycle implements DaemonHandlers {
     return guarded;
   }
 
-  /** Undefined when the run did not begin: a stop, a revision that moved since it was planned, or a workspace the start does not confirm. */
+  /**
+   * Undefined when the run did not begin: a stop, a revision that moved since it was planned, or a workspace the start
+   * does not confirm. `uninterruptible` says why no change may interrupt it, when none may.
+   */
   async #run(
     entry: WorkspaceDiscovery,
     plannedRevision: number,
+    uninterruptible: string | undefined,
   ): Promise<RunReport | undefined> {
     const { log, executor, start, inputs } = this.#parts;
     const { workspace } = entry;
@@ -337,6 +348,11 @@ export class DaemonLifecycle implements DaemonHandlers {
     await inputs.settled();
     if (this.#beginsNothing(plannedRevision)) return undefined;
     log.entry(`run started: ${workspace.path}`);
+    if (uninterruptible !== undefined) {
+      log.entry(
+        `the run of ${workspace.path} ${NOT_INTERRUPTED}: ${uninterruptible}`,
+      );
+    }
     const mark = inputs.beginJob();
     let startInputs: CurrentInputs;
     let watch: RunWatch;
@@ -350,7 +366,10 @@ export class DaemonLifecycle implements DaemonHandlers {
         view: () => this.#runInputs(),
         inputsChanged: () => inputs.changed(),
         isStopping: () => this.isStopping(),
-        interrupt: () => executor.abort(ABORT_PURPOSE.interruption),
+        interrupt:
+          uninterruptible === undefined
+            ? () => executor.abort(ABORT_PURPOSE.interruption)
+            : () => false,
         log,
       });
     } catch (error) {
@@ -391,6 +410,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       revision,
       stored,
       changedWhileRunning: changed,
+      window: watch.window,
       ...ended,
     });
     const { interruption, interruptedBy = [] } = watch;

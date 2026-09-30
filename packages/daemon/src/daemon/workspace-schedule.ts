@@ -15,12 +15,13 @@ import {
   type DueReason,
   type ExplainedFallback,
   type ExplainedPath,
-  type IdleReason,
   type NamedList,
+  type NotSelfChangingReason,
   type RoundFacts,
   type RoundWait,
   type ScheduleFacts,
   type SelectionExplanation,
+  type SelfChangedPath,
   type WorkspaceExecution,
 } from "../query/answer.js";
 import { cutReason } from "../query/summary.js";
@@ -32,25 +33,16 @@ import type {
   PathSelection,
 } from "../selection/selection-types.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
+import type { JobsByPath } from "./change-record.js";
 import { retryOwed, retryReason, staleReason } from "./due-workspaces.js";
 import type { DaemonActivity } from "./protocol.js";
 import type { RoundExplanation } from "./round-selection.js";
-import {
-  JUDGMENT,
-  type NotKeptKind,
-  type NotKeptVerdict,
-} from "./run-judgment.js";
+import { labelsInvalidated, type NotKeptVerdict } from "./run-judgment.js";
 
 /** How many changed paths and broad fallbacks an answer names, and how many workspaces within each. */
 const MAX_EXPLAINED = 20;
 /** How many of the reasons the latest round's selection chose it a queued workspace names. */
 const MAX_CHOOSING_REASONS = 3;
-
-/** The verdicts that read a run as invalidated, since its inputs changed while it ran. */
-const INVALIDATING: ReadonlySet<NotKeptKind> = new Set([
-  JUDGMENT.changedInside,
-  JUDGMENT.moved,
-]);
 
 type RecordedRound =
   | { readonly state: typeof ROUND.pending }
@@ -106,6 +98,8 @@ export interface ScheduleParts {
   readonly confirmed: (entry: WorkspaceDiscovery) => boolean;
   /** Whether the last run attempted for the workspace ended with nothing stored. */
   readonly storedNothing: (path: string) => boolean;
+  /** The paths that changed each time a held workspace became due, with their jobs; undefined when it is not held. */
+  readonly heldBy: (path: string) => JobsByPath | undefined;
 }
 
 /** The scheduler's record of what it is doing with each confirmed workspace, and the one read every answer gives of it. */
@@ -242,7 +236,7 @@ export class WorkspaceSchedule implements ScheduleReader {
 
   invalidation(run: StoredRun): CutReason | undefined {
     const notKept = this.#verdictOf(run);
-    return notKept !== undefined && INVALIDATING.has(notKept.kind)
+    return notKept !== undefined && labelsInvalidated(notKept)
       ? cutReason(notKept.reason)
       : undefined;
   }
@@ -317,15 +311,21 @@ export class WorkspaceSchedule implements ScheduleReader {
     const stale = staleReason(latest, fingerprintDigest(current));
     const due = stale ?? retryReason(latest);
     if (due === undefined) return {};
+    const dueFacts = this.#dueFacts(due, latest, () => current);
+    const held = this.#parts.heldBy(path);
+    if (held !== undefined) {
+      return {
+        notRunning: {
+          why: IDLE_REASON.selfChanging,
+          due: dueFacts,
+          selfChanged: selfChangedList(held),
+        },
+      };
+    }
     const retrying =
       round.state === ROUND.planned &&
       retryOwed(latest, stale, this.#parts.storedNothing(path));
-    return {
-      notRunning: {
-        why: idleReason(round, retrying),
-        due: this.#dueFacts(due, latest, () => current),
-      },
-    };
+    return { notRunning: { why: idleReason(round, retrying), due: dueFacts } };
   }
 
   /** A run stored not fingerprinted names the verdict this daemon held for it, or reads as from an earlier daemon life. */
@@ -346,7 +346,7 @@ export class WorkspaceSchedule implements ScheduleReader {
     const notKept = this.#verdictOf(latest);
     if (notKept === undefined) return { kind: EARLIER_DAEMON_LIFE };
     return {
-      kind: INVALIDATING.has(notKept.kind) ? INVALIDATED : due,
+      kind: labelsInvalidated(notKept) ? INVALIDATED : due,
       detail: cutReason(notKept.reason),
     };
   }
@@ -374,11 +374,24 @@ export class WorkspaceSchedule implements ScheduleReader {
 }
 
 /** A held round is tried again at the next input event or reconciliation, so no run waits on an input change alone. */
-function idleReason(round: RoundFacts, retrying: boolean): IdleReason {
+function idleReason(
+  round: RoundFacts,
+  retrying: boolean,
+): NotSelfChangingReason {
   if (round.state === ROUND.held) return IDLE_REASON.roundHeld;
   return retrying
     ? IDLE_REASON.retryPending
     : IDLE_REASON.noRunUntilInputChange;
+}
+
+/** Each path and each of its jobs bounded as the interruption's paths are, since both come from the job window. */
+function selfChangedList(held: JobsByPath): NamedList<SelfChangedPath> {
+  return mappedList([...held], MAX_NAMED_CHANGES, ([path, jobs]) => ({
+    path,
+    jobs: mappedList([...jobs], MAX_NAMED_CHANGES, (workspacePath) =>
+      workspacePath === undefined ? {} : { workspacePath },
+    ),
+  }));
 }
 
 function boundedList<T>(items: readonly T[], bound: number): NamedList<T> {

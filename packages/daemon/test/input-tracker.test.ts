@@ -4315,3 +4315,50 @@ describe("a workspace whose env files are not known", () => {
     });
   });
 });
+
+describe("the committed digests a job's window keeps", () => {
+  it("D3172: a job's window keeps the committed digests at its open and at its close", async () => {
+    const kept = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      try {
+        return await tracking(root, async ({ tracker }) => {
+          const digestNow = (): string | undefined =>
+            tracker.current().snapshot?.digests.get("src/a.ts");
+          const opened = digestNow();
+          const mark = tracker.beginJob();
+          appendFileSync(join(root, "src", "a.ts"), "export {};\n");
+          deliver(watches, root, join("src", "a.ts"));
+          await tracker.endJob(mark);
+          const closed = digestNow();
+          const { startDigests, endDigests } = mark.window;
+          return {
+            start:
+              opened !== undefined && startDigests?.get("src/a.ts") === opened,
+            end: closed !== opened && endDigests?.get("src/a.ts") === closed,
+          };
+        });
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(kept).toStrictEqual({ start: true, end: true });
+  });
+
+  it("D3173: a job's window opened before the first reconciliation has ended keeps no digests", async () => {
+    const digests = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const tracker = new InputTracker({
+        consumerRoot: root,
+        exclusions: [join(root, STATE_DIRECTORY)],
+        log: memoryLog(),
+      });
+      try {
+        return tracker.beginJob().window.startDigests;
+      } finally {
+        await tracker.stop();
+      }
+    });
+    expect(digests).toBeUndefined();
+  });
+});

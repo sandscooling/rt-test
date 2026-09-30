@@ -84,6 +84,7 @@ import {
   builtAt,
   discoveredIn,
   failedAt,
+  inputsOf,
   ranWorkspace,
 } from "./round-fixtures.js";
 import {
@@ -3848,3 +3849,266 @@ describe("interrupting a run in progress", () => {
     expect(outcome).toStrictEqual({ asked: 1, interruption: undefined });
   });
 });
+
+/** How many runs of `a` change an input before its runs change nothing, so a loop never held still ends. */
+const REWRITING_RUNS = 4;
+/** A test module of workspace `a` that lies in package `b`, so the narrowed build places it in `b` alone. */
+const LISTED_ELSEWHERE = "b/src/b.test.ts";
+/** Flushes in which the daemon logs, builds and begins nothing, after which nothing more is coming until a job ends. */
+const QUIET_FLUSHES = 2;
+/** Flushes a daemon's runs may take before the test fails as never settling. */
+const RUNS_END_FLUSHES = 200;
+
+/**
+ * An executor whose every run calls `during` with the run's count from 1, then holds until an interruption ends it,
+ * interrupted after its tests loaded, or the test finishes it. Each discovery calls `discovering` first.
+ */
+class RewritingExecutor extends ScriptedExecutor {
+  readonly #during: (run: number) => void;
+  readonly #discovering: () => void;
+  #held: Deferred<RunOutcome> | undefined;
+
+  constructor(
+    during: (run: number) => void,
+    found: TestDiscovery,
+    discovering: () => void,
+  ) {
+    super({ ended: true, value: found });
+    this.#during = during;
+    this.#discovering = discovering;
+  }
+
+  /** Whether a run has begun and not ended. */
+  get holding(): boolean {
+    return this.#held !== undefined;
+  }
+
+  override discover(): Promise<JobOutcome<TestDiscovery>> {
+    this.#discovering();
+    return super.discover();
+  }
+
+  override run(workspace: VitestWorkspace): Promise<RunOutcome> {
+    this.runs.push(workspace.path);
+    const held = new Deferred<RunOutcome>();
+    this.#held = held;
+    this.#during(this.runs.length);
+    return held.promise;
+  }
+
+  override abort(purpose?: AbortPurpose): boolean {
+    const reached = super.abort(purpose);
+    this.#end(INTERRUPTED_RUN);
+    return reached;
+  }
+
+  /** Ends the run holding as finished, as a run no change interrupted ends. */
+  finish(): void {
+    this.#end({ ended: true, value: ranWorkspace("a") });
+  }
+
+  #end(outcome: RunOutcome): void {
+    this.#held?.resolve(outcome);
+    this.#held = undefined;
+  }
+}
+
+/**
+ * Flushes until the daemon has gone quiet with no run holding. A run still holding once the daemon has gone quiet has
+ * no interruption coming, so the test finishes it. Throws when the daemon never settles.
+ */
+async function untilRunsEnd(
+  started: Daemon,
+  executor: RewritingExecutor,
+): Promise<void> {
+  let quiet = 0;
+  let seen = "";
+  for (let flushes = 0; flushes < RUNS_END_FLUSHES; flushes += 1) {
+    await flush();
+    const now = `${started.log.entries.length}:${started.builds.builds.length}:${executor.runs.length}`;
+    quiet = now === seen ? quiet + 1 : 0;
+    seen = now;
+    if (quiet < QUIET_FLUSHES) continue;
+    if (!executor.holding) return;
+    executor.finish();
+    quiet = 0;
+  }
+  throw new Error(
+    `the daemon's runs did not settle within ${RUNS_END_FLUSHES} flushes`,
+  );
+}
+
+interface Rewrites {
+  /**
+   * The paths each run of `a` changes, given the run's count from 1, moving the input revision, or undefined when it
+   * changes nothing; `INSIDE` for the first `REWRITING_RUNS` when absent.
+   */
+  readonly paths?: (run: number) => readonly string[] | undefined;
+  /** Whether `a`'s fingerprint moves with the input revision, as it does when its own inputs change. */
+  readonly fingerprintMoves?: boolean;
+  /** The test modules of `a` the discovery lists, relative to `a`; none when absent. */
+  readonly modules?: readonly string[];
+  /** A path each discovery changes while it runs; each input revision is then rediscovered. */
+  readonly discoveryChanges?: string;
+  /** Runs once the runs have ended, with the committed digests by path, which the test may edit. */
+  readonly afterRuns?: (
+    started: Daemon,
+    digests: Record<string, string>,
+  ) => void;
+}
+
+/**
+ * A daemon over narrowed builds each of whose runs of `a` changes a path as it runs, moving the input revision. The
+ * committed digests change with each such path, so each round's selection sees what the last run changed.
+ */
+function rewritingDaemon<T>(
+  rewrites: Rewrites,
+  body: (started: Daemon) => Promise<T>,
+): Promise<T> {
+  return inTempDir(async (root) => {
+    const digests: Record<string, string> = { [INSIDE]: "0", [OUTSIDE]: "0" };
+    const { discoveryChanges } = rewrites;
+    const inputs: StandInInputs = new StandInInputs({
+      snapshot: () => inputsOf(digests),
+      ...(rewrites.fingerprintMoves === true
+        ? {
+            fingerprintOf: (path: string): FingerprintResult => ({
+              ok: true,
+              digest: `${path}-digest-${inputs.revision}`,
+            }),
+          }
+        : {}),
+      ...(discoveryChanges === undefined
+        ? {}
+        : {
+            discoveryFingerprintOf: (): FingerprintResult => ({
+              ok: true,
+              digest: `discovery-digest-${inputs.revision}`,
+            }),
+          }),
+    });
+    const pathsOf =
+      rewrites.paths ??
+      ((run: number) => (run <= REWRITING_RUNS ? [INSIDE] : undefined));
+    const executor = new RewritingExecutor(
+      (run) => {
+        const paths = pathsOf(run);
+        if (paths === undefined) return;
+        for (const path of paths) {
+          inputs.recordPath(path);
+          digests[path] = `run-${run}`;
+        }
+        inputs.moveRevision();
+      },
+      discovery(discoveredIn("a", rewrites.modules ?? [])),
+      () => {
+        if (discoveryChanges !== undefined) inputs.recordPath(discoveryChanges);
+      },
+    );
+    const started = await begun(narrowedDaemon(root, inputs, executor));
+    await untilRunsEnd(started, executor);
+    if (rewrites.afterRuns !== undefined) {
+      rewrites.afterRuns(started, digests);
+      await untilRunsEnd(started, executor);
+    }
+    return thenStopped(started, body);
+  });
+}
+
+describe(
+  "holding a workspace whose runs keep changing its inputs",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3166: a workspace each of whose runs changes a path inside its inputs runs three times and no more", async () => {
+      const runs = await rewritingDaemon({}, async ({ executor }) => [
+        ...executor.runs,
+      ]);
+      expect(runs).toStrictEqual(["a", "a", "a"]);
+    });
+
+    it("D3167: the third run of a workspace whose runs change its inputs is not interrupted, though the first two are", async () => {
+      const purposes = await rewritingDaemon({}, async ({ executor }) => [
+        ...executor.purposes,
+      ]);
+      expect(purposes).toStrictEqual([
+        ABORT_PURPOSE.interruption,
+        ABORT_PURPOSE.interruption,
+      ]);
+    });
+
+    it("D3168: the log says, as the third run begins, that no change will interrupt it, naming the path that changed each time", async () => {
+      const logged = await rewritingDaemon({}, async ({ log }) =>
+        log.entries.flatMap((entry) => {
+          if (entry.startsWith("run started: a")) return ["run started"];
+          if (!entry.startsWith("the run of a will not be interrupted")) {
+            return [];
+          }
+          return [
+            entry.includes(INSIDE) ? "not interrupted, naming it" : entry,
+          ];
+        }),
+      );
+      expect(logged).toStrictEqual([
+        "run started",
+        "run started",
+        "run started",
+        "not interrupted, naming it",
+      ]);
+    });
+
+    it("D3169: a workspace whose runs change only a path outside its inputs is never held", async () => {
+      const runs = await rewritingDaemon(
+        {
+          paths: (run) => (run <= REWRITING_RUNS ? [OUTSIDE] : undefined),
+          fingerprintMoves: true,
+        },
+        async ({ executor }) => executor.runs.length,
+      );
+      expect(runs).toBe(REWRITING_RUNS + 1);
+    });
+
+    it("D3170: an edit outside a held workspace's inputs does not release it", async () => {
+      const runs = await rewritingDaemon(
+        {
+          afterRuns: ({ inputs }, digests) => {
+            digests[OUTSIDE] = "edited";
+            inputs.moveRevision();
+          },
+        },
+        async ({ executor }) => executor.runs.length,
+      );
+      expect(runs).toBe(3);
+    });
+
+    it("D3171: the round a hold begins in never logs the held workspace as holding current results, though selection chose it", async () => {
+      const logged = await rewritingDaemon({}, async ({ log }) =>
+        log.entries.filter((entry) => entry.startsWith("not run: a")),
+      );
+      expect(logged).toStrictEqual([]);
+    });
+
+    it("D3181: a workspace whose runs rewrite one of its listed test modules is held, though the build places that module in another package", async () => {
+      const runs = await rewritingDaemon(
+        {
+          modules: [`../${LISTED_ELSEWHERE}`],
+          paths: (run) =>
+            run <= REWRITING_RUNS ? [LISTED_ELSEWHERE] : undefined,
+        },
+        async ({ executor }) => executor.runs.length,
+      );
+      expect(runs).toBe(3);
+    });
+
+    it("D3182: a workspace whose inputs each discovery changes is held through the discoveries' own reports", async () => {
+      const runs = await rewritingDaemon(
+        {
+          discoveryChanges: INSIDE,
+          fingerprintMoves: true,
+          paths: (run) => (run <= REWRITING_RUNS ? [] : undefined),
+        },
+        async ({ executor }) => executor.runs.length,
+      );
+      expect(runs).toBe(3);
+    });
+  },
+);

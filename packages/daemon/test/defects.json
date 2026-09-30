@@ -1697,7 +1697,7 @@
     "id": "D1465",
     "defect": "A discovery that returns after the stop arrived is stored.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n",
+    "old": "      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n",
     "new": ""
   },
   {
@@ -3328,8 +3328,8 @@
     "id": "D1987",
     "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }\n    const bindings = this.#bindings(\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
-    "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return { stored: false };\n    }"
+    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    const bindings = this.#bindings(\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
+    "new": "    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
   },
   {
     "id": "D1988",
@@ -5134,8 +5134,8 @@
     "id": "D2661",
     "defect": "A workspace whose retry fails again stays in the retry set, so it is retried without end instead of once for each periodic reconciliation.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    this.#retryWorkspaces.delete(path);\n",
-    "new": ""
+    "old": "    const retried = this.#retryWorkspaces.has(path);\n    this.#retryWorkspaces.delete(path);\n",
+    "new": "    const retried = this.#retryWorkspaces.has(path);\n"
   },
   {
     "id": "D2662",
@@ -5190,8 +5190,8 @@
     "id": "D2668",
     "defect": "A selected workspace that is due is logged as not run because it holds current results.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      if (confirmed.has(path) && !dueNow.has(path)) {",
-    "new": "      if (confirmed.has(path)) {"
+    "old": "      const holdsCurrent = !dueNow.has(path) && !this.#runs.isHeld(path);",
+    "new": "      const holdsCurrent = !this.#runs.isHeld(path);"
   },
   {
     "id": "D2669",
@@ -5463,8 +5463,8 @@
     "id": "D2729",
     "defect": "After a run ends the activity keeps naming its workspace while the scheduler waits out the next quiet window and build wait, so status and every answer say a run is going while none is.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      run: (entry, revision) => this.#idleAfter(this.#run(entry, revision)),",
-    "new": "      run: (entry, revision) => this.#run(entry, revision),"
+    "old": "      run: (entry, revision, uninterruptible) =>\n        this.#idleAfter(this.#run(entry, revision, uninterruptible)),",
+    "new": "      run: (entry, revision, uninterruptible) =>\n        this.#run(entry, revision, uninterruptible),"
   },
   {
     "id": "D2730",
@@ -5764,8 +5764,8 @@
     "id": "D2788",
     "defect": "A retry armed because the last attempt stored nothing runs a workspace whose latest run is bound to its current fingerprint again by plan time, so a current result runs again.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": ") ?? (retry ? retryReason(latest) : undefined);",
-    "new": ") ?? (retry ? (retryReason(latest) ?? \"its last attempt stored nothing\") : undefined);"
+    "old": "      const reason = stale ?? (retry ? retryReason(latest) : undefined);",
+    "new": "      const reason = stale ?? (retry ? (retryReason(latest) ?? \"its last attempt stored nothing\") : undefined);"
   },
   {
     "id": "D2791",
@@ -6310,8 +6310,8 @@
     "id": "D2888",
     "defect": "A run's interruption is asked of the executor as a stop, so an interruption that lands before the job is sent ends it with the stop's reason.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "        interrupt: () => executor.abort(ABORT_PURPOSE.interruption),",
-    "new": "        interrupt: () => executor.abort(),"
+    "old": "            ? () => executor.abort(ABORT_PURPOSE.interruption)",
+    "new": "            ? () => executor.abort()"
   },
   {
     "id": "D2889",
@@ -7087,20 +7087,20 @@
     "id": "D2990",
     "defect": "A run stored not fingerprinted because a path inside its inputs changed while it ran reads only as stored not fingerprinted, never as invalidated.",
     "file": "packages/daemon/src/daemon/workspace-schedule.ts",
-    "old": "      kind: INVALIDATING.has(notKept.kind) ? INVALIDATED : due,",
+    "old": "      kind: labelsInvalidated(notKept) ? INVALIDATED : due,",
     "new": "      kind: due,"
   },
   {
     "id": "D2991",
     "defect": "A run stored not fingerprinted because its workspace's fingerprint moved while it ran is not called invalidated.",
-    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
     "old": "  JUDGMENT.changedInside,\n  JUDGMENT.moved,\n]);",
     "new": "  JUDGMENT.changedInside,\n]);"
   },
   {
     "id": "D2992",
     "defect": "A run stored not fingerprinted for a cause that names no path, such as a watcher failure, is called invalidated although no input is known to have changed.",
-    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
     "old": "  JUDGMENT.changedInside,\n  JUDGMENT.moved,\n]);",
     "new": "  JUDGMENT.changedInside,\n  JUDGMENT.moved,\n  JUDGMENT.causes,\n]);"
   },
@@ -7950,5 +7950,278 @@
     "file": "packages/daemon/src/daemon/run-history.ts",
     "old": "      before.modules === modules;\n",
     "new": "      true;\n"
+  },
+  {
+    "id": "D3138",
+    "defect": "A workspace is held after four times in a row it became due through its jobs' changes, rather than three.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "export const SELF_CHANGE_HOLD_COUNT = 3;",
+    "new": "export const SELF_CHANGE_HOLD_COUNT = 4;"
+  },
+  {
+    "id": "D3139",
+    "defect": "A change a run makes while it runs never reaches its workspace's record of changes, so a workspace whose runs keep rewriting its own inputs is never held.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "        this.#changes.jobEnded(report.window, path, path);\n",
+    "new": ""
+  },
+  {
+    "id": "D3140",
+    "defect": "The log says nothing when a workspace's hold begins.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    this.#log.entry(`held: ${path} ${HELD_ENTRY}: ${changesText(next.shared)}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D3141",
+    "defect": "The scheduler never tells the run begun at a count of 2 that no change may interrupt it, so it is interrupted like any other run.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "        this.#parts.run(entry, revision, uninterruptible),",
+    "new": "        this.#parts.run(entry, revision, undefined),"
+  },
+  {
+    "id": "D3142",
+    "defect": "A digest that changed between two jobs is never measured as an edit, so an agent's save between runs does not start the count again.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    this.#interval(digests);\n",
+    "new": ""
+  },
+  {
+    "id": "D3143",
+    "defect": "A held workspace stays held after an edit reaches its inputs.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      if (!this.#edited(due, this.#changes.of(path))) return true;",
+    "new": "      return true;"
+  },
+  {
+    "id": "D3144",
+    "defect": "The log says nothing when an edit releases a held workspace.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      this.#log.entry(`${path} ${RELEASED_ENTRY}`);\n",
+    "new": ""
+  },
+  {
+    "id": "D3145",
+    "defect": "A cause naming no path recorded while a job ran, such as a watcher failure, is not an edit in every workspace, so counts and holds survive it.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    if (window.causes.size > 0 || window.paths.size > MAX_COUNTED_CHANGES) {",
+    "new": "    if (window.paths.size > MAX_COUNTED_CHANGES) {"
+  },
+  {
+    "id": "D3146",
+    "defect": "An interval whose digests cannot be read is not an edit in every workspace, so a hold survives a round that could not read its inputs.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    if (from === undefined || to === undefined) {\n      this.#everywhere();\n",
+    "new": "    if (from === undefined || to === undefined) {\n"
+  },
+  {
+    "id": "D3147",
+    "defect": "A discovery's changes never reach the record of changes, so a workspace whose inputs each discovery rewrites is never held.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      this.#runs.discoveryEnded(report.window);\n",
+    "new": ""
+  },
+  {
+    "id": "D3148",
+    "defect": "A time sharing no changed path with the times before it still raises the count instead of starting it again at 1.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "  return shared.size > 0\n",
+    "new": "  return shared.size >= 0\n"
+  },
+  {
+    "id": "D3149",
+    "defect": "The paths a count keeps are those of its earlier times rather than those every counted time shares, so a held workspace names paths its latest time did not change.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    ? { count: base.count + 1, shared }",
+    "new": "    ? { count: base.count + 1, shared: base.shared }"
+  },
+  {
+    "id": "D3150",
+    "defect": "The schedule never learns which workspaces the count holds, so a held workspace reads as waiting for the next input change.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      heldBy: (path) => this.#runs.heldBy(path),",
+    "new": "      heldBy: () => undefined,"
+  },
+  {
+    "id": "D3151",
+    "defect": "A held workspace reads round-held while the round is held after a failed step, though retrying the round runs no held workspace.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (held !== undefined) {",
+    "new": "    if (held !== undefined && round.state !== ROUND.held) {"
+  },
+  {
+    "id": "D3152",
+    "defect": "A held workspace whose latest run failed reads retry-pending, though the periodic retry runs no held workspace.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (held !== undefined) {",
+    "new": "    if (held !== undefined && retryReason(latest) === undefined) {"
+  },
+  {
+    "id": "D3153",
+    "defect": "A held workspace names its hold while a round is pending, though the pending round may be the edit that releases it.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    if (round.state === ROUND.pending) return {};",
+    "new": "    if (round.state === ROUND.pending && this.#parts.heldBy(path) === undefined) return {};"
+  },
+  {
+    "id": "D3154",
+    "defect": "A held workspace names every path its counted times shared, however many, with no count of the rest.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "  return mappedList([...held], MAX_NAMED_CHANGES, ([path, jobs]) => ({",
+    "new": "  return mappedList([...held], held.size, ([path, jobs]) => ({"
+  },
+  {
+    "id": "D3155",
+    "defect": "A held workspace names every job that changed one of its paths, however many, with no count of the rest.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "    jobs: mappedList([...jobs], MAX_NAMED_CHANGES, (workspacePath) =>",
+    "new": "    jobs: mappedList([...jobs], jobs.size, (workspacePath) =>"
+  },
+  {
+    "id": "D3156",
+    "defect": "The periodic reconciliation arms a retry for a held workspace, so its log counts a workspace that will not retry.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (this.#runs.isHeld(path)) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D3157",
+    "defect": "A workspace due only for a periodic retry is counted, so failed runs that change its inputs hold it after three retries.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    if (attempt?.qualifies !== true || due.retryOnly || !due.fingerprinted) {",
+    "new": "    if (attempt?.qualifies !== true || !due.fingerprinted) {"
+  },
+  {
+    "id": "D3158",
+    "defect": "A workspace whose current input fingerprint cannot be computed is counted, so runs that change its inputs hold it.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    if (attempt?.qualifies !== true || due.retryOnly || !due.fingerprinted) {",
+    "new": "    if (attempt?.qualifies !== true || due.retryOnly) {"
+  },
+  {
+    "id": "D3159",
+    "defect": "A run stored not fingerprinted for a cause that names no path counts toward a hold, as an invalidated run does.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    (report.notKept === undefined || labelsInvalidated(report.notKept))",
+    "new": "    true"
+  },
+  {
+    "id": "D3160",
+    "defect": "A run that stored nothing though no change interrupted it counts toward a hold.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    report.stored &&\n",
+    "new": ""
+  },
+  {
+    "id": "D3161",
+    "defect": "A run that never began leaves its mark as the workspace's last run begun, so the next count starts from a run that never ran.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "        if (before === undefined) this.#attempts.delete(path);\n        else this.#attempts.set(path, before);\n",
+    "new": ""
+  },
+  {
+    "id": "D3162",
+    "defect": "A placement that throws while counting puts every changed path inside the workspace's inputs, so uncertainty holds it.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "        error,\n      );\n      return undefined;",
+    "new": "        error,\n      );\n      return [...paths];"
+  },
+  {
+    "id": "D3163",
+    "defect": "A workspace for which exactly 1,000 distinct paths changed since its last run began reads as edited, though the bound is more than 1,000.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    if (this.#distinct <= MAX_COUNTED_CHANGES) return true;",
+    "new": "    if (this.#distinct < MAX_COUNTED_CHANGES) return true;"
+  },
+  {
+    "id": "D3164",
+    "defect": "A workspace for which more than 1,000 distinct paths changed since its last run began keeps counting instead of reading as edited.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "    if (this.#distinct <= MAX_COUNTED_CHANGES) return true;",
+    "new": "    if (this.#distinct > 0) return true;"
+  },
+  {
+    "id": "D3165",
+    "defect": "A workspace reads as edited only once more than 1,001 distinct paths changed since its last run began.",
+    "file": "packages/daemon/src/daemon/change-record.ts",
+    "old": "export const MAX_COUNTED_CHANGES = 1_000;",
+    "new": "export const MAX_COUNTED_CHANGES = 1_001;"
+  },
+  {
+    "id": "D3166",
+    "defect": "A run's report carries none of the paths its window recorded, so a workspace whose runs keep changing its inputs is never held.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      window: watch.window,",
+    "new": "      window: { ...watch.window, paths: new Set<string>() },"
+  },
+  {
+    "id": "D3167",
+    "defect": "The run begun at a count of 2 is interrupted by a change like any other run, so it leaves no results to mark.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "            : () => false,",
+    "new": "            : () => executor.abort(ABORT_PURPOSE.interruption),"
+  },
+  {
+    "id": "D3168",
+    "defect": "The log says nothing when a run begins that no change will interrupt.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    if (uninterruptible !== undefined) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D3169",
+    "defect": "A count rises on job-caused paths outside the workspace's inputs, so a workspace whose runs change only another workspace's inputs is held.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      [...changes.byJobs].filter(([changed]) => inside.has(changed)),",
+    "new": "      [...changes.byJobs],"
+  },
+  {
+    "id": "D3170",
+    "defect": "An edit anywhere releases a held workspace, though it lies outside that workspace's inputs.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "    return inside === undefined || inside.length > 0;",
+    "new": "    return inside === undefined || changes.edits.size > 0;"
+  },
+  {
+    "id": "D3171",
+    "defect": "A held workspace that the round's selection chose is logged as not run because it holds current results.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      const holdsCurrent = !dueNow.has(path) && !this.#runs.isHeld(path);",
+    "new": "      const holdsCurrent = !dueNow.has(path);"
+  },
+  {
+    "id": "D3172",
+    "defect": "A job's window never keeps the committed digests at its close, so every interval after a job reads as unreadable and no count ever rises.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "    if (open !== undefined) open.endDigests = digests;\n",
+    "new": ""
+  },
+  {
+    "id": "D3173",
+    "defect": "A job's window keeps digests the tracker cannot vouch for, so an edit measured from them can be missed.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    return unavailable === undefined\n      ? this.#state.project().digests\n      : undefined;",
+    "new": "    return this.#state.project().digests;"
+  },
+  {
+    "id": "D3180",
+    "defect": "A held workspace names only the jobs that changed its shared path in the latest counted time, dropping the jobs of earlier times.",
+    "file": "packages/daemon/src/daemon/run-history.ts",
+    "old": "      if (before !== undefined) shared.set(path, new Set([...before, ...jobs]));",
+    "new": "      if (before !== undefined) shared.set(path, new Set(jobs));"
+  },
+  {
+    "id": "D3181",
+    "defect": "The count places paths without the listed-test-module rule, so a workspace whose runs rewrite a listed test module its narrowed build places elsewhere is never held.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  const testModules = new Set(workspaceTestModules(entry));",
+    "new": "  const testModules = new Set<string>();"
+  },
+  {
+    "id": "D3182",
+    "defect": "The lifecycle's discovery report carries none of the paths its window recorded, so a discovery's own changes are never job-caused.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      stored,\n      window: mark.window,",
+    "new": "      stored,\n      window: { ...mark.window, paths: new Set<string>() },"
   }
 ]

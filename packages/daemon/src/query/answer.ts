@@ -327,9 +327,22 @@ export const IDLE_REASON = {
   retryPending: "retry-pending",
   noRunUntilInputChange: "no-run-until-input-change",
   roundHeld: "round-held",
+  selfChanging: "self-changing",
 } as const;
 
 export type IdleReason = (typeof IDLE_REASON)[keyof typeof IDLE_REASON];
+
+export type NotSelfChangingReason = Exclude<
+  IdleReason,
+  typeof IDLE_REASON.selfChanging
+>;
+
+/** A path the daemon's own runs and discoveries changed each time a held workspace became due. */
+export interface SelfChangedPath {
+  readonly path: string;
+  /** Each job it changed during: the run of a workspace, or the discovery, which names none. */
+  readonly jobs: NamedList<Pick<UnstoredJob, "workspacePath">>;
+}
 
 /** A reason a round's selection chose a workspace, with the broad fallback's scope when it was one. */
 export type ChoosingReason = Pick<SelectionReason, "path" | "trigger"> &
@@ -352,10 +365,18 @@ export type WorkspaceExecution = { readonly workspacePath: string } & (
   | {
       readonly state: typeof EXECUTION_STATE.idle;
       /** Present while no round is pending and the workspace is not current or is due a retry. */
-      readonly notRunning?: {
-        readonly why: IdleReason;
-        readonly due: DueFacts;
-      };
+      readonly notRunning?:
+        | {
+            readonly why: typeof IDLE_REASON.selfChanging;
+            readonly due: DueFacts;
+            /** The paths that changed each time it became due. */
+            readonly selfChanged: NamedList<SelfChangedPath>;
+          }
+        | {
+            readonly why: NotSelfChangingReason;
+            readonly due: DueFacts;
+            readonly selfChanged?: never;
+          };
     }
 );
 
