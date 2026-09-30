@@ -1,0 +1,9 @@
+{
+  "name": "edit-corpus",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

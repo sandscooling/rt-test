@@ -35,7 +35,7 @@ sprint-2: in-progress
 2-4-late-answers: done
 2-4d-read-named-paths: done
 2-4b-wait-for-files: done
-2-5-edit-corpus: ready-for-dev
+2-5-edit-corpus: review
 2-6-changes-query: ready-for-dev
 2-7-agent-hook: ready-for-dev
 2-7b-agent-edits-never-hold: ready-for-dev

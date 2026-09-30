@@ -1,0 +1,1 @@
+globalThis.corpusLocale = "en-US";

@@ -1,0 +1,13 @@
+{
+  "name": "@corpus/web",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/checkout.mjs"
+  },
+  "dependencies": {
+    "@corpus/backend": "workspace:*",
+    "@corpus/lib": "workspace:*",
+    "@corpus/ui": "workspace:*"
+  }
+}
