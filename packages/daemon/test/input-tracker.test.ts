@@ -4362,3 +4362,39 @@ describe("the committed digests a job's window keeps", () => {
     expect(digests).toBeUndefined();
   });
 });
+
+/** A watch that never reports and whose close throws, as closing a handle the system already released can. */
+function throwingCloseWatch(): FSWatcher {
+  return Object.assign(silentWatch(), {
+    close: () => {
+      throw new Error("the watch handle is gone");
+    },
+  });
+}
+
+describe("stopping the tracker", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
+  it("D3256: a stop whose watcher close throws still releases a wait on the tracker's change signal", async () => {
+    const outcome = await inTempDir(async (root) => {
+      writeTree(root, { "a.ts": UNCHANGED_TEXT });
+      vi.mocked(watch).mockImplementation((() =>
+        throwingCloseWatch()) as typeof watch);
+      try {
+        const tracker = new InputTracker({
+          consumerRoot: root,
+          exclusions: [join(root, STATE_DIRECTORY)],
+          log: memoryLog(),
+        });
+        tracker.start();
+        await tracker.firstReconciled();
+        const resolved = changeSignal(tracker);
+        const watchesOpened = vi.mocked(watch).mock.calls.length > 0;
+        await tracker.stop().catch(() => undefined);
+        await new Promise((resolve) => setImmediate(resolve));
+        return { watchesOpened, released: resolved() };
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(outcome).toStrictEqual({ watchesOpened: true, released: true });
+  });
+});

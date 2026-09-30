@@ -335,15 +335,19 @@ export class InputTracker implements TrackedInputs {
     }
   }
 
+  /** Releases every wait on the tracker even when closing its watches throws, so no job it holds outlives the stop. */
   async stop(): Promise<void> {
     if (this.#stopped) return;
     this.#stopped = true;
-    this.#schedule.clear();
-    this.#abort.abort();
-    this.#watcher.close();
-    this.#ledger.releaseAll();
-    this.#signalChange();
-    this.#markFirstReconciled();
+    try {
+      this.#schedule.clear();
+      this.#abort.abort();
+      this.#watcher.close();
+    } finally {
+      this.#ledger.releaseAll();
+      this.#signalChange();
+      this.#markFirstReconciled();
+    }
     await Promise.allSettled([this.#reconciliation, this.#processing]);
   }
 

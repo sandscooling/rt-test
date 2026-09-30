@@ -238,7 +238,7 @@ No production handler answers late until 2.4d, so the only way to observe a late
 
 Tests session: threadId 85803a7e-5c53-41f9-8424-d0d3f15ec912
 
-Id request: asked the orchestrator at 23:57 on 2026-09-29 for 2 ids past D3187 to D3216, for 32 named defects; the orchestrator allocated D3247 to D3249 at 23:57. For the review's four gaps, the orchestrator kept D3192 and D3249 with this lane and allocated D3254 to D3256 at 00:26 on 2026-09-30; D3256 is unused.
+Id request: asked the orchestrator at 23:57 on 2026-09-29 for 2 ids past D3187 to D3216, for 32 named defects; the orchestrator allocated D3247 to D3249 at 23:57. For the review's four gaps, the orchestrator kept D3192 and D3249 with this lane and allocated D3254 to D3256 at 00:26 on 2026-09-30; D3256 went to the tech-debt round's G5, re-allocated by the orchestrator at 01:00.
 
 #### Named Defects
 
@@ -277,6 +277,7 @@ Id request: asked the orchestrator at 23:57 on 2026-09-29 for 2 ids past D3187 t
 - D3249: The bound counts only requests whose work still runs, so a client that sends one late request and then any number answered at once makes the daemon hold every one of those answers without bound. (AC2, review gap G2)
 - D3254: A stop request on a connection holding 8 unanswered requests queues its acknowledgement first, which passes the bound and closes the connection, so neither the stopping errors nor the acknowledgement is written. (AC3, review gap G3)
 - D3255: A stop whose sequence fails never resolves stopped(), so the daemon never exits and keeps its lock. (review gap G4)
+- D3256: A tracker whose watcher close throws never releases the jobs waiting on it, so the daemon's stop waits on them forever and the daemon never exits. (review gap G5, in `input-tracker.test.ts` over a wait on the change signal)
 - Re-anchored, each keeping its defect: D1444, D1448, D1569 and D1838 to the queued `connection.reply` and `queryFailed`, and D1463 to `stop()`'s once-only `isStopping()` guard. The stand-in in `server.test.ts` gains the stop signal, which its `stop()` aborts as the lifecycle's does.
 
 #### Deliberately Untested
@@ -299,13 +300,13 @@ Review fixes on disk (rt-t2-4-review, 00:26 to 00:28):
 
 CR1 (orchestrator's ruling, 00:26 on 2026-09-30, agreeing with review): recorded as a known limit, not bounded. Only same-user local processes can connect, so the growth is self-inflicted with no product guarantee at stake, and a per-connection byte bound buys nothing without a connection cap whose value would constrain legitimate concurrent clients.
 
-Undisposed tech debt, for Step 9:
+Tech debt, worked at Step 9 against 074dc69 (dispositions agreed by the orchestrator at 01:00 on 2026-09-30; GitHub: 0 open issues):
 
-- `packages/daemon/src/inputs/input-tracker.ts` `stop()`: it closes the watcher and releases the ledger before it signals the change and marks the first reconciliation, so a throw from `#watcher.close()` leaves every job parked on the tracker waiting; the lifecycle's stop then waits on `#sequence` forever and the daemon never exits. Releasing the waits in a `finally` would fix it. Pre-existing, outside this lane's files.
-- `packages/daemon/src/daemon/lifecycle.ts` `begin()`: it does not refuse once a stop has begun; only `daemon-main.ts`'s `if (!lifecycle.isStopping())` guard keeps the tracker and scheduler from starting after the stop. Pre-existing.
-- `packages/daemon/test/server.test.ts`: `afterATurn` (805) and `afterQueuedCallbacks` (1156) are the same function, inlined again at 685 and 759; `scheduling-harness.ts` 497 and `unhandled-rejections.ts` hold more copies.
-- `packages/daemon/test/unhandled-rejections.ts`: it restores Vitest's listeners with `process.on`, so a listener registered with `once` would become permanent, and restored listeners land after any the body added.
-- Root `package.json` pins `@types/node` 22.20.4 while the runtime is Node 24.19.0; the installed types misstate the default `highWaterMark` (65,536 stated, 16,384 measured) and omit Node 24's timer warnings.
+- T1, fixed: `packages/daemon/src/inputs/input-tracker.ts` `stop()` closed the watcher before it released its waiters, so a throw from `#watcher.close()` left every job parked on the tracker, and the lifecycle's stop then waited on `#sequence` forever, the daemon never exiting. The schedule clear, the abort and the watcher close now run in a `try` whose `finally` releases the ledger, signals the change and marks the first reconciliation. Test owed: row G5.
+- T3, fixed by the tests session: `packages/daemon/test/server.test.ts` inlines one event-loop turn at 685 and 759, and `afterQueuedCallbacks` (1156) duplicates `afterATurn` (805). Row G6.
+- T2, no change: `lifecycle.ts` `begin()` has one caller, `daemon-main.ts`, which already guards it with `if (!lifecycle.isStopping())`, so a refusal inside `begin()` is unreachable (measured) and would be a second spelling of the same check.
+- T4, no change: Vitest registers its unhandled-rejection listener with `process.on` (its dist holds one `process.on("unhandledRejection", onUnhandledRejection`, no `once`), so `unhandled-rejections.ts` restores exactly what was registered.
+- T5, no change: the `@types/node` 22.20.4 pin is deliberate, since the engines floor is Node `^22.13.0` (root `package.json`) and the types match the lowest supported runtime. A runtime claim the types document is probed on the runtime, as this review's assumptions pass did.
 
 #### Test Coverage Gaps
 
@@ -315,6 +316,8 @@ Denominator: 32 named defects in the touched test files over the six criteria's 
 - G2 (MEDIUM, daemon-state; `packages/daemon/src/daemon/server.ts` `#queue`, AC2): "The bound counts only requests whose work still runs, so a client that sends one late request and then any number of requests answered at once makes the daemon hold every one of those answers without bound." Expected test in `server.test.ts`: one late summary, then `MAX_UNANSWERED_REQUESTS` statuses (9 unanswered, 8 of them computed), and the connection is closed with the late work's signal aborted. Mutation: `this.#turns.length > MAX_UNANSWERED_REQUESTS` to `this.#turns.filter((turn) => turn.message === undefined).length > MAX_UNANSWERED_REQUESTS`. D3190 and D3191 send only late requests, so neither catches it.
 - G3 (MEDIUM, consumer; `packages/daemon/src/daemon/server.ts` `answer`, AC3): "A stop request on a connection holding 8 unanswered requests queues its acknowledgement first, which passes the bound and closes the connection, so neither the stopping errors nor the acknowledgement is written." Expected test in `server.test.ts`: 8 late summaries pending on one connection, then a stop request, and the client reads 8 stopping errors and then the acknowledgement. Mutation: queue `connection.reply(stopAcknowledgement(...))` before `handlers.stop()`. This contradicts the third `#### Deliberately Untested` entry (the stop calling `handlers.stop()` before it queues its acknowledgement), whose reason holds only below the bound; remove that entry.
 - G4 (MEDIUM, daemon-state; `packages/daemon/src/daemon/lifecycle.ts` `stop()`): "A stop whose sequence fails never resolves `stopped()`, so the daemon never exits and keeps its lock." Expected test in `lifecycle.test.ts` with `FailingStopInputs`: set a flag in `void lifecycle.stopped().then(...)`, flush, and assert the flag, never awaiting `stopped()`. Mutation: resolve `#markStopped` only on success, e.g. `void this.#stopSequence().then(() => this.#markStopped()).catch(...)`. D3247's test awaits `stopped()`, so this mutation times it out rather than failing an assertion.
+- G5 (MEDIUM, daemon-state; `packages/daemon/src/inputs/input-tracker.ts` `stop()`, Step 9's T1, id D3256): "A tracker whose watcher close throws never releases the jobs waiting on it, so the daemon's stop waits on them forever and the daemon never exits." Expected test in `input-tracker.test.ts`: a job waiting on the tracker (a pending `settled()`, `endJob()` or `firstReconciled()`) resolves after a `stop()` whose watcher close throws. Mutation: take the three releases out of the `finally`, back after the watcher close, e.g. `    } finally {\n      this.#ledger.releaseAll();` to `      this.#ledger.releaseAll();` with the `try` removed; name the exact `old` and `new` in the record.
+- G6 (LOW, internal; `packages/daemon/test/server.test.ts`, Step 9's T3): not a defect but a duplication. Use `afterATurn` at 685 and 759 and in place of `afterQueuedCallbacks` (1156), deleting that function; re-prove each record whose test body changes.
 
 ### Completion Notes
 

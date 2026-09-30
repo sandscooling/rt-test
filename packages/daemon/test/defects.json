@@ -8475,5 +8475,12 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    void this.#stopSequence()\n      .catch((error: unknown) => {\n        this.#parts.log.error(\"the stop sequence failed\", error);\n      })\n      .finally(() => this.#markStopped());",
     "new": "    void this.#stopSequence()\n      .then(() => this.#markStopped())\n      .catch((error: unknown) => {\n        this.#parts.log.error(\"the stop sequence failed\", error);\n      });"
+  },
+  {
+    "id": "D3256",
+    "defect": "A tracker whose watcher close throws never releases the jobs waiting on it, so the daemon's stop waits on them forever and the daemon never exits.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    try {\n      this.#schedule.clear();\n      this.#abort.abort();\n      this.#watcher.close();\n    } finally {\n      this.#ledger.releaseAll();\n      this.#signalChange();\n      this.#markFirstReconciled();\n    }\n",
+    "new": "    this.#schedule.clear();\n    this.#abort.abort();\n    this.#watcher.close();\n    this.#ledger.releaseAll();\n    this.#signalChange();\n    this.#markFirstReconciled();\n"
   }
 ]

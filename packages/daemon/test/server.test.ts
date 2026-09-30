@@ -696,7 +696,7 @@ describe(
         stop.abort();
         const stopping = await within(connection.next(), RESPONSE_BOUND_MS);
         late.answer(0);
-        await new Promise((resolve) => setImmediate(resolve));
+        await afterATurn();
         connection.sendLine(STATUS);
         return [
           kindOf(stopping),
@@ -789,7 +789,7 @@ describe(
               RESPONSE_BOUND_MS,
             );
             workEnds.resolve();
-            await new Promise((resolve) => setImmediate(resolve));
+            await afterATurn();
           },
           {
             summary: (signal) => {
@@ -1185,11 +1185,6 @@ describe("proving each answer to a challenge", () => {
 });
 
 describe("the raw connection a test reads lines from", () => {
-  /** Resolves on the next turn of the event loop, once every callback already queued has run. */
-  function afterQueuedCallbacks(): Promise<void> {
-    return new Promise((resolve) => setImmediate(resolve));
-  }
-
   it("D2410: a connection an error closes reads as closed, rather than waiting on a line that cannot come", async () => {
     const connect = vi.spyOn(Socket.prototype, "connect");
     let read: unknown = "still waiting";
@@ -1214,7 +1209,7 @@ describe("the raw connection a test reads lines from", () => {
               }),
             );
             await closed;
-            await afterQueuedCallbacks();
+            await afterATurn();
           }),
       );
     } finally {
