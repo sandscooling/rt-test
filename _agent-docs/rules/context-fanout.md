@@ -7,8 +7,8 @@ Read this before a skill gathers context for a ticket, change request or review.
 With `scale.ctx_agents: off` and `scale.rule_selection: whole`, the defaults, **spawn no context agent.** Gather each dimension inline:
 
 - **Impact**: find the code the change touches and its callers with `rg`, and read the files.
-- **Docs**: read the relevant parts of `docs/` whole, the glossary (`glossary`), and the ADRs the change touches.
-- **Test infrastructure**: read the tests beside the changed code, their `defects.json`, and `docs/testing.md`.
+- **Docs**: read the relevant parts of `docs/` whole, the glossary (`glossary`), and the ADRs the change touches. For `docs/architecture.md` and `docs/testing.md`, read the `Section menu` and load the sections the change touches with `node scripts/doc-section.mjs`.
+- **Test infrastructure**: read the tests beside the changed code, their `defects.json`, and the `docs/testing.md` sections its `Section menu` names for the change.
 - **Rules**: read `_agent-docs/project-context.md` whole and the checklist shards the change touches, as `_agent-docs/code-review-checklist/_index.md` directs, and pick ids inline.
 
 ## When `scale.ctx_agents` is on: two waves

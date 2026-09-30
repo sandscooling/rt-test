@@ -34,8 +34,10 @@ or root tooling under test), optional `features`, and optional `target_files`.
 
 Issue independent reads and searches in parallel.
 
-- **The conventions**: read `docs/testing.md`, which states how named-defect tests are written, where each
-  `defects.json` lives, and what the defect sandbox copies.
+- **The conventions**: read `docs/testing.md`'s `Section menu`, then load, by passing each heading
+  to `node scripts/doc-section.mjs docs/testing.md`, the sections that state how named-defect
+  tests are written, where each `defects.json` lives, and what the defect sandbox copies, plus each subject
+  section naming the tests and harnesses of the subject's targets.
 - **Tests beside the targets**: for each target file, find the suites that import it
   (`rg -l "<module name>" test packages --glob "*.test.ts"`), and note the harness each uses.
 - **Shared harnesses and helpers**: the non-test modules under `test/` and each `packages/*/test/`

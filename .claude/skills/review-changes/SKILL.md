@@ -218,8 +218,9 @@ List omits is a discrepancy in the record every later gate reads.
 
 **In every mode, check the product docs yourself for lines this change made false**, since doc-verify reads only
 changed lines. When the diff changes user-visible behavior (the CLI, configuration, supported versions, what is
-implemented), read `README.md`, `docs/plan.md`, `docs/architecture.md` and `docs/roadmap.md` for what they say
-about it, touched or not. Each line now false is a doc discrepancy, and so is a README Status that claims what is
+implemented), read `README.md`, `docs/plan.md` and `docs/roadmap.md`, and the `docs/architecture.md` sections its
+`Section menu` names for that behavior (loaded with `node scripts/doc-section.mjs`), for what they say about it,
+touched or not. Each line now false is a doc discrepancy, and so is a README Status that claims what is
 not built or omits what now is.
 
 **Then run the checklist pass without waiting.** Read each file and review it against its rules in
