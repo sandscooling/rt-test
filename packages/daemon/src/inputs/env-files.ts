@@ -54,8 +54,8 @@ export type EnvFileDigest =
 
 /**
  * Every env file each of the project's sources names, named as its env directory is. None for a project whose sources
- * are not known, which is safe only because its workspace and discovery then have no fingerprint, so nothing that
- * protection or selection derives from the list can leave a result current.
+ * are not known, which is safe only because its workspace and discovery then have no fingerprint, so nothing derived
+ * from the list (protection, selection, run judgment, the watched listed files) can leave a result current.
  */
 export function projectEnvFiles(project: ProjectSelectionFacts): string[] {
   if (isNotKnown(project.envSources)) return [];

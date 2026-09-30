@@ -266,7 +266,7 @@ export class Scheduler {
     const view = this.#parts.view();
     if (view.inputs.facts.revision !== revision) return { kind: "again" };
     this.#noteRevision(revision);
-    this.#runs.observed(view.inputs.snapshot?.digests);
+    this.#runs.observed(view.inputs.snapshot?.comparedDigests);
     const eligible = this.#eligible(view);
     this.#armRetries(view, eligible, revision);
     if (this.#discoveryDue(revision, view)) {
@@ -427,7 +427,7 @@ export class Scheduler {
     due: readonly DueWorkspace[],
   ): RoundSelection {
     const { log, narrowing } = this.#parts;
-    const now = view.inputs.snapshot?.digests;
+    const now = view.inputs.snapshot?.comparedDigests;
     const before = this.#snapshot;
     if (now === undefined) {
       log.entry(NO_SNAPSHOT_ENTRY);

@@ -1,9 +1,6 @@
 import { lstatSync, type Stats } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
-import type {
-  TestDiscovery,
-  WorkspaceDiscovery,
-} from "../vitest/discover-tests.js";
+import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import { isRecord, isStringArray } from "../json-guards.js";
 import { CONFIG_FILE_NAME as TYPESCRIPT_CONFIG_NAME } from "../selection/source-walk.js";
 import { errorText } from "../vitest/error-text.js";
@@ -166,11 +163,6 @@ export function declaredNonInputs(
       ? undefined
       : pattern;
   };
-}
-
-/** Every test module the discovery lists, named by `testModuleFile`: each workspace's test, failed and typecheck modules. */
-export function discoveredTestModules(discovery: TestDiscovery): string[] {
-  return [...new Set(discovery.workspaces.flatMap(workspaceTestModules))];
 }
 
 /** The test modules the discovery lists for one workspace, named by `testModuleFile`. */

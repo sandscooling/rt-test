@@ -79,7 +79,8 @@ import {
   memoryLog,
   type MemoryLog,
 } from "./daemon-harness.js";
-import { inTempDir, settle } from "./harness.js";
+import { inTempDir, projectFacts, settle } from "./harness.js";
+import { onPlatform } from "./on-platform.js";
 import {
   builtAt,
   discoveredIn,
@@ -773,7 +774,7 @@ describe("the start sequence", () => {
 
   it("D1879: a discovery during which a listed test module a declared pattern kept unwatched may have changed is stored not fingerprinted, naming the module", async () => {
     const moduleChanged =
-      "packages/a/gen/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran";
+      "packages/a/gen/a.test.ts, which the discovery protects and the inputs leave out, may have changed while the job ran";
     const held: { daemon?: Daemon } = {};
     held.daemon = scripted({
       get moduleChanged() {
@@ -792,9 +793,9 @@ describe("the start sequence", () => {
     });
   });
 
-  it("D3030: a listed test module no watch covers, edited after protection's check and before the discovery's fingerprint is composed, leaves the discovery stored not fingerprinted, naming the module", async () => {
+  it("D3030: a listed test module the inputs leave out, edited after protection's check and before the discovery's fingerprint is composed, leaves the discovery stored not fingerprinted, naming the module", async () => {
     const moduleChanged =
-      "packages/a/gen/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran";
+      "packages/a/gen/a.test.ts, which the discovery protects and the inputs leave out, may have changed while the job ran";
     const held: { daemon?: Daemon } = {};
     held.daemon = scripted({
       // The edit lands once the discovery's protection has begun, after its own check of the module and before the fingerprint.
@@ -818,7 +819,7 @@ describe("the start sequence", () => {
     });
   });
 
-  it("D3100: both checks for a listed file no watch covers are measured from the discovery's start, so an edit during the job is caught however long before the fingerprint it landed", async () => {
+  it("D3100: both checks for a listed file the inputs leave out are measured from the discovery's start, so an edit during the job is caught however long before the fingerprint it landed", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       const inputs = new StandInInputs();
@@ -1468,7 +1469,7 @@ describe(
           return moduleChange.settled
             ? untilProtected(
                 held.daemon,
-                "src/a.test.ts, which the discovery protects and no watch covers, may have changed while the job ran",
+                "src/a.test.ts, which the discovery protects and the inputs leave out, may have changed while the job ran",
               )
             : undefined;
         },
@@ -3202,6 +3203,35 @@ const NOT_FINGERPRINTED = { kind: "not-fingerprinted" };
 const PLACEMENT_FAILED =
   "error: placing the paths that changed during the run of a, so every one counts inside its inputs";
 
+/** Workspace `path`, discovered with no test, whose one project lists `setupFiles`, root-relative. */
+function listingSetupOf(
+  path: string,
+  setupFiles: readonly string[],
+): WorkspaceDiscovery {
+  return {
+    ...discovered(path),
+    selectionFacts: {
+      reported: true,
+      projects: [projectFacts({ setupFiles })],
+    },
+  };
+}
+
+/** Workspace `path`, discovered with no test, whose one project loads env files from `envDirectory`, root-relative. */
+function listingEnvOf(path: string, envDirectory: string): WorkspaceDiscovery {
+  return {
+    ...discovered(path),
+    selectionFacts: {
+      reported: true,
+      projects: [
+        projectFacts({
+          envSources: [{ envDirectory, envPrefixes: ["VITE_"], mode: "test" }],
+        }),
+      ],
+    },
+  };
+}
+
 /** A daemon over workspace `a`, started from `root`, whose every dependency build narrows over `dependencies`. */
 function narrowedDaemon(
   root: string,
@@ -3829,6 +3859,34 @@ describe("placing a run's changed paths by each build it saw", () => {
     expect(judgment).toStrictEqual({ kind: "changed-inside", paths: [module] });
   });
 
+  it("D3245: a setup file the discovery lists for the workspace lies inside its inputs, though the build places it in another package", async () => {
+    const judgment = await watched(
+      { entry: listingSetupOf("a", [SETUP_ELSEWHERE]), builds: narrowedAt(1) },
+      (run) => {
+        run.windows.recordPath(SETUP_ELSEWHERE);
+        return judged(run.judgeAt(1, narrowedAt(1)));
+      },
+    );
+    expect(judgment).toStrictEqual({
+      kind: "changed-inside",
+      paths: [SETUP_ELSEWHERE],
+    });
+  });
+
+  it("D3246: an env file the discovery lists for the workspace lies inside its inputs, though the build places it in another package", async () => {
+    const judgment = await watched(
+      { entry: listingEnvOf("a", "b"), builds: narrowedAt(1) },
+      (run) => {
+        run.windows.recordPath(ENV_ELSEWHERE);
+        return judged(run.judgeAt(1, narrowedAt(1)));
+      },
+    );
+    expect(judgment).toStrictEqual({
+      kind: "changed-inside",
+      paths: [ENV_ELSEWHERE],
+    });
+  });
+
   it("D2868: a path inside the workspace's inputs that changed after the reason's naming cap still leaves the run not fingerprinted", async () => {
     const judgment = await watched({ builds: narrowedAt(1) }, (run) => {
       for (let index = 0; index < NAMED_PATHS; index += 1) {
@@ -3947,6 +4005,18 @@ describe("interrupting a run in progress", () => {
     expect(interrupts).toBe(1);
   });
 
+  it("D3250: a setup file the discovery lists for the workspace, changed while the run runs, interrupts it once a newer revision's build has ended, though that build places it in another package", async () => {
+    const interrupts = await watched(
+      { entry: listingSetupOf("a", [SETUP_ELSEWHERE]), builds: narrowedAt(1) },
+      async (run) => {
+        run.windows.recordPath(SETUP_ELSEWHERE);
+        await run.moveTo(2, narrowedAt(2));
+        return run.interrupts;
+      },
+    );
+    expect(interrupts).toBe(1);
+  });
+
   it("D2875: an interruption whose abort reached no job records no interruption", async () => {
     const outcome = await watched(
       { builds: narrowedAt(1), reaches: false },
@@ -3964,6 +4034,10 @@ describe("interrupting a run in progress", () => {
 const REWRITING_RUNS = 4;
 /** A test module of workspace `a` that lies in package `b`, so the narrowed build places it in `b` alone. */
 const LISTED_ELSEWHERE = "b/src/b.test.ts";
+/** A setup file of workspace `a`'s project that lies in package `b`, so the narrowed build places it in `b` alone. */
+const SETUP_ELSEWHERE = "b/src/setup.ts";
+/** An env file `a`'s project loads from package `b`, which selection places in `b` alone, since no import names it. */
+const ENV_ELSEWHERE = "b/.env.local";
 /** Flushes in which the daemon logs, builds and begins nothing, after which nothing more is coming until a job ends. */
 const QUIET_FLUSHES = 2;
 /** Flushes a daemon's runs may take before the test fails as never settling. */
@@ -4058,6 +4132,8 @@ interface Rewrites {
   readonly fingerprintMoves?: boolean;
   /** The test modules of `a` the discovery lists, relative to `a`; none when absent. */
   readonly modules?: readonly string[];
+  /** The env directory of `a`'s one project, root-relative; no project is reported when absent. */
+  readonly envDirectory?: string;
   /** A path each discovery changes while it runs; each input revision is then rediscovered. */
   readonly discoveryChanges?: string;
   /** Runs once the runs have ended, with the committed digests by path, which the test may edit. */
@@ -4110,7 +4186,11 @@ function rewritingDaemon<T>(
         }
         inputs.moveRevision();
       },
-      discovery(discoveredIn("a", rewrites.modules ?? [])),
+      discovery(
+        rewrites.envDirectory === undefined
+          ? discoveredIn("a", rewrites.modules ?? [])
+          : listingEnvOf("a", rewrites.envDirectory),
+      ),
       () => {
         if (discoveryChanges !== undefined) inputs.recordPath(discoveryChanges);
       },
@@ -4209,6 +4289,17 @@ describe(
       expect(runs).toBe(3);
     });
 
+    it("D3251: a workspace whose runs rewrite its listed env file is held, though the build places that file in another package", async () => {
+      const runs = await rewritingDaemon(
+        {
+          envDirectory: "b",
+          paths: (run) => (run <= REWRITING_RUNS ? [ENV_ELSEWHERE] : undefined),
+        },
+        async ({ executor }) => executor.runs.length,
+      );
+      expect(runs).toBe(3);
+    });
+
     it("D3182: a workspace whose inputs each discovery changes is held through the discoveries' own reports", async () => {
       const runs = await rewritingDaemon(
         {
@@ -4222,3 +4313,22 @@ describe(
     });
   },
 );
+
+describe("placing a listed file by the spelling on disk", () => {
+  it("D3262: with process.platform read as win32, an env file the discovery lists for the workspace, changed under another case of its name, lies inside its inputs though the build places it in another package", async () => {
+    const onDisk = "b/.ENV.local";
+    const judgment = await onPlatform("win32", () =>
+      watched(
+        { entry: listingEnvOf("a", "b"), builds: narrowedAt(1) },
+        (run) => {
+          run.windows.recordPath(onDisk);
+          return judged(run.judgeAt(1, narrowedAt(1)));
+        },
+      ),
+    );
+    expect(judgment).toStrictEqual({
+      kind: "changed-inside",
+      paths: [onDisk],
+    });
+  });
+});

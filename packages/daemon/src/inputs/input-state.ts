@@ -5,6 +5,7 @@ import {
   type InputRead,
   type InputReads,
 } from "./input-inventory.js";
+import type { ListedReads } from "./listed-files.js";
 
 /** Each daemon life counts its revisions from here. */
 const INITIAL_REVISION = 0;
@@ -18,6 +19,11 @@ const ROOT_RELATIVE_PATH = "";
 export class InputState {
   readonly #root: string;
   #inputs = new Map<string, InputRead>();
+  /** The listed files the inputs leave out, each as its last read saw it, by listed spelling. */
+  #listed = new Map<string, InputRead>();
+  /** Each listed file read, present or not, since it became listed, so a later read of it can differ from that one. */
+  #listedRead = new Set<string>();
+  #listedEverEstablished = false;
   #directories = new Set<string>();
   #everEstablished = false;
   #established = false;
@@ -80,10 +86,54 @@ export class InputState {
    * whether a write may have landed since the last read, which only a read seeing all of it unmoved can rule out.
    */
   set(path: string, read: InputRead): boolean {
-    const held = this.#inputs.get(path);
-    this.#inputs.set(path, read);
-    if (held?.digest !== read.digest) this.#changed = true;
-    return held === undefined || !restedSince(held, read);
+    return this.#record(this.#inputs, path, read);
+  }
+
+  /** Records a read of the listed file at `path`, which the inputs leave out, as `set` records an input's. */
+  holdListed(path: string, read: InputRead): boolean {
+    this.#listedRead.add(path);
+    return this.#record(this.#listed, path, read);
+  }
+
+  /** Records that the listed file at `path` holds nothing to read; returns whether a read of it was held. */
+  dropListed(path: string): boolean {
+    this.#listedRead.add(path);
+    if (!this.#listed.delete(path)) return false;
+    this.#changed = true;
+    return true;
+  }
+
+  /** Drops the held read of each file `listed` no longer names, which moves the revision but is no change a job made. */
+  keepListed(listed: ReadonlySet<string>): void {
+    for (const path of this.#listed.keys()) {
+      if (!listed.has(path)) this.dropListed(path);
+    }
+    for (const path of this.#listedRead) {
+      if (!listed.has(path)) this.#listedRead.delete(path);
+    }
+  }
+
+  /**
+   * Replaces the held reads of the listed files with a reconciliation's, as `establish` replaces the inputs, and moves
+   * the revision when any differs. Returns the paths whose digest changed among those read before under the listing,
+   * since a file that became listed or stopped being listed is no change a job made; the first one changes nothing.
+   */
+  establishListed(
+    { files, reads }: ListedReads,
+    unread: ReadonlySet<string>,
+  ): string[] {
+    const moved = this.#listedEverEstablished
+      ? changedPaths(this.#listed, reads)
+      : [];
+    const changed = moved.filter(
+      (path) => files.has(path) && this.#listedRead.has(path),
+    );
+    this.#listed = keptReads(this.#listed, reads, (path) => unread.has(path));
+    this.#listedRead = new Set(files);
+    this.#listedEverEstablished = true;
+    this.#project = undefined;
+    if (moved.length > 0) this.#changed = true;
+    return changed;
   }
 
   /** Removes the input at `path`, or every input and directory at or under it; returns the inputs removed. */
@@ -132,13 +182,26 @@ export class InputState {
     this.#project = undefined;
   }
 
-  /** The committed inputs, whose digest is computed once per revision. */
+  /** The committed inputs, whose digest is computed once per revision, with the held reads of the listed files. */
   project(): ProjectInputs {
     this.#project ??= new ProjectInputs(
       this.#root,
-      new Map([...this.#inputs].map(([path, read]) => [path, read.digest])),
+      digestsOf(this.#inputs),
+      digestsOf(this.#listed),
     );
     return this.#project;
+  }
+
+  /** Marks a change when the digest differs; returns whether a write may have landed since the last read. */
+  #record(
+    reads: Map<string, InputRead>,
+    path: string,
+    read: InputRead,
+  ): boolean {
+    const held = reads.get(path);
+    reads.set(path, read);
+    if (held?.digest !== read.digest) this.#changed = true;
+    return held === undefined || !restedSince(held, read);
   }
 
   #removeDirectoriesInside(absolutePath: string): void {
@@ -147,6 +210,10 @@ export class InputState {
         this.#directories.delete(directory);
     }
   }
+}
+
+function digestsOf(reads: InputReads): Map<string, string> {
+  return new Map([...reads].map(([path, read]) => [path, read.digest]));
 }
 
 function liesUnder(input: string, path: string): boolean {

@@ -11,6 +11,13 @@ import {
 import type { JobWindows } from "./input-jobs.js";
 import type { InputState } from "./input-state.js";
 import type { InputWatcher } from "./input-watcher.js";
+import {
+  readListedFile,
+  readListedFiles,
+  type ListedFile,
+  type ListedFiles,
+  type ListedReads,
+} from "./listed-files.js";
 
 export const RENAME_EVENT = "rename";
 
@@ -22,6 +29,7 @@ interface QueuedReadsParts {
   readonly watcher: InputWatcher;
   readonly git: GitFiles;
   readonly jobs: JobWindows;
+  readonly listed: ListedFiles;
   readonly abort: AbortController;
   /** Absolute paths queued only because protection changed whether they count, whose read marks no job. */
   readonly quiet: Set<string>;
@@ -30,13 +38,17 @@ interface QueuedReadsParts {
   readonly retryLostInputSet: () => void;
 }
 
-/** Reads the paths events named between reconciliations into the input state, marking each job a change can affect. */
+/**
+ * Reads the paths events named between reconciliations into the input state, marking each job a change can affect,
+ * and the listed files the inputs leave out into the reads it holds apart from them.
+ */
 export class QueuedReads {
   readonly #root: string;
   readonly #state: InputState;
   readonly #watcher: InputWatcher;
   readonly #git: GitFiles;
   readonly #jobs: JobWindows;
+  readonly #listed: ListedFiles;
   readonly #abort: AbortController;
   readonly #quiet: Set<string>;
   readonly #scope: (filter: InputFilter) => InventoryScope;
@@ -49,6 +61,7 @@ export class QueuedReads {
     this.#watcher = parts.watcher;
     this.#git = parts.git;
     this.#jobs = parts.jobs;
+    this.#listed = parts.listed;
     this.#abort = parts.abort;
     this.#quiet = parts.quiet;
     this.#scope = parts.scope;
@@ -71,17 +84,71 @@ export class QueuedReads {
     }
     const unknown = batch
       .map(([path]) => path)
-      .filter((path) => !this.#isKnown(path) && filter.needsCheck(path));
+      .filter(
+        (path) =>
+          !this.#isKnown(path) &&
+          !filter.excludes(path) &&
+          filter.needsCheck(path),
+      );
     if (unknown.length > 0) {
       await filter.check(unknown, this.#abort.signal);
       this.#git.report(filter);
     }
     for (const [path, kind] of batch) {
-      if (filter.excludes(path)) {
-        this.#quiet.delete(path);
-        continue;
-      }
-      await this.#readPath(filter, path, kind);
+      const quiet = this.#quiet.has(path);
+      if (filter.excludes(path)) this.#quiet.delete(path);
+      else await this.#readPath(filter, path, kind);
+      await this.#readListed(filter, path, quiet);
+    }
+  }
+
+  /**
+   * Watches the files the discovery now in effect lists and drops each held read no longer listed; returns the newly
+   * listed files the filter excludes, root-relative, to read quietly. Before an input set is established, the
+   * reconciliation that establishes one watches and reads them all.
+   */
+  relist(
+    added: readonly ListedFile[] | undefined,
+    filter: InputFilter | undefined,
+  ): string[] {
+    if (added === undefined) return [];
+    if (filter === undefined || !this.#state.established) return [];
+    this.#watcher.watchListedFiles(this.#listed.paths);
+    const excluded = this.#listed.excluded(filter);
+    this.#state.keepListed(new Set(excluded.map((file) => file.spelling)));
+    return added
+      .filter((file) => filter.excludes(file.path))
+      .map((file) => file.spelling);
+  }
+
+  /** A reconciliation's reads of the listed files `filter` excludes, taken again when a discovery relists them meanwhile. */
+  async readAllListed(filter: InputFilter): Promise<ListedReads> {
+    for (;;) {
+      const version = this.#listed.version;
+      this.#watcher.watchListedFiles(this.#listed.paths);
+      const files = this.#listed.excluded(filter);
+      const reads = await readListedFiles(files, this.#abort.signal);
+      if (version === this.#listed.version) return reads;
+    }
+  }
+
+  /**
+   * Reads each listed file at or under `path` that the filter excludes into the held reads, since no walk of an input
+   * directory reaches it. Unless `quiet`, marks each job a changed read, or a write it may have missed, can affect.
+   */
+  async #readListed(
+    filter: InputFilter,
+    path: string,
+    quiet: boolean,
+  ): Promise<void> {
+    for (const file of this.#listed.under(path, filter)) {
+      const read = await readListedFile(file, this.#abort.signal);
+      if (!this.#listed.lists(file.path)) continue;
+      const changed =
+        read === undefined
+          ? this.#state.dropListed(file.spelling)
+          : this.#state.holdListed(file.spelling, read);
+      if (changed && !quiet) this.#jobs.recordPath(file.spelling);
     }
   }
 

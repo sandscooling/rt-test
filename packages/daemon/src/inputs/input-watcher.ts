@@ -1,6 +1,7 @@
 import {
   existsSync,
   realpathSync,
+  statSync,
   watch,
   type FSWatcher,
   type WatchEventType,
@@ -9,11 +10,13 @@ import { basename, dirname, join } from "node:path";
 import { WINDOWS } from "../daemon/endpoint.js";
 import { errorText } from "../vitest/error-text.js";
 import { liesInside } from "../vitest/find-workspaces.js";
+import { directoriesAbove } from "./listed-files.js";
 
 const MISSING_CODE = "ENOENT";
 const RENAME_EVENT = "rename";
 const LOST_EVENTS_REASON =
   "the file watcher reported that it lost events, so changes it did not name may have been missed";
+const VANISHED_TWICE_REASON = "it vanished twice while its watch was opening";
 
 export interface WatchListener {
   /** An event named `path`, an absolute path under the root, which may have been added, changed or removed. */
@@ -28,6 +31,11 @@ export interface WatchListener {
   readonly failed: (reason: string) => void;
   /** A watch of the root's tree could not be opened: the watcher is unhealthy until a reconciliation opens every watch. */
   readonly cannotWatch: (reason: string) => void;
+  /**
+   * A listed file's watch could not be opened, reported once per directory: the watcher stays healthy, since every
+   * fingerprint reads such a file afresh, and its change waits for the next reconciliation.
+   */
+  readonly cannotWatchListed: (reason: string) => void;
 }
 
 /**
@@ -42,6 +50,15 @@ export class InputWatcher {
   readonly #recursive = process.platform === WINDOWS;
   readonly #tree = new Map<string, FSWatcher>();
   #git: FSWatcher[] = [];
+  #listed: FSWatcher[] = [];
+  /** Every listed file under the root, inputs included, by absolute path; those the tree does not cover are watched apart. */
+  #listedFiles: readonly string[] = [];
+  /** Each directory on the way from the root to a listed file, whose change re-arms the listed watches. */
+  #listedWays: ReadonlySet<string> = new Set();
+  /** Directories whose listed watch could not open, each reported once. */
+  readonly #listedUnopened = new Set<string>();
+  /** Whether a closed tree watch covered a directory on the way to a listed file since the listed watches were armed. */
+  #listedOwed = false;
   readonly #live = new Set<FSWatcher>();
   /** Directories whose watch could not open since the last `clearFailures`, so each is tried once a round. */
   readonly #unopened = new Set<string>();
@@ -77,7 +94,9 @@ export class InputWatcher {
           this.#fail(LOST_EVENTS_REASON);
           return;
         }
-        this.#listener.changed(join(watched, name), kind);
+        const path = join(watched, name);
+        if (this.#listedWays.has(path)) this.#armListed();
+        this.#listener.changed(path, kind);
         // inotify reports a watched directory's own removal under its own name, so the directory itself is re-read;
         // a child of the same name is told apart by still existing.
         if (
@@ -99,6 +118,7 @@ export class InputWatcher {
     for (const [directory, watcher] of this.#tree) {
       if (!directories.has(directory)) this.#closeTree(directory, watcher);
     }
+    this.#armListedIfOwed();
   }
 
   /** Closes the watch of `directory` and of every directory under it, on Linux, once it no longer holds inputs. */
@@ -107,6 +127,7 @@ export class InputWatcher {
     for (const [watched, watcher] of this.#tree) {
       if (liesInside(directory, watched)) this.#closeTree(watched, watcher);
     }
+    this.#armListedIfOwed();
   }
 
   /**
@@ -137,12 +158,111 @@ export class InputWatcher {
     return unopened;
   }
 
+  /**
+   * Replaces the listed files watched on Linux, `files` being absolute paths under the root; the recursive watch
+   * covers them on Windows.
+   */
+  watchListedFiles(files: readonly string[]): void {
+    if (this.#recursive) return;
+    this.#listedFiles = files;
+    this.#listedWays = directoriesAbove(this.#root, files);
+    this.#armListed();
+  }
+
   close(): void {
     this.#closed = true;
     for (const [directory, watcher] of this.#tree) {
       this.#closeTree(directory, watcher);
     }
     this.#closeGit();
+    this.#closeListed();
+  }
+
+  /**
+   * Watches every existing directory on the way to each listed file that the tree does not watch, up to the first one
+   * it does, each filtered to the entries leading to a listed file, so replacing or renaming any of them is seen. The
+   * new watches open before the old ones close, so no moment goes unwatched. A directory that vanished before its watch
+   * opened is looked for again once, then logged as unwatched.
+   */
+  #armListed(retry = true): void {
+    this.#listedOwed = false;
+    const replaced = this.#listed;
+    this.#listed = [];
+    this.#armListedWatches(retry);
+    for (const watcher of replaced) this.#stop(watcher);
+  }
+
+  #armListedWatches(retry: boolean): void {
+    if (this.#closed || this.#listedFiles.length === 0) return;
+    const covered = (directory: string): boolean => this.#tree.has(directory);
+    const vanished: string[] = [];
+    const watched = listedDirectories(this.#root, this.#listedFiles, covered);
+    for (const [directory, names] of watched) {
+      let refused = false;
+      const opened = this.#open(
+        directory,
+        false,
+        (kind, name) => this.#listedEvent(directory, names, kind, name),
+        (reason) => {
+          refused = true;
+          this.#cannotWatchListed(directory, reason);
+        },
+      );
+      if (opened !== undefined) this.#listed.push(opened);
+      else if (!refused) vanished.push(directory);
+    }
+    if (vanished.length === 0) return;
+    if (retry) this.#armListed(false);
+    else for (const directory of vanished) this.#vanishedTwice(directory);
+  }
+
+  #vanishedTwice(directory: string): void {
+    this.#cannotWatchListed(
+      directory,
+      `cannot watch ${directory}: ${VANISHED_TWICE_REASON}`,
+    );
+  }
+
+  #closeListed(): void {
+    for (const watcher of this.#listed) this.#stop(watcher);
+    this.#listed = [];
+  }
+
+  /**
+   * An entry on the way to a listed file re-arms before it is reported. So does an entry named as the watched directory,
+   * which may be its own removal or replacement, reported under its own name, and is then reported as the directory.
+   */
+  #listedEvent(
+    directory: string,
+    names: ReadonlySet<string>,
+    kind: WatchEventType,
+    name: string | null,
+  ): void {
+    if (name === null) {
+      this.#fail(LOST_EVENTS_REASON);
+      return;
+    }
+    if (name === basename(directory)) {
+      this.#armListed();
+      this.#listener.changed(directory, RENAME_EVENT);
+    }
+    if (!names.has(name)) return;
+    const path = join(directory, name);
+    if (this.#listedWays.has(path)) this.#armListed();
+    this.#listener.changed(path, kind);
+  }
+
+  /** Re-arms once after a batch of tree watches closed, when one covered a directory on the way to a listed file. */
+  #armListedIfOwed(): void {
+    if (!this.#listedOwed) return;
+    this.#listedOwed = false;
+    this.#armListed();
+  }
+
+  #cannotWatchListed(directory: string, reason: string): void {
+    if (this.#listedUnopened.has(directory)) return;
+    this.#listedUnopened.add(directory);
+    this.#listener.cannotWatchListed(reason);
   }
 
   /** A path that vanished before its watch opened is a deletion its parent reports, never a failure. */
@@ -172,6 +292,7 @@ export class InputWatcher {
       if (!this.#isCurrent(watcher)) return;
       this.#stop(watcher);
       this.#git = this.#git.filter((kept) => kept !== watcher);
+      this.#listed = this.#listed.filter((kept) => kept !== watcher);
       if (this.#tree.get(directory) === watcher) this.#tree.delete(directory);
       this.#fail(`the watch of ${directory} failed: ${errorText(error)}`);
     });
@@ -194,9 +315,11 @@ export class InputWatcher {
     watcher.close();
   }
 
+  /** A listed file whose directory the closed watch covered needs a listed watch of its own. */
   #closeTree(directory: string, watcher: FSWatcher): void {
     this.#stop(watcher);
     this.#tree.delete(directory);
+    if (this.#listedWays.has(directory)) this.#listedOwed = true;
   }
 
   #closeGit(): void {
@@ -222,9 +345,53 @@ function nearestDirectories(
       entry = directory;
       directory = dirname(directory);
     }
-    const names = directories.get(directory) ?? new Set<string>();
-    names.add(basename(entry));
-    directories.set(directory, names);
+    addEntry(directories, directory, entry);
   }
   return directories;
+}
+
+/**
+ * Each existing directory from each file's up to the first `covered` or the root, with the names of the entries under
+ * it that lead to the files. One already met stops the climb, since everything above it was met with it.
+ */
+function listedDirectories(
+  root: string,
+  files: readonly string[],
+  covered: (directory: string) => boolean,
+): Map<string, Set<string>> {
+  const directories = new Map<string, Set<string>>();
+  for (const file of files) {
+    let entry = file;
+    let directory = dirname(file);
+    while (!covered(directory) && liesInside(root, directory)) {
+      if (isDirectory(directory)) {
+        const met = directories.has(directory);
+        addEntry(directories, directory, entry);
+        if (met) break;
+      }
+      if (directory === root) break;
+      entry = directory;
+      directory = dirname(directory);
+    }
+  }
+  return directories;
+}
+
+function addEntry(
+  directories: Map<string, Set<string>>,
+  directory: string,
+  entry: string,
+): void {
+  const names = directories.get(directory) ?? new Set<string>();
+  names.add(basename(entry));
+  directories.set(directory, names);
+}
+
+/** A path that cannot be read is no directory to watch, so its parent is watched for it. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+  } catch {
+    return false;
+  }
 }

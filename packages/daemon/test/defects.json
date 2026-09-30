@@ -2878,7 +2878,7 @@
   },
   {
     "id": "D1879",
-    "defect": "A discovery is stored under its digest although a file it protects by path, which no watch covers, may have changed while it ran.",
+    "defect": "A discovery is stored under its digest although a file it protects by path, which the inputs leave out, may have changed while it ran.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    const changed = unwatched ?? released;\n",
     "new": "    const changed = released;\n"
@@ -2997,7 +2997,7 @@
   },
   {
     "id": "D1898",
-    "defect": "A listed test module no watch covers is never checked for an edit during a job, so a discovery that read it mid-edit is stored under its digest.",
+    "defect": "A listed test module the inputs leave out is never checked for an edit during a job, so a discovery that read it mid-edit is stored under its digest.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
     "old": "    if (watched(path)) continue;\n    const modified",
     "new": "    continue;\n    const modified"
@@ -3076,8 +3076,8 @@
     "id": "D1909",
     "defect": "A watch event reporting lost events is ignored, so the watcher stays healthy and no reconciliation looks for the changes it missed.",
     "file": "packages/daemon/src/inputs/input-watcher.ts",
-    "old": "        if (name === null) {\n          this.#fail(LOST_EVENTS_REASON);\n          return;\n        }\n        this.#listener.changed(join(watched, name), kind);",
-    "new": "        if (name === null) {\n          return;\n        }\n        this.#listener.changed(join(watched, name), kind);"
+    "old": "        if (name === null) {\n          this.#fail(LOST_EVENTS_REASON);\n          return;\n        }\n        const path = join(watched, name);",
+    "new": "        if (name === null) {\n          return;\n        }\n        const path = join(watched, name);"
   },
   {
     "id": "D1910",
@@ -3265,8 +3265,8 @@
     "id": "D1951",
     "defect": "A git file whose directory does not exist yet is watched for its own name in the nearest directory, so creating its directory is never matched and runs no reconciliation.",
     "file": "packages/daemon/src/inputs/input-watcher.ts",
-    "old": "    names.add(basename(entry));",
-    "new": "    names.add(basename(file));"
+    "old": "    }\n    addEntry(directories, directory, entry);\n  }",
+    "new": "    }\n    addEntry(directories, directory, file);\n  }"
   },
   {
     "id": "D1952",
@@ -3333,7 +3333,7 @@
   },
   {
     "id": "D1988",
-    "defect": "The check for test modules no watch covered runs after protection has moved them into the inputs, so a declared module edited during the discovery's job is skipped and the discovery is stored under a digest.",
+    "defect": "The check for test modules the inputs left out runs after protection has moved them into the inputs, so a declared module edited during the discovery's job is skipped and the discovery is stored under a digest.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    const released = await inputs.protectInputs(discovery, startedAt);\n",
     "new": "    const guard = inputs.beginJob();\n    const released = await inputs.protectInputs(discovery, startedAt);\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n"
@@ -4162,7 +4162,7 @@
     "defect": "The time check before protection covers only listed test modules, so a setup file a pattern hid, edited during the discovery's job, leaves the discovery stored under its digest.",
     "file": "packages/daemon/src/inputs/fingerprint.ts",
     "old": "  for (const path of protectedFiles(discovery)) {",
-    "new": "  for (const path of discoveredTestModules(discovery)) {"
+    "new": "  for (const path of discovery.workspaces\n    .map(workspaceListing)\n    .flatMap((listing) => listing.testModules)) {"
   },
   {
     "id": "D2162",
@@ -6198,8 +6198,8 @@
     "id": "D2867",
     "defect": "A changed test module the discovery lists for the workspace lies outside its inputs whenever selection does not include it, so a run during which one of its own test files changed can be stored under its fingerprint.",
     "file": "packages/daemon/src/daemon/run-judgment.ts",
-    "old": "  const modules = paths.filter((path) => testModules.has(path));",
-    "new": "  const modules = paths.filter(() => false);"
+    "old": "  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));",
+    "new": "  const listed = paths.filter(() => false);"
   },
   {
     "id": "D2868",
@@ -6352,8 +6352,8 @@
     "id": "D2894",
     "defect": "An event naming an ignored file that came and went before its read is recorded as a changed path, so a test that writes and removes temp files under a gitignored folder in its workspace invalidates every run.",
     "file": "packages/daemon/src/inputs/queued-reads.ts",
-    "old": "      if (filter.excludes(path)) {",
-    "new": "      if (false) {"
+    "old": "      if (filter.excludes(path)) this.#quiet.delete(path);",
+    "new": "      if (false) this.#quiet.delete(path);"
   },
   {
     "id": "D2903",
@@ -7302,7 +7302,7 @@
   },
   {
     "id": "D3030",
-    "defect": "A discovery is stored bound to its fingerprint although a listed file no watch covers was edited after protection's check and before the fingerprint was composed, so it reads current under content it never collected.",
+    "defect": "A discovery is stored bound to its fingerprint although a listed file the inputs leave out was edited after protection's check and before the fingerprint was composed, so it reads current under content it never collected.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "        return moved === undefined ? print : { ok: false, reason: moved };",
     "new": "        return print;"
@@ -7611,9 +7611,9 @@
   {
     "id": "D3067",
     "defect": "The discovery's env files are those of its first workspace alone, so an edit to another workspace's env file leaves the discovery current.",
-    "file": "packages/daemon/src/inputs/env-files.ts",
-    "old": "  for (const entry of discovery.workspaces) {",
-    "new": "  for (const entry of discovery.workspaces.slice(0, 1)) {"
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      envFiles: listings.flatMap((listing) => listing.envFiles),",
+    "new": "      envFiles: listings.slice(0, 1).flatMap((listing) => listing.envFiles),"
   },
   {
     "id": "D3068",
@@ -7639,9 +7639,9 @@
   {
     "id": "D3071",
     "defect": "A workspace's env files are those of its first project alone, so an edit to an env file only another project names leaves the workspace current.",
-    "file": "packages/daemon/src/inputs/env-files.ts",
-    "old": "    files: [...new Set(entry.selectionFacts.projects.flatMap(projectEnvFiles))],",
-    "new": "    files: [...new Set(entry.selectionFacts.projects.slice(0, 1).flatMap(projectEnvFiles))],"
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    envFiles: unique(projects.flatMap(projectEnvFiles)),",
+    "new": "    envFiles: unique(projects.slice(0, 1).flatMap(projectEnvFiles)),"
   },
   {
     "id": "D3072",
@@ -7710,8 +7710,8 @@
     "id": "D3081",
     "defect": "Protection names no env file, so a declared rt-test.json pattern covering an env directory removes its env files from the inputs, and an edit to one no longer raises the input revision.",
     "file": "packages/daemon/src/inputs/protection.ts",
-    "old": "    for (const file of projectEnvFiles(project)) files.add(file);\n",
-    "new": ""
+    "old": "    discovery.workspaces.flatMap(workspaceListing).flatMap(listedPaths),",
+    "new": "    discovery.workspaces\n      .flatMap(workspaceListing)\n      .flatMap((listing) => [...listing.testModules, ...listing.setupFiles]),"
   },
   {
     "id": "D3082",
@@ -8200,8 +8200,8 @@
     "id": "D3173",
     "defect": "A job's window keeps digests the tracker cannot vouch for, so an edit measured from them can be missed.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    return unavailable === undefined\n      ? this.#state.project().digests\n      : undefined;",
-    "new": "    return this.#state.project().digests;"
+    "old": "    return this.#jobs.open(view.unavailable, view.snapshot?.comparedDigests);",
+    "new": "    return this.#jobs.open(\n      view.unavailable,\n      this.#state.project().comparedDigests,\n    );"
   },
   {
     "id": "D3180",
@@ -8214,8 +8214,8 @@
     "id": "D3181",
     "defect": "The count places paths without the listed-test-module rule, so a workspace whose runs rewrite a listed test module its narrowed build places elsewhere is never held.",
     "file": "packages/daemon/src/daemon/run-judgment.ts",
-    "old": "  const testModules = new Set(workspaceTestModules(entry));",
-    "new": "  const testModules = new Set<string>();"
+    "old": "  return placeFor(paths, entry.workspace.path, workspaceListedFiles(entry), [",
+    "new": "  return placeFor(paths, entry.workspace.path, new Set<string>(), ["
   },
   {
     "id": "D3182",
@@ -8223,6 +8223,244 @@
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "      stored,\n      window: mark.window,",
     "new": "      stored,\n      window: { ...mark.window, paths: new Set<string>() },"
+  },
+  {
+    "id": "D3217",
+    "defect": "An event naming a listed file the filter excludes is dropped, as an excluded path's is, so an edit to a setup file git ignores moves no revision until the next reconciliation.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      if (this.#listed.names(path)) this.#queuePath(path, kind);",
+    "new": "      if (this.#listed.names(path)) return;"
+  },
+  {
+    "id": "D3218",
+    "defect": "Linux opens no watch for a listed file the inputs leave out, so an edit inside a directory git ignores raises no event.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "  watchListedFiles(files: readonly string[]): void {\n    if (this.#recursive) return;",
+    "new": "  watchListedFiles(files: readonly string[]): void {\n    return;"
+  },
+  {
+    "id": "D3219",
+    "defect": "A changed read of a listed file the inputs leave out marks no running job, so a job during which such a file was replaced keeping its modification time is fingerprinted.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      if (changed && !quiet) this.#jobs.recordPath(file.spelling);",
+    "new": "      if (changed && quiet) this.#jobs.recordPath(file.spelling);"
+  },
+  {
+    "id": "D3220",
+    "defect": "Deleting a listed file the tracker held a read of marks no running job, so the job is fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    this.#changed = true;\n    return true;",
+    "new": "    this.#changed = true;\n    return false;"
+  },
+  {
+    "id": "D3221",
+    "defect": "Deleting a listed file the inputs leave out drops its held read without moving the input revision, so its rerun waits for the next reconciliation.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    this.#changed = true;\n    return true;",
+    "new": "    return true;"
+  },
+  {
+    "id": "D3222",
+    "defect": "Only an excluded event path reads the listed files under it, so a listed file git ignores under a replaced input directory is never read.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      if (filter.excludes(path)) this.#quiet.delete(path);\n      else await this.#readPath(filter, path, kind);\n      await this.#readListed(filter, path, quiet);",
+    "new": "      if (!filter.excludes(path)) {\n        await this.#readPath(filter, path, kind);\n        continue;\n      }\n      this.#quiet.delete(path);\n      await this.#readListed(filter, path, quiet);"
+  },
+  {
+    "id": "D3223",
+    "defect": "A reconciliation that finds a listed file's digest changed leaves the input revision where it was.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    if (moved.length > 0) this.#changed = true;\n    return changed;",
+    "new": "    return changed;"
+  },
+  {
+    "id": "D3224",
+    "defect": "A reconciliation records the listed files it finds changed in no running job's window, so the job is fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "        ...this.#state.establishListed(listed, unread),",
+    "new": "        ...(this.#state.establishListed(listed, unread), []),"
+  },
+  {
+    "id": "D3225",
+    "defect": "The first reconciliation counts every listed file it reads as changed, so a start with a stored discovery listing a file git ignores raises the input revision.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    const moved = this.#listedEverEstablished\n      ? changedPaths(this.#listed, reads)\n      : [];",
+    "new": "    const moved = changedPaths(this.#listed, reads);"
+  },
+  {
+    "id": "D3226",
+    "defect": "A file a new discovery comes to list is not read until the next reconciliation, so the input revision does not move.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      .filter((file) => filter.excludes(file.path))\n      .map((file) => file.spelling);",
+    "new": "      .filter(() => false)\n      .map((file) => file.spelling);"
+  },
+  {
+    "id": "D3227",
+    "defect": "The read of a file a new discovery comes to list marks the running job, so the change of listing reads as one the job made.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      const quiet = this.#quiet.has(path);",
+    "new": "      const quiet = false;"
+  },
+  {
+    "id": "D3228",
+    "defect": "A reconciliation counts a file that became listed while it read the listed files as changed by the running job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "      (path) => files.has(path) && this.#listedRead.has(path),",
+    "new": "      (path) => files.has(path),"
+  },
+  {
+    "id": "D3229",
+    "defect": "A file a new discovery stops listing keeps its held read, so the input revision does not move.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "      if (!listed.has(path)) this.dropListed(path);",
+    "new": "      if (!listed.has(path)) continue;"
+  },
+  {
+    "id": "D3230",
+    "defect": "A read finding nothing at a listed file never held counts as a change, so an event on a directory above listed env files that never exist marks every running job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    if (!this.#listed.delete(path)) return false;",
+    "new": "    if (!this.#listed.delete(path)) return true;"
+  },
+  {
+    "id": "D3231",
+    "defect": "Linux watches only the nearest existing directory above a listed file, so renaming a directory further up leaves that watch on the moved directory and a file created again at the listed path goes unseen.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        if (met) break;",
+    "new": "        break;"
+  },
+  {
+    "id": "D3232",
+    "defect": "A listed watch's events never re-arm the listed watches, so a directory on the way to a listed file replaced in place is never watched again.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    if (name === basename(directory)) {\n      this.#armListed();\n      this.#listener.changed(directory, RENAME_EVENT);\n    }\n    if (!names.has(name)) return;\n    const path = join(directory, name);\n    if (this.#listedWays.has(path)) this.#armListed();\n    this.#listener.changed(path, kind);",
+    "new": "    if (name === basename(directory)) {\n      this.#listener.changed(directory, RENAME_EVENT);\n    }\n    if (!names.has(name)) return;\n    const path = join(directory, name);\n    this.#listener.changed(path, kind);"
+  },
+  {
+    "id": "D3233",
+    "defect": "A listed file's watch that cannot open marks the watcher unhealthy, so no result reads current while the watch stays shut.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "          this.#cannotWatchListed(directory, reason);",
+    "new": "          this.#cannotWatchTree(directory, reason);"
+  },
+  {
+    "id": "D3234",
+    "defect": "A listed file's watch that cannot open is logged again at every re-arm.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    if (this.#listedUnopened.has(directory)) return;\n    this.#listedUnopened.add(directory);",
+    "new": "    this.#listedUnopened.add(directory);"
+  },
+  {
+    "id": "D3235",
+    "defect": "A job's window keeps the inputs' digests alone at its open, so an edit to a listed file between jobs never reaches the change record.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    return this.#jobs.open(view.unavailable, view.snapshot?.comparedDigests);",
+    "new": "    return this.#jobs.open(view.unavailable, view.snapshot?.digests);"
+  },
+  {
+    "id": "D3236",
+    "defect": "A job's window keeps the inputs' digests alone at its close, so an edit to a listed file between jobs never reaches the change record.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      view.snapshot?.comparedDigests,\n    );",
+    "new": "      view.snapshot?.digests,\n    );"
+  },
+  {
+    "id": "D3237",
+    "defect": "A fingerprint takes the tracker's held read of a listed file the inputs leave out, so an edit an event missed leaves a result reading current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "  const digest = project.digests.get(path);\n  return digest === undefined ? undefined : { ok: true, digest };",
+    "new": "  const digest = project.comparedDigests.get(path);\n  return digest === undefined ? undefined : { ok: true, digest };"
+  },
+  {
+    "id": "D3238",
+    "defect": "A listed setup file the inputs leave out enters no workspace fingerprint, so an edit to it after a run is stored leaves the run reading current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    ...new Set([...testModules, ...inputs.setupFiles]),",
+    "new": "    ...new Set([...testModules]),"
+  },
+  {
+    "id": "D3239",
+    "defect": "The listing leaves out global setup files, so an edit to a global setup file the inputs leave out changes no fingerprint.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "        ...project.setupFiles,\n        ...project.globalSetupFiles,",
+    "new": "        ...project.setupFiles,"
+  },
+  {
+    "id": "D3240",
+    "defect": "The discovery's fingerprint counts no setup file, so creating a listed setup file the inputs leave out leaves the discovery reading current.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      setupFiles: listings.flatMap((listing) => listing.setupFiles),",
+    "new": "      setupFiles: [],"
+  },
+  {
+    "id": "D3241",
+    "defect": "A listed setup file that cannot be read is named as a test module in the fingerprint's refusal.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "      const kind = testModules.has(path) ? TEST_MODULE : SETUP_FILE;",
+    "new": "      const kind = TEST_MODULE;"
+  },
+  {
+    "id": "D3242",
+    "defect": "A listed setup file the selected inputs already count is digested again beside them, so a workspace's fingerprint moves though nothing it reads changed.",
+    "file": "packages/daemon/src/inputs/fingerprint.ts",
+    "old": "    if (inputs.selected.digests.has(path)) continue;\n    const read = heldDigest(inputs.project, path) ?? reads.moduleDigest(path);",
+    "new": "    const read = heldDigest(inputs.project, path) ?? reads.moduleDigest(path);"
+  },
+  {
+    "id": "D3243",
+    "defect": "A round compares the inputs' digests alone, so a changed listed file the inputs leave out is never among the paths selection is asked about.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    const now = view.inputs.snapshot?.comparedDigests;",
+    "new": "    const now = view.inputs.snapshot?.digests;"
+  },
+  {
+    "id": "D3244",
+    "defect": "The change record observes the inputs' digests alone at each plan, so an edit between jobs to a listed file the inputs leave out never releases a held workspace.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    this.#runs.observed(view.inputs.snapshot?.comparedDigests);",
+    "new": "    this.#runs.observed(view.inputs.snapshot?.digests);"
+  },
+  {
+    "id": "D3245",
+    "defect": "The listing's paths leave out setup files, so run judgment places a listed setup file only by selection, and a run during which it changed is stored under its fingerprint.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    ...listing.testModules,\n    ...listing.setupFiles,\n    ...listing.envFiles,",
+    "new": "    ...listing.testModules,\n    ...listing.envFiles,"
+  },
+  {
+    "id": "D3246",
+    "defect": "The listing's paths leave out env files, so run judgment places a listed env file only by selection, and a run during which it changed is stored under its fingerprint.",
+    "file": "packages/daemon/src/inputs/protection.ts",
+    "old": "    ...listing.testModules,\n    ...listing.setupFiles,\n    ...listing.envFiles,",
+    "new": "    ...listing.testModules,\n    ...listing.setupFiles,"
+  },
+  {
+    "id": "D3250",
+    "defect": "A listed file changed while a run runs lies inside its inputs but never joins the paths that interrupt it, so a run whose setup file changed runs to its end.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "    for (const path of [...placed.inside, ...listed]) {",
+    "new": "    for (const path of placed.inside) {"
+  },
+  {
+    "id": "D3251",
+    "defect": "The count leaves listed env files to selection, so a workspace whose runs rewrite its listed env file in another package, which its narrowed build places there alone, is never held.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  return placeFor(paths, entry.workspace.path, workspaceListedFiles(entry), [",
+    "new": "  return placeFor(paths, entry.workspace.path, new Set(listedPaths({ ...workspaceListing(entry), envFiles: [] })), ["
+  },
+  {
+    "id": "D3252",
+    "defect": "A listed file's directory whose watch finds it gone on both tries is never reported, so its file's changes wait for the next reconciliation with no warning saying so.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    if (retry) this.#armListed(false);\n    else for (const directory of vanished) this.#vanishedTwice(directory);",
+    "new": "    if (retry) this.#armListed(false);"
+  },
+  {
+    "id": "D3253",
+    "defect": "Closing a tree watch that covered a directory on the way to a listed file owes no re-arm, so a listed file in a directory git comes to ignore goes unwatched until the next reconciliation.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    this.#tree.delete(directory);\n    if (this.#listedWays.has(directory)) this.#listedOwed = true;",
+    "new": "    this.#tree.delete(directory);"
   },
   {
     "id": "D3184",
@@ -8482,5 +8720,54 @@
     "file": "packages/daemon/src/inputs/input-tracker.ts",
     "old": "    try {\n      this.#schedule.clear();\n      this.#abort.abort();\n      this.#watcher.close();\n    } finally {\n      this.#ledger.releaseAll();\n      this.#signalChange();\n      this.#markFirstReconciled();\n    }\n",
     "new": "    this.#schedule.clear();\n    this.#abort.abort();\n    this.#watcher.close();\n    this.#ledger.releaseAll();\n    this.#signalChange();\n    this.#markFirstReconciled();\n"
+  },
+  {
+    "id": "D3257",
+    "defect": "An event on an excluded path that is neither a listed file nor a directory on the way to one is queued, so every write under a directory git ignores counts as a pending changed path until it is read.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      if (this.#listed.names(path)) this.#queuePath(path, kind);",
+    "new": "      this.#queuePath(path, kind);"
+  },
+  {
+    "id": "D3258",
+    "defect": "A tree watch's event naming a directory on the way to a listed file does not re-arm the listed watches, so a listed file in a directory git ignores created after they were armed is read once and its later edit raises no revision.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        const path = join(watched, name);\n        if (this.#listedWays.has(path)) this.#armListed();",
+    "new": "        const path = join(watched, name);"
+  },
+  {
+    "id": "D3259",
+    "defect": "Closing tree watches in dropDirectory owes no re-arm, so a listed file git ignores under an input directory recreated before its read goes unwatched once the read drops the old tree watch.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "      if (liesInside(directory, watched)) this.#closeTree(watched, watcher);\n    }\n    this.#armListedIfOwed();",
+    "new": "      if (liesInside(directory, watched)) this.#closeTree(watched, watcher);\n    }"
+  },
+  {
+    "id": "D3260",
+    "defect": "A read of a listed file finding it unmoved since a held read taken at least 2 s after its last write still reports a possible write, so every event on it marks each running job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    this.#listedRead.add(path);\n    return this.#record(this.#listed, path, read);",
+    "new": "    this.#listedRead.add(path);\n    this.#record(this.#listed, path, read);\n    return true;"
+  },
+  {
+    "id": "D3261",
+    "defect": "A read of a listed file that a new discovery stopped listing while the read ran is held again and marks the running job.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      const read = await readListedFile(file, this.#abort.signal);\n      if (!this.#listed.lists(file.path)) continue;",
+    "new": "      const read = await readListedFile(file, this.#abort.signal);"
+  },
+  {
+    "id": "D3262",
+    "defect": "On Windows a changed path spelled on disk in another case than the listing's is placed only by selection, so a run during which a listed env file in another package changed is stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));",
+    "new": "  const listed = paths.filter((path) => listedFiles.has(path));"
+  },
+  {
+    "id": "D3263",
+    "defect": "An event naming a listed file the filter does not exclude holds a listed read of that input beside its own read, so the next reconciliation, which reads only excluded listed files, drops it and raises the revision though nothing changed.",
+    "file": "packages/daemon/src/inputs/listed-files.ts",
+    "old": "    if (file !== undefined) return filter.excludes(file.path) ? [file] : [];",
+    "new": "    if (file !== undefined) return [file];"
   }
 ]

@@ -24,17 +24,20 @@ import {
   wholeDigest,
   type InputDigests,
 } from "./input-inventory.js";
-import { discoveredTestModules, workspaceTestModules } from "./non-inputs.js";
 import {
   protectedFiles,
   protectedModules,
+  workspaceListing,
   workspaceName,
+  type WorkspaceListing,
 } from "./protection.js";
 
 const ENTRY_SEPARATOR = "\n";
 const MISSING_CODE = "ENOENT";
-/** Stands for a listed test module or env file that does not exist, so its creation or deletion changes the digest. */
+/** Stands for a listed file that does not exist, so its creation or deletion changes the digest. */
 const ABSENT_FILE = "absent";
+const TEST_MODULE = "test module";
+const SETUP_FILE = "setup file";
 const NO_DECLARED_VARIABLES: readonly string[] = [];
 /** A path `statSync` finds no entry at, a missing file or one below a file. */
 const NOTHING_THERE = null;
@@ -50,11 +53,27 @@ export type FingerprintResult =
 export class ProjectInputs {
   readonly root: string;
   readonly digests: InputDigests;
+  /** The tracker's held reads of the listed files the inputs leave out, which no fingerprint takes. */
+  readonly #listed: InputDigests;
   #digest: string | undefined;
+  #compared: InputDigests | undefined;
 
-  constructor(root: string, digests: InputDigests) {
+  constructor(root: string, digests: InputDigests, listed?: InputDigests) {
     this.root = root;
     this.digests = digests;
+    this.#listed = listed ?? new Map();
+  }
+
+  /**
+   * The inputs' digests with the held digests of the listed files they leave out, which a comparison of two moments
+   * reads; the same map on every call, and `digests` itself while no listed file is held.
+   */
+  get comparedDigests(): InputDigests {
+    this.#compared ??=
+      this.#listed.size === 0
+        ? this.digests
+        : new Map([...this.#listed, ...this.digests]);
+    return this.#compared;
   }
 
   /** One digest over every input's path and content digest, in path order, whatever order they were read in. */
@@ -65,31 +84,24 @@ export class ProjectInputs {
 }
 
 /**
- * The inputs of one Vitest workspace: those of the project its results can depend on, and its own test modules and
- * env files.
+ * The inputs of one Vitest workspace: those of the project its results can depend on, and the files its discovery
+ * lists by path.
  */
-interface WorkspaceInputs {
+interface WorkspaceInputs extends WorkspaceListing {
   readonly selected: ProjectInputs;
   /** Every input of the project, among which `selected` lies. */
   readonly project: ProjectInputs;
-  /** Root-relative, `/`-separated. */
-  readonly testModules: readonly string[];
-  /** Named as `testModules` are. */
-  readonly envFiles: readonly string[];
 }
 
 /**
  * Maps a Vitest workspace to its inputs: `narrowed`, those its selection includes, when a narrowing is given, and
- * every input of the project otherwise. Either way it returns each test module the latest discovery lists for the
- * workspace, whatever git ignores, so a stored result can match only while its tests' positions in their modules
- * are unchanged, and each env file Vite loads for its tests, whatever git ignores.
+ * every input of the project otherwise. Either way it returns each test module, setup file and global setup file the
+ * latest discovery lists for the workspace, whatever git ignores, so a stored result can match only while its tests'
+ * positions in their modules are unchanged, and each env file Vite loads for its tests, whatever git ignores.
  */
 function workspaceInputs(
   project: ProjectInputs,
-  listed: {
-    readonly testModules: readonly string[];
-    readonly envFiles: readonly string[];
-  },
+  listed: WorkspaceListing,
   narrowed: ProjectInputs | undefined,
 ): WorkspaceInputs {
   return { selected: narrowed ?? project, project, ...listed };
@@ -158,11 +170,7 @@ export function workspaceFingerprint(
   const { vitestVersion } = reads;
   const envFiles = workspaceEnvFiles(entry);
   if (!envFiles.known) return envFilesUnknown(envFiles);
-  const inputs = workspaceInputs(
-    project,
-    { testModules: workspaceTestModules(entry), envFiles: envFiles.files },
-    narrowed,
-  );
+  const inputs = workspaceInputs(project, workspaceListing(entry), narrowed);
   const listed = listedDigests(inputs, reads);
   if (!listed.ok) return listed;
   return {
@@ -170,7 +178,7 @@ export function workspaceFingerprint(
     digest: digestOf({
       ...sharedParts(reads.environment),
       inputs: inputs.selected.digest(),
-      testModules: listed.testModules,
+      testModules: listed.modules,
       envFiles: listed.envFiles,
       vitestVersion: vitestVersion(entry.workspace.directory),
     }),
@@ -186,11 +194,13 @@ export function discoveryFingerprint(
   const { vitestVersion } = reads;
   const envFiles = discoveryEnvFiles(discovery);
   if (!envFiles.known) return envFilesUnknown(envFiles);
+  const listings = discovery.workspaces.map(workspaceListing);
   const inputs = workspaceInputs(
     project,
     {
-      testModules: discoveredTestModules(discovery),
-      envFiles: envFiles.files,
+      testModules: listings.flatMap((listing) => listing.testModules),
+      setupFiles: listings.flatMap((listing) => listing.setupFiles),
+      envFiles: listings.flatMap((listing) => listing.envFiles),
     },
     undefined,
   );
@@ -201,7 +211,7 @@ export function discoveryFingerprint(
     digest: digestOf({
       ...sharedParts(reads.environment),
       inputs: inputs.selected.digest(),
-      testModules: listed.testModules,
+      testModules: listed.modules,
       envFiles: listed.envFiles,
       vitestVersions: discovery.workspaces.map((entry) => [
         entry.workspace.path,
@@ -229,7 +239,8 @@ type PathDigests =
 type ListedDigests =
   | {
       readonly ok: true;
-      readonly testModules: Digests;
+      /** Each listed test module, setup file and global setup file's, under the digest's `testModules` part. */
+      readonly modules: Digests;
       readonly envFiles: Digests;
     }
   | { readonly ok: false; readonly reason: string };
@@ -244,7 +255,7 @@ function listedDigests(
   if (!envFiles.ok) return envFiles;
   return {
     ok: true,
-    testModules: modules.digests,
+    modules: modules.digests,
     envFiles: envFiles.digests,
   };
 }
@@ -278,21 +289,26 @@ function envFileDigests(
 }
 
 /**
- * Digests each listed test module the selected inputs leave out: from the project's inputs when they hold it, and
- * otherwise from disk, such as one git ignores, since no watch covers it.
+ * Digests each listed test module, setup file and global setup file the selected inputs leave out: from the project's
+ * inputs when they hold it, and otherwise from disk, such as one git ignores, since a fingerprint never takes the
+ * tracker's held read of it.
  */
 function unselectedModuleDigests(
   inputs: WorkspaceInputs,
   reads: SnapshotReads,
 ): PathDigests {
+  const testModules = new Set(inputs.testModules);
   const digests: string[][] = [];
-  for (const path of [...new Set(inputs.testModules)].sort()) {
+  for (const path of [
+    ...new Set([...testModules, ...inputs.setupFiles]),
+  ].sort()) {
     if (inputs.selected.digests.has(path)) continue;
     const read = heldDigest(inputs.project, path) ?? reads.moduleDigest(path);
     if (!read.ok) {
+      const kind = testModules.has(path) ? TEST_MODULE : SETUP_FILE;
       return {
         ok: false,
-        reason: `the test module ${path} cannot be read: ${read.reason}`,
+        reason: `the ${kind} ${path} cannot be read: ${read.reason}`,
       };
     }
     digests.push([path, read.digest]);
@@ -344,9 +360,9 @@ function readOnce(
 
 /**
  * Why a file the discovery protects by path that the inputs leave out may have changed at or after `since`, a time in
- * ms, or undefined when none did: a listed test module, setup file, global setup file or env file. No watch covers
- * such a file, so a job reading it cannot learn of an edit any other way. A listed env file with nothing there is
- * unchanged, since most never exist.
+ * ms, or undefined when none did: a listed test module, setup file, global setup file or env file. Events on such a
+ * file reach a job only while an earlier discovery listed it, under the consumer root, and its watch opened. A listed
+ * env file with nothing there is unchanged, since most never exist.
  */
 export function protectedFileChangedSince(
   project: ProjectInputs,
@@ -367,7 +383,7 @@ export function protectedFileChangedSince(
       modified === undefined ||
       modified >= since - MODIFIED_TIME_RESOLUTION_MS
     ) {
-      return `${path}, which the discovery protects and no watch covers, may have changed while the job ran`;
+      return `${path}, which the discovery protects and the inputs leave out, may have changed while the job ran`;
     }
   }
   return undefined;

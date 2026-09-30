@@ -13,7 +13,11 @@ import {
   type EndedBuild,
   type QueryNarrowing,
 } from "../inputs/narrowed-inputs.js";
-import { workspaceTestModules } from "../inputs/non-inputs.js";
+import {
+  caseComparable,
+  listedPaths,
+  workspaceListing,
+} from "../inputs/protection.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import type { DaemonLog } from "./daemon-log.js";
 import type { DependencyBuilds } from "./dependency-builds.js";
@@ -90,8 +94,8 @@ interface RunFacts {
   readonly workspacePath: string;
   readonly start: FingerprintResult;
   readonly window: JobWindow;
-  /** The test modules the discovery lists for the workspace, each inside its inputs whatever selection says. */
-  readonly testModules: ReadonlySet<string>;
+  /** Case-comparable: the files the discovery lists by path for the workspace, each inside its inputs whatever selection says. */
+  readonly listedFiles: ReadonlySet<string>;
   /** The start revision's build, each build that ended since, and at the end the end revision's. */
   readonly placements: readonly ChangePlacement[];
   /** Its workspace's fingerprint at its end; undefined while it runs. */
@@ -126,8 +130,8 @@ function judgeRun(facts: RunFacts): RunJudgment {
 }
 
 function placedInside(facts: RunFacts): PathsInside {
-  const { workspacePath, window, testModules, placements } = facts;
-  return placeFor([...window.paths], workspacePath, testModules, placements);
+  const { workspacePath, window, listedFiles, placements } = facts;
+  return placeFor([...window.paths], workspacePath, listedFiles, placements);
 }
 
 interface PathsInside {
@@ -138,16 +142,16 @@ interface PathsInside {
 
 /**
  * A path lies inside when any of these holds: a narrowed build's selection of it includes the workspace, that build
- * cannot place it, a widened build is held, or it is a listed test module. Only a narrowed build's placement interrupts.
+ * cannot place it, a widened build is held, or it is a file the discovery lists. Only a narrowed build's placement interrupts.
  */
 function placeFor(
   paths: readonly string[],
   workspacePath: string,
-  testModules: ReadonlySet<string>,
+  listedFiles: ReadonlySet<string>,
   placements: readonly ChangePlacement[],
 ): PathsInside {
-  const modules = paths.filter((path) => testModules.has(path));
-  const inside = new Set(modules);
+  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));
+  const inside = new Set(listed);
   const narrowed = new Set<string>();
   for (const placement of placements) {
     if (placement.kind === NARROWING.widened) {
@@ -155,7 +159,7 @@ function placeFor(
       continue;
     }
     const placed = placement.build.place(paths, workspacePath);
-    for (const path of [...placed.inside, ...modules]) {
+    for (const path of [...placed.inside, ...listed]) {
       inside.add(path);
       narrowed.add(path);
     }
@@ -272,8 +276,14 @@ export function pathsInside(
   entry: WorkspaceDiscovery,
   placement: ChangePlacement,
 ): readonly string[] {
-  const testModules = new Set(workspaceTestModules(entry));
-  return placeFor(paths, entry.workspace.path, testModules, [placement]).inside;
+  return placeFor(paths, entry.workspace.path, workspaceListedFiles(entry), [
+    placement,
+  ]).inside;
+}
+
+/** Case-comparable, as protection compares a listed file, since a changed path is named as it is spelled on disk. */
+function workspaceListedFiles(entry: WorkspaceDiscovery): ReadonlySet<string> {
+  return new Set(listedPaths(workspaceListing(entry)).map(caseComparable));
 }
 
 /** The latest build over the discovery in effect; widened when the builds give that discovery no narrowing at all. */
@@ -313,7 +323,7 @@ export class RunWatch {
   /** The run's workspace fingerprint at its start. */
   readonly started: FingerprintResult;
   readonly #parts: RunWatchParts;
-  readonly #testModules: ReadonlySet<string>;
+  readonly #listedFiles: ReadonlySet<string>;
   readonly #held: ChangePlacement[] = [];
   readonly #heldBuilds = new Set<BuildPlacement>();
   /** Weak, so a replaced build's narrowed sets are not kept alive by the watch. */
@@ -332,7 +342,7 @@ export class RunWatch {
     this.#parts = parts;
     const { startView, builds, entry, log } = parts;
     this.started = startView.workspaceFingerprint(entry);
-    this.#testModules = new Set(workspaceTestModules(entry));
+    this.#listedFiles = workspaceListedFiles(entry);
     const query = builds.narrowing();
     const latest = latestEnded(query);
     if (typeof latest === "object") this.#seen.add(latest);
@@ -469,7 +479,7 @@ export class RunWatch {
       workspacePath: this.#parts.entry.workspace.path,
       start: this.started,
       window: this.#parts.window,
-      testModules: this.#testModules,
+      listedFiles: this.#listedFiles,
       placements,
       end,
     });
