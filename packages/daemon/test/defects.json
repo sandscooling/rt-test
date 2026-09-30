@@ -8461,5 +8461,12 @@
     "file": "packages/daemon/src/inputs/input-watcher.ts",
     "old": "    this.#tree.delete(directory);\n    if (this.#listedWays.has(directory)) this.#listedOwed = true;",
     "new": "    this.#tree.delete(directory);"
+  },
+  {
+    "id": "D3184",
+    "defect": "A retried workspace the lifecycle refuses at its planned revision keeps its retry, so each plan runs it into another refusal at the same revision until the revision moves.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "      if (refusedAtPlan) return;\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
+    "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) return;\n      begun.notBegun();\n"
   }
 ]

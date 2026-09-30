@@ -39,6 +39,6 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 
 - NFR1: Never execute a test while it holds a current result for the same input fingerprint, except to falsify it or to rerun an invalidated run. [Tickets 2.3f, 2.3h, 2.5]
 - NFR2: Find in every selected run each failure that a full run over the same input snapshot finds, across the controlled edit corpus. [Sprint 2]
-- NFR3: Never report a result as current unless its stored input fingerprint matches the current inputs. [Tickets 2.1, 2.3g, 2.3j, 2.3m, 2.3q, 2.3p, 2.4d]
+- NFR3: Never report a result as current unless its stored input fingerprint matches the current inputs. [Tickets 2.1, 2.3g, 2.3j, 2.3m, 2.3q, 2.3n, 2.3p, 2.4d]
 - NFR4: Keep state, logs, and results on the machine under the configured state directory, and send nothing off it. [Tickets 1.2, 1.3, 1.3b]
 - NFR5: Run on Node `^22.13.0`, `^24`, and `>=26`, on Windows and Linux. [Ticket 1.2]

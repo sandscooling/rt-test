@@ -991,14 +991,15 @@ describe("retrying at a periodic reconciliation", () => {
     });
   });
 
-  it("D2731: a workspace's periodic retry whose run did not begin is kept, so the workspace runs once the scheduler plans again", async () => {
+  it("D2731: a workspace's periodic retry whose run did not begin because the revision moved is kept, so the workspace runs at the new revision", async () => {
     const calls = await running(
       {
         seed: (store) => {
           currentResults("a")(store);
           store.seedRun(failedRun("a"), digestOf("a-digest"));
         },
-        ran: (_path, call) => ({ notBegun: call === 0 }),
+        ran: (_path, call) =>
+          call === 0 ? { notBegun: true, movesRevision: true } : {},
       },
       async (started) => {
         await flush();
@@ -1007,7 +1008,26 @@ describe("retrying at a periodic reconciliation", () => {
         return [...started.calls];
       },
     );
-    expect(calls).toStrictEqual(["idle", "run:a@1", "run:a@1", "idle"]);
+    expect(calls).toStrictEqual(["idle", "run:a@1", "run:a@2", "idle"]);
+  });
+
+  it("D3184: a retried workspace the lifecycle refuses at its planned revision drops its retry, so it runs into no further refusal until the revision moves", async () => {
+    const calls = await running(
+      {
+        seed: (store) => {
+          currentResults("a")(store);
+          store.seedRun(failedRun("a"), digestOf("a-digest"));
+        },
+        ran: () => ({ notBegun: true }),
+      },
+      async (started) => {
+        await flush();
+        started.inputs.endPeriodicReconciliation();
+        await flush();
+        return [...started.calls];
+      },
+    );
+    expect(calls).toStrictEqual(["idle", "run:a@1", "idle"]);
   });
 
   it("D2732: a discovery's periodic retry that did not begin is kept, so the discovery happens once the scheduler plans again", async () => {

@@ -496,8 +496,9 @@ export class Scheduler {
     if (report === undefined) {
       const refusedAtPlan =
         !this.#isStopping() && this.#revision() === revision;
-      // A refused workspace keeps its attempt, so it waits for the revision to move.
-      if (!refusedAtPlan) begun.notBegun();
+      // A refused workspace keeps its attempt and drops its retry, so it waits for the revision to move.
+      if (refusedAtPlan) return;
+      begun.notBegun();
       if (retried) this.#retryWorkspaces.add(path);
       return;
     }
