@@ -8,7 +8,7 @@ The roadmap's first spike, plugin transforms under Vitest 4.1, held on 4.1.11 an
 
 Evidence freshness has workspace granularity (ADR-0007): an edit anywhere in a workspace's inputs stales every defect in it, and M3's file-level dependencies narrow that. Fleet Cooling commits no defect definitions today (its mutation specs live in change records), so the M2 trial there needs definitions written in its repository first, in ADR-0009's format.
 
-Order: 3.1 and 3.2 build in parallel, since 3.1 works in the daemon's query, protocol and CLI and 3.2 in its Vitest session and executor. 3.3 follows 3.2, whose experiment records it judges. 3.4 follows 3.1 and 3.3, storing 3.3's verdicts against 3.1's definitions. 3.5 follows 3.4, since a scheduled job stores evidence. 3.6 follows 3.5, gating the job 3.5 starts. 3.7 comes last and measures the milestone's acceptance. Each ticket is estimated at 25 files or fewer.
+Order: 3.1 and 3.2 build in parallel, since 3.1 works in the daemon's query, protocol and CLI and 3.2 in its Vitest session and executor. 3.3 follows 3.2, whose experiment records it judges. 3.4 follows 3.1 and 3.3, storing 3.3's verdicts against 3.1's definitions. 3.5 follows 3.4, since a scheduled job stores evidence. 3.6 follows 3.5, gating the job 3.5 starts. 3.7 measures the milestone's acceptance. 3.8 comes last, once RT Test runs this repository's own suite, since its evidence needs this repository started under RT Test. Each ticket is estimated at 25 files or fewer.
 
 ## Ticket 3.1: Defect definitions and gaps
 
@@ -37,3 +37,7 @@ Scope: before a workspace's first falsification on a Vitest version, run RT Test
 ## Ticket 3.7: Falsification corpus
 
 Scope: replay the M2 acceptance against RT Test's daemon on a synthetic two-workspace fixture on Vitest 4.1 and 5: a weakened assertion retires earlier evidence, a setup failure is never a detection, a moved anchor is reported while the other defects run, duplicate test names cannot misattribute a detection, the verified and eligible counts are exact, and every consumer file stays byte-identical. Requirements: NFR6, NFR7.
+
+## Ticket 3.8: This repository's defects proven by RT Test
+
+Scope: convert this repository's own named-defect records into definition files in ADR-0009's format that its `rt-test.json` lists, and move the workflow's defect proving from `scripts/verify-defects.mjs` to RT Test's `defects` answers, so a lane reads current evidence instead of running proofs, retiring the bootstrap verifier once every converted defect reads detected under RT Test (owner, 17:55 on 2026-09-30).

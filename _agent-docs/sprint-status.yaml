@@ -48,3 +48,4 @@ sprint-3: backlog
 3-5-schedule-falsification: backlog
 3-6-canary-gate: backlog
 3-7-falsification-corpus: backlog
+3-8-own-defects-to-rt-test: backlog
