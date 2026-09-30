@@ -2200,7 +2200,7 @@ function notVitestStatus(
     writeFileSync(file, "");
     try {
       return work(
-        pathStatusAnswer(
+        answerFor(
           join(root, path),
           withNotVitestWorkspace(),
           { ...IDLE, consumerRoot: root },
