@@ -149,7 +149,7 @@ ALTER TABLE discovery_workspaces ADD COLUMN ${SELECTION_FACTS_COLUMN};`;
 /** A report missing a fact this version reads, or one that may read complete without being so, is dropped rather than guessed at, so it reads as never made. */
 const DROP_INCOMPLETE_FACTS = `
 UPDATE discovery_workspaces SET selection_facts = NULL;`;
-/** Each discovery stored before keeps a NULL report, so it reads as not reporting them. */
+/** Each discovery stored before keeps a NULL not-covered list, so it reads as never reporting one. */
 const ADD_NOT_COVERED = `
 ALTER TABLE discoveries ADD COLUMN ${NOT_COVERED_COLUMN};`;
 const SET_SCHEMA_VERSION = `

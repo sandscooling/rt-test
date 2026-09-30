@@ -330,7 +330,7 @@ function notCoveredCandidate(
   if (path === ROOT_PATH || typeof script !== "string") return undefined;
   return {
     path,
-    reason: `has a test script, ${JSON.stringify(script)}, but is not a Vitest workspace: it holds no Vitest config file and does not depend on Vitest, so RT Test does not discover or run its tests`,
+    reason: `has a test script, ${JSON.stringify(script)}, but is not a Vitest workspace: it holds no Vitest config file and lists no Vitest in its dependencies or devDependencies, so RT Test does not discover or run its tests`,
   };
 }
 
