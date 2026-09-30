@@ -270,9 +270,17 @@ export function selectionOf(
   };
 }
 
-/** The committed inputs at `root` holding each path with the given digest. */
+/**
+ * The committed inputs at `root` holding each path with the given digest, beside the held reads of `listed`, listed
+ * files the inputs leave out.
+ */
 export function inputsOf(
   digests: Readonly<Record<string, string>>,
+  listed: Readonly<Record<string, string>> = {},
 ): ProjectInputs {
-  return new ProjectInputs(ABSENT_ROOT, new Map(Object.entries(digests)));
+  return new ProjectInputs(
+    ABSENT_ROOT,
+    new Map(Object.entries(digests)),
+    new Map(Object.entries(listed)),
+  );
 }

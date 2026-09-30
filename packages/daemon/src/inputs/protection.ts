@@ -1,6 +1,9 @@
 import { isAbsolute, posix } from "node:path";
 import { WINDOWS } from "../daemon/endpoint.js";
-import type { TestDiscovery } from "../vitest/discover-tests.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import {
   climbsOut,
@@ -14,7 +17,7 @@ import type {
 } from "../vitest/selection-facts.js";
 import { projectEnvFiles } from "./env-files.js";
 import { absoluteInputPath } from "./input-filter.js";
-import { discoveredTestModules, NON_INPUTS_FILE } from "./non-inputs.js";
+import { NON_INPUTS_FILE, workspaceTestModules } from "./non-inputs.js";
 import {
   BACKSLASHES,
   directoryPrefix,
@@ -111,39 +114,71 @@ export function protection(
  * Lower-cased on Windows, whose file system opens a listed file whatever case its name is spelled in, as Vite opens
  * `.env.local` for a `.ENV.local` on disk.
  */
-function caseComparable(path: string): string {
+export function caseComparable(path: string): string {
   return process.platform === WINDOWS ? path.toLowerCase() : path;
 }
 
-/** Root-relative: every file `protectedModules` names, and every env file its projects' env sources name. */
+/** What the discovery lists by path for one workspace, each root-relative as the discovery names it. */
+export interface WorkspaceListing {
+  readonly testModules: readonly string[];
+  /** Each setup file and global setup file its reported projects name. */
+  readonly setupFiles: readonly string[];
+  /** Each env file its reported projects' known env sources name; a missing one is unchanged, unlike the rest. */
+  readonly envFiles: readonly string[];
+}
+
+/** The one listing protection, the fingerprints, run judgment and the tracker read of a workspace. */
+export function workspaceListing(entry: WorkspaceDiscovery): WorkspaceListing {
+  const projects = reportedProjects(entry);
+  return {
+    testModules: workspaceTestModules(entry),
+    setupFiles: unique(
+      projects.flatMap((project) => [
+        ...project.setupFiles,
+        ...project.globalSetupFiles,
+      ]),
+    ),
+    envFiles: unique(projects.flatMap(projectEnvFiles)),
+  };
+}
+
+/** Every path the listing names, env files included. */
+export function listedPaths(listing: WorkspaceListing): readonly string[] {
+  return unique([
+    ...listing.testModules,
+    ...listing.setupFiles,
+    ...listing.envFiles,
+  ]);
+}
+
+/** Root-relative: every file `protectedModules` names, and every env file the listing names. */
 export function protectedFiles(discovery: TestDiscovery): ReadonlySet<string> {
-  const files = new Set(protectedModules(discovery));
-  for (const project of reportedProjects(discovery)) {
-    for (const file of projectEnvFiles(project)) files.add(file);
-  }
-  return files;
+  return new Set(
+    discovery.workspaces.flatMap(workspaceListing).flatMap(listedPaths),
+  );
 }
 
 /** Root-relative: every test module the discovery lists, and every setup and global setup file its projects report. */
 export function protectedModules(
   discovery: TestDiscovery,
 ): ReadonlySet<string> {
-  const files = new Set(discoveredTestModules(discovery));
-  for (const project of reportedProjects(discovery)) {
-    for (const file of project.setupFiles) files.add(file);
-    for (const file of project.globalSetupFiles) files.add(file);
-  }
-  return files;
+  return new Set(
+    discovery.workspaces
+      .map(workspaceListing)
+      .flatMap((listing) => [...listing.testModules, ...listing.setupFiles]),
+  );
 }
 
 function reportedProjects(
-  discovery: TestDiscovery,
+  entry: WorkspaceDiscovery,
 ): readonly ProjectSelectionFacts[] {
-  return discovery.workspaces.flatMap((entry) =>
-    entry.status === "discovered" && entry.selectionFacts.reported
-      ? entry.selectionFacts.projects
-      : [],
-  );
+  return entry.status === "discovered" && entry.selectionFacts.reported
+    ? entry.selectionFacts.projects
+    : [];
+}
+
+function unique(paths: readonly string[]): string[] {
+  return [...new Set(paths)];
 }
 
 /**
