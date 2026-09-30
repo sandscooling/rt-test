@@ -355,20 +355,50 @@ Tests session: threadId 6ab805a3-d546-41d0-866b-231fc841bfd5
 - D3467: The scheduler reads every workspace as having no stored run, so each new input revision reruns every confirmed workspace, and the inside packages sequence reports each workspace an edit did not reach as a duplicate execution and a run outside the declared set (AC6, AC3).
 - D3468: The tracker's declared non-input match never matches, so the rename sequence's docs edit moves the input revision and runs every workspace, reported as an input revision moved and runs outside the declared set (AC4, AC3).
 - D3469: Selection reads every changed path as owned by the root, so every edit runs every workspace, and the config and run in progress sequence reports runs outside the declared set (AC3).
+- D3470: The daemon records a test that failed as passed, so after the shared library edit it runs exactly the declared workspaces yet holds each test the full run fails as a current pass, which the shared library sequence reports only as selection misses (AC5; review gap, NFR2's comparator).
+- D3471: The corpus's duplicate execution comparison never reports, so a run stored under its workspace's previous fingerprint and adapter version reads clean; a test of `storedRunFindings` over runs shaped as the store returns them (AC6; review gap, NFR1's detector).
+- D3472: The corpus compares a run with its workspace's first stored run rather than its previous one, so a run at a fingerprint only an older, superseded run held, as after a revert, reads as a duplicate execution; the same test also pins that a run after one stored not fingerprinted is none (AC6).
+- D3473: The baseline's run-once check lets a workspace run twice, so a daemon that runs a workspace twice at its start, under two fingerprints, reads clean (AC3; review gap, the baseline run-once rule).
 
-The verifier confirms each mutated sequence's report is not clean; it prints no report, so the finding kinds each sentence names are traced through the code, not observed. The ticket's example of a deleted path that selects nothing is not observable here: the rename's new path and lib's index select the same workspaces, and a workspace's fingerprint is taken over the inputs that exist.
+NFR1 has no product mutation that yields a duplicate execution alone: a second run of a workspace needs its stored result to read stale and `ranAlready` to pass at the same revision, two guards, and any one-edit mutation that reruns a current workspace also runs it outside an edit's declared set, as D3467 does. So D3471 and D3472 prove the check's own detector.
+
+The verifier confirms each mutated sequence's report is not clean; it prints no report, so the finding kinds D3466 to D3469 name are traced through the code, not observed. D3470's were observed: in a disposable WSL clone with its record applied, its report held exactly four findings, each a selection miss at "lib's unit price raised", one per declared failure (11:33). The ticket's example of a deleted path that selects nothing is not observable here: the rename's new path and lib's index select the same workspaces, and a workspace's fingerprint is taken over the inputs that exist.
 
 #### Deliberately Untested
 
-- `packages/daemon/test/edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-full-run.ts`, `edit-corpus-sequences.ts`: the check is test infrastructure the four tests run; D3466 to D3469 prove it reports the finding kinds a selection or scheduler defect produces. Its full run unusable, wait not settled and daemon not idle branches fire only on a harness or daemon failure no stable mutation makes (owner ruling, 03:25).
+- `packages/daemon/test/edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-full-run.ts`, `edit-corpus-sequences.ts`: the check is test infrastructure the sequence tests run; D3466 to D3470 prove it reports the finding kinds a selection, scheduler or run-recording defect produces, and D3471 to D3473 prove its duplicate and run-once detectors directly. Its full run unusable, wait not settled and daemon not idle branches fire only on a harness or daemon failure no stable mutation makes (owner ruling, 03:25).
 - The baseline's single supersede by declared non-inputs (orchestrator, 10:31): a wrongly accepted supersede is followed by a second wait and the full-run comparison, so it cannot report a stale result as current.
 - `packages/daemon/test/harness.ts` `linkWorkspacePackages`: every sequence runs it, and a missing link fails the dependents' modules to load in the full run, which each test reports as undeclared failures or a full run unusable.
 
 ### Review Record
 
+Review session: threadId 3ce153d2-2869-4261-8434-f660294989d6
+
+Fixed in review (2026-09-30, 11:17):
+
+- `edit-corpus-full-run.ts`: a workspace whose Vitest exit disagrees with its report (exit 1 with no failed module entry, as on an unhandled error; exit 0 with one) is full run unusable, so a full run cannot fail unnoticed.
+- `edit-corpus.ts`: the during-run edit's first wait may answer superseded only when its second part was saved before that wait answered, and only naming the second part's paths (AC4).
+- `edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-sequences.ts`: the baseline declares each workspace run once, and a second stored run of one is a run outside the declared set (AC3).
+- `edit-corpus.ts`: idle also requires no unread change (`inputs.pendingChanges` 0), since while any remain no result is current.
+- `edit-corpus.ts`: a daemon-not-idle finding with no summary read says so rather than "undefined"; unused exports removed (`EDIT_CORPUS`, `BASELINE`, the workspace constants, the `FINDING` re-export).
+
+Recorded, not fixed (owner ruling 03:25; none can read CLEAN over a failure the fixture produces):
+
+- A workspace whose every module fails to load reads as full run unusable rather than as failed modules (AC7's wording); no corpus edit does this.
+- A module failure beside reported tests (a file-level hook error, an empty `describe`) is compared on neither side; no fixture module has a hook.
+- A duplicate reported after a crashed or failed run's retry at one fingerprint would be a false finding, not a false CLEAN; no sequence produces one.
+- The full run inherits the outer Vitest worker's environment, and the linked Vitest's version is fixed by the `vitest-4` install name only.
+- Outcomes come from the store and freshness from the answers (§ Decisions taken here), so a query-layer defect answering a wrong state is not measured; AC5's "the daemon's answers" reads as that pair.
+
 #### Test Coverage Gaps
 
-None.
+| Source                                                                        | Defect                                                                                                                                                                                                                                                                                                                                                         | Expected test                                                                                                                                                                                                                                                                                                                     | Severity |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `packages/daemon/test/edit-corpus-findings.ts` `daemonFindings`               | The comparison of the daemon's results with the full run reports nothing (for example `reportedTestFindings` returns `[]`), so a daemon that runs the right workspaces but stores or reads a wrong outcome reads CLEAN; D3466 to D3469 all still go red through declared-run-missing or run-outside-declared-set, so no test proves NFR2's own detector fires. | A proof whose only finding is a selection miss or disagreement: for example a record in `packages/daemon/src/vitest/run-states.ts` recording a failed test as passed, detected by the shared library sequence with its run sets unchanged.                                                                                        | HIGH     |
+| `packages/daemon/test/edit-corpus-findings.ts` `duplicateFinding`             | The duplicate execution comparison never reports (an inverted digest or adapter comparison), so a daemon that runs a declared workspace a second time at the same fingerprint within an edit reads CLEAN; D3467's mutation still goes red through run-outside-declared-set, so no test proves NFR1's detector fires.                                           | A proof whose only finding is a duplicate execution, from a scheduler or store mutation if one exists, or otherwise a test of `storedRunFindings` over stored runs built as the store returns them (same digest and adapter version: one finding; a revert to an older digest, or a previous run stored not fingerprinted: none). | HIGH     |
+| `packages/daemon/test/edit-corpus-findings.ts` `storedRunFindings` (baseline) | The baseline's run-once check never fires, so a daemon that runs a workspace twice at its start under two fingerprints (the declared non-inputs dropping out mid-run) reads CLEAN.                                                                                                                                                                             | Decide against the deliberately untested reasons: a proof if a stable mutation makes a baseline double run, otherwise record it untested with its reason.                                                                                                                                                                         | MEDIUM   |
+
+Denominator: 4 named-defect tests in `edit-corpus.test.ts` against the check's finding kinds AC3 to AC8 name; the four proofs reach run-outside-declared-set, declared-run-missing and input-revision-moved observably, and selection-miss and duplicate-execution only alongside them.
 
 ### Completion Notes
 
@@ -457,6 +487,13 @@ Dev, rt-t2-5-dev (2026-09-30):
 - `packages/daemon/test/edit-corpus-sequences.ts` (new)
 - `test/fixtures/daemon/edit-corpus/` (new, 23 files): `package.json`, `rt-test.json`, `README.md`; `packages/lib/{package.json,vitest.config.mjs,README.md,src/pricing.mjs,src/index.mjs,test/pricing.test.mjs}`; `packages/ui/{package.json,vitest.config.mjs,src/label.mjs,test/label.test.mjs}`; `packages/backend/{package.json,vitest.config.mjs,src/quote.mjs,test/quote.test.mjs}`; `apps/web/{package.json,vitest.config.mjs,src/checkout.mjs,test/checkout.test.mjs,test/cart.test.mjs,test/setup.mjs}`
 - `_agent-docs/tickets/2-5-edit-corpus.md` (modified: task and criterion boxes, Dev Handoff, Completion Notes, File List)
+
+Tests, rt-t2-5-tests (2026-09-30):
+
+- `packages/daemon/test/edit-corpus.test.ts` (new: D3466 to D3469)
+- `packages/daemon/test/defects.json` (modified: D3466 to D3469)
+
+Review, rt-t2-5-review (2026-09-30): `edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-full-run.ts`, `edit-corpus-sequences.ts` (modified, § Review Record).
 
 Planning files create-ticket wrote (2026-09-30):
 

@@ -132,6 +132,14 @@ async function workspaceRun(
   }
   const report = readReport(reportFile);
   if (typeof report === "string") return unusable(report);
+  const reportsFailure = report.testResults.some(
+    (module) => module.status === FAILED,
+  );
+  if (reportsFailure !== (end.code === VITEST_FAILED_EXIT)) {
+    return unusable(
+      "Vitest's exit disagrees with its report, which then misses a failure or reports one the exit does not",
+    );
+  }
   const results = workspaceResults(
     workspacePath,
     realpathSync(directory),

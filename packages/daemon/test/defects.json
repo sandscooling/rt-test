@@ -10008,5 +10008,33 @@
     "file": "packages/daemon/src/selection/select-tests.ts",
     "old": "if (owner === ROOT_PATH && dependencies.packageWorkspaces.length > 1) {",
     "new": "if (dependencies.packageWorkspaces.length > 1) {"
+  },
+  {
+    "id": "D3470",
+    "defect": "The daemon records a test that failed as passed, so after the shared library edit it runs exactly the declared workspaces yet holds each test the full run fails as a current pass, which the corpus reports only as selection misses.",
+    "file": "packages/daemon/src/vitest/run-states.ts",
+    "old": "return finished(\"failed\", result.errors.map(errorText));",
+    "new": "return finished(\"passed\");"
+  },
+  {
+    "id": "D3471",
+    "defect": "The corpus's duplicate execution comparison never reports, so a run stored under its workspace's previous fingerprint and adapter version reads clean.",
+    "file": "packages/daemon/test/edit-corpus-findings.ts",
+    "old": "  if (!duplicate) return [];",
+    "new": "  return [];"
+  },
+  {
+    "id": "D3472",
+    "defect": "The corpus compares a run with its workspace's first stored run rather than its previous one, so a run at a fingerprint only an older, superseded run held, as after a revert, reads as a duplicate execution.",
+    "file": "packages/daemon/test/edit-corpus-findings.ts",
+    "old": "const previous = earlierRuns.findLast(",
+    "new": "const previous = earlierRuns.find("
+  },
+  {
+    "id": "D3473",
+    "defect": "The baseline's run-once check lets a workspace run twice, so a daemon that runs a workspace twice at its start, under two fingerprints, reads clean.",
+    "file": "packages/daemon/test/edit-corpus-findings.ts",
+    "old": ".filter(([, count]) => count > 1)",
+    "new": ".filter(([, count]) => count > 2)"
   }
 ]

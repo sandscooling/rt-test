@@ -103,10 +103,26 @@ export function storedRunFindings(
         "declared, but no run of it was stored",
       ),
     );
+  const repeated =
+    edit.declaredRunsOnce === true
+      ? declared
+          .map(
+            (path) => [path, ran.filter((run) => run === path).length] as const,
+          )
+          .filter(([, count]) => count > 1)
+          .map(([path, count]) =>
+            finding(
+              FINDING.runOutsideDeclaredSet,
+              edit.name,
+              path,
+              `${count} runs stored; the edit declares one`,
+            ),
+          )
+      : [];
   const duplicates = added.flatMap((stored, offset) =>
     duplicateFinding(edit.name, stored, runs.slice(0, storedBefore + offset)),
   );
-  return [...outside, ...missing, ...duplicates];
+  return [...outside, ...missing, ...repeated, ...duplicates];
 }
 
 function duplicateFinding(

@@ -56,8 +56,6 @@ import {
   linkWorkspacePackages,
 } from "./harness.js";
 
-export { FINDING, type Finding, type FindingKind };
-
 /** What a sequence with no finding returns. */
 export const CLEAN = "clean";
 
@@ -66,7 +64,7 @@ export type SequenceReport =
   | { readonly sequence: string; readonly findings: readonly Finding[] };
 
 /** The step before a sequence's first edit, at which every confirmed workspace runs once. */
-export const BASELINE = "baseline";
+const BASELINE = "baseline";
 
 /** Covers a start's discovery and a run of every workspace, with room for a loaded machine. */
 const WAIT_LIMIT_MS = 45_000;
@@ -148,6 +146,7 @@ class Replay {
       name: BASELINE,
       changes: [],
       declaredRuns: this.#workspaces,
+      declaredRunsOnce: true,
       declaredFailures: NO_FAILURES,
     };
     if (!(await this.#step(baseline, testModules(this.#root)))) return;
@@ -232,6 +231,8 @@ class Replay {
       async () => answered || (await this.#declaredRunning(edit)),
       WAIT_LIMIT_MS,
     );
+    // Only a second part saved before the first wait answered can supersede it.
+    const savedBeforeAnswer = !answered;
     applyChanges(this.#root, edit.duringRun);
     const bothParts = [
       ...waitPaths,
@@ -240,7 +241,14 @@ class Replay {
     const secondWait = await settled(
       queryWait(this.#root, bothParts, { limitMs: WAIT_LIMIT_MS }),
     );
-    const first = this.#settledWait(edit.name, await firstWait, true);
+    const firstAnswer = await firstWait;
+    const first = this.#settledWait(
+      edit.name,
+      firstAnswer,
+      savedBeforeAnswer &&
+        !("thrown" in firstAnswer) &&
+        supersededOnlyBy(firstAnswer, edit.duringRun),
+    );
     const second = this.#settledWait(edit.name, secondWait, false);
     return first && second;
   }
@@ -333,9 +341,11 @@ class Replay {
       FINDING.daemonNotIdle,
       edit,
       "the daemon",
-      summary === undefined || "thrown" in summary
-        ? String(summary?.thrown)
-        : scheduleText(summary),
+      summary === undefined
+        ? "no summary was read"
+        : "thrown" in summary
+          ? String(summary.thrown)
+          : scheduleText(summary),
     );
     return undefined;
   }
@@ -343,6 +353,7 @@ class Replay {
   #isIdle(summary: SummaryResponse): boolean {
     const { round, workspaces } = summary.schedule;
     return (
+      summary.inputs.pendingChanges === 0 &&
       round.state === ROUND.planned &&
       this.#workspaces.every((path) =>
         workspaces.some(
@@ -415,11 +426,29 @@ function applyChange(root: string, change: FileChange): void {
 
 /** Every path the changes touch, a renamed file's old and new paths both, as absolute paths. */
 function changedPaths(root: string, changes: readonly FileChange[]): string[] {
-  return changes
-    .flatMap((change) =>
-      change.kind === CHANGE.rename ? [change.path, change.to] : [change.path],
-    )
-    .map((path) => join(root, path));
+  return touchedPaths(changes).map((path) => join(root, path));
+}
+
+/** Every path the changes touch, a renamed file's old and new paths both, root-relative and `/`-separated. */
+function touchedPaths(changes: readonly FileChange[]): string[] {
+  return changes.flatMap((change) =>
+    change.kind === CHANGE.rename ? [change.path, change.to] : [change.path],
+  );
+}
+
+/** Whether `answer` is superseded, naming only paths `changes` touch. */
+function supersededOnlyBy(
+  answer: WaitResponse,
+  changes: readonly FileChange[],
+): boolean {
+  if (answer.outcome !== WAIT_OUTCOME.superseded) return false;
+  const { named, more } = answer.changedPaths;
+  const touched = touchedPaths(changes);
+  return (
+    more === 0 &&
+    named.length > 0 &&
+    named.every((path) => touched.includes(path))
+  );
 }
 
 /** Every `.test.mjs` module under `directory`, as the fixture names them, as absolute paths; throws when there is none. */
@@ -444,5 +473,5 @@ function scheduleText(summary: SummaryResponse): string {
   const states = workspaces.map(
     (workspace) => `${workspace.workspacePath} ${workspace.state}`,
   );
-  return `${roundText(round)}; ${states.join(", ")}`;
+  return `${roundText(round)}; ${states.join(", ")}; ${summary.inputs.pendingChanges} change(s) unread`;
 }

@@ -7,10 +7,10 @@
 
 export const EDIT_CORPUS_FIXTURE = "edit-corpus";
 
-export const LIB = "packages/lib";
-export const UI = "packages/ui";
-export const BACKEND = "packages/backend";
-export const WEB = "apps/web";
+const LIB = "packages/lib";
+const UI = "packages/ui";
+const BACKEND = "packages/backend";
+const WEB = "apps/web";
 
 export const CHANGE = {
   /** Replaces the one occurrence of `from` in the file. */
@@ -68,6 +68,8 @@ export interface CorpusEdit {
   /** Saved once a declared workspace is seen running, or once the wait on `changes` has answered. */
   readonly duringRun?: readonly FileChange[];
   readonly declaredRuns: readonly string[];
+  /** Each declared workspace stores exactly one run, as at the baseline. */
+  readonly declaredRunsOnce?: true;
   readonly declaredFailures: DeclaredFailures;
 }
 
@@ -319,10 +321,3 @@ export const CONFIG_AND_RUN_IN_PROGRESS: CorpusSequence = {
     },
   ],
 };
-
-export const EDIT_CORPUS: readonly CorpusSequence[] = [
-  SHARED_LIBRARY,
-  INSIDE_PACKAGES,
-  RENAME,
-  CONFIG_AND_RUN_IN_PROGRESS,
-];
