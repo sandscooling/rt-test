@@ -69,7 +69,10 @@ export interface CurrentInputs {
   readonly nonInputsUnusable?: string;
   /** Why no workspace's inputs are narrowed to those its selection includes; absent otherwise. */
   readonly inputsNotNarrowed?: InputsNotNarrowed;
-  /** The committed inputs every fingerprint here is computed from; undefined when none can be computed. */
+  /**
+   * The committed inputs every fingerprint here is computed from, with the held reads of the listed files they leave
+   * out, which no fingerprint takes; undefined when none can be computed.
+   */
   readonly snapshot: ProjectInputs | undefined;
   workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
   discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
@@ -114,8 +117,10 @@ export interface TrackedInputs {
   endJob(mark: JobMark): Promise<JobVerdict>;
   /**
    * Protects from the declared patterns what `discovery` lists and its projects' test file patterns find, in place of
-   * the last discovery's, and resolves once every path whose declared state that change flips has been read. Resolves
-   * with why a file only a walk found may have changed at or after `jobStart`, a time in ms; undefined when none may.
+   * the last discovery's, and resolves once every path whose declared state that change flips, and every file it newly
+   * lists that the inputs leave out, has been read, marking no job; a change in the files listed moves the revision.
+   * Resolves with why a file only a walk found may have changed at or after `jobStart`, a time in ms; undefined when
+   * none may.
    */
   protectInputs(
     discovery: TestDiscovery | undefined,

@@ -80,6 +80,7 @@ import {
   type MemoryLog,
 } from "./daemon-harness.js";
 import { inTempDir, projectFacts, settle } from "./harness.js";
+import { onPlatform } from "./on-platform.js";
 import {
   builtAt,
   discoveredIn,
@@ -4202,3 +4203,22 @@ describe(
     });
   },
 );
+
+describe("placing a listed file by the spelling on disk", () => {
+  it("D3262: with process.platform read as win32, an env file the discovery lists for the workspace, changed under another case of its name, lies inside its inputs though the build places it in another package", async () => {
+    const onDisk = "b/.ENV.local";
+    const judgment = await onPlatform("win32", () =>
+      watched(
+        { entry: listingEnvOf("a", "b"), builds: narrowedAt(1) },
+        (run) => {
+          run.windows.recordPath(onDisk);
+          return judged(run.judgeAt(1, narrowedAt(1)));
+        },
+      ),
+    );
+    expect(judgment).toStrictEqual({
+      kind: "changed-inside",
+      paths: [onDisk],
+    });
+  });
+});

@@ -178,7 +178,7 @@ export function workspaceFingerprint(
     digest: digestOf({
       ...sharedParts(reads.environment),
       inputs: inputs.selected.digest(),
-      testModules: listed.testModules,
+      testModules: listed.modules,
       envFiles: listed.envFiles,
       vitestVersion: vitestVersion(entry.workspace.directory),
     }),
@@ -211,7 +211,7 @@ export function discoveryFingerprint(
     digest: digestOf({
       ...sharedParts(reads.environment),
       inputs: inputs.selected.digest(),
-      testModules: listed.testModules,
+      testModules: listed.modules,
       envFiles: listed.envFiles,
       vitestVersions: discovery.workspaces.map((entry) => [
         entry.workspace.path,
@@ -239,7 +239,8 @@ type PathDigests =
 type ListedDigests =
   | {
       readonly ok: true;
-      readonly testModules: Digests;
+      /** Each listed test module, setup file and global setup file's, under the digest's `testModules` part. */
+      readonly modules: Digests;
       readonly envFiles: Digests;
     }
   | { readonly ok: false; readonly reason: string };
@@ -254,7 +255,7 @@ function listedDigests(
   if (!envFiles.ok) return envFiles;
   return {
     ok: true,
-    testModules: modules.digests,
+    modules: modules.digests,
     envFiles: envFiles.digests,
   };
 }

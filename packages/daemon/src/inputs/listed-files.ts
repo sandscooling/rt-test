@@ -75,14 +75,21 @@ export class ListedFiles {
     return this.#files.has(key) || this.#ways.has(key);
   }
 
+  /** Whether the discovery in effect lists the file at `path`, absolute. */
+  lists(path: string): boolean {
+    return this.#files.has(caseComparable(path));
+  }
+
   /** Each listed file at or under `path`, an absolute path, that `filter` excludes now. */
   under(path: string, filter: InputFilter): ListedFile[] {
-    if (!this.names(path)) return [];
     const key = caseComparable(path);
+    const file = this.#files.get(key);
+    if (file !== undefined) return filter.excludes(file.path) ? [file] : [];
+    if (!this.#ways.has(key)) return [];
     return [...this.#files]
-      .filter(([file]) => liesInside(key, file))
-      .map(([, file]) => file)
-      .filter((file) => filter.excludes(file.path));
+      .filter(([listed]) => liesInside(key, listed))
+      .map(([, listed]) => listed)
+      .filter((listed) => filter.excludes(listed.path));
   }
 
   /** Each listed file `filter` excludes now. */

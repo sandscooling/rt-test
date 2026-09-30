@@ -6198,7 +6198,7 @@
     "id": "D2867",
     "defect": "A changed test module the discovery lists for the workspace lies outside its inputs whenever selection does not include it, so a run during which one of its own test files changed can be stored under its fingerprint.",
     "file": "packages/daemon/src/daemon/run-judgment.ts",
-    "old": "  const listed = paths.filter((path) => listedFiles.has(path));",
+    "old": "  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));",
     "new": "  const listed = paths.filter(() => false);"
   },
   {
@@ -8468,5 +8468,54 @@
     "file": "packages/daemon/src/daemon/scheduler.ts",
     "old": "      if (refusedAtPlan) return;\n      begun.notBegun();\n      if (retried) this.#retryWorkspaces.add(path);\n",
     "new": "      if (retried) this.#retryWorkspaces.add(path);\n      if (refusedAtPlan) return;\n      begun.notBegun();\n"
+  },
+  {
+    "id": "D3257",
+    "defect": "An event on an excluded path that is neither a listed file nor a directory on the way to one is queued, so every write under a directory git ignores counts as a pending changed path until it is read.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      if (this.#listed.names(path)) this.#queuePath(path, kind);",
+    "new": "      this.#queuePath(path, kind);"
+  },
+  {
+    "id": "D3258",
+    "defect": "A tree watch's event naming a directory on the way to a listed file does not re-arm the listed watches, so a listed file in a directory git ignores created after they were armed is read once and its later edit raises no revision.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "        const path = join(watched, name);\n        if (this.#listedWays.has(path)) this.#armListed();",
+    "new": "        const path = join(watched, name);"
+  },
+  {
+    "id": "D3259",
+    "defect": "Closing tree watches in dropDirectory owes no re-arm, so a listed file git ignores under an input directory recreated before its read goes unwatched once the read drops the old tree watch.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "      if (liesInside(directory, watched)) this.#closeTree(watched, watcher);\n    }\n    this.#armListedIfOwed();",
+    "new": "      if (liesInside(directory, watched)) this.#closeTree(watched, watcher);\n    }"
+  },
+  {
+    "id": "D3260",
+    "defect": "A read of a listed file finding it unmoved since a held read taken at least 2 s after its last write still reports a possible write, so every event on it marks each running job.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "    this.#listedRead.add(path);\n    return this.#record(this.#listed, path, read);",
+    "new": "    this.#listedRead.add(path);\n    this.#record(this.#listed, path, read);\n    return true;"
+  },
+  {
+    "id": "D3261",
+    "defect": "A read of a listed file that a new discovery stopped listing while the read ran is held again and marks the running job.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      const read = await readListedFile(file, this.#abort.signal);\n      if (!this.#listed.lists(file.path)) continue;",
+    "new": "      const read = await readListedFile(file, this.#abort.signal);"
+  },
+  {
+    "id": "D3262",
+    "defect": "On Windows a changed path spelled on disk in another case than the listing's is placed only by selection, so a run during which a listed env file in another package changed is stored under its fingerprint.",
+    "file": "packages/daemon/src/daemon/run-judgment.ts",
+    "old": "  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));",
+    "new": "  const listed = paths.filter((path) => listedFiles.has(path));"
+  },
+  {
+    "id": "D3263",
+    "defect": "An event naming a listed file the filter does not exclude holds a listed read of that input beside its own read, so the next reconciliation, which reads only excluded listed files, drops it and raises the revision though nothing changed.",
+    "file": "packages/daemon/src/inputs/listed-files.ts",
+    "old": "    if (file !== undefined) return filter.excludes(file.path) ? [file] : [];",
+    "new": "    if (file !== undefined) return [file];"
   }
 ]

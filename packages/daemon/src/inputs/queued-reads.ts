@@ -143,6 +143,7 @@ export class QueuedReads {
   ): Promise<void> {
     for (const file of this.#listed.under(path, filter)) {
       const read = await readListedFile(file, this.#abort.signal);
+      if (!this.#listed.lists(file.path)) continue;
       const changed =
         read === undefined
           ? this.#state.dropListed(file.spelling)

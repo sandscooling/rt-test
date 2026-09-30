@@ -29,7 +29,7 @@ sprint-2: in-progress
 2-3l-hold-self-changing-discovery: ready-for-dev
 2-3m-env-files: done
 2-3q-nested-container-env: done
-2-3p-listed-ignored-events: review
+2-3p-listed-ignored-events: done
 2-3n-env-snapshot: ready-for-dev
 2-3o-count-carried-env: backlog
 2-4-late-answers: ready-for-dev

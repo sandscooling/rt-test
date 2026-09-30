@@ -362,6 +362,18 @@ In `packages/daemon/test/lifecycle.test.ts`:
 - D3250: a listed file changed while a run runs never joins the paths that interrupt it (AC4).
 - D3251: the count leaves listed env files to selection, so a workspace whose runs rewrite its listed env file in another package is never held (AC2, AC4).
 
+From the review's gaps, in `input-tracker.test.ts` and, for G6, `lifecycle.test.ts`:
+
+- D3257 (G1): an event on an excluded path that names no listed file is queued, so a write under a directory git ignores counts as a pending changed path (AC1).
+- D3258 (G2): a tree watch's event on a directory on the way to a listed file does not re-arm, so a listed file in a directory git ignores created later is read once and never again (AC1).
+- D3259 (G3): `dropDirectory` owes no re-arm, so a listed file under an input directory recreated before its read goes unwatched once the read drops the old tree watch (AC1).
+- D3260 (G4): a read of a listed file unmoved since a held read taken at least 2 s after its last write still marks the running job (AC1).
+- D3261 (G5): a read of a listed file a new discovery stopped listing while the read ran is held again and marks the running job (AC2).
+- D3262 (G6): on Windows a changed path spelled on disk in another case than the listing's is placed only by selection (AC4).
+- D3263 (G7): an event naming a listed file that is an input holds a listed read of it too, so the next reconciliation raises the revision though nothing changed (AC1).
+
+D2867 is re-anchored again to the review's case-folded filter.
+
 Re-anchored to the same defect in the code this change reshaped: D1909, D1951 (`input-watcher.ts`), D2867, D3181 (`run-judgment.ts`), D2894 (`queued-reads.ts`), D3081, D3071 (`protection.ts`), D2160, D3067 (`fingerprint.ts`, since the fingerprints now take a workspace's env files from the listing and the end check its test modules from it), D3173 (`input-tracker.ts`), and D2128, D2129 (`protection.ts`, in `packages/daemon/test/selection/defects.json`).
 
 Repaired for the reworded end check (C48): the stand-in strings of D1879, D3030 and D2090 and the titles of D3030, D3100, D3077 and D3079, and the record sentences of D1879, D1898, D1988 and D3030. The rig's and the stand-in's window edges read `comparedDigests`, as the tracker's do. The inotify model now carries a watch along when an ancestor is renamed within its own parent, and reports no content change for a directory entry, as inotify reports neither; both disagreed with real inotify, which D3231's Linux proof showed.
@@ -377,9 +389,39 @@ Repaired for the reworded end check (C48): the stand-in strings of D1879, D3030 
 
 ### Review Record
 
+Review session: threadId 212f1087-c6a8-44ef-987f-8518328bcc8d
+
+Reviewed 9bac5ea, merge 4687599's scheduler.ts, and the doc changes of 70eb123 and fe14b55, 2026-09-30 00:41 to 01:03, against the ticket's rule contract (16 checklist, 7 project-context rules), with three fresh-eyes batches (tracker, listing, scheduler) and one doc-verify agent. The merge and 9bac5ea edit disjoint regions of `scheduler.ts`: a run refused at plan opens no job window, so it never reaches the change record.
+
+Fixed (uncommitted on `wt/1`):
+
+- F1 (MEDIUM, daemon-state): `QueuedReads.#readListed` chose its files before awaiting each read, and `protectInputs` does not wait for the drain, so a discovery that stopped listing a file during its read had its dropped read restored by `holdListed`, marking the open job (a discovery then stored not fingerprinted over a file it no longer lists) and leaving a stale digest in `comparedDigests`, which the change record reads as two edits. The read is now dropped unless `ListedFiles.lists` still names the file after the await.
+- F2 (LOW, C8, C42): on Windows protection matches a listed file case-folded (`caseComparable`, D3093) while run judgment and the count matched it exactly, so an edit to a tracked `.ENV.local` for a listed `.env.local` neither interrupted a run under a narrowed build nor counted toward or released a hold in another package. `workspaceListedFiles` and `placeFor` now compare case-comparable paths. D2867's anchor moved.
+- F3 (LOW, performance): `ListedFiles.under` scanned every listed file for an event on a listed test module that is an input, every save of one. A listed file's own path is now looked up directly; only a directory on the way scans.
+- F4 (LOW): `discoveredTestModules` (`inputs/non-inputs.ts`) lost its last importers here; deleted.
+- F5 (LOW, C48): `ListedDigests.testModules` carries setup and global setup files too; renamed `modules`, the digest's `testModules` key unchanged so stored fingerprints still match.
+- F6 to F8 (LOW, C48, comment-only): `CurrentInputs.snapshot` and `TrackedInputs.protectInputs` (`input-tracker.ts`), the watcher's `#listedFiles`, and `projectEnvFiles`' list of what derives from an unknown project's empty list (`env-files.ts`).
+
+Dismissed: `comparedDigests`' precedence (the inputs and the held reads never overlap, since a held input is never re-checked by `filter.check`); a listed watch's runtime error marking the watcher unhealthy (stricter than an open failure, and safe, as a tree watch's); `#listedEvent` without `existsSync` (an extra read only, and the check would miss an in-place replace); `isDirectory` hiding a stat error other than ENOENT (the file's fingerprint refusal names it); a fresh `comparedDigests` map after every reconciliation (pre-existing, once per reconciliation).
+
+Tech debt, for triage once this change is committed:
+
+- TD1 (C8, P18): `workspaceEnvFiles` and `discoveryEnvFiles` (`inputs/env-files.ts`) still build a `files` list, a second answer to which env files a workspace lists, which `workspaceListing` now owns; both fingerprints read only `known` and the reason from them, and only `discover-tests.test.ts`' `envFilesOf` reads `files`. The two agree whenever the env files are known and differ when one project's are not (the listing keeps the known projects' files), where no fingerprint exists. Fix: narrow them to the not-known answer the fingerprints check, and move `envFilesOf` onto `workspaceListing(entry).envFiles`; D3074, D3075 and D3076 guard the known answer and would re-anchor.
+- TD2 (edge case, pre-existing in `moduleDigest`, `inputs/fingerprint.ts`): only ENOENT digests as absent, so a listed test module or, after this change, setup file whose path runs through a file (ENOTDIR) refuses the workspace's and the discovery's fingerprints where AC5 says nothing at its path digests as absent; `envFileDigest` treats ENOTDIR as absent. It fails toward no fingerprint.
+
 #### Test Coverage Gaps
 
-None.
+- G1 (MEDIUM, `packages/daemon/src/inputs/input-tracker.ts`, `#changed`): an event on an excluded path that is neither a listed file nor a directory on the way to one is queued, so on Windows every write under a directory git ignores (build output, `node_modules`) counts as a pending changed path and answers read "changed paths have not been read yet" until it is read. Expected: a tracker with `process.platform` read as win32 (as D3217) sees no pending change for a write to a gitignored file no discovery lists. Record it as deliberately untested if the pending window cannot be observed.
+- G2 (MEDIUM, `packages/daemon/src/inputs/input-watcher.ts`, the tree watch's `#listedWays` re-arm): a tree watch's event naming a directory on the way to a listed file does not re-arm the listed watches, so on Linux a listed file in a directory git ignores created after the watches were armed (`gen/` absent at start, then `gen/setup.ts` created) is read once and its later edit raises no revision until the next reconciliation. Expected: create the directory and file, see the revision rise, edit the file, see it rise again.
+- G3 (MEDIUM, `packages/daemon/src/inputs/input-watcher.ts`, `dropDirectory`'s owed re-arm): closing tree watches in `dropDirectory` owes no re-arm, so on Linux a listed file in a gitignored directory under an input directory that is removed and recreated goes unwatched after the tree watch closes. D3253 covers only `keepDirectories`.
+- G4 (MEDIUM, `packages/daemon/src/inputs/input-state.ts`, `holdListed`): a read of a listed file finding its digest, size and times equal to a held read taken at least 2 s after its last write still reports a possible write, so on Windows every event on its directory marks each running job and the run is stored not fingerprinted. Expected: a listed file written well before the held read, an event on it during a job, the job fingerprinted (AC1's ticket 2.3 rule).
+- G5 (MEDIUM, `packages/daemon/src/inputs/queued-reads.ts`, `#readListed`, fix F1): a read of a listed file that a new discovery stopped listing while the read ran is held again and marks the running job. Expected: the unlisted file's read holds nothing and marks no job. Record it as deliberately untested if the relist cannot be ordered inside the read.
+- G6 (LOW, `packages/daemon/src/daemon/run-judgment.ts`, fix F2): on Windows a changed path spelled on disk in another case than the listing's (a tracked `.ENV.local` for a listed `.env.local`) is placed only by selection, so an edit to a root env file another package's workspace lists does not interrupt its run under a narrowed build. Also re-anchor D2867 (`old` now `  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));`, after prettier) and re-prove it.
+- G7 (LOW, `packages/daemon/src/inputs/listed-files.ts`, `under`'s direct lookup, fix F3): the direct lookup returning a listed file the filter does not exclude would hold a listed read of an input too. Record it as deliberately untested when unobservable (the inputs' digest wins in `comparedDigests`, and the input's own read already marks the job).
+
+Every row is covered (rt-t2-3p-tests, 01:20): G1 D3257, G2 D3258, G3 D3259, G4 D3260, G5 D3261, G6 D3262 with D2867 re-anchored, G7 D3263, each passing against the fix round. Proof by `--ids` of 174 records (the seven, D2867, and every record mutating the eight production files the fix round edited): 174 detected on Windows (01:09 to 01:17) and on Linux Node 24.19.0 (01:17 to 01:20).
+
+Validation of the fix round: `bun x oxlint`, `bun x prettier --check` and `bun run --filter @rt-test/daemon typecheck` exit 0 (01:03) over the eight production files; `bun x vitest related` over them, through the run lease, 25 of 132 test files, 1652 of 1652 tests passed, exit 0 (01:21 to 01:25); `check-line-citations` clean; `check-sprint-keys` and `check-requirement-markers` exit 0 (01:25).
 
 ### Completion Notes
 
@@ -434,6 +476,8 @@ Built by rt-t2-3p-dev (threadId 0397f746) in Tree 1 on `wt/1` at fe14b55, 2026-0
 - packages/daemon/src/inputs/input-watcher.ts (modified)
 - packages/daemon/src/daemon/scheduler.ts (modified)
 - packages/daemon/src/inputs/listed-files.ts (created)
+- packages/daemon/src/inputs/non-inputs.ts (modified by review: `discoveredTestModules` deleted)
+- packages/daemon/src/inputs/env-files.ts (modified by review: `projectEnvFiles` docblock)
 - _agent-docs/tickets/2-3p-listed-ignored-events.md (dev: task and criterion boxes, Dev Handoff, Completion Notes, File List)
 - _agent-docs/tickets/2-3p-listed-ignored-events.md (created by create-ticket, 2026-09-29, in Tree 1 against `wt/1` at 345b57e, written against the tree ticket 2.3k's tasks leave)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (§ Ticket 2.3p: the Q1 and Q2 rulings, the build order after 2.3k, NFR3 and the ticket link, under the dispatch's grant)

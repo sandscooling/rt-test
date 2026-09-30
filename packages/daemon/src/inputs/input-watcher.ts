@@ -51,7 +51,7 @@ export class InputWatcher {
   readonly #tree = new Map<string, FSWatcher>();
   #git: FSWatcher[] = [];
   #listed: FSWatcher[] = [];
-  /** The listed files the inputs may leave out, by absolute path, watched apart from the tree on Linux. */
+  /** Every listed file under the root, inputs included, by absolute path; those the tree does not cover are watched apart. */
   #listedFiles: readonly string[] = [];
   /** Each directory on the way from the root to a listed file, whose change re-arms the listed watches. */
   #listedWays: ReadonlySet<string> = new Set();

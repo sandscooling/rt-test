@@ -13,7 +13,11 @@ import {
   type EndedBuild,
   type QueryNarrowing,
 } from "../inputs/narrowed-inputs.js";
-import { listedPaths, workspaceListing } from "../inputs/protection.js";
+import {
+  caseComparable,
+  listedPaths,
+  workspaceListing,
+} from "../inputs/protection.js";
 import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
 import type { DaemonLog } from "./daemon-log.js";
 import type { DependencyBuilds } from "./dependency-builds.js";
@@ -90,7 +94,7 @@ interface RunFacts {
   readonly workspacePath: string;
   readonly start: FingerprintResult;
   readonly window: JobWindow;
-  /** The files the discovery lists by path for the workspace, each inside its inputs whatever selection says. */
+  /** Case-comparable: the files the discovery lists by path for the workspace, each inside its inputs whatever selection says. */
   readonly listedFiles: ReadonlySet<string>;
   /** The start revision's build, each build that ended since, and at the end the end revision's. */
   readonly placements: readonly ChangePlacement[];
@@ -146,7 +150,7 @@ function placeFor(
   listedFiles: ReadonlySet<string>,
   placements: readonly ChangePlacement[],
 ): PathsInside {
-  const listed = paths.filter((path) => listedFiles.has(path));
+  const listed = paths.filter((path) => listedFiles.has(caseComparable(path)));
   const inside = new Set(listed);
   const narrowed = new Set<string>();
   for (const placement of placements) {
@@ -277,8 +281,9 @@ export function pathsInside(
   ]).inside;
 }
 
+/** Case-comparable, as protection compares a listed file, since a changed path is named as it is spelled on disk. */
 function workspaceListedFiles(entry: WorkspaceDiscovery): ReadonlySet<string> {
-  return new Set(listedPaths(workspaceListing(entry)));
+  return new Set(listedPaths(workspaceListing(entry)).map(caseComparable));
 }
 
 /** The latest build over the discovery in effect; widened when the builds give that discovery no narrowing at all. */
