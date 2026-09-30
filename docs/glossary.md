@@ -163,7 +163,7 @@ A wait's answer when its time limit passed before every covering test had a curr
 _Avoid_: timed out, failed
 
 **Cursor**:
-The token a `changes` answer returns, naming the test standings the daemon recorded when it answered, so the next `changes` call reports only what changed since.
+The token a `changes` answer returns, naming a moment whose test standings the daemon recorded, so the next `changes` call reports only what changed since.
 _Avoid_: checkpoint, bookmark, since-id
 
 ### Falsification

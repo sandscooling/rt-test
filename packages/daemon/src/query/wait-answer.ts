@@ -39,6 +39,7 @@ import {
   ROUND,
   SELECTION_REFUSED,
   UNKNOWN,
+  type CutReason,
   type InputsNotNarrowed,
   type ListedCoverage,
   type NamedFailure,
@@ -370,9 +371,16 @@ function failed(outcome: TestOutcome): outcome is "failed" | "error" {
   return outcome === "failed" || outcome === "error";
 }
 
-function firstError(errors: readonly string[]): NamedFailure["firstError"] {
+/** The first line of the first error, cut; null when none was recorded. */
+export function firstError(
+  errors: readonly string[],
+): NamedFailure["firstError"] {
   const [first] = errors;
-  if (first === undefined) return null;
-  const [line = ""] = first.split(ERROR_LINE_BREAK);
+  return first === undefined ? null : firstLineOf(first);
+}
+
+/** The first line of `text`, cut as an answer cuts a reason. */
+export function firstLineOf(text: string): CutReason {
+  const [line = ""] = text.split(ERROR_LINE_BREAK);
   return cutReason(line);
 }

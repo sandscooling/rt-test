@@ -1619,9 +1619,9 @@
   {
     "id": "D1453",
     "defect": "The daemon stores every job not fingerprinted, even one whose inputs held still from its start to its end, so none of its results can ever read current.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    if (print.ok) {\n      return {\n        ...scope,",
-    "new": "    if (print.ok && false) {\n      return {\n        ...scope,"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  if (print.ok) {\n    return {\n      ...scope,",
+    "new": "  if (print.ok && false) {\n    return {\n      ...scope,"
   },
   {
     "id": "D1454",
@@ -1913,9 +1913,9 @@
   {
     "id": "D1500",
     "defect": "The daemon stores its records under the project's identity for the worktree's, so two worktrees on one state directory read back each other's runs.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const { scope, log } = this.#parts;",
-    "new": "    const { log } = this.#parts;\n    const scope = { ...this.#parts.scope, worktreeIdentity: this.#parts.scope.projectIdentity };"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  fingerprint: () => FingerprintResult,\n): StoreBindings {\n",
+    "new": "  fingerprint: () => FingerprintResult,\n): StoreBindings {\n  scope = { ...scope, worktreeIdentity: scope.projectIdentity };\n"
   },
   {
     "id": "D1501",
@@ -2865,9 +2865,9 @@
   {
     "id": "D1877",
     "defect": "A job's verdict is ignored, so a run during which an input changed is stored under its digest and can read current.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const print: FingerprintResult = verdict.fingerprinted\n      ? fingerprint()",
-    "new": "    const print: FingerprintResult = true\n      ? fingerprint()"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  const print: FingerprintResult = verdict.fingerprinted\n    ? fingerprint()",
+    "new": "  const print: FingerprintResult = true\n    ? fingerprint()"
   },
   {
     "id": "D1878",
@@ -3328,8 +3328,8 @@
     "id": "D1987",
     "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    let movedOnceComposed = false;\n    const bindings = this.#bindings(\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        movedOnceComposed = moved !== undefined;\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
-    "new": "    let movedOnceComposed = false;\n    const bindings = this.#bindings(\"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
+    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    let movedOnceComposed = false;\n    const bindings = storeBindings(\n      this.#parts,\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        movedOnceComposed = moved !== undefined;\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
+    "new": "    let movedOnceComposed = false;\n    const bindings = storeBindings(this.#parts, \"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
   },
   {
     "id": "D1988",
@@ -9677,8 +9677,8 @@
     "id": "D3380",
     "defect": "A path status waits only the connection's default 10000 ms, so a folder's reads fail it before the daemon can answer.",
     "file": "packages/daemon/src/query-client.ts",
-    "old": "    request,\n    PATH_STATUS_BOUND_MS,\n  );",
-    "new": "    request,\n  );"
+    "old": "    request,\n    READ_FIRST_BOUND_MS,\n  );\n  return answer as unknown as PathStatusResponse;",
+    "new": "    request,\n  );\n  return answer as unknown as PathStatusResponse;"
   },
   {
     "id": "D3381",
@@ -9782,8 +9782,8 @@
     "id": "D3426",
     "defect": "A wait request naming 1001 paths, one past the bound, is taken rather than refused.",
     "file": "packages/daemon/src/daemon/server.ts",
-    "old": "if (paths.length > MAX_WAIT_PATHS) {",
-    "new": "if (paths.length > MAX_WAIT_PATHS + 1) {"
+    "old": "namedPaths(message, WAIT_TYPE, MAX_WAIT_PATHS, \"a wait\");",
+    "new": "namedPaths(message, WAIT_TYPE, MAX_WAIT_PATHS + 1, \"a wait\");"
   },
   {
     "id": "D3427",
@@ -9866,8 +9866,8 @@
     "id": "D3438",
     "defect": "A wait naming a refused path beside acceptable ones waits on the acceptable ones rather than being refused whole.",
     "file": "packages/daemon/src/daemon/waits.ts",
-    "old": "    if (refusals.length === 0) return { paths: [...paths] };",
-    "new": "    if (paths.size > 0) return { paths: [...paths] };"
+    "old": "  if (refusals.length === 0) return { paths: [...paths] };",
+    "new": "  if (paths.size > 0) return { paths: [...paths] };"
   },
   {
     "id": "D3439",
@@ -9908,8 +9908,8 @@
     "id": "D3444",
     "defect": "A named failure carries its whole first error, stack lines and all, rather than that error's first line.",
     "file": "packages/daemon/src/query/wait-answer.ts",
-    "old": "  const [line = \"\"] = first.split(ERROR_LINE_BREAK);",
-    "new": "  const line = first;"
+    "old": "  const [line = \"\"] = text.split(ERROR_LINE_BREAK);",
+    "new": "  const line = text;"
   },
   {
     "id": "D3445",
@@ -9943,8 +9943,8 @@
     "id": "D3449",
     "defect": "A wait naming a directory is taken as a file rather than refused naming it.",
     "file": "packages/daemon/src/daemon/waits.ts",
-    "old": "      else if (isDirectory(path)) refusals.push(`${path} ${DIRECTORY_REASON}`);\n",
-    "new": ""
+    "old": "    else if (isDirectory(path)) {\n      refusals.push(`${path} is a directory, and a ${query} names only files`);\n    } else paths.add(target.path);",
+    "new": "    else paths.add(target.path);"
   },
   {
     "id": "D3456",
@@ -9980,6 +9980,223 @@
     "file": "packages/daemon/src/daemon/server.ts",
     "old": "if (!Array.isArray(paths) || paths.length === 0) {",
     "new": "if (!Array.isArray(paths)) {"
+  },
+  {
+    "id": "D3498",
+    "defect": "A changes request naming 1001 paths, one past the bound, is taken rather than refused.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "    MAX_CHANGES_PATHS,\n    \"a changes request\",",
+    "new": "    MAX_CHANGES_PATHS + 1,\n    \"a changes request\","
+  },
+  {
+    "id": "D3499",
+    "defect": "A changes request's cursor is never checked, so an empty string or a number reaches the query as a cursor.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (since !== undefined && !isCursor(since)) {",
+    "new": "  if (since !== undefined && false) {"
+  },
+  {
+    "id": "D3476",
+    "defect": "A changes query naming a refused path beside acceptable ones answers for the acceptable ones rather than being refused whole.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    if (\"refused\" in resolved) return resolved;\n    const { paths } = resolved;",
+    "new": "    const paths = \"refused\" in resolved ? [] : resolved.paths;"
+  },
+  {
+    "id": "D3477",
+    "defect": "A changes answer takes the daemon's moment before its named read, so a file saved just before the call is answered from its pre-edit result as current.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    await inputs.readNamed(paths);\n    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };\n    const moment = this.#parts.moment();",
+    "new": "    const moment = this.#parts.moment();\n    await inputs.readNamed(paths);\n    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };"
+  },
+  {
+    "id": "D3478",
+    "defect": "A changes answer ignores the named files its read found but could not read, and answers determined over content no read of them supports.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    const unread = inputs.unreadNamed(paths);",
+    "new": "    const unread: readonly UnreadPath[] = [];"
+  },
+  {
+    "id": "D3479",
+    "defect": "A changes answer not determined hands back the latest recorded cursor in place of the usable one it was given, so a failure recorded between the two is never listed.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "      const cursor =\n        cursorUse === CURSOR_USE.used && since !== undefined\n          ? since\n          : (this.#journal.latest() ?? null);",
+    "new": "      const cursor = this.#journal.latest() ?? null;"
+  },
+  {
+    "id": "D3480",
+    "defect": "A changes answer is determined while the tracker cannot vouch for its inputs, as long as it holds a snapshot.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  if (inputs.unavailable !== undefined || snapshot === undefined) {",
+    "new": "  if (snapshot === undefined) {"
+  },
+  {
+    "id": "D3481",
+    "defect": "A changes answer compares with the journal before recording the moment it reads, so a change made after the last record is not listed and its returned cursor already names it, losing it for good.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    const cursor = this.#journal.record(basis.standings, basis.notDiscovered);\n    return changesAnswer(basis, {\n      revision,\n      cursor,\n      reading: this.#journal.since(since),",
+    "new": "    const reading = this.#journal.since(since);\n    const cursor = this.#journal.record(basis.standings, basis.notDiscovered);\n    return changesAnswer(basis, {\n      revision,\n      cursor,\n      reading,"
+  },
+  {
+    "id": "D3482",
+    "defect": "The journal never records at the end of a dependency build, so a daemon life whose only determined moments are build ends has no cursor to hand back, and its first changes after an edit are never listed.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "        await builds.ended();\n        this.#record(BUILD_END_MOMENT);",
+    "new": "        await builds.ended();"
+  },
+  {
+    "id": "D3483",
+    "defect": "A store never wakes the build-end loop, so the end of the build a newly stored discovery begins with no input change is never recorded.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    this.#record(moment);\n    this.#wake?.();",
+    "new": "    this.#record(moment);"
+  },
+  {
+    "id": "D3484",
+    "defect": "A changes answer places each test by the workspaces that do not cover the named files, listing changes outside scope and leaving the covering tests' changes unlisted.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "    coverage.workspaces.has(workspacePath);",
+    "new": "    !coverage.workspaces.has(workspacePath);"
+  },
+  {
+    "id": "D3485",
+    "defect": "A changes answer counts every discovered test in scope and none outside it.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "    const set = covers(standing.test.identity.workspacePath)\n      ? inScope\n      : outside;",
+    "new": "    const set = inScope;"
+  },
+  {
+    "id": "D3486",
+    "defect": "The journal gives every test touched since a cursor, so a test that changed and changed back is listed though its standing is what it was.",
+    "file": "packages/daemon/src/daemon/change-journal.ts",
+    "old": "      if (!same(before, now)) changes.push({ key, atCursor: before, now });",
+    "new": "      changes.push({ key, atCursor: before, now });"
+  },
+  {
+    "id": "D3487",
+    "defect": "The journal gives a test's standing before its latest change as its standing at the cursor, so a test that failed and then went stale reads as having stood failed at the cursor, and its failure is not listed as failing.",
+    "file": "packages/daemon/src/daemon/change-journal.ts",
+    "old": "      if (change.sequence > sequence && !atCursor.has(change.key)) {",
+    "new": "      if (change.sequence > sequence) {"
+  },
+  {
+    "id": "D3488",
+    "defect": "The journal keys a not-discovered entry without its module, so a second module failing to load in the same workspace is no change.",
+    "file": "packages/daemon/src/daemon/change-journal.ts",
+    "old": "    \"modulePath\" in entry ? entry.modulePath : null,",
+    "new": "    null,"
+  },
+  {
+    "id": "D3489",
+    "defect": "The journal reads a cursor from another daemon life by its sequence alone, listing only the changes after that number in this life.",
+    "file": "packages/daemon/src/daemon/change-journal.ts",
+    "old": "    if (at === -1 || cursor.slice(0, at) !== this.#life) return undefined;",
+    "new": "    if (at === -1) return undefined;"
+  },
+  {
+    "id": "D3490",
+    "defect": "A cursor whose changes the journal dropped is still used, and lists none of them.",
+    "file": "packages/daemon/src/daemon/change-journal.ts",
+    "old": "    if (sequence < this.#dropped) return { use: CURSOR_USE.expired };",
+    "new": "    if (sequence < this.#dropped - 1) return { use: CURSOR_USE.expired };"
+  },
+  {
+    "id": "D3491",
+    "defect": "A test whose run crashed is not a failing state, so its change is listed as other.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  [RUN_CRASHED]: true,",
+    "new": "  [RUN_CRASHED]: false,"
+  },
+  {
+    "id": "D3492",
+    "defect": "A rerun that still fails after its result went stale is listed as other, since its state did not change, rather than as failing now that it reads current.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  if (FAILING_STATES[now.state] && (then?.state !== now.state || current)) {",
+    "new": "  if (FAILING_STATES[now.state] && then?.state !== now.state) {"
+  },
+  {
+    "id": "D3493",
+    "defect": "A test that stood failing and now stands a current pass is listed as other rather than recovered.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  if (now.state === PASSED && current && stoodFailing) {\n    return CHANGE_KIND.recovered;",
+    "new": "  if (now.state === PASSED && current && stoodFailing) {\n    return CHANGE_KIND.other;"
+  },
+  {
+    "id": "D3494",
+    "defect": "A module that fails to load is not a breaking entry, so a syntax error in a covering test file is listed as other, and its return as other too.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  [FAILED_MODULE]: true,",
+    "new": "  [FAILED_MODULE]: false,"
+  },
+  {
+    "id": "D3495",
+    "defect": "The listed changes are cut to the bound in the journal's order, so a failing or recovered change past the first 20 is only counted while other changes are listed.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  kinded.sort(byKindThenKey);\n",
+    "new": ""
+  },
+  {
+    "id": "D3496",
+    "defect": "A failing test change carries no first error line, though its latest run recorded errors for it.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "    ? firstError(recorded.errors)",
+    "new": "    ? firstError([])"
+  },
+  {
+    "id": "D3500",
+    "defect": "A changes call never reads its named files, so a test file saved before the watcher reports the save is answered determined from its pre-edit result as current.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    await inputs.readNamed(paths);\n",
+    "new": ""
+  },
+  {
+    "id": "D3501",
+    "defect": "The journal records only at changes answers, never at stored runs, discoveries or build ends, so a first call right after an edit has no cursor to take and the edit's failing rerun is never listed.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "    if (this.#parts.stopSignal.aborted) return;\n    try {",
+    "new": "    return;\n    try {"
+  },
+  {
+    "id": "D3502",
+    "defect": "queryChanges never sends the cursor it is given, so every answer is a baseline and no change is ever listed.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    ...(since === undefined ? {} : { since }),",
+    "new": ""
+  },
+  {
+    "id": "D3509",
+    "defect": "The journal never records when the inputs change, so a moment made determined by the inputs coming back at an unchanged revision goes unrecorded, and an answer not determined afterwards hands back an older cursor, under which a test that passed there and failed again nets to no change.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "        this.#record(INPUT_CHANGE_MOMENT);\n",
+    "new": ""
+  },
+  {
+    "id": "D3510",
+    "defect": "A skipped test counts as failing, so a test moving from skipped to a current pass is listed recovered and one moving into skipped from a pass is listed failing.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  skipped: false,",
+    "new": "  skipped: true,"
+  },
+  {
+    "id": "D3511",
+    "defect": "A workspace whose discovery failed is not a breaking entry, so a covering workspace whose discovery newly fails is listed as other, and its return as other too.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "  [WORKSPACE_DISCOVERY_FAILED]: true,",
+    "new": "  [WORKSPACE_DISCOVERY_FAILED]: false,"
+  },
+  {
+    "id": "D3517",
+    "defect": "A failing change of a test whose run failed or crashed carries no first error line, though its run recorded one.",
+    "file": "packages/daemon/src/query/changes-answer.ts",
+    "old": "    return firstError([run.error]);",
+    "new": "    return null;"
+  },
+  {
+    "id": "D3518",
+    "defect": "A store or a build end records its moment though it is not determined, so a cursor handed back names standings no answer could give.",
+    "file": "packages/daemon/src/daemon/changes.ts",
+    "old": "      if (!determination(inputs, narrowing, []).determined) return;\n",
+    "new": ""
   },
   {
     "id": "D3466",

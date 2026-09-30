@@ -1,5 +1,6 @@
 import {
   activityText,
+  COVERAGE,
   DEPENDENCY_BUILD_FAILED,
   DEPENDENCY_BUILD_TIMED_OUT,
   DEPENDENCY_BUILDS_ENDED,
@@ -28,6 +29,8 @@ import {
   type IdleReason,
   type InputFacts,
   type InputsNotNarrowed,
+  type ListedCoverage,
+  type NamedFailure,
   type NamedList,
   type NoRoundSelection,
   type NotDiscoveredEntry,
@@ -37,12 +40,20 @@ import {
   type SelfChangedPath,
   type SummaryResponse,
   type TestCounts,
+  type WaitFile,
   type WaitResponse,
   type WorkspaceExecution,
+  type ChangesResponse,
 } from "@rt-test/daemon/client";
 import { oneLine } from "./output.js";
 
-type Answer = SummaryResponse | PathStatusResponse | WaitResponse;
+type Answer =
+  SummaryResponse | PathStatusResponse | WaitResponse | ChangesResponse;
+type CoverageState = WaitResponse["coverage"]["state"];
+type ModuleLocation = Pick<
+  NamedFailure,
+  "workspacePath" | "projectName" | "modulePath"
+>;
 type NotRunning = NonNullable<
   Extract<
     WorkspaceExecution,
@@ -51,7 +62,7 @@ type NotRunning = NonNullable<
 >;
 
 export const INDENT = "  ";
-const LIST_SEPARATOR = ", ";
+export const LIST_SEPARATOR = ", ";
 const LINE_BREAK = "\n";
 /** A reason from a Windows tool may end its lines with CRLF. */
 const REASON_LINE_BREAK = /\r?\n/;
@@ -122,6 +133,14 @@ export const DETAIL_SEPARATOR = "; ";
 const INCOMPLETE_MARK = " (incomplete)";
 const NO_OWNER = "no package workspace";
 const EXECUTION_HEADING = "Execution:";
+const NAME_PATH_SEPARATOR = " > ";
+const NO_ERROR_RECORDED = "no error was recorded";
+const FILES_HEADING = "Files:";
+const NOTHING_COVERS = "covered by no test";
+const EVERY_WORKSPACE_COVERS = "covered by every discovered workspace";
+const COVERAGE_NOT_KNOWN = "its covering workspaces are not yet known";
+const COVERAGE_NOT_YET_KNOWN =
+  "Coverage: not yet known, so every test counts as covering";
 
 /** The answer's fields for `--json`, without the daemon protocol's own. */
 export function answerFields(answer: Answer): Record<string, unknown> {
@@ -193,9 +212,74 @@ export function contextLines(answer: Answer): string[] {
   ];
 }
 
-/** Why no workspace's inputs are narrowed, as every answer's warning phrases it. */
-export function notNarrowedCause(kind: InputsNotNarrowed["kind"]): string {
-  return NOT_NARROWED_CAUSES[kind];
+export function coverageLine(coverage: WaitResponse["coverage"]): string {
+  switch (coverage.state) {
+    case COVERAGE.selected:
+      return `Coverage: by selection at input revision ${coverage.revision}`;
+    case COVERAGE.widened:
+      return `Coverage: every discovered workspace at input revision ${coverage.revision}, since ${NOT_NARROWED_CAUSES[coverage.widenedBy]}: ${cutReasonText(coverage.reason)}`;
+    case COVERAGE.notYetKnown:
+      return COVERAGE_NOT_YET_KNOWN;
+  }
+}
+
+/** Each named file with the workspaces covering it, or why none does. */
+export function fileLines(
+  files: readonly WaitFile[],
+  coverage: CoverageState,
+): string[] {
+  return [
+    FILES_HEADING,
+    ...files.map((file) => `${INDENT}${fileText(file, coverage)}`),
+  ];
+}
+
+function fileText(file: WaitFile, coverage: CoverageState): string {
+  const unread =
+    file.unread === undefined
+      ? []
+      : [`could not be read: ${cutReasonText(file.unread)}`];
+  return `${oneLine(file.path)}: ${[coveringText(file, coverage), ...unread].join(DETAIL_SEPARATOR)}`;
+}
+
+/** Selection's report, then the workspaces whose fingerprints list the file; a file neither reaches is covered by none. */
+function coveringText(file: WaitFile, coverage: CoverageState): string {
+  if (coverage === COVERAGE.widened) return EVERY_WORKSPACE_COVERS;
+  const { selection, listed } = file;
+  if (selection === undefined || listed === undefined) {
+    return COVERAGE_NOT_KNOWN;
+  }
+  const listing =
+    listed.named.length === 0 && listed.more === 0
+      ? []
+      : [`listed by ${namedText(listed, listedText)}`];
+  const nothing =
+    selection.selected.named.length === 0 && listing.length === 0
+      ? [NOTHING_COVERS]
+      : [];
+  return [...nothing, pathSelectionText(selection), ...listing].join(
+    DETAIL_SEPARATOR,
+  );
+}
+
+function listedText({ workspacePath, listedAs }: ListedCoverage): string {
+  return `${oneLine(workspacePath)} (${listedAs})`;
+}
+
+/** A module by workspace, project and path, then a test's name path when it names one. */
+export function testText(
+  module: ModuleLocation,
+  namePath: readonly string[] | undefined,
+): string {
+  const test =
+    namePath === undefined
+      ? ""
+      : `${NAME_PATH_SEPARATOR}${namePath.map(oneLine).join(NAME_PATH_SEPARATOR)}`;
+  return `${oneLine(module.workspacePath)} ${oneLine(module.projectName)} ${oneLine(module.modulePath)}${test}`;
+}
+
+export function firstErrorText(firstError: CutReason | null): string {
+  return firstError === null ? NO_ERROR_RECORDED : cutReasonText(firstError);
 }
 
 /** The held discovery's line, only while the answer carries its hold. */
@@ -366,7 +450,7 @@ function pathText(path: ExplainedPath): string {
  * The path's owner and what selection selected for it, then the workspaces it reached that cannot run, bounded and
  * counted, whether or not it selected any.
  */
-export function pathSelectionText(path: ExplainedPath): string {
+function pathSelectionText(path: ExplainedPath): string {
   const owner = path.owner === undefined ? NO_OWNER : oneLine(path.owner);
   const notRunnable = isEmpty(path.notRunnable)
     ? ""
@@ -431,13 +515,12 @@ export function notDiscoveredLines(
   heading = NOT_DISCOVERED_HEADING,
 ): string[] {
   if (entries.length === 0) return [];
-  return [
-    heading,
-    ...entries.map(
-      (entry) =>
-        `${INDENT}${entry.kind} ${oneLine(entryName(entry))}: ${cutReasonText(entry)}${errorCountText(entry)}`,
-    ),
-  ];
+  return [heading, ...entries.map((entry) => `${INDENT}${entryText(entry)}`)];
+}
+
+/** An entry's kind, what it names, its reason's first line and its error count. */
+export function entryText(entry: NotDiscoveredEntry): string {
+  return `${entry.kind} ${oneLine(entryName(entry))}: ${cutReasonText(entry)}${errorCountText(entry)}`;
 }
 
 /** A reason an answer cut, as its first line and a count of what the cut left out. */

@@ -19,6 +19,7 @@ import type {
 import {
   CLOSE_GRACE_MS,
   connectionServer,
+  type ChangesQuery,
   type DaemonHandlers,
   type Prover,
   type WaitQuery,
@@ -87,6 +88,7 @@ function handlers(
     summary: () => NO_STAND_IN_ANSWER,
     pathStatus: () => NO_STAND_IN_ANSWER,
     wait: () => NO_STAND_IN_ANSWER,
+    changes: () => NO_STAND_IN_ANSWER,
     ...queries,
     stop: () => stop.abort(),
     isStopping: () => stop.signal.aborted,
@@ -1321,6 +1323,85 @@ describe("a wait request naming no path", () => {
     expect(await waitsAnswered(waitRequest([]))).toStrictEqual({
       kinds: [{ type: "error", code: "invalid-request" }],
       asked: [],
+    });
+  });
+});
+
+/** A changes request naming `paths`, with `more` beside them. */
+function changesRequest(paths: readonly string[], more: object = {}): object {
+  return { type: "changes", protocolVersion: PROTOCOL_VERSION, paths, ...more };
+}
+
+/**
+ * Sends each request after a hello to a server whose changes query records what reached it, and resolves with each
+ * answer by its kind and each query the handler was given, by its path count and cursor.
+ */
+async function changesAnswered(
+  ...requests: object[]
+): Promise<{ kinds: unknown[]; asked: [number, string | undefined][] }> {
+  const asked: ChangesQuery[] = [];
+  const server = connectionServer(
+    {
+      ...handlers(false),
+      changes: (query) => {
+        asked.push(query);
+        return NO_STAND_IN_ANSWER;
+      },
+    },
+    memoryLog(),
+    NO_PROOF,
+  );
+  const kinds = await withTestEndpoint(server.onConnection, (path) =>
+    withConnection(path, (connection) => {
+      connection.send(linesOf(HELLO, ...requests));
+      return answerKinds(connection, requests.length + 1);
+    }),
+  );
+  return {
+    kinds: kinds.slice(1),
+    asked: asked.map((query) => [query.paths.length, query.since]),
+  };
+}
+
+describe("a changes request", () => {
+  it("D3498: one naming 1001 paths is refused, while one naming 1000 reaches the query", async () => {
+    const paths = (count: number): string[] =>
+      Array.from({ length: count }, (_, index) =>
+        join(HAND_BUILT_ROOT, `${index}.ts`),
+      );
+    expect(
+      await changesAnswered(
+        changesRequest(paths(1001)),
+        changesRequest(paths(1000)),
+      ),
+    ).toStrictEqual({
+      kinds: [
+        { type: "error", code: "invalid-request" },
+        { type: "error", code: "nothing-to-answer" },
+      ],
+      asked: [[1000, undefined]],
+    });
+  });
+
+  it("D3499: one whose cursor is an empty string or not a string is refused, while a cursor given reaches the query and none reaches it as none", async () => {
+    expect(
+      await changesAnswered(
+        changesRequest([WAITED_FILE], { since: "" }),
+        changesRequest([WAITED_FILE], { since: 7 }),
+        changesRequest([WAITED_FILE], { since: "cursor-1" }),
+        changesRequest([WAITED_FILE]),
+      ),
+    ).toStrictEqual({
+      kinds: [
+        { type: "error", code: "invalid-request" },
+        { type: "error", code: "invalid-request" },
+        { type: "error", code: "nothing-to-answer" },
+        { type: "error", code: "nothing-to-answer" },
+      ],
+      asked: [
+        [1, "cursor-1"],
+        [1, undefined],
+      ],
     });
   });
 });

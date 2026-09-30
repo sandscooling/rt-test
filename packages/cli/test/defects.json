@@ -472,8 +472,8 @@
     "id": "D2536",
     "defect": "A daemon's queries read every workspace over the whole project's inputs, so an edit to one workspace stales every other workspace's results.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return this.#parts.inputs.current({\n      ...this.#builds.narrowing(),\n      discoveryId: results.discovery?.discoveryId,\n    });",
-    "new": "    return this.#parts.inputs.current();"
+    "old": "    return this.#parts.inputs.current(this.#queryNarrowing(results));",
+    "new": "    this.#queryNarrowing(results);\n    return this.#parts.inputs.current();"
   },
   {
     "id": "D2562",
@@ -828,9 +828,9 @@
   {
     "id": "D3452",
     "defect": "rt-test wait exits 1 for a superseded or unsettled answer, as though RT Test had not answered.",
-    "file": "packages/cli/src/commands/wait.ts",
-    "old": "        return output.succeed(answerFields(answer), waitText(answer));",
-    "new": "        return answer.outcome === WAIT_OUTCOME.settled\n          ? output.succeed(answerFields(answer), waitText(answer))\n          : output.fail(answer.outcome);"
+    "file": "packages/cli/src/file-query.ts",
+    "old": "      return output.succeed(answerFields(answer), text(answer));",
+    "new": "      return \"outcome\" in answer && answer.outcome !== \"settled\"\n        ? output.fail(answer.outcome)\n        : output.succeed(answerFields(answer), text(answer));"
   },
   {
     "id": "D3453",
@@ -842,36 +842,113 @@
   {
     "id": "D3454",
     "defect": "A named file no workspace covers is printed with selection's report alone, never saying no test covers it.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/answer-text.ts",
     "old": "    selection.selected.named.length === 0 && listing.length === 0",
     "new": "    false"
   },
   {
     "id": "D3455",
     "defect": "A named failure's test name is printed unescaped, so a line break in it splits the failure across lines.",
-    "file": "packages/cli/src/commands/wait.ts",
-    "old": "`${NAME_PATH_SEPARATOR}${failure.testName.map(oneLine).join(NAME_PATH_SEPARATOR)}`",
-    "new": "`${NAME_PATH_SEPARATOR}${failure.testName.join(NAME_PATH_SEPARATOR)}`"
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "`${NAME_PATH_SEPARATOR}${namePath.map(oneLine).join(NAME_PATH_SEPARATOR)}`",
+    "new": "`${NAME_PATH_SEPARATOR}${namePath.join(NAME_PATH_SEPARATOR)}`"
   },
   {
     "id": "D3461",
     "defect": "rt-test wait sends only its first file, so it answers settled while the other files' covering workspaces are queued.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/file-query.ts",
     "old": "const files = fileArguments.map((file) => absolutePath(io, file));",
     "new": "const files = fileArguments.slice(0, 1).map((file) => absolutePath(io, file));"
   },
   {
     "id": "D3462",
     "defect": "A file only a workspace's fingerprint lists, which selection selects nothing for, is printed as covered by no test though its edit stales that workspace.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/answer-text.ts",
     "old": "selection.selected.named.length === 0 && listing.length === 0",
     "new": "selection.selected.named.length === 0"
   },
   {
     "id": "D3463",
     "defect": "A named file the wait could not read is printed without its reason, so the text never says which file held the wait.",
-    "file": "packages/cli/src/commands/wait.ts",
+    "file": "packages/cli/src/answer-text.ts",
     "old": "  const unread =\n    file.unread === undefined\n      ? []\n      : [`could not be read: ${cutReasonText(file.unread)}`];",
     "new": "  const unread: string[] = [];"
+  },
+  {
+    "id": "D3503",
+    "defect": "rt-test changes never sends the cursor --since gives, so every answer is a baseline and no change is ever listed.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    const options = changesOptions(values.since);",
+    "new": "    const options = changesOptions(undefined);"
+  },
+  {
+    "id": "D3504",
+    "defect": "An empty --since, as an unset shell variable gives it, is sent as a cursor rather than refused as a usage error.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "  if (since === \"\") throw new UsageError(\"The --since cursor is empty.\");\n",
+    "new": ""
+  },
+  {
+    "id": "D3505",
+    "defect": "rt-test changes --json prints a document without the answer's fields, so a hook reading it finds no cursor and no change.",
+    "file": "packages/cli/src/file-query.ts",
+    "old": "      return output.succeed(answerFields(answer), text(answer));",
+    "new": "      return output.succeed({}, text(answer));"
+  },
+  {
+    "id": "D3506",
+    "defect": "rt-test changes that gets no answer exits 0 as though it had one, so a hook reads a daemon that is not there as nothing having changed.",
+    "file": "packages/cli/src/file-query.ts",
+    "old": "        return output.fail(errorText(error), {",
+    "new": "        return output.succeed({ reason: errorText(error) }, errorText(error), {"
+  },
+  {
+    "id": "D3507",
+    "defect": "An answer not determined is headed as listing no change since the given cursor, reading as an all-clear though nothing was compared.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "      `${lead} ${NOT_DETERMINED_LEAD}, since ${notDeterminedText(answer.notDetermined)}`,",
+    "new": "      `${lead} 0 changes in scope since the given cursor`,"
+  },
+  {
+    "id": "D3508",
+    "defect": "A failing change is printed without its first error line, so the text never says why the test failed.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    change.kind === CHANGE_KIND.failing\n      ? [",
+    "new": "    false\n      ? ["
+  },
+  {
+    "id": "D3512",
+    "defect": "An answer not determined since named files could not be read never lists them, so the text never names which file could not be read or why.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "  if (facts.kind !== NOT_DETERMINED.pathsUnread) return [];\n  return [\n    UNREAD_HEADING,",
+    "new": "  if (facts.kind !== NOT_DETERMINED.pathsUnread || true) return [];\n  return [\n    UNREAD_HEADING,"
+  },
+  {
+    "id": "D3513",
+    "defect": "The count of tests in scope is printed from the tests outside scope, so the heading for the files' tests carries the rest of the worktree's count.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    `Tests in scope: ${counts.tests}`,",
+    "new": "    `Tests in scope: ${outside.counts.tests}`,"
+  },
+  {
+    "id": "D3514",
+    "defect": "An answer given a usable cursor with no test in scope is headed as listing no change, an all-clear, without saying that no test is in scope.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "      ...(answer.counts.tests === 0 ? [NO_TEST_IN_SCOPE] : []),\n",
+    "new": ""
+  },
+  {
+    "id": "D3515",
+    "defect": "An answer not determined given a cursor not issued or expired never says why the given cursor was not used.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "    default:\n      return [UNUSABLE_CURSOR[use]];",
+    "new": "    default:\n      return [];"
+  },
+  {
+    "id": "D3516",
+    "defect": "An entry that newly appeared is printed from its standing at the cursor, which it had none of, so a newly failing module reads as an entry appeared with no entry named.",
+    "file": "packages/cli/src/commands/changes.ts",
+    "old": "  const entry = now ?? atCursor;",
+    "new": "  const entry = atCursor;"
   }
 ]

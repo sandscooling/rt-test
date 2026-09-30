@@ -32,11 +32,13 @@ import {
 import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
 import {
   daemonStatus,
+  queryChanges,
   queryPathStatus,
   querySummary,
   queryWait,
   startDaemon,
   stopDaemon,
+  type ChangesOptions,
   type DaemonIdentity,
 } from "../src/client.js";
 import { daemonLogFile } from "../src/daemon/daemon-log.js";
@@ -50,6 +52,7 @@ import {
 import { DaemonConnection } from "../src/daemon/daemon-connection.js";
 import { PROTOCOL_VERSION, RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
 import {
+  CHANGES_TYPE,
   ERROR_TYPE,
   PATH_STATUS_TYPE,
   STOPPING_CODE,
@@ -1914,5 +1917,157 @@ describe("a wait for files", () => {
       expect(answer).toStrictEqual({ thrown: refusal });
     },
     DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+/** A test body that fails with one line of its own, so its first error line is known. */
+const BROKEN_PASSES_TEST =
+  'it("passes", () => {\n  throw new Error("broken by the edit");\n});\n';
+
+/** The options passing back the cursor an earlier answer returned, or none when it returned none. */
+function sinceCursor(cursor: string | null): ChangesOptions {
+  return cursor === null ? {} : { since: cursor };
+}
+
+describe("the changes for files", () => {
+  it(
+    "D3500: a changes call naming a test file saved before the watcher reports the save is not determined, and hands back the given cursor",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await withPreload(SILENT_WATCH, () =>
+          started(root, pids, confirmEvery(root)),
+        );
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        const file = join(root, WORKSPACE_B, "passes.test.mjs");
+        const baseline = await settled(queryChanges(root, [file]));
+        if ("thrown" in baseline) return baseline;
+        appendFileSync(file, "// an edit\n");
+        const answer = await settled(
+          queryChanges(root, [file], sinceCursor(baseline.cursor)),
+        );
+        return {
+          idle,
+          baseline: baseline.determined,
+          answer:
+            "thrown" in answer
+              ? answer
+              : {
+                  determined: answer.determined,
+                  notDetermined: answer.determined
+                    ? undefined
+                    : answer.notDetermined.kind,
+                  handedBack: answer.cursor === baseline.cursor,
+                },
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        baseline: true,
+        answer: {
+          determined: false,
+          notDetermined: "build-not-ended",
+          handedBack: true,
+        },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3501: a first changes call right after an edit takes the cursor the daemon last recorded, and the call given it once the rerun is stored lists the edited test failing with its first error line",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await withPreload(SILENT_WATCH, () =>
+          started(root, pids, confirmEvery(root)),
+        );
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        const file = join(root, WORKSPACE_B, "passes.test.mjs");
+        writeFileSync(file, BROKEN_PASSES_TEST);
+        const first = await settled(queryChanges(root, [file]));
+        if ("thrown" in first) return first;
+        const waited = await settled(
+          queryWait(root, [file], { limitMs: DAEMON_WAIT_MS }),
+        );
+        const later = await settled(
+          queryChanges(root, [file], sinceCursor(first.cursor)),
+        );
+        return {
+          idle,
+          firstDetermined: first.determined,
+          waited: "thrown" in waited ? waited : waited.outcome,
+          later:
+            "thrown" in later || !later.determined
+              ? later
+              : later.changes.map((change) => ({
+                  kind: change.kind,
+                  test: "test" in change ? change.test.namePath : undefined,
+                  now: change.now,
+                  firstError:
+                    "firstError" in change ? change.firstError : undefined,
+                })),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        firstDetermined: false,
+        waited: "settled",
+        later: [
+          {
+            kind: "failing",
+            test: ["passes"],
+            now: { state: "failed", freshness: "current" },
+            firstError: {
+              reason: expect.stringMatching(/^[^\n]*broken by the edit[^\n]*$/),
+              omittedCharacters: 0,
+            },
+          },
+        ],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3502: queryChanges sends each absolute path, with the cursor when one is given and none otherwise",
+    async () => {
+      const sent = await inTempDir(async (root) => {
+        const daemon = answerAs(exitedPid(), "key");
+        const requests: unknown[] = [];
+        const file = join(root, "a.ts");
+        await withKeyedStandIn(
+          root,
+          (context) => (request, standIn, connectionClosed) => {
+            if (request["type"] !== CHANGES_TYPE) {
+              return daemon(context)(request, standIn, connectionClosed);
+            }
+            requests.push({
+              paths: request["paths"],
+              since: "since" in request ? request["since"] : "none",
+            });
+            return {
+              type: ERROR_TYPE,
+              code: STOPPING_CODE,
+              message: "the daemon is stopping",
+            };
+          },
+          async () => {
+            await settled(queryChanges(root, [file], { since: "life.1" }));
+            await settled(queryChanges(root, [file]));
+          },
+        );
+        return { requests, file };
+      });
+      expect(sent.requests).toStrictEqual([
+        { paths: [sent.file], since: "life.1" },
+        { paths: [sent.file], since: "none" },
+      ]);
+    },
+    KEY_TEST_TIMEOUT_MS,
   );
 });
