@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   DiscoveredTest,
+  TestDiscovery,
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
@@ -15,6 +16,7 @@ import {
   json,
   member,
   moduleReport,
+  notCoveredWorkspace,
   projectSelectionFacts,
   rowsBy,
   stringArray,
@@ -36,7 +38,7 @@ import {
 import { inRecordRead } from "./transaction.js";
 
 const DISCOVERY_COLUMNS = `SELECT sequence, discovery_id, project_identity, worktree_identity, fingerprint_kind,
-  fingerprint_digest, adapter_version, not_read
+  fingerprint_digest, adapter_version, not_read, not_covered
   FROM discoveries WHERE project_identity = ? AND worktree_identity = ?`;
 const SELECT_LATEST_DISCOVERY = `${DISCOVERY_COLUMNS} ORDER BY sequence DESC LIMIT 1`;
 const SELECT_DISCOVERY = `${DISCOVERY_COLUMNS} AND discovery_id = ?`;
@@ -51,6 +53,7 @@ const SELECT_TESTS = `SELECT workspace_index, workspace_path, project_name, modu
   FROM discovered_tests WHERE discovery_sequence = ? ORDER BY workspace_index, test_index`;
 
 const SELECTION_FACTS = "selection_facts";
+const NOT_COVERED = "not_covered";
 
 const TEST_MODES: Members<DiscoveredTest["mode"]> = {
   run: true,
@@ -104,8 +107,15 @@ function storedDiscovery(database: DatabaseSync, row: Row): StoredDiscovery {
     discovery: {
       workspaces: readWorkspaces(database, integer(row, "sequence")),
       notRead: arrayOf(row, "not_read", unreadWorkspaceSource),
+      ...notCovered(row),
     },
   };
+}
+
+/** NULL is a report never made, as on a discovery stored before the store kept one. */
+function notCovered(row: Row): Pick<TestDiscovery, "notCovered"> {
+  if (column(row, NOT_COVERED) === null) return {};
+  return { notCovered: arrayOf(row, NOT_COVERED, notCoveredWorkspace) };
 }
 
 function readWorkspaces(

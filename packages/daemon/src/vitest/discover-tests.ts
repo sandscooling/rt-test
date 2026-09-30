@@ -1,9 +1,12 @@
 import type { IdentifiedTest } from "@rt-test/core";
+import { join, resolve } from "node:path";
 import type { TestCase, TestModule } from "vitest/node";
 import { confirmedEntry, type ConfirmedStart } from "./confirmed-start.js";
 import { errorText } from "./error-text.js";
 import {
   findVitestWorkspaces,
+  liesInside,
+  type NotCoveredWorkspace,
   type UnreadWorkspaceSource,
   type VitestWorkspace,
 } from "./find-workspaces.js";
@@ -64,6 +67,8 @@ export type WorkspaceDiscovery =
 export interface TestDiscovery {
   readonly workspaces: readonly WorkspaceDiscovery[];
   readonly notRead: readonly UnreadWorkspaceSource[];
+  /** Absent on a discovery stored before the store kept it, which reads as never reported. */
+  readonly notCovered?: readonly NotCoveredWorkspace[];
 }
 
 interface CollectedWorkspace {
@@ -96,7 +101,9 @@ async function discoverAll(
   signal: AbortSignal,
 ): Promise<TestDiscovery> {
   signal.throwIfAborted();
-  const { workspaces, notRead } = findVitestWorkspaces(start.consumerRoot);
+  const { workspaces, notRead, notCovered } = findVitestWorkspaces(
+    start.consumerRoot,
+  );
   const discoveries: WorkspaceDiscovery[] = [];
   for (const workspace of workspaces) {
     const confirmed = confirmedEntry(start, workspace);
@@ -107,7 +114,36 @@ async function discoverAll(
     );
     signal.throwIfAborted();
   }
-  return { workspaces: discoveries, notRead };
+  return {
+    workspaces: discoveries,
+    notRead,
+    notCovered: withoutDiscoveredModules(
+      notCovered,
+      start.consumerRoot,
+      discoveries,
+    ),
+  };
+}
+
+/** A test module discovered inside a candidate means another workspace's config runs its tests, so it is covered. */
+function withoutDiscoveredModules(
+  candidates: readonly NotCoveredWorkspace[],
+  consumerRoot: string,
+  discoveries: readonly WorkspaceDiscovery[],
+): NotCoveredWorkspace[] {
+  const moduleFiles = discoveries.flatMap(discoveredModuleFiles);
+  return candidates.filter((candidate) => {
+    const directory = join(consumerRoot, candidate.path);
+    return !moduleFiles.some((file) => liesInside(directory, file));
+  });
+}
+
+function discoveredModuleFiles(entry: WorkspaceDiscovery): string[] {
+  if (entry.status !== "discovered") return [];
+  return [
+    ...entry.tests.map((test) => test.identity.modulePath),
+    ...entry.failedModules.map((module) => module.modulePath),
+  ].map((modulePath) => resolve(entry.workspace.directory, modulePath));
 }
 
 function notConfirmed(workspace: VitestWorkspace): WorkspaceDiscovery {

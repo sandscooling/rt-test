@@ -2171,3 +2171,78 @@ describe("resolving a caller's path", () => {
     ).toBe("src/notes~1.md");
   });
 });
+
+const NOT_VITEST_PATH = "packages/tooling";
+const NOT_VITEST_REASON =
+  'has a test script, "node run-tests.js", but is not a Vitest workspace';
+
+/** Workspace A with one test, beside a stored package workspace with a test script that is not a Vitest workspace. */
+function withNotVitestWorkspace(): LatestResults {
+  const workspaces = [discoveredWorkspace(WORKSPACE_A, [discovered("a")])];
+  return results({
+    ...storedDiscovery(workspaces),
+    discovery: {
+      workspaces,
+      notRead: [],
+      notCovered: [{ path: NOT_VITEST_PATH, reason: NOT_VITEST_REASON }],
+    },
+  });
+}
+
+/** Answers `status <path>` over a tree holding the not-Vitest workspace's `src/lint.js`, or names what it threw. */
+function notVitestStatus(
+  path: string,
+  work: (answer: PathStatusAnswer | NoAnswer) => unknown,
+): Promise<unknown> {
+  return inTempDir((root) => {
+    const file = join(root, NOT_VITEST_PATH, "src/lint.js");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "");
+    try {
+      return work(
+        pathStatusAnswer(
+          join(root, path),
+          withNotVitestWorkspace(),
+          { ...IDLE, consumerRoot: root },
+          UNSETTLED,
+        ),
+      );
+    } catch (error) {
+      return `threw: ${String(error)}`;
+    }
+  });
+}
+
+describe("a package workspace with a test script that is not a Vitest workspace", () => {
+  it("D3355: the summary lists each stored not-covered workspace as not discovered, by kind, path and reason", () => {
+    const summary = answered(
+      summaryAnswer(withNotVitestWorkspace(), IDLE, UNSETTLED),
+    );
+    expect(summary.notDiscovered).toStrictEqual([
+      {
+        kind: "workspace-not-vitest",
+        workspacePath: NOT_VITEST_PATH,
+        reason: NOT_VITEST_REASON,
+        omittedCharacters: 0,
+      },
+    ]);
+  });
+
+  it("D3356: status for the workspace itself lists it as not discovered at the path", async () => {
+    expect(
+      await notVitestStatus(NOT_VITEST_PATH, (answer) =>
+        "noAnswer" in answer
+          ? answer.noAnswer
+          : answer.notDiscovered.map((entry) => entry.kind),
+      ),
+    ).toStrictEqual(["workspace-not-vitest"]);
+  });
+
+  it("D3357: status for a path inside the workspace, with nothing else at or under it, is refused naming the workspace it lies in", async () => {
+    expect(
+      await notVitestStatus(`${NOT_VITEST_PATH}/src/lint.js`, (answer) =>
+        "noAnswer" in answer ? answer.noAnswer : answer,
+      ),
+    ).toMatch(/; it lies in workspace-not-vitest packages\/tooling$/);
+  });
+});

@@ -3245,3 +3245,56 @@ describe("a project started through another spelling of its root", () => {
     DISCOVERY_TIMEOUT_MS,
   );
 });
+
+let notCoveredRun: Promise<TestDiscovery | { thrown: string }> | undefined;
+
+/**
+ * Discovers the `not-covered` fixture once: its root Vitest config collects the tests of `packages/collected` and the
+ * module of `packages/broken` that fails to load, and nothing of `packages/scripted`, and each of the three has a test
+ * script and no Vitest.
+ */
+function discoverNotCovered(): Promise<TestDiscovery | { thrown: string }> {
+  notCoveredRun ??= discoverFixture("not-covered", "vitest");
+  return notCoveredRun;
+}
+
+/** Whether the discovery keeps `path` as not covered, or why it made no discovery. */
+function keptNotCovered(
+  discovery: TestDiscovery | { thrown: string },
+  path: string,
+): boolean | string {
+  if ("thrown" in discovery) return discovery.thrown;
+  return (discovery.notCovered ?? []).some((entry) => entry.path === path);
+}
+
+describe("dropping a not-covered workspace another workspace's config collects", () => {
+  it(
+    "D3352: a candidate holding a test another workspace's config discovered is not kept as not covered",
+    async () => {
+      expect(
+        keptNotCovered(await discoverNotCovered(), "packages/collected"),
+      ).toBe(false);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3353: a candidate holding no discovered test module is kept as not covered",
+    async () => {
+      expect(
+        keptNotCovered(await discoverNotCovered(), "packages/scripted"),
+      ).toBe(true);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D3354: a candidate holding a module another workspace's config collected but could not load is not kept as not covered",
+    async () => {
+      expect(
+        keptNotCovered(await discoverNotCovered(), "packages/broken"),
+      ).toBe(false);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
