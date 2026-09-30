@@ -10,6 +10,40 @@ const BY_PRESENCE = "set";
 
 /** Windows looks a variable up whatever its case, and one shell spells `Path` where another spells `PATH`. */
 const FOLDS_CASE = process.platform === "win32";
+/** Node copies it from the live environment into a child's unless the child's environment holds it as an own key. */
+const CARRIED_VARIABLE = "NODE_V8_COVERAGE";
+
+/** The daemon's environment as it began serving: the digest counts it, and every executor process starts with it. */
+export type StartEnvironment = Readonly<NodeJS.ProcessEnv>;
+
+/** The daemon's one read of its whole environment for the digest and the executor processes, taken as it begins serving. */
+export function takeStartEnvironment(): StartEnvironment {
+  return Object.freeze({ ...process.env });
+}
+
+/**
+ * A fresh environment for one executor process, holding every variable of `start`. Node writes into the object it is
+ * given, and carries the live `NODE_V8_COVERAGE` into it unless that is an own key, so the key holds what the child
+ * would see from `start` alone.
+ */
+export function executorEnvironment(
+  start: StartEnvironment,
+): NodeJS.ProcessEnv {
+  return { ...start, [CARRIED_VARIABLE]: carriedValue(start) };
+}
+
+/**
+ * The carried variable's value in `start`, undefined when unset. On Windows it is the value under the first name in
+ * sort order among those that fold to it, the name Node keeps; the all-upper-case spelling sorts before every other,
+ * so Node keeps the key added in its place.
+ */
+function carriedValue(start: StartEnvironment): string | undefined {
+  const carried = comparable(CARRIED_VARIABLE);
+  const [kept] = Object.keys(start)
+    .filter((name) => comparable(name) === carried)
+    .sort();
+  return kept === undefined ? undefined : start[kept];
+}
 
 /**
  * Each entry names state a shell, terminal, editor, agent or login keeps for one session or process, such as its id.

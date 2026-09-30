@@ -13,8 +13,8 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: The start environment is the daemon's environment as it begins serving. The environment part of every fingerprint, and the environment digest every answer composes, counts the start environment under the declaration in effect: a variable set before the daemon begins serving is counted, and a variable the daemon's `process.env` gains, loses or changes afterwards moves no fingerprint, before or after a reconciliation that reads `rt-test.json` again. (NFR3)
-- [ ] AC2: Every executor process, the job executor's (discoveries and runs) and the dependency build executor's alike, starts with the start environment as its whole environment: each variable the start environment holds, with its value (on Windows, names differing only in case reach the child as one variable carrying one of their values), and no change the daemon's `process.env` undergoes after the daemon begins serving: a variable it gains, `NODE_V8_COVERAGE` included, is absent from the child, and one it loses or changes reaches the child as the start environment holds it. On Windows the digest counts every value the start environment holds under names differing only in case, so a change to any of them stales results. (NFR3)
+- [x] AC1: The start environment is the daemon's environment as it begins serving. The environment part of every fingerprint, and the environment digest every answer composes, counts the start environment under the declaration in effect: a variable set before the daemon begins serving is counted, and a variable the daemon's `process.env` gains, loses or changes afterwards moves no fingerprint, before or after a reconciliation that reads `rt-test.json` again. (NFR3)
+- [x] AC2: Every executor process, the job executor's (discoveries and runs) and the dependency build executor's alike, starts with the start environment as its whole environment: each variable the start environment holds, with its value (on Windows, names differing only in case reach the child as one variable carrying one of their values), and no change the daemon's `process.env` undergoes after the daemon begins serving: a variable it gains, `NODE_V8_COVERAGE` included, is absent from the child, and one it loses or changes reaches the child as the start environment holds it. On Windows the digest counts every value the start environment holds under names differing only in case, so a change to any of them stales results. (NFR3)
 
 ## Unverified Assumptions
 
@@ -31,6 +31,17 @@ when that is literally true.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | U1  | On Node 26 (the project's engines allow `>=26.0.0`), does `normalizeSpawnArguments` in `child_process` still use `options.env` as given, copy a live `NODE_V8_COVERAGE` into it only when it is not an own key, and on Windows keep the first of the names that fold together in sort order, as Node 24.19.0 and the `v22.x` branch do (§ Settled facts)? | AC2's handling of `NODE_V8_COVERAGE` and of names that fold together rests on it; a Node 26 that copies other live variables would let one reach a job. | On a Node 26 install: `node -e "const l=process.binding('natives').child_process.split('\n'); l.forEach((x,i)=>{ if(/const env = options.env\|copyProcessEnvToEnv\(env\|sawKey/.test(x)) console.log(i+1, x) })"`. The pre-push gate runs Node 22 and 24 only, so this row may stay open. |
 
+**U1: CONFIRMED** (dev, 2026-09-30 03:24). No Node 26 is installed here, so I read Node's own source for the `v26.x` branch (head `9224b248492af09694dc68c6187713dd1c0ddfba`, 2026-09-22), fetched raw from `https://raw.githubusercontent.com/nodejs/node/v26.x/`:
+
+- `lib/child_process.js:533-538`, `copyProcessEnvToEnv`: `env[name] = process.env[name]` only when the live value is set and `optionEnv` is absent or lacks `name` as an own key (`ObjectPrototypeHasOwnProperty`).
+- `lib/child_process.js:701`: `const env = options.env || { ...process.env };`, so a given object is used as given. `:706`: `copyProcessEnvToEnv(env, 'NODE_V8_COVERAGE', options.env);` is the one carried variable outside z/OS, whose list (`:709-719`) sits behind `isZOS`.
+- `lib/child_process.js:721-723` and `:566-581`: under `permission.isEnabled()`, `copyPermissionModelFlagsToEnv` appends permission flags taken from the daemon's own `process.execArgv` to `env.NODE_OPTIONS`, never a live environment value, and writes into the object it is given. Node 24.19.0 has the same step (the installed runtime's `child_process` source holds `copyPermissionModelFlagsToEnv`). A fresh object per executor process keeps that write out of the shared copy too.
+- `lib/child_process.js:725-729`: keys are gathered with `for (const key in env)`, "Prototype values are intentionally included", so the per-process object must hold its variables as own keys of a plain object.
+- `lib/child_process.js:731-746`: on `win32`, `ArrayPrototypeSort(envKeys)` then a filter keeping the first key per `StringPrototypeToUpperCase(key)`. `:748-755`: a key whose value is `undefined` is skipped.
+- `lib/internal/child_process.js:403-413`: `spawn` appends only `NODE_CHANNEL_FD` and `NODE_CHANNEL_SERIALIZATION_MODE` to `envPairs` for the IPC channel, as today.
+
+So Node 26 uses `options.env` as given, carries a live `NODE_V8_COVERAGE` only when it is not an own key, and on Windows keeps the first of the names that fold together in sort order, as 24.19.0 and `v22.x` do. The row's design stands.
+
 ## Tasks / Subtasks
 
 <!--
@@ -39,17 +50,17 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Resolve every Unverified Assumption above before implementing, or record why it stays open.
-- [ ] (Support) Before the first edit, re-read the landed code of tickets 2.4, 2.3p and 2.3l, and of 2.4d if it has landed, in the files below and confirm § Current structure of the modified files still holds: `InputTrackerOptions` and the tracker's constructor (`inputs/input-tracker.ts`, where 2.3p adds `#listed` beside the `DeclaredNonInputs` construction), the `SnapshotReads` constructor and the `reads` parameters of `workspaceFingerprint` and `discoveryFingerprint` (`inputs/fingerprint.ts`), and `serve` in `daemon/daemon-main.ts`.
-- [ ] (AC1, AC2) In `packages/daemon/src/inputs/environment-digest.ts`, add the start environment's type (a read-only environment, as `NodeJS.ProcessEnv` holds one), the function that copies `process.env` into it, which becomes the daemon's one read of its whole environment for the digest and for tests, and the function that builds, for each executor process, a fresh object holding every variable of a start environment plus an own `NODE_V8_COVERAGE` key holding the value a child would see from the copy alone (undefined when the copy holds none), per § Settled facts, so Node neither carries a live value into the child nor writes into the shared copy.
-- [ ] (AC1, AC2) In `packages/daemon/src/daemon/daemon-main.ts`, in `serve`, take the start environment once before `new InputTracker(...)` and hand the same copy to the tracker's options and to both `new Executor(...)` constructions.
-- [ ] (AC1) In `packages/daemon/src/inputs/input-tracker.ts`, give `InputTrackerOptions` a required member carrying the start environment, and hand it to `new DeclaredNonInputs(...)`.
-- [ ] (AC1) In `packages/daemon/src/inputs/declared-non-inputs.ts`, take the start environment through the constructor in place of the field's own `{ ...process.env }` copy, count it in both `countEnvironment` calls, and rewrite the field's docblock, which today says every executor process inherits it, to the new truth.
-- [ ] (AC1) In `packages/daemon/src/inputs/fingerprint.ts`, make `SnapshotReads`' `environment` argument required and the `reads` argument of `workspaceFingerprint` and `discoveryFingerprint` required, so no fingerprint counts the live environment by omission; delete `NO_DECLARED_VARIABLES` and the `countEnvironment` import once nothing reads them, and keep the `SnapshotReads.environment` docblock true.
-- [ ] (AC2) In `packages/daemon/src/daemon/executor.ts`, give `Executor`'s constructor a required start environment, and in `#startChild` pass `fork` the per-process object the environment-digest function builds from it.
-- [ ] (AC2) Sweep `packages/daemon/src`, `docs/` and `README.md` for prose saying an executor process inherits or reads the daemon's live environment (`rg -n -i "inherit|live environment" packages/daemon/src docs README.md`). At drafting (00:12) that found only the `declared-non-inputs.ts` docblock and the `docs/architecture.md` and `README.md` sentences § Doc text already covers. Rewrite each comment found in this change, and add each doc line found to § Doc text.
-- [ ] (Support) Send the orchestrator the text in § Doc text, its final wording to follow the build.
-- [ ] (Support) Lint and typecheck.
+- [x] (Support) Resolve every Unverified Assumption above before implementing, or record why it stays open.
+- [x] (Support) Before the first edit, re-read the landed code of tickets 2.4, 2.3p and 2.3l, and of 2.4d if it has landed, in the files below and confirm § Current structure of the modified files still holds: `InputTrackerOptions` and the tracker's constructor (`inputs/input-tracker.ts`, where 2.3p adds `#listed` beside the `DeclaredNonInputs` construction), the `SnapshotReads` constructor and the `reads` parameters of `workspaceFingerprint` and `discoveryFingerprint` (`inputs/fingerprint.ts`), and `serve` in `daemon/daemon-main.ts`.
+- [x] (AC1, AC2) In `packages/daemon/src/inputs/environment-digest.ts`, add the start environment's type (a read-only environment, as `NodeJS.ProcessEnv` holds one), the function that copies `process.env` into it, which becomes the daemon's one read of its whole environment for the digest and for tests, and the function that builds, for each executor process, a fresh object holding every variable of a start environment plus an own `NODE_V8_COVERAGE` key holding the value a child would see from the copy alone (undefined when the copy holds none), per § Settled facts, so Node neither carries a live value into the child nor writes into the shared copy.
+- [x] (AC1, AC2) In `packages/daemon/src/daemon/daemon-main.ts`, in `serve`, take the start environment once before `new InputTracker(...)` and hand the same copy to the tracker's options and to both `new Executor(...)` constructions.
+- [x] (AC1) In `packages/daemon/src/inputs/input-tracker.ts`, give `InputTrackerOptions` a required member carrying the start environment, and hand it to `new DeclaredNonInputs(...)`.
+- [x] (AC1) In `packages/daemon/src/inputs/declared-non-inputs.ts`, take the start environment through the constructor in place of the field's own `{ ...process.env }` copy, count it in both `countEnvironment` calls, and rewrite the field's docblock, which today says every executor process inherits it, to the new truth.
+- [x] (AC1) In `packages/daemon/src/inputs/fingerprint.ts`, make `SnapshotReads`' `environment` argument required and the `reads` argument of `workspaceFingerprint` and `discoveryFingerprint` required, so no fingerprint counts the live environment by omission; delete `NO_DECLARED_VARIABLES` and the `countEnvironment` import once nothing reads them, and keep the `SnapshotReads.environment` docblock true.
+- [x] (AC2) In `packages/daemon/src/daemon/executor.ts`, give `Executor`'s constructor a required start environment, and in `#startChild` pass `fork` the per-process object the environment-digest function builds from it.
+- [x] (AC2) Sweep `packages/daemon/src`, `docs/` and `README.md` for prose saying an executor process inherits or reads the daemon's live environment (`rg -n -i "inherit|live environment" packages/daemon/src docs README.md`). At drafting (00:12) that found only the `declared-non-inputs.ts` docblock and the `docs/architecture.md` and `README.md` sentences § Doc text already covers. Rewrite each comment found in this change, and add each doc line found to § Doc text.
+- [x] (Support) Send the orchestrator the text in § Doc text, its final wording to follow the build.
+- [x] (Support) Lint and typecheck.
 
 ## Reusable Code
 
@@ -143,6 +154,8 @@ Each fails to compile or changes behavior; create-tests repairs them. Found by `
 
 A lane re-proves every record whose test or mutated file it edits. By each record's `file` in `packages/daemon/test/defects.json` at `19ba5cd`: `executor.ts` 39, `input-tracker.ts` 27, `fingerprint.ts` 19, `environment-digest.ts` 17, `declared-non-inputs.ts` 14, `daemon-main.ts` 11. Recount on the landed tree, since 2.3p adds records on `fingerprint.ts` and `input-tracker.ts`. Every record whose test sits in a test file create-tests edits (`executor.test.ts`, `input-tracker.test.ts`, `lifecycle.test.ts`, `env-files.test.ts`, `discover-tests.test.ts`) is re-proved too, unless that file's diff only adds lines as `_agent-docs/crew.md` § Gates allows. D2943's mutation replaces `this.#startEnvironment,` in `read()`'s `countEnvironment` call with `process.env,`, so renaming or re-sourcing that field breaks its anchor. D2759 and D2771 anchor on the `execArgv` and `stdio` lines of `#startChild`'s `fork` options, which an added `env` line leaves whole.
 
+A record whose mutant drops an argument this ticket makes required is reached too, although its mutated file is not edited. A search of `defects.json` for mutations naming `SnapshotReads`, `countEnvironment`, `#startEnvironment`, the fingerprint functions or the constructors this ticket changes (Tree 1 at `d1c0b20`, 03:23) finds one: D2941 (`inputs/current-inputs.ts`, test in `input-tracker.test.ts`) replaces `new SnapshotReads(inputs.root, environment)` with `new SnapshotReads(inputs.root)`. Its mutant relied on the live-environment default the fingerprint task deletes; afterwards it is a type error, and at runtime it passes no environment, so every fingerprint drops its environment part and D2941's test, which expects a declared variable's value to move nothing, passes under it. create-tests rewrites or retires D2941, since the defect it names is one the required argument now rules out. The search's other hits, D1885, D1914 and D1987, mutate code this ticket leaves as it is.
+
 #### Sizing
 
 Raw 15 files, estimated 19.5; code units 3 (two criteria plus validation). The estimate sits just under the file limit. The test-file edits are mostly one repeated edit (a start environment passed at each construction), so the decision-bearing files are the six production ones. Production: modify `daemon/daemon-main.ts`, `daemon/executor.ts`, `inputs/input-tracker.ts`, `inputs/declared-non-inputs.ts`, `inputs/fingerprint.ts` and `inputs/environment-digest.ts`. Tests, for create-tests: `executor.test.ts`, `input-tracker.test.ts`, `lifecycle.test.ts`, `env-files.test.ts`, `discover-tests.test.ts` and `defects.json`. Docs, through the orchestrator: `docs/architecture.md`, `README.md`, and the glossary entry below.
@@ -216,11 +229,18 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 883ae9bd-9a50-448d-bc21-4d0d6b7cc60a
 
 #### Test Files This Change Broke
 
-None.
+`bun run --filter @rt-test/daemon typecheck` (03:26) reports 46 errors, every one in these five test files and none in `src/`. The new required arguments: `InputTrackerOptions.startEnvironment`, `DeclaredNonInputs`' and `Executor`'s third and second constructor arguments, `SnapshotReads`' `environment`, and the `reads` of `workspaceFingerprint` and `discoveryFingerprint`. `takeStartEnvironment()` (`inputs/environment-digest.ts`) takes a copy, so a test that sets a variable and then takes the copy hands it on.
+
+- `packages/daemon/test/executor.test.ts`: 15 `new Executor(log)` constructions (TS2554, first at line 260). Behavior: a variable a test sets after its executor's start environment was taken no longer reaches the job. `stoppedWhileHeld` (line 1342) sets `HOLD_VARIABLE` around the held run, after its callers (lines 1488, 1508, 1526, 1545) built the executor in `inCrashingConsumer`, and D2780's second job sets `CRASH_VARIABLE` (line 1491) afterwards too. Check every other `withEnvironment` around a job (lines 1322, 1439, 1464) for where its executor's copy is taken.
+- `packages/daemon/test/input-tracker.test.ts`: `new InputTracker(...)` option objects at lines 331, 1315, 1696, 1972, 4393 and 4424, and the idle-tracker script string at line 231, which the typecheck cannot see and which now throws at runtime (`countEnvironment` reads `Object.entries` of an undefined start environment). Fingerprint calls without `reads` or `SnapshotReads` without `environment` at lines 2100, 2127, 2192, 2357, 2381, 2399, 5104, 5118, 5144 and 5146.
+- `packages/daemon/test/lifecycle.test.ts`: `new InputTracker(...)` at lines 460 and 542.
+- `packages/daemon/test/env-files.test.ts`: fingerprint calls without `reads` at lines 81 and 435.
+- `packages/daemon/test/discover-tests.test.ts`: `workspaceFingerprint(inputs, entry)` and `discoveryFingerprint(inputs, discovery)` at lines 2989 and 2990.
+- `packages/daemon/test/defects.json`: D2941's mutant (`new SnapshotReads(inputs.root)`) is now a type error and at runtime drops the environment part, so its test passes under it; rewrite or retire it (Dev Notes § Named-defect records the edits reach). D2943's anchor (`this.#startEnvironment,` in `read()`) and D2149's (`this.#protection = protection(undefined, root);`) are whole; `declared-non-inputs.ts` was edited around both, so they are re-proved.
 
 #### ACs Owed a Test
 
@@ -232,26 +252,89 @@ None.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId a81de227-0f90-4c2a-b04b-09f085ce6007
 
 #### Named Defects
 
-None.
+- D3331: An executor process inherits the daemon's live environment, so a variable the daemon gains, loses or changes after it began serving reaches a test while the fingerprint counts the start environment (AC2)
+- D3332: An executor process's environment holds no own NODE_V8_COVERAGE key, so Node carries a NODE_V8_COVERAGE the daemon's live environment gained after the start into the process (AC2)
+- D3333: An executor process's NODE_V8_COVERAGE key always holds undefined, so a daemon started under coverage starts its executor processes without the coverage directory its start environment holds (AC2)
+- D3334: The start environment is the daemon's live process.env rather than a copy, so a later variable reaches the digest and every executor process (AC1, AC2)
+- D3335: The daemon builds its job executor from its live process.env rather than the start environment, so a variable it gains after it began serving reaches the tests it runs while no fingerprint counts it (AC2)
+- D2941 retired: its mutant (`new SnapshotReads(inputs.root)`) relied on the live-environment default the build deleted, and is now a compile error. `packages/daemon/test/required-start-environment.ts` pins that with `@ts-expect-error` lines, which `tsc` checks, for each omitted start environment or `reads`. A declared variable's value moving the fingerprint is detected by D2942's mutation (the declaration's entries dropped from the count).
+- D1914 rewritten (stale): it moved a live variable and fingerprinted through the deleted default; it now fingerprints over two environment digests passed through `SnapshotReads`, against its unchanged mutation (AC1).
+- Proof: `node scripts/verify-defects.mjs --edited` through the run lease selected 676 of 2635 and detected 676 of 676, with the baseline green before and after. On Windows under Node 24.19.0 it ran 03:55 to 04:25, queued behind 2.3l. On Linux under WSL Node 24.19.0 it ran 04:26 to 04:33, in a clone at `d1c0b20` with the lane's patch applied and each file's hash matching Tree 1, with `TMPDIR` at `~/.rt-test-runs/wsl-2-3n-tests`.
+- Review gap (D3335): the preload now matches the daemon entry as `.ts` or `.js`. Each daemon fork records whether the daemon's environment already held `RT_GAINED_AFTER_START`, and D3335 also asserts that one fork began holding it, so a patch that stops firing fails the test instead of passing it. Same record, re-proved with D3331 to D3333 by `node scripts/verify-defects.mjs --ids D3331,D3332,D3333,D3335` through the lease: 4 of 4 detected on Windows (queued 04:43, ended 04:54) and on Linux under WSL Node 24.19.0 (04:54 to 04:56, clone at `5a61b5a` with the round's patch applied).
+- The `executor-crash` fixture reads its crash kind from a `crash` file and holds on a `hold-point` directory the test writes, since a variable set after an executor is built no longer reaches its jobs (AC2). That repairs `stoppedWhileHeld`'s callers (D2778, D2779, D2780, D2909) and D2780's second job.
 
 #### Deliberately Untested
 
-None.
+- packages/daemon/src/inputs/declared-non-inputs.ts: the constructor's count of the start environment. No fingerprint exists before the first reconciliation (D1912), and that reconciliation's `read()` recounts it, so the constructor's count is never observed.
+- packages/daemon/src/inputs/environment-digest.ts: `carriedValue`'s Windows fold for a NODE_V8_COVERAGE spelled other than all upper case. Such a spelling is unlikely, and a wrong value changes only where V8 writes coverage, never a test result.
+- packages/daemon/src/inputs/environment-digest.ts: `Object.freeze` in `takeStartEnvironment`. Nothing writes into the copy, `StartEnvironment`'s `Readonly` type rejects a write at compile time, and each executor process gets a fresh object.
+- packages/daemon/src/daemon/daemon-main.ts: the copy handed to the tracker and to the build executor. Nothing in the daemon process writes its environment, so a live environment there counts or starts with the same variables as the copy; the owner's 03:25 ruling leaves that a known limit.
+- packages/daemon/src/inputs/fingerprint.ts, input-tracker.ts, executor.ts: the required start environment and `reads` are a type-level guard, pinned by `packages/daemon/test/required-start-environment.ts` rather than by a named defect.
+
+#### Questions
+
+- Proof scope (03:52, decided by the orchestrator): the `--edited` selection counts 667 records. I proposed 305 by `--ids`, leaving out tests in edited files that call no edited helper. Ruling: run the full `--edited` selection on Windows and Linux, since the rule exists so nobody judges which tests still run the same code.
 
 ### Review Record
 
+Review session: threadId fc53dc2e-2d89-496f-af8b-c3df2abe1e2e
+
+Reviewed f528b31 (build and tests) and e2ac766's doc changes, 04:36 to 04:41: two fresh-eyes batches (inputs, executor), one assumptions pass, the checklist pass. U1 re-checked against the installed Node v24.19.0 (`process.binding('natives')`): every claim CONFIRMED, with two details the row leaves out: a live `NODE_V8_COVERAGE` is carried only when non-empty, and the permission-model flags come from the parent's own `execArgv`. Fixed here: `carriedValue`'s docblock now states the rule on every platform before the Windows fold; this File List gained the tests session's files.
+
+Tech debt, for triage once the change is committed:
+
+- `packages/daemon/src/inputs/environment-digest.ts`, `countEnvironment` (the per-key `values` Set and the sorted `held` list in its `BY_VALUE` line): on Windows, names that fold together keep their values as a sorted set, so a swap of values between two spellings (`Path=a`, `PATH=b` at one start, `Path=b`, `PATH=a` at the next) leaves the digest unmoved while the child, which receives the value under the first spelling in sort order, sees a different one. A stale result could read as current. It needs two spellings of one variable in the daemon's environment and a swap between daemon starts. Fix: count each folded key's values in the sort order of their spellings rather than as a sorted set, which keeps a lone respelled variable's digest unchanged. Pre-existing code; AC2's last sentence claims the case it misses.
+
+Known limits (owner ruling, 2026-09-30 03:25: no chasing edge cases):
+
+- On Windows, libuv's native spawn is known to add a fixed set of system variables (`SYSTEMROOT`, `PATH`, `TEMP` and others) from the daemon's live environment when the block it is given lacks them. From libuv knowledge, not read in installed source (it is C). It matters only when one was unset as the daemon began serving.
+- AC2's clause for the dependency build executor holds by construction (`serve` hands both executors one copy), with no named defect; only a daemon that writes its own environment could make the two differ, and none does.
+
 #### Test Coverage Gaps
 
-None.
+| Source file                                                                              | Named defect                                                                                                                                                                                                                                                                                                                                                                                                         | Expected test                                                                                                                                                                                     | Severity                          |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| test/fixtures/daemon/report-environment.mjs, with packages/daemon/src/daemon/executor.ts | D3335's test passes whether or not the job executor starts from the start environment once the preload's daemon-side `fork` patch stops firing (the daemon entry check is `endsWith("daemon-main.ts")` where the executor's is `/executor-main\.[jt]s$/`, and nothing asserts the daemon's live environment gained `RT_GAINED_AFTER_START`), so a job executor built from the live `process.env` would go undetected | D3335's test also asserts the daemon-side patch fired (a marker the patch writes, or the gained variable recorded as set in the daemon), and the daemon entry check matches `.ts` and `.js` alike | LOW (daemon-state, reach unknown) |
 
 ### Completion Notes
 
+Built in Tree 1 on `wt/1` at `d1c0b20`, 03:24 to 03:33.
+
+- **What was done.** `inputs/environment-digest.ts` gains `StartEnvironment` (a read-only `NodeJS.ProcessEnv`), `takeStartEnvironment()` (a frozen copy of `process.env`) and `executorEnvironment(start)`, which returns a fresh object holding every variable of `start` plus an own `NODE_V8_COVERAGE` key holding the value of the first name in sort order that folds to it (undefined when none), found with the private `comparable` fold. `serve` takes the copy once before `new InputTracker(...)` and hands it to the tracker's options and to both `Executor`s. `DeclaredNonInputs` takes it through its constructor, which now counts it (a field initializer runs before the constructor body), and keeps the field name `#startEnvironment`. `Executor.#startChild` forks with `env: executorEnvironment(this.#startEnvironment)`. `SnapshotReads`' `environment` and both fingerprint functions' `reads` are required; `NO_DECLARED_VARIABLES` and fingerprint.ts's `countEnvironment` import are deleted.
+- **U1**: CONFIRMED from Node's `v26.x` source, resolution under the table.
+- **Sanity check**: one finding, D2941 missing from the records the edits reach. The author confirmed it (SANITY CHECK REPLY, 03:23) and updated Dev Notes § Named-defect records the edits reach; built as written.
+- **Acceptance evidence.** AC1: traced. The copy is taken once in `serve`, frozen, and counted by `DeclaredNonInputs` in its constructor and in `read()` (each reconciliation's re-read of `rt-test.json`). `current()` hands that digest to `currentInputs`, whose `new SnapshotReads(inputs.root, environment)` (`current-inputs.ts`) is the only production construction, and no fingerprint function has a default left. AC2: traced (`serve` passes the same copy to both `Executor`s, and `#startChild` is the only `fork`) and observed by a throwaway probe (`_agent-docs/.scratch/2-3n/probe.mjs`, deleted), which imported the real module through `source-hooks.ts` and forked a child with `executorEnvironment(start)` after the parent gained, changed and lost variables and set a live `NODE_V8_COVERAGE`. On Windows under Node 24.19.0 (03:27) and on Linux under WSL Node 24.13.1 (03:28): the child held exactly the start copy's names and values, the gained variable was absent, the lost one and the changed one arrived as the copy held them, no live `NODE_V8_COVERAGE` arrived, and a copy holding `node_v8_Coverage` gave the child the copy's value (Windows, as `NODE_V8_COVERAGE`) or kept it a distinct variable (Linux). The count over the frozen copy did not move after the writes. A default fork, the control, saw the gained variable and the live `NODE_V8_COVERAGE`. The Windows digest's count of every value under folded names is `countEnvironment`'s, unchanged.
+- **Adversarial review** (one general-purpose agent, 03:28 to 03:32): two LOW findings, both fixed. F1: the tracker option's docblock "never the daemon's live one" claimed a guarantee the structural type does not enforce; softened to "The daemon's environment as it began serving, which the digest counts", since the ruling asks only that no path omits it, and a branded type would force a cast on every test that builds a crafted environment. F2: "the daemon's one read of its whole environment" over-claimed, since git's spawns read the whole live environment; restored the qualifier "for the digest and the executor processes". Post-fix re-validation: comment-only round, so lint only (exit 0).
+- **Gates** (03:32): `bun x oxlint` over the six files exit 0; `bun x prettier --check` over them and this ticket exit 0; `bun run --filter @rt-test/daemon typecheck` has no error in `src/` (46 in the five test files above); `bun x tsc --noEmit` (root) exit 0; `bun run --filter rt-test typecheck` (the CLI, which depends on the daemon) exit 0; `node scripts/check-line-citations.mjs` clean; literal check: `CARRIED_VARIABLE` named, no other new literal.
+- **Prose sweep**: `packages/daemon/src`, `docs/` and `README.md` hold no line beyond those § Doc text covers; the `declared-non-inputs.ts` docblock is rewritten. **README**: a user-visible change (tests now see the environment as the daemon began serving); the README line is in § Doc text, sent to the orchestrator.
+- **Change-request candidates**: none. No pre-existing fixes.
+
 ### File List
 
-- _agent-docs/tickets/2-3n-env-snapshot.md (created by create-ticket)
+- packages/daemon/src/inputs/environment-digest.ts (modified)
+- packages/daemon/src/inputs/declared-non-inputs.ts (modified)
+- packages/daemon/src/inputs/input-tracker.ts (modified)
+- packages/daemon/src/inputs/fingerprint.ts (modified)
+- packages/daemon/src/daemon/executor.ts (modified)
+- packages/daemon/src/daemon/daemon-main.ts (modified)
+- _agent-docs/tickets/2-3n-env-snapshot.md (created by create-ticket; modified by dev: U1 resolution, checkboxes, Dev Handoff, Completion Notes, File List)
 - _agent-docs/sprints/sprint-2-fresh-runs.md (modified by create-ticket: § Ticket 2.3n's scope line and ticket link)
 - _agent-docs/sprint-status.yaml (modified by create-ticket: the 2-3n line)
+- packages/daemon/test/daemon-harness.ts (modified by create-tests)
+- packages/daemon/test/daemon.test.ts (modified by create-tests)
+- packages/daemon/test/defects.json (modified by create-tests)
+- packages/daemon/test/discover-tests.test.ts (modified by create-tests)
+- packages/daemon/test/env-files.test.ts (modified by create-tests)
+- packages/daemon/test/executor.test.ts (modified by create-tests)
+- packages/daemon/test/harness.ts (modified by create-tests)
+- packages/daemon/test/input-tracker.test.ts (modified by create-tests)
+- packages/daemon/test/lifecycle.test.ts (modified by create-tests)
+- packages/daemon/test/required-start-environment.ts (created by create-tests)
+- test/fixtures/daemon/executor-crash/a.test.mjs (modified by create-tests)
+- test/fixtures/daemon/executor-crash/global-setup.mjs (modified by create-tests)
+- test/fixtures/daemon/report-environment.mjs (created by create-tests)
+- test/fixtures/daemon/report-environment.d.mts (created by create-tests)

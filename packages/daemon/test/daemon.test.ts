@@ -22,6 +22,12 @@ import {
   WatchedChild,
   type ChildEnd,
 } from "../../../test/scripts/child-end.js";
+import {
+  DAEMON_FORKS_SUFFIX,
+  GAINED_VARIABLE,
+  HELD_AT_FORK,
+  REPORT_VARIABLE,
+} from "../../../test/fixtures/daemon/report-environment.mjs";
 import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
 import {
   daemonStatus,
@@ -59,6 +65,8 @@ import {
   leakAtFirstRun,
   logEntries,
   logged,
+  REPORT_ENVIRONMENT,
+  reportedEnvironments,
   settled,
   started,
   storedRuns,
@@ -67,6 +75,7 @@ import {
   withConnection,
   withDaemonConsumer,
   withDaemons,
+  withEnvironment,
   withPreload,
   withStandIn,
   type StandIn,
@@ -1644,6 +1653,45 @@ describe("what a daemon runs after a start and after an edit", () => {
       expect(outcome).toStrictEqual({
         before: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 1 },
         after: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 2 },
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the environment a daemon's executor processes start with", () => {
+  it(
+    "D3335: a variable the daemon's own environment gains after it began serving reaches none of the executor processes that run its tests",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const report = join(dirname(root), "environments.jsonl");
+        const identity = await withEnvironment(REPORT_VARIABLE, report, () =>
+          withPreload(REPORT_ENVIRONMENT, () =>
+            started(root, pids, confirmEvery(root)),
+          ),
+        );
+        if ("thrown" in identity) return identity;
+        const idle = await eventually(() =>
+          logged(identity.logFile, IDLE_ENTRY),
+        );
+        const environments = reportedEnvironments(report);
+        const forks = `${report}${DAEMON_FORKS_SUFFIX}`;
+        return {
+          idle,
+          reported: environments.length > 0,
+          forkedHoldingIt:
+            existsSync(forks) &&
+            readFileSync(forks, "utf8").split("\n").includes(HELD_AT_FORK),
+          gained: environments.filter(
+            (environment) => environment[GAINED_VARIABLE] !== undefined,
+          ).length,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idle: true,
+        reported: true,
+        forkedHoldingIt: true,
+        gained: 0,
       });
     },
     DAEMON_TEST_TIMEOUT_MS,

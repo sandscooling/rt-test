@@ -50,6 +50,10 @@ _Avoid_: ignored file, excluded file
 An environment variable whose value the input fingerprint leaves out, counting only whether it is set and whether it is empty: a session or process identifier on RT Test's fixed list, or one `rt-test.json` declares in `nonInputVariables`.
 _Avoid_: ignored variable, session variable
 
+**Start environment**:
+The copy of its environment the daemon takes as it begins serving: the input fingerprint counts it, and every executor process starts with it.
+_Avoid_: live environment, environment snapshot
+
 **Input revision**:
 The number naming a worktree's inputs as the daemon last observed them in its current life, raised once for each batch of changes it observes.
 _Avoid_: version, generation

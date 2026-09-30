@@ -7,6 +7,7 @@ import {
   HOOK_EXIT_CODE,
   HOOK_VARIABLE,
 } from "../../../test/fixtures/daemon/build-hook.mjs";
+import { REPORT_VARIABLE } from "../../../test/fixtures/daemon/report-environment.mjs";
 import {
   type ChildEnd,
   WatchedChild,
@@ -23,6 +24,7 @@ import {
   openParseRecord,
 } from "../src/daemon/parse-record.js";
 import type { TreeContainment } from "../src/daemon/process-tree.js";
+import { takeStartEnvironment } from "../src/inputs/environment-digest.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
@@ -40,9 +42,12 @@ import {
   DAEMON_TEST_TIMEOUT_MS,
   eventually,
   memoryLog,
+  REPORT_ENVIRONMENT,
+  reportedEnvironments,
   settled,
   withEnvironment,
   withPreload,
+  withVariables,
 } from "./daemon-harness.js";
 import {
   finished,
@@ -257,7 +262,7 @@ async function abortedWhileHeld(
   const { events, release } = recording({ hold: true });
   const [outcome, next] = await inTempDir((root) =>
     recordingSends(events, async () => {
-      const executor = new Executor(memoryLog());
+      const executor = new Executor(memoryLog(), takeStartEnvironment());
       try {
         const job = discoverIn(executor, root);
         await eventually(() => events.includes("contain"));
@@ -283,7 +288,7 @@ describe("holding each executor's tree before its job", () => {
       const { events } = recording();
       await inTempDir((root) =>
         recordingSends(events, async () => {
-          const executor = new Executor(memoryLog());
+          const executor = new Executor(memoryLog(), takeStartEnvironment());
           try {
             await discoverIn(executor, root);
           } finally {
@@ -306,7 +311,7 @@ describe("holding each executor's tree before its job", () => {
       const { events } = recording({ fail: true });
       const outcome = await inTempDir((root) =>
         recordingSends(events, async () => {
-          const executor = new Executor(memoryLog());
+          const executor = new Executor(memoryLog(), takeStartEnvironment());
           try {
             return await discoverIn(executor, root);
           } finally {
@@ -410,7 +415,7 @@ describe("holding each executor's tree before its job", () => {
     async () => {
       recording();
       const reached = await inTempDir(async (root) => {
-        const executor = new Executor(memoryLog());
+        const executor = new Executor(memoryLog(), takeStartEnvironment());
         try {
           await discoverIn(executor, root);
           return executor.abort(ABORT_PURPOSE.interruption);
@@ -425,7 +430,7 @@ describe("holding each executor's tree before its job", () => {
 
   it("D1683: closing the executor releases what holds the trees, which on Windows ends the job object helper", async () => {
     const { events } = recording();
-    await new Executor(memoryLog()).close();
+    await new Executor(memoryLog(), takeStartEnvironment()).close();
     expect(events).toStrictEqual(["close"]);
   });
 
@@ -434,7 +439,7 @@ describe("holding each executor's tree before its job", () => {
     async () => {
       const { events } = recording({ killDelayMs: 300 });
       await inTempDir(async (root) => {
-        const executor = new Executor(memoryLog());
+        const executor = new Executor(memoryLog(), takeStartEnvironment());
         try {
           events.push(
             `settled: ${String((await withinBound(discoverIn(executor, root))) === "never settled")}`,
@@ -457,7 +462,7 @@ describe("holding each executor's tree before its job", () => {
     async () => {
       recording({ endWhileHeld: true });
       const outcome = await inTempDir(async (root) => {
-        const executor = new Executor(memoryLog());
+        const executor = new Executor(memoryLog(), takeStartEnvironment());
         try {
           return await withinBound(discoverIn(executor, root));
         } finally {
@@ -478,7 +483,7 @@ describe("holding each executor's tree before its job", () => {
       recording();
       next.unstartable = true;
       const outcome = await inTempDir(async (root) => {
-        const executor = new Executor(memoryLog());
+        const executor = new Executor(memoryLog(), takeStartEnvironment());
         try {
           return await withinBound(discoverIn(executor, root));
         } finally {
@@ -555,7 +560,7 @@ async function buildIn(
   workspaces: readonly SelectableWorkspace[] = [],
 ): Promise<JobOutcome<DependencyInformation>> {
   next.containment = undefined;
-  const executor = new Executor(memoryLog());
+  const executor = new Executor(memoryLog(), takeStartEnvironment());
   try {
     return await executor.buildDependencies(root, workspaces, state);
   } finally {
@@ -593,7 +598,7 @@ function stoppedMidBuild(
       { at: PARSED_FILE, action: "hold", marker },
       async () => {
         next.containment = undefined;
-        const executor = new Executor(memoryLog());
+        const executor = new Executor(memoryLog(), takeStartEnvironment());
         let stopped: Promise<void> | void = undefined;
         try {
           const job = executor.buildDependencies(
@@ -799,7 +804,7 @@ describe("a dependency build in an executor process of its own", () => {
         const { root, state } = buildConsumer(dir);
         next.containment = undefined;
         next.unremovableRecord = true;
-        const executor = new Executor(log);
+        const executor = new Executor(log, takeStartEnvironment());
         try {
           return await settled(executor.buildDependencies(root, [], state));
         } finally {
@@ -891,7 +896,7 @@ function inLeakingConsumer<T>(
   return inConsumerCopy(HOST_REJECTION_FIXTURE, install, (root) =>
     withEnvironment(LEAK_SITE, site, async () => {
       next.containment = undefined;
-      const executor = new Executor(memoryLog());
+      const executor = new Executor(memoryLog(), takeStartEnvironment());
       try {
         return await job(executor, root);
       } finally {
@@ -1301,10 +1306,10 @@ describe("the executor's guard against host unhandled rejections", () => {
 });
 
 const CRASH_FIXTURE = "executor-crash";
-/** Read by the executor-crash fixture's global setup: how it ends the executor process. */
-const CRASH_VARIABLE = "RT_EXECUTOR_CRASH";
-/** Read by the executor-crash fixture's first test: the directory holding its hold point. */
-const HOLD_VARIABLE = "RT_EXECUTOR_HOLD";
+/** Read by the executor-crash fixture's global setup at each job: how it ends the executor process. */
+const CRASH_FILE = "crash";
+/** While this directory exists, the executor-crash fixture's first test holds on it. */
+const HOLD_POINT = "hold-point";
 const UNCAUGHT_EXIT =
   "the executor process <pid> exited during the job (exit code 1)";
 const TEARDOWN_EXIT =
@@ -1318,17 +1323,21 @@ function inCrashingConsumer<T>(
   crash: CrashKind,
   job: (executor: Executor, root: string) => Promise<T>,
 ): Promise<T> {
-  return inConsumerCopy(CRASH_FIXTURE, install, (root) =>
-    withEnvironment(CRASH_VARIABLE, crash, async () => {
-      next.containment = undefined;
-      const executor = new Executor(memoryLog());
-      try {
-        return await job(executor, root);
-      } finally {
-        await executor.close();
-      }
-    }),
-  );
+  return inConsumerCopy(CRASH_FIXTURE, install, async (root) => {
+    crashAs(root, crash);
+    next.containment = undefined;
+    const executor = new Executor(memoryLog(), takeStartEnvironment());
+    try {
+      return await job(executor, root);
+    } finally {
+      await executor.close();
+    }
+  });
+}
+
+/** Sets how the executor-crash fixture at `root` ends each executor process from its next job on. */
+function crashAs(root: string, crash: CrashKind): void {
+  writeFileSync(join(root, CRASH_FILE), crash);
 }
 
 function runIn(executor: Executor, root: string) {
@@ -1344,17 +1353,15 @@ async function stoppedWhileHeld(
   root: string,
   stop: (executor: Executor) => Promise<void> | void,
 ): Promise<JobOutcome<WorkspaceRun | NotConfirmedRun>> {
-  const hold = join(root, "hold-point");
+  const hold = join(root, HOLD_POINT);
   mkdirSync(hold);
-  return withEnvironment(HOLD_VARIABLE, hold, async () => {
-    const job = runIn(executor, root);
-    await waitUntil(() => existsSync(join(hold, "holding")), job);
-    const stopped = stop(executor);
-    writeFileSync(join(hold, "release"), "");
-    const outcome = await job;
-    await stopped;
-    return outcome;
-  });
+  const job = runIn(executor, root);
+  await waitUntil(() => existsSync(join(hold, "holding")), job);
+  const stopped = stop(executor);
+  writeFileSync(join(hold, "release"), "");
+  const outcome = await job;
+  await stopped;
+  return outcome;
 }
 
 const pidless = (text: string): string =>
@@ -1435,17 +1442,16 @@ describe("a run whose executor process dies with no stop asked of it", () => {
     "D2800: a message on the executor's channel that is no job reply is logged as ignored, naming the process",
     async () => {
       const log = memoryLog();
-      await inConsumerCopy(CRASH_FIXTURE, "vitest", (root) =>
-        withEnvironment(CRASH_VARIABLE, "send-ready", async () => {
-          next.containment = undefined;
-          const executor = new Executor(log);
-          try {
-            await runIn(executor, root);
-          } finally {
-            await executor.close();
-          }
-        }),
-      );
+      await inConsumerCopy(CRASH_FIXTURE, "vitest", async (root) => {
+        crashAs(root, "send-ready");
+        next.containment = undefined;
+        const executor = new Executor(log, takeStartEnvironment());
+        try {
+          await runIn(executor, root);
+        } finally {
+          await executor.close();
+        }
+      });
       expect(
         log.entries
           .filter((entry) => entry.includes("no job reply"))
@@ -1460,16 +1466,19 @@ describe("a run whose executor process dies with no stop asked of it", () => {
   it(
     "D2797: a run whose executor dies settles once the process has exited, rather than never",
     async () => {
-      const outcome = await inConsumerCopy(CRASH_FIXTURE, "vitest", (root) =>
-        withEnvironment(CRASH_VARIABLE, "throw", async () => {
+      const outcome = await inConsumerCopy(
+        CRASH_FIXTURE,
+        "vitest",
+        async (root) => {
+          crashAs(root, "throw");
           recording();
-          const executor = new Executor(memoryLog());
+          const executor = new Executor(memoryLog(), takeStartEnvironment());
           try {
             return await withinBound(runIn(executor, root));
           } finally {
             await executor.close();
           }
-        }),
+        },
       );
       expect(
         outcome === "never settled" ? outcome : crashFacts(outcome),
@@ -1488,9 +1497,8 @@ describe("a run whose executor process dies with no stop asked of it", () => {
           await stoppedWhileHeld(executor, root, (stopping) => {
             stopping.abort();
           });
-          return withEnvironment(CRASH_VARIABLE, "throw", () =>
-            runIn(executor, root),
-          );
+          crashAs(root, "throw");
+          return runIn(executor, root);
         },
       );
       expect(crashFacts(outcome)).toStrictEqual(crashedWith(UNCAUGHT_EXIT));
@@ -1568,6 +1576,105 @@ describe("an executor process that dies after a stop, or during a job that is no
         ended: false,
         reason: UNCAUGHT_EXIT,
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+const GAINED_VARIABLE = "RT_TEST_GAINED";
+const CHANGED_VARIABLE = "RT_TEST_CHANGED";
+const LOST_VARIABLE = "RT_TEST_LOST";
+/** Node copies this one from its own live environment into a child's. */
+const COVERAGE_VARIABLE = "NODE_V8_COVERAGE";
+
+type Variables = Readonly<Record<string, string | undefined>>;
+
+interface EnvironmentScenario {
+  /** Set in the live environment as the start environment is taken; unset where undefined. */
+  readonly start: Variables;
+  /** Applied to the live environment once the executor is built, and held while its job runs. */
+  readonly later: Variables;
+}
+
+/**
+ * Takes a start environment with `start` applied, builds an executor from it, applies `later` to the live environment
+ * around one discovery, and hands back the environment each executor process started with, as the report-environment
+ * preload saw it. `scenario` is given the test's directory.
+ */
+function executorEnvironments(
+  scenario: (dir: string) => EnvironmentScenario,
+): Promise<{ dir: string; environments: NodeJS.ProcessEnv[] }> {
+  return inTempDir(async (dir) => {
+    const { start, later } = scenario(dir);
+    const report = join(dir, "environments.jsonl");
+    return withPreload(REPORT_ENVIRONMENT, () =>
+      withVariables({ ...start, [REPORT_VARIABLE]: report }, async () => {
+        next.containment = undefined;
+        const executor = new Executor(memoryLog(), takeStartEnvironment());
+        try {
+          await withVariables(later, () => discoverIn(executor, dir));
+        } finally {
+          await executor.close();
+        }
+        return { dir, environments: reportedEnvironments(report) };
+      }),
+    );
+  });
+}
+
+describe("the environment each executor process starts with", () => {
+  it(
+    "D3331: an executor process starts with the start environment rather than the daemon's live one: a variable gained since is absent, and one changed or lost since arrives as the start environment held it",
+    async () => {
+      const { environments } = await executorEnvironments(() => ({
+        start: {
+          [GAINED_VARIABLE]: undefined,
+          [CHANGED_VARIABLE]: "at the start",
+          [LOST_VARIABLE]: "at the start",
+        },
+        later: {
+          [GAINED_VARIABLE]: "later",
+          [CHANGED_VARIABLE]: "later",
+          [LOST_VARIABLE]: undefined,
+        },
+      }));
+      expect(
+        environments.map((environment) => ({
+          gained: environment[GAINED_VARIABLE],
+          changed: environment[CHANGED_VARIABLE],
+          lost: environment[LOST_VARIABLE],
+        })),
+      ).toStrictEqual([
+        { gained: undefined, changed: "at the start", lost: "at the start" },
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3332: a NODE_V8_COVERAGE the daemon's live environment gains after the start never reaches an executor process",
+    async () => {
+      const { environments } = await executorEnvironments((dir) => ({
+        start: { [COVERAGE_VARIABLE]: undefined },
+        later: { [COVERAGE_VARIABLE]: join(dir, "coverage-gained") },
+      }));
+      expect(
+        environments.map((environment) => environment[COVERAGE_VARIABLE]),
+      ).toStrictEqual([undefined]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3333: a NODE_V8_COVERAGE the start environment holds reaches the executor process with its value, after the live environment lost it",
+    async () => {
+      const { dir, environments } = await executorEnvironments((root) => ({
+        start: { [COVERAGE_VARIABLE]: join(root, "coverage-at-start") },
+        later: { [COVERAGE_VARIABLE]: undefined },
+      }));
+      expect(
+        environments.map((environment) => environment[COVERAGE_VARIABLE]),
+      ).toStrictEqual([join(dir, "coverage-at-start")]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

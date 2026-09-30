@@ -43,6 +43,7 @@ import {
   copyFixture,
   fakeVitest,
   finished,
+  handBuiltReads,
   inConsumerCopy,
   inTempDir,
   INTERRUPTED,
@@ -2986,8 +2987,14 @@ function fingerprintRefusals(
   if (entry === undefined) return `no workspace ${path}`;
   const inputs = new ProjectInputs(REPO, new Map());
   return {
-    workspace: refusal(settle(() => workspaceFingerprint(inputs, entry))),
-    discovery: refusal(settle(() => discoveryFingerprint(inputs, discovery))),
+    workspace: refusal(
+      settle(() => workspaceFingerprint(inputs, entry, handBuiltReads(REPO))),
+    ),
+    discovery: refusal(
+      settle(() =>
+        discoveryFingerprint(inputs, discovery, handBuiltReads(REPO)),
+      ),
+    ),
   };
 }
 
