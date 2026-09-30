@@ -330,6 +330,8 @@ export interface InputsScript {
   readonly settleFails?: string;
   /** Makes each ask for the next change of the inputs throw this text, as only the dependency builds ask. */
   readonly changedFails?: string;
+  /** Holds each read of named paths until the test resolves `namedReadHeld` or the inputs stop. */
+  readonly heldNamedRead?: boolean;
 }
 
 export const NO_DECLARATION: NonInputsDeclaration = {
@@ -358,8 +360,11 @@ export class StandInInputs implements TrackedInputs {
   readonly changedSince: number[] = [];
   /** The narrowing each view of the inputs was asked for, in call order. */
   readonly narrowings: (QueryNarrowing | undefined)[] = [];
+  /** The root-relative paths each read of named paths was given, in call order. */
+  readonly namedReads: (readonly string[])[] = [];
   readonly reconciled = new Deferred<void>();
   readonly settleHeld = new Deferred<void>();
+  readonly namedReadHeld = new Deferred<void>();
   readonly #released = new Deferred<void>();
   readonly #script: InputsScript;
   readonly #verdicts: JobVerdict[];
@@ -458,6 +463,13 @@ export class StandInInputs implements TrackedInputs {
     });
   }
 
+  readNamed(paths: readonly string[]): Promise<void> {
+    this.namedReads.push(paths);
+    return this.#script.heldNamedRead === true
+      ? this.namedReadHeld.promise
+      : Promise.resolve();
+  }
+
   beginJob(): JobMark {
     this.jobsBegun += 1;
     return this.#windows.open(undefined, this.#vouchedDigests());
@@ -506,6 +518,7 @@ export class StandInInputs implements TrackedInputs {
     this.#released.resolve();
     this.reconciled.resolve();
     this.settleHeld.resolve();
+    this.namedReadHeld.resolve();
     return Promise.resolve();
   }
 }

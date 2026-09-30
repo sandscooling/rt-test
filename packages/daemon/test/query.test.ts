@@ -23,6 +23,7 @@ import {
   type SummaryAnswer,
   type TestCounts,
 } from "../src/query/answer.js";
+import { resolveCallerPath } from "../src/query/caller-paths.js";
 import { pathStatusAnswer } from "../src/query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../src/query/summary.js";
 import type { LatestResults } from "../src/store/open-store.js";
@@ -40,7 +41,7 @@ import type { UnreadWorkspaceSource } from "../src/vitest/find-workspaces.js";
 import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
 import type { TestOutcome } from "@rt-test/core";
-import { inTempDir } from "./harness.js";
+import { inTempDir, onPlatform } from "./harness.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 type DiscoveredWorkspace = Extract<
@@ -84,6 +85,18 @@ const IDLE: DaemonView = {
 };
 const FIRST_RECONCILIATION = "the first reconciliation has not ended";
 const OTHER_DIGEST = "sha256:2C26B46B68FFC68F";
+
+/** Answers `status <path>` for the absolute `path` as the daemon does: resolved against the view's root, then answered. */
+function answerFor(
+  path: string,
+  latest: LatestResults,
+  daemon: DaemonView,
+  inputs: CurrentInputs,
+): PathStatusAnswer | NoAnswer {
+  const target = resolveCallerPath(path, daemon.consumerRoot);
+  if (!target.ok) return { noAnswer: target.reason };
+  return pathStatusAnswer(target, latest, daemon, inputs);
+}
 
 /** Inputs before the first reconciliation has ended, when no fingerprint can be computed. */
 const UNSETTLED: CurrentInputs = {
@@ -576,7 +589,7 @@ describe("a workspace whose latest run the store refused as unreadable", () => {
   /** Answers `status <path>` over the consumer tree, with workspace A's latest run refused for `REFUSAL`. */
   function refusedStatus(path: string): Promise<unknown> {
     return inTempDir((root) => {
-      const answer = pathStatusAnswer(
+      const answer = answerFor(
         join(root, path),
         {
           ...consumerTree(root),
@@ -1905,7 +1918,7 @@ function statusIn(
   inputs: CurrentInputs = UNSETTLED,
 ): Promise<unknown> {
   return inTempDir((root) => {
-    const answer = pathStatusAnswer(
+    const answer = answerFor(
       join(root, path),
       consumerTree(root),
       { ...IDLE, consumerRoot: root },
@@ -2047,7 +2060,7 @@ describe("the status of a file or folder", () => {
     const above = await inTempDir((root) => {
       mkdirSync(dirname(join(root, file)), { recursive: true });
       writeFileSync(join(root, file), "");
-      const answer = pathStatusAnswer(
+      const answer = answerFor(
         join(root, file),
         results(
           storedDiscovery([
@@ -2080,5 +2093,81 @@ describe("the committed inputs a view carries", () => {
     expect(
       viewOf(undefined, {}, "the watcher failed: ENOSPC").snapshot,
     ).toBeUndefined();
+  });
+});
+
+/** How a caller's path was refused: whether its reason names the whole path, and apart from it the offending name. */
+interface Refusal {
+  readonly namesPath: boolean;
+  readonly namesName: boolean;
+}
+
+/**
+ * Resolves the root-relative `path`, written with `/`, under a consumer root holding each root-relative file in
+ * `existing`, with `process.platform` read as `platform`: the root-relative path it resolved to, or how it was refused
+ * for `name`.
+ */
+function resolvedOn(
+  platform: NodeJS.Platform,
+  path: string,
+  name: string,
+  existing: readonly string[] = [],
+): Promise<string | Refusal> {
+  return inTempDir((root) => {
+    for (const file of existing) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), "");
+    }
+    const absolute = join(root, ...path.split("/"));
+    return onPlatform<string | Refusal>(platform, () => {
+      const resolved = resolveCallerPath(absolute, root);
+      if (resolved.ok) return Promise.resolve(resolved.path);
+      return Promise.resolve({
+        namesPath: resolved.reason.includes(absolute),
+        namesName: resolved.reason.split(absolute).join("").includes(name),
+      });
+    });
+  });
+}
+
+const NAMES_PATH_AND_NAME: Refusal = { namesPath: true, namesName: true };
+
+describe("resolving a caller's path", () => {
+  it("D3360: on Windows, a missing file whose name ends in a dot is refused, naming the path and the name", async () => {
+    expect(
+      await resolvedOn("win32", "src/gone.ts.", "gone.ts.", ["src/kept.ts"]),
+    ).toStrictEqual(NAMES_PATH_AND_NAME);
+  });
+
+  it("D3361: on Windows, a missing file whose name ends in a space is refused, naming the path and the name", async () => {
+    expect(
+      await resolvedOn("win32", "src/gone.ts ", "gone.ts ", ["src/kept.ts"]),
+    ).toStrictEqual(NAMES_PATH_AND_NAME);
+  });
+
+  it("D3362: on Windows, a missing file named in an 8.3 short-name form is refused, naming the path and the name", async () => {
+    expect(
+      await resolvedOn("win32", "src/GONE~1.TS", "GONE~1.TS", ["src/kept.ts"]),
+    ).toStrictEqual(NAMES_PATH_AND_NAME);
+  });
+
+  it("D3363: on Windows, a path under a missing directory whose name ends in a dot is refused, naming that directory", async () => {
+    expect(
+      await resolvedOn("win32", "src/gen./a.ts", "gen.", ["src/kept.ts"]),
+    ).toStrictEqual(NAMES_PATH_AND_NAME);
+  });
+
+  it("D3364: on Linux, a missing file whose name ends in a dot is an ordinary name and resolves as given", async () => {
+    expect(
+      await resolvedOn("linux", "src/gone.ts.", "gone.ts.", ["src/kept.ts"]),
+    ).toBe("src/gone.ts.");
+  });
+
+  it("D3365: on Windows, an existing file whose long name holds a tilde and a digit resolves, since only a missing name is refused", async () => {
+    expect(
+      await resolvedOn("win32", "src/notes~1.md", "notes~1.md", [
+        "src/notes~1.md",
+      ]),
+    ).toBe("src/notes~1.md");
   });
 });

@@ -126,6 +126,11 @@ const IDENTITY: DaemonIdentity = {
   logFile: "/consumer/.rt-test/daemon.log",
   protocolVersion: PROTOCOL_VERSION,
 };
+/** The signal of a request whose client still waits for its answer. */
+function stillWaited(): AbortSignal {
+  return new AbortController().signal;
+}
+
 /** No quiet window, so a job begins as soon as the inputs have settled; the window itself is pinned in the scheduler's tests. */
 const NO_QUIET_WINDOW_MS = 0;
 const FRESHNESS_SETTLE_MS = 5_000;
@@ -1207,10 +1212,14 @@ describe(
 
     /**
      * Runs a daemon over a readable store to idle, so it has stored and read its own discovery, then runs `after`
-     * against the store's file and the daemon, and returns the refusals the log quotes.
+     * against the store's file, the daemon and its consumer root, and returns the refusals the log quotes.
      */
     function afterIdle(
-      after: (file: string, lifecycle: DaemonLifecycle) => void,
+      after: (
+        file: string,
+        lifecycle: DaemonLifecycle,
+        root: string,
+      ) => void | Promise<void>,
     ): Promise<string[]> {
       return inTempDir((dir) => {
         const store = openStore(join(dir, "state"));
@@ -1221,9 +1230,10 @@ describe(
             value: discovery(discovered("a")),
           }),
           store,
+          { ...IDENTITY, consumerRoot: dir },
         );
-        return begunThenStopped(started, ({ lifecycle, log }) => {
-          after(store.file, lifecycle);
+        return begunThenStopped(started, async ({ lifecycle, log }) => {
+          await after(store.file, lifecycle, dir);
           return quotedRefusals(log);
         });
       });
@@ -1389,9 +1399,9 @@ describe(
     });
 
     it("D2959: a refusal a path status reads first is logged before the answer quotes it", async () => {
-      const refusals = await afterIdle((file, lifecycle) => {
+      const refusals = await afterIdle(async (file, lifecycle, root) => {
         alterStore(file, MADE_UNREADABLE);
-        lifecycle.pathStatus(join(IDENTITY.consumerRoot, "a"));
+        await lifecycle.pathStatus(join(root, "a"), stillWaited());
       });
       expect(refusals).toStrictEqual([REFUSAL]);
     });
@@ -1791,7 +1801,7 @@ describe("answering a query", () => {
     const { started, held } = heldAt("a", ["a", "b"], discoveredWithTest);
     const { lifecycle, executor } = await begun(started);
     lifecycle.summary();
-    lifecycle.pathStatus("/consumer/a");
+    void lifecycle.pathStatus("/consumer/a", stillWaited());
     held.resolve({ ended: true, value: interrupted("a") });
     await flush();
     expect({ runs: executor.runs, aborts: executor.aborts }).toStrictEqual({
@@ -1804,7 +1814,7 @@ describe("answering a query", () => {
     const { started } = heldAt("a", ["a", "b"], discoveredWithTest);
     const { lifecycle } = await begun(started);
     lifecycle.summary();
-    lifecycle.pathStatus("/consumer/a");
+    void lifecycle.pathStatus("/consumer/a", stillWaited());
     expect(lifecycle.status().activity).toStrictEqual({
       state: "running",
       workspacePath: "a",
@@ -1823,12 +1833,80 @@ describe("answering a query", () => {
           consumerRoot: root,
         }),
       );
-      const answer = lifecycle.pathStatus(join(root, "b"));
+      const answer = await lifecycle.pathStatus(join(root, "b"), stillWaited());
       return "unstoredJobs" in answer ? answer.unstoredJobs : answer;
     });
     expect(jobs).toStrictEqual([
       { workspacePath: "a", reason: "the store write failed" },
     ]);
+  });
+
+  it("D3377: a path status reads its resolved path by name first and answers only once that read ends, from the inputs as it left them", async () => {
+    const outcome = await inTempDir(async (root) => {
+      const inputs = new StandInInputs({ heldNamedRead: true });
+      const { lifecycle } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discoveredWithTest("a")),
+          }),
+          new RecordingStore(),
+          { ...IDENTITY, consumerRoot: root },
+          inputs,
+        ),
+      );
+      let readEnded = false;
+      let answeredBeforeRead = false;
+      const answer = lifecycle.pathStatus(root, stillWaited()).then((done) => {
+        answeredBeforeRead = !readEnded;
+        return done;
+      });
+      await flush();
+      readEnded = true;
+      const readRevision = inputs.revision + 1;
+      inputs.moveRevision();
+      inputs.namedReadHeld.resolve();
+      const done = await answer;
+      return {
+        answeredBeforeRead,
+        read: inputs.namedReads,
+        revisionIsTheRead:
+          "noAnswer" in done ? done : done.inputs.revision === readRevision,
+      };
+    });
+    expect(outcome).toStrictEqual({
+      answeredBeforeRead: false,
+      read: [["."]],
+      revisionIsTheRead: true,
+    });
+  });
+
+  it("D3378: a path status whose request aborts while its named read runs answers that nobody waits for it", async () => {
+    const answer = await inTempDir(async (root) => {
+      const inputs = new StandInInputs({ heldNamedRead: true });
+      const { lifecycle } = await begun(
+        daemon(
+          confirmed("a"),
+          new ScriptedExecutor({
+            ended: true,
+            value: discovery(discoveredWithTest("a")),
+          }),
+          new RecordingStore(),
+          { ...IDENTITY, consumerRoot: root },
+          inputs,
+        ),
+      );
+      const request = new AbortController();
+      const answered = lifecycle.pathStatus(root, request.signal);
+      await flush();
+      request.abort();
+      inputs.namedReadHeld.resolve();
+      return answered;
+    });
+    expect(answer).toStrictEqual({
+      noAnswer: "nobody waits for the answer any more",
+    });
   });
 
   it("D3020: a summary during a run reads that run's workspace running, as the answer's activity names it", async () => {

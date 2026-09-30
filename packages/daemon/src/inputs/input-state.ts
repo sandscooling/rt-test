@@ -49,6 +49,11 @@ export class InputState {
     return this.#inputs.has(path);
   }
 
+  /** Whether the held read of the input at `path` has `digest`. */
+  holdsDigest(path: string, digest: string): boolean {
+    return this.#inputs.get(path)?.digest === digest;
+  }
+
   /** `directory` is absolute. */
   hasDirectory(directory: string): boolean {
     return this.#directories.has(directory);

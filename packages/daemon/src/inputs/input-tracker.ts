@@ -42,14 +42,13 @@ import type { QueryNarrowing } from "./narrowed-inputs.js";
 import { NON_INPUTS_FILE, type NonInputsDeclaration } from "./non-inputs.js";
 import { protection } from "./protection.js";
 import { keepReleasedFiles } from "./protection-walk.js";
-import { QueuedReads, RENAME_EVENT } from "./queued-reads.js";
+import { pendingCount, QueuedReads } from "./queued-reads.js";
 import {
   RECONCILE_INTERVAL_MS,
   ReconcileSchedule,
 } from "./reconcile-schedule.js";
 
 const IGNORE_FILE = ".gitignore";
-const CHANGE_EVENT = "change";
 const NON_INPUTS_CHANGED_REASON = `${NON_INPUTS_FILE}, which declares the non-inputs, changed`;
 const LISTED_UNWATCHED_CONSEQUENCE =
   "so a change to a listed file there is seen at the next reconciliation";
@@ -116,6 +115,14 @@ export interface TrackedInputs {
    * tracker has stopped. Events arriving after the call do not hold it.
    */
   settled(): Promise<void>;
+  /**
+   * Reads each root-relative path, a folder as each input held under it, changing only what the read finds changed,
+   * and resolves once those reads and every event seen before the call are read, or at once while a reconciliation runs
+   * or once one begins, or when the tracker has stopped. Reads nothing while a reconciliation runs or before an input
+   * set is established, and never `rt-test.json`; its reads count as no pending change, drop no input set and ask for
+   * no reconciliation, leaving an entry they cannot read as a file to its event.
+   */
+  readNamed(paths: readonly string[]): Promise<void>;
   beginJob(): JobMark;
   endJob(mark: JobMark): Promise<JobVerdict>;
   /**
@@ -149,9 +156,6 @@ export class InputTracker implements TrackedInputs {
   readonly #jobs = new JobWindows();
   readonly #listed: ListedFiles;
   readonly #ledger = new EventLedger(() => this.#reconciling);
-  readonly #queue = new Map<string, WatchEventType>();
-  /** Queued only because protection changed whether they count, so reading them marks no job; an event clears one. */
-  readonly #quiet = new Set<string>();
   readonly #declared: DeclaredNonInputs;
   /** `rt-test.json` at the consumer root, which is never an input and whose change reconciles every one. */
   readonly #declarationFile: string;
@@ -214,8 +218,7 @@ export class InputTracker implements TrackedInputs {
       git: this.#git,
       jobs: this.#jobs,
       listed: this.#listed,
-      abort: this.#abort,
-      quiet: this.#quiet,
+      signal: this.#abort.signal,
       scope: (filter) => this.#scope(filter),
       inputSetLost: (reason) => this.#inputSetLost(reason),
       retryLostInputSet: () => this.#retryLostInputSet(),
@@ -242,7 +245,7 @@ export class InputTracker implements TrackedInputs {
 
   current(narrowing?: QueryNarrowing): CurrentInputs {
     return currentInputs({
-      unavailable: this.#unavailableReason(),
+      unavailable: unavailableReason(this.#condition()),
       facts: this.facts(),
       nonInputsUnusable: this.#declared.unusable,
       environment: this.#declared.environment,
@@ -266,6 +269,19 @@ export class InputTracker implements TrackedInputs {
 
   settled(): Promise<void> {
     return this.#stopped ? Promise.resolve() : this.#ledger.waitForRead();
+  }
+
+  /** An ignore file named is read as the input it is; its rules apply at its event or the next reconciliation. */
+  readNamed(paths: readonly string[]): Promise<void> {
+    if (this.#stopped) return Promise.resolve();
+    if (!this.#reconciling && this.#state.established) {
+      const named = paths
+        .flatMap((path) => this.#reads.namedPaths(path))
+        .filter((path) => !liesInsideOnHost(this.#declarationFile, path));
+      this.#ledger.accept(this.#reads.enqueueNamed(named));
+      this.#processQueue();
+    }
+    return this.#ledger.waitForReadOrReconciliation();
   }
 
   /** Each edge of a job reads the digests a round's view compares, only while the view can vouch for them. */
@@ -323,7 +339,7 @@ export class InputTracker implements TrackedInputs {
     const released = await keepReleasedFiles(
       this.#scope(filter),
       this.#state,
-      (path) => this.#queue.has(path),
+      (path) => this.#reads.has(path),
       jobStart,
     )
       .catch((error: unknown) => ({
@@ -345,11 +361,7 @@ export class InputTracker implements TrackedInputs {
   /** Root-relative paths queued because protection changed whether they count; an event before their read clears it. */
   #queueQuietly(paths: readonly string[]): void {
     for (const path of paths) {
-      const absolute = absoluteInputPath(this.#root, path);
-      if (!this.#queue.has(absolute)) {
-        this.#quiet.add(absolute);
-        this.#queue.set(absolute, CHANGE_EVENT);
-      }
+      this.#reads.enqueueQuietly(absoluteInputPath(this.#root, path));
       this.#ledger.accept();
     }
   }
@@ -393,8 +405,7 @@ export class InputTracker implements TrackedInputs {
   }
 
   #queuePath(path: string, kind: WatchEventType): void {
-    this.#quiet.delete(path);
-    if (this.#queue.get(path) !== RENAME_EVENT) this.#queue.set(path, kind);
+    this.#reads.enqueue(path, kind);
     this.#ledger.accept();
     this.#processQueue();
   }
@@ -421,6 +432,7 @@ export class InputTracker implements TrackedInputs {
     this.#reconcileRequested = true;
     if (this.#reconciling) return;
     this.#reconciling = true;
+    this.#ledger.notify();
     this.#log.entry(`input reconciliation started: ${reason}`);
     this.#reconciliation = this.#reconcileWhileRequested();
   }
@@ -488,9 +500,7 @@ export class InputTracker implements TrackedInputs {
   #settleReconciliation(inventory: InventoryResult, listed: ListedReads): void {
     if (inventory.ok) {
       this.#watcher.keepDirectories(new Set(inventory.directories));
-      const unread = new Set(
-        [...this.#queue.keys()].map((path) => this.#label(path)),
-      );
+      const unread = this.#reads.queuedLabels();
       const changed = [
         ...this.#state.establish(
           inventory.inputs,
@@ -524,7 +534,7 @@ export class InputTracker implements TrackedInputs {
 
   /** Reads queued paths in batches, never while a reconciliation runs, whose end applies them after its own read. */
   #processQueue(): void {
-    if (this.#queue.size === 0 || this.#processing !== undefined) return;
+    if (this.#reads.queued === 0 || this.#processing !== undefined) return;
     if (this.#reconciling || this.#stopped) return;
     this.#processing = this.#drainQueue().finally(() => {
       this.#processing = undefined;
@@ -534,11 +544,10 @@ export class InputTracker implements TrackedInputs {
   }
 
   async #drainQueue(): Promise<void> {
-    while (this.#queue.size > 0 && !this.#reconciling && !this.#stopped) {
-      const batch = [...this.#queue];
+    while (this.#reads.queued > 0 && !this.#reconciling && !this.#stopped) {
+      const batch = this.#reads.takeBatch();
       const through = this.#ledger.accepted;
-      this.#queue.clear();
-      this.#inFlight = batch.length;
+      this.#inFlight = pendingCount(batch);
       try {
         await this.#reads.read(batch, this.#filter);
       } catch (error) {
@@ -581,10 +590,6 @@ export class InputTracker implements TrackedInputs {
     for (const resolve of waiting) resolve();
   }
 
-  #unavailableReason(): string | undefined {
-    return unavailableReason(this.#condition());
-  }
-
   #condition(): TrackerCondition {
     return {
       stopped: this.#stopped,
@@ -593,7 +598,7 @@ export class InputTracker implements TrackedInputs {
       establishFailure: this.#establishFailure,
       watchFailure: this.#watchFailure,
       protecting: this.#protecting > 0,
-      pending: this.#queue.size + this.#inFlight,
+      pending: this.#reads.pending + this.#inFlight,
     };
   }
 

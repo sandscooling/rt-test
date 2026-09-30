@@ -6,6 +6,7 @@ import type {
   PathStatusAnswer,
   SummaryAnswer,
 } from "../query/answer.js";
+import { resolveCallerPath } from "../query/caller-paths.js";
 import { pathStatusAnswer } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
 import type { LatestResults, RtTestStore } from "../store/open-store.js";
@@ -60,6 +61,7 @@ const NOT_INTERRUPTED =
   "will not be interrupted by a change, so it runs to its end, and a change inside its inputs while it runs leaves the run it stores invalidated";
 const UNCONFIRMED_RUN_REASON =
   "the discovery listed it, but the confirmed start does not, so it was not run";
+const NOT_AWAITED_REASON = "nobody waits for the answer any more";
 
 export interface LifecycleParts {
   readonly identity: DaemonIdentity;
@@ -168,10 +170,21 @@ export class DaemonLifecycle implements DaemonHandlers {
     return summaryAnswer(results, this.#view(), this.#queryInputs(results));
   }
 
-  pathStatus(path: string): PathStatusAnswer | NoAnswer {
+  /**
+   * Reads the path through the tracker before it answers, and a refused path not at all. Once `signal` aborts nobody
+   * waits for the answer, and a stop may have closed the store, so it reads nothing more.
+   */
+  async pathStatus(
+    path: string,
+    signal: AbortSignal,
+  ): Promise<PathStatusAnswer | NoAnswer> {
+    const target = resolveCallerPath(path, this.identity.consumerRoot);
+    if (!target.ok) return { noAnswer: target.reason };
+    await this.#parts.inputs.readNamed([target.path]);
+    if (signal.aborted) return { noAnswer: NOT_AWAITED_REASON };
     const results = this.#latestResults();
     return pathStatusAnswer(
-      path,
+      target,
       results,
       this.#view(),
       this.#queryInputs(results),

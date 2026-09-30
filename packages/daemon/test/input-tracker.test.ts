@@ -5349,6 +5349,265 @@ describe(
   },
 );
 
+/** What a saved file holds before and after a save whose event the watcher has not reported. */
+const BEFORE_SAVE = "export const saved = 1;\n";
+const AFTER_SAVE = "export const saved = 2;\n";
+
+/** Resolves once the event loop has turned, so every settled promise's callbacks have run. */
+function afterATurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Whether `wait` has settled once the event loop has turned. */
+async function settlesWithinATurn(wait: Promise<void>): Promise<boolean> {
+  let done = false;
+  void wait.then(() => {
+    done = true;
+  });
+  await afterATurn();
+  return done;
+}
+
+/**
+ * Tracks `root` over silent watches, so nothing `edit` does raises an event, runs `edit`, reads `named` by name, and
+ * says whether the input revision rose by the time that read resolved.
+ */
+async function namedReadRaisesRevision(
+  root: string,
+  named: readonly string[],
+  edit: () => void,
+): Promise<boolean> {
+  silentCapturedWatches();
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      const revision = tracker.facts().revision;
+      edit();
+      await tracker.readNamed(named);
+      return tracker.facts().revision > revision;
+    });
+  } finally {
+    vi.mocked(watch).mockReset();
+  }
+}
+
+interface HeldNamedRead {
+  /** Whether the named read had resolved while its read of the file was held. */
+  readonly settledWhileHeld: boolean;
+  /** Why no fingerprint could be computed while that read was held; undefined when one could. */
+  readonly unavailableWhileHeld: string | undefined;
+  readonly revisionRose: boolean;
+}
+
+/**
+ * Tracks `root`, holding `a.ts`, over silent watches, saves new content to `a.ts` with no event, and reads it by
+ * name while holding its read of the file, then releases it.
+ */
+async function heldNamedRead(root: string): Promise<HeldNamedRead> {
+  writeTree(root, { "a.ts": BEFORE_SAVE });
+  silentCapturedWatches();
+  const hold = holdingReadsOf("a.ts");
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      const revision = tracker.facts().revision;
+      writeFileSync(join(root, "a.ts"), AFTER_SAVE);
+      let settledWhileHeld = false;
+      const read = tracker.readNamed(["a.ts"]).then(() => {
+        settledWhileHeld = true;
+      });
+      try {
+        await hold.entered;
+        await afterATurn();
+        const whileHeld = {
+          settledWhileHeld,
+          unavailableWhileHeld: tracker.current().unavailable,
+        };
+        hold.release();
+        await read;
+        return {
+          ...whileHeld,
+          revisionRose: tracker.facts().revision > revision,
+        };
+      } finally {
+        hold.release();
+      }
+    });
+  } finally {
+    vi.mocked(readEntryDigest).mockReset();
+    vi.mocked(watch).mockReset();
+  }
+}
+
+describe(
+  "reading the paths a query names",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3366: a file saved with new content before any event reports it moves the input revision once a named read of it resolves", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["a.ts"], () =>
+          writeFileSync(join(root, "a.ts"), AFTER_SAVE),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3367: a named read stays pending while its read of the file is held, and resolves with the change read once it ends", async () => {
+      const read = await inTempDir(heldNamedRead);
+      expect({
+        settledWhileHeld: read.settledWhileHeld,
+        revisionRose: read.revisionRose,
+      }).toStrictEqual({ settledWhileHeld: false, revisionRose: true });
+    });
+
+    it("D3368: a named read of a file saved again with its content unchanged, just after the save, marks no job open across it", async () => {
+      const fingerprinted = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE });
+        silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            const file = join(root, "a.ts");
+            writeFileSync(file, BEFORE_SAVE);
+            utimesSync(
+              file,
+              new Date(),
+              new Date(Date.now() + 2 * MS_PER_SECOND),
+            );
+            await tracker.readNamed(["a.ts"]);
+            return (await tracker.endJob(mark)).fingerprinted;
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(fingerprinted).toBe(true);
+    });
+
+    it("D3369: a held input deleted before any event reports it moves the input revision once a named read of it resolves", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["a.ts"], () =>
+          rmSync(join(root, "a.ts")),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3370: a new file created before any event reports it moves the input revision once a named read of it resolves", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["new.ts"], () =>
+          writeFileSync(join(root, "new.ts"), AFTER_SAVE),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3371: a named read of a folder reads each input held under it, so an unreported save to one moves the input revision", async () => {
+      const rose = await inTempDir((root) => {
+        writeTree(root, { "src/a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["src"], () =>
+          writeFileSync(join(root, "src", "a.ts"), AFTER_SAVE),
+        );
+      });
+      expect(rose).toBe(true);
+    });
+
+    it("D3372: a named read in progress counts as no unread change, so a fingerprint can be computed meanwhile", async () => {
+      const read = await inTempDir(heldNamedRead);
+      expect(read.unavailableWhileHeld).toBeUndefined();
+    });
+
+    it("D3373: a named read asked while a reconciliation runs resolves at once, never waiting the reconciliation out", async () => {
+      const settledAtOnce = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        const watches = silentCapturedWatches();
+        const hold = holdingReadsOf("b.ts");
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            try {
+              deliver(watches, root, "b.ts");
+              await hold.entered;
+              deliver(watches, root, ".gitignore");
+              return await settlesWithinATurn(tracker.readNamed(["a.ts"]));
+            } finally {
+              hold.release();
+            }
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(settledAtOnce).toBe(true);
+    });
+
+    it("D3374: a named read still reading when a reconciliation begins resolves as it begins", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE });
+        const watches = silentCapturedWatches();
+        const hold = holdingReadsOf("a.ts");
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            let settled = false;
+            void tracker.readNamed(["a.ts"]).then(() => {
+              settled = true;
+            });
+            try {
+              await hold.entered;
+              await afterATurn();
+              const beforeReconciliation = settled;
+              deliver(watches, root, ".gitignore");
+              await afterATurn();
+              return { beforeReconciliation, onceItBegan: settled };
+            } finally {
+              hold.release();
+            }
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        beforeReconciliation: false,
+        onceItBegan: true,
+      });
+    });
+
+    it("D3375: a named read of a file git ignores reads nothing, so the input revision stays", async () => {
+      const rose = await inTempDir((root) => {
+        repository(root, "gen/\n", { "src/a.ts": BEFORE_SAVE });
+        return namedReadRaisesRevision(root, ["gen/x.ts"], () =>
+          writeTree(root, { "gen/x.ts": AFTER_SAVE }),
+        );
+      });
+      expect(rose).toBe(false);
+    });
+
+    it("D3376: on Windows, a held input deleted before any event reports it is found deleted by a named read spelling it in another letter case", async () => {
+      const rose = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const revision = tracker.facts().revision;
+            rmSync(join(root, "src", "a.ts"));
+            const { read } = await onPlatform("win32", () =>
+              Promise.resolve({ read: tracker.readNamed(["SRC/A.ts"]) }),
+            );
+            await read;
+            return tracker.facts().revision > revision;
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(rose).toBe(true);
+    });
+  },
+);
+
 describe("the start environment", () => {
   it("D3334: a variable the daemon's live environment gains after the start environment was taken is absent from it", async () => {
     const seen = await withVariables({ [PLANTED_VARIABLE]: undefined }, () => {
