@@ -99,7 +99,7 @@ C37. **Do not retry a verdict**: Under automatic retry, a deterministic refusal 
 
 ## Consumers and shapes
 
-C38. **Audit every consumer of a changed shape**: When a returned shape or schema changes, every consumer that reads it is found and checked in the same diff, including JSON consumers outside the type system. A defect record's `new` text that builds the changed shape as a literal is a consumer too: the typecheck never reads it, and the mutant fails by a crash rather than by its named defect.
+C38. **Audit every consumer of a changed shape**: When a returned shape or schema changes, every consumer that reads it is found and checked in the same diff, including JSON consumers outside the type system. A defect record's `new` text that builds the changed shape as a literal, or calls a signature whose parameters or defaults the change alters, is a consumer too: the typecheck never reads it, and the mutant fails by a crash, or silently changes meaning, rather than failing by its named defect.
 
 C39. **Audit every consumer of a changed behavior**: When a shared helper's behavior changes at an unchanged shape (a short-circuit, a narrowed result), each caller is checked for the new behavior individually.
 
