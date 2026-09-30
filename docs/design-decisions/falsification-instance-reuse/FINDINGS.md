@@ -1,6 +1,6 @@
 # Falsification by one reused Vitest instance per run group
 
-**For:** M2 falsification (FR10 through FR15, ADR-0003), when its tickets are planned
+**For:** Ticket 3.2 (FR10, ADR-0003, ADR-0007)
 
 ## The question
 

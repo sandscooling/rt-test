@@ -67,8 +67,14 @@ on:
 node scripts/doc-section.mjs {cfg.code_change_standards} "Universal gates" "File Size & Extraction Strategies" "Targeted Test Validation" "Full-Suite Validation" "Test Coverage Recommendation" "Writing Tests Outside create-tests"
 ```
 
-Then read `docs/testing.md` (the defect checker's mechanics and limits), `{cfg.rules_dir}/task-lists.md`, and in
-standalone mode `{cfg.rules_dir}/github-issues.md`.
+Then load the named-defect rule and the defect checker's mechanics and limits from `docs/testing.md`:
+
+```sh
+node scripts/doc-section.mjs docs/testing.md "Section menu" "Named-defect rule and where records live" "Bootstrap falsification"
+```
+
+Add to that call each subject section the menu names for the tests this change touches. Then read
+`{cfg.rules_dir}/task-lists.md`, and in standalone mode `{cfg.rules_dir}/github-issues.md`.
 
 ### 2b. Select the rules
 

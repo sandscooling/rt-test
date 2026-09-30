@@ -6,7 +6,7 @@ Fleet Cooling's `falsify.mjs` writes each mutation into the working file, restor
 
 Apply each mutation as an in-memory module transform in a separate Vitest instance, after the unmutated baseline passes for the same inputs, and never write a mutated file. Decide each verdict from facts recorded during the run: the failure phase, the error kind, whether the mutated code was reached, and the baseline result. Only an assertion failure in the intended test counts as a detection. Keep canary fixtures, aimed at the fact collector.
 
-The premise holds on the installed Vitest 5.0.1: a `createVitest` instance given a plugin whose `transform` rewrites one source module ran the baseline to `pass` and the mutated run to `fail` with an error named `AssertionError`, and the source file was unchanged. Vitest 4.1 is unverified until the falsification milestone's first spike.
+The premise holds on the installed Vitest 5.0.1: a `createVitest` instance given a plugin whose `transform` rewrites one source module ran the baseline to `pass` and the mutated run to `fail` with an error named `AssertionError`, and the source file was unchanged. It holds on Vitest 4.1.11 as well (ADR-0007).
 
 Rejected: mutating a disposable copy, as the bootstrap `scripts/verify-defects.mjs` does, which pays a copy per experiment and is still a file write. Rejected: porting the message classifier, whose growth is the cost this decision removes. Rejected: Stryker, which chooses mutations, while RT Test runs only the mutations the author defines. Revisit if a supported Vitest version stops applying plugin transforms to the modules a test imports.
 

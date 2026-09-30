@@ -275,7 +275,7 @@ If that finds the root cause, fix it and retry with the attempt count reset. Oth
 
 ## Writing Tests Outside create-tests
 
-**In a workflow, `create-tests` is the only session that writes or edits a test.** This section is the falsification gate it runs, and the one an ad-hoc change runs when it writes a test. `docs/testing.md` describes the defect checker's mechanics and limits.
+**In a workflow, `create-tests` is the only session that writes or edits a test.** This section is the falsification gate it runs, and the one an ad-hoc change runs when it writes a test. `docs/testing.md` § Bootstrap falsification describes the defect checker's mechanics and limits.
 
 **Scope.** Steps 2 to 5 apply to product tests: those under `packages/`, and the root `test/` records that mutate a file under `packages/` (`docs/testing.md`). A new test of the repository's tooling names its defect (step 1) and asserts it, with no `D###` title, record or proof.
 

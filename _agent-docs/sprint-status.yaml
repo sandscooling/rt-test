@@ -39,3 +39,13 @@ sprint-2: in-progress
 2-6-changes-query: done
 2-7-agent-hook: done
 2-7b-agent-edits-never-hold: review
+
+sprint-3: in-progress
+3-1-defect-definitions: backlog
+3-2-transform-experiments: ready-for-dev
+3-3-verdicts-from-facts: backlog
+3-4-defect-evidence: backlog
+3-5-schedule-falsification: backlog
+3-6-canary-gate: backlog
+3-7-falsification-corpus: backlog
+3-8-own-defects-to-rt-test: backlog

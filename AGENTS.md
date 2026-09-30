@@ -2,7 +2,7 @@
 
 ## Project
 
-Build RT Test as a standalone, local-first developer tool for Vitest projects. Read `docs/plan.md`, `docs/architecture.md`, `docs/roadmap.md`, and `_agent-docs/next-session.md` before substantial work. Keep implemented behavior distinct from planned capabilities.
+Build RT Test as a standalone, local-first developer tool for Vitest projects. Read `docs/plan.md`, `docs/roadmap.md`, and `_agent-docs/next-session.md` before substantial work, and the `Section menu` of `docs/architecture.md`, then load each section your work needs by passing its heading to `node scripts/doc-section.mjs docs/architecture.md`. Keep implemented behavior distinct from planned capabilities.
 
 Use this file as the shared agent entry point. Do not create a separate Claude instructions file.
 

@@ -2,7 +2,7 @@
 
 ## Objective
 
-Build RT Test as a standalone tool providing fast, queryable Vitest results, freshness tracking, selective execution, and named-defect evidence. Read `AGENTS.md` first, then `docs/plan.md`, `docs/architecture.md`, and `docs/roadmap.md`.
+Build RT Test as a standalone tool providing fast, queryable Vitest results, freshness tracking, selective execution, and named-defect evidence. Read `AGENTS.md` first, then `docs/plan.md` and `docs/roadmap.md`, and `docs/architecture.md`'s `Section menu`, loading the sections your work needs with `node scripts/doc-section.mjs`.
 
 ## Agreed direction
 

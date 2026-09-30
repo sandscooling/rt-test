@@ -27,7 +27,7 @@ The local process that alone executes a started consumer's tests and answers que
 _Avoid_: server, watcher
 
 **Executor process**:
-A child process of the daemon that runs one job, a discovery, a run or a dependency build, and ends with it; only an executor process hosts Vitest.
+A child process of the daemon that runs one job, a discovery, a run, a dependency build or a falsification job, and ends with it; only an executor process hosts Vitest.
 _Avoid_: worker, runner
 
 **Confirmed start**:
@@ -199,6 +199,46 @@ _Avoid_: live mutant
 **Anchor missing**:
 The state of a defect whose mutation no longer matches the code it names.
 _Avoid_: stale anchor, skipped defect
+
+**Invalid definition**:
+A defect definition RT Test cannot apply as written, such as one naming no discovered test, or a test it shares a name with.
+_Avoid_: bad defect, broken spec
+
+**Falsification job**:
+One executor job that runs a Vitest workspace's baseline, each of its defects' experiments and the restored baseline in one Vitest instance.
+_Avoid_: mutation run, falsification run
+
+**Experiment**:
+One run of a defect's test with its mutation applied, inside a falsification job.
+_Avoid_: mutant run, trial
+
+**Baseline**:
+The unmutated run of a falsification job's tests before its experiments; the restored baseline repeats it after them.
+_Avoid_: control run, clean run
+
+**Confirming run**:
+A second run of an experiment that would be a detection, which must fail the same way before the detection counts.
+_Avoid_: retry, rerun check
+
+**Reach probe**:
+The recorder call a mutation's transform places at the mutated site, so an experiment records which tests executed the mutated code.
+_Avoid_: coverage marker, reach flag
+
+**Invalid experiment**:
+An experiment whose run cannot say whether the test rejects the mutation, such as one whose test failed in a hook or never executed the mutated site.
+_Avoid_: void, setup kill
+
+**Unclear experiment**:
+An experiment whose test failed in its own body but not at an assertion, or failed at an assertion and then passed its confirming run.
+_Avoid_: unclassified, maybe-kill
+
+**Eligible defect**:
+A defect whose definition is valid, whose anchor matches, and whose test holds a current pass, so it can be falsified now.
+_Avoid_: runnable defect, pending defect
+
+**Canary fixture**:
+A test that fails on purpose in one known way, so RT Test can check that it reads that failure's facts correctly on a Vitest version.
+_Avoid_: selftest, probe
 
 **Gap**:
 A test with no defect, or code no named defect reaches.

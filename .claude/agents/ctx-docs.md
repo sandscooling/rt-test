@@ -46,8 +46,10 @@ whatever else the subject needs and report it on the `OUTSIDE_SHORTLIST:` line.
 - **ADRs** (`{cfg.adr_dir}`): list the directory; each file name states its decision. Open those in scope,
   and quote each binding decision verbatim with `[Source: <path>]`. An ADR marked superseded is context,
   never a constraint: follow it to the ADR that superseded it.
-- **Design docs**: `docs/architecture.md`, `docs/plan.md` and `docs/roadmap.md`. Read by heading, and cite
-  a section by its heading text, never a line number.
+- **Design docs**: `docs/architecture.md`, `docs/plan.md` and `docs/roadmap.md`. Read `docs/architecture.md`'s
+  `Section menu`, then load each section the subject touches by passing its heading to
+  `node scripts/doc-section.mjs docs/architecture.md`. Read the others by heading. Cite a
+  section by its heading text, never a line number.
 - **Design-decision records** (`{cfg.design_decisions_dir}`): each folder's `FINDINGS.md` records a
   prototype verdict. Quote the verdict of any record whose question the subject touches.
 - **Glossary** (`{cfg.glossary}`): read it whole when it exists. Quote every entry for a term the subject
