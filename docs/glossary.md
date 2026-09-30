@@ -50,6 +50,10 @@ _Avoid_: ignored file, excluded file
 An environment variable whose value the input fingerprint leaves out, counting only whether it is set and whether it is empty: a session or process identifier on RT Test's fixed list, or one `rt-test.json` declares in `nonInputVariables`.
 _Avoid_: ignored variable, session variable
 
+**Start environment**:
+The copy of its environment the daemon takes as it begins serving: the input fingerprint counts it, and every executor process starts with it.
+_Avoid_: live environment, environment snapshot
+
 **Input revision**:
 The number naming a worktree's inputs as the daemon last observed them in its current life, raised once for each batch of changes it observes.
 _Avoid_: version, generation
@@ -137,6 +141,14 @@ _Avoid_: full run
 **Duplicate execution**:
 Running a test again while it holds a current result for the same input fingerprint.
 _Avoid_: rerun
+
+**Edit corpus**:
+The committed synthetic consumer and the sequences of changes saved to it, each replayed against RT Test's own daemon beside a full run by plain Vitest, over which duplicate execution and selection misses are measured.
+_Avoid_: test corpus, benchmark
+
+**Selection miss**:
+A failure that a full run of plain Vitest over the same input snapshot finds and the daemon's current results do not.
+_Avoid_: missed test
 
 **Wait**:
 A query that returns once every test covering the given files has a current result or an explicit non-current state, or earlier as superseded or unsettled.

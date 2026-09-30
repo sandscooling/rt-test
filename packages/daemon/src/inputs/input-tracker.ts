@@ -17,6 +17,7 @@ import {
 } from "./current-inputs.js";
 import type { FingerprintResult, ProjectInputs } from "./fingerprint.js";
 import { DeclaredNonInputs } from "./declared-non-inputs.js";
+import type { StartEnvironment } from "./environment-digest.js";
 import { GitFiles } from "./git-files.js";
 import {
   absoluteInputPath,
@@ -58,6 +59,8 @@ export interface InputTrackerOptions {
   /** Absolute paths excluded with everything under them, such as the daemon's state directory and log file. */
   readonly exclusions: readonly string[];
   readonly log: DaemonLog;
+  /** The daemon's environment as it began serving, which the digest counts. */
+  readonly startEnvironment: StartEnvironment;
 }
 
 /** What a query reads of the inputs, taken at one moment. */
@@ -176,12 +179,17 @@ export class InputTracker implements TrackedInputs {
   readonly #firstReconciled: Promise<void>;
   #markFirstReconciled: () => void = () => undefined;
 
-  constructor({ consumerRoot, exclusions, log }: InputTrackerOptions) {
+  constructor({
+    consumerRoot,
+    exclusions,
+    log,
+    startEnvironment,
+  }: InputTrackerOptions) {
     this.#root = realpathSync.native(consumerRoot);
     this.#declarationFile = join(this.#root, NON_INPUTS_FILE);
     this.#exclusions = exclusions;
     this.#log = log;
-    this.#declared = new DeclaredNonInputs(this.#root, log);
+    this.#declared = new DeclaredNonInputs(this.#root, log, startEnvironment);
     this.#state = new InputState(this.#root);
     this.#listed = new ListedFiles(this.#root);
     this.#firstReconciled = new Promise((resolve) => {

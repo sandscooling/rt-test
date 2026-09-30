@@ -3,6 +3,10 @@ import type {
   DependencyInformation,
   SelectableWorkspace,
 } from "../selection/selection-types.js";
+import {
+  executorEnvironment,
+  type StartEnvironment,
+} from "../inputs/environment-digest.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText, exitText } from "../vitest/error-text.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
@@ -100,9 +104,11 @@ export class Executor {
   /** Whether the daemon asked the job in progress to stop, by an abort or a close, so its executor's exit is no crash. */
   #stopAsked = false;
   readonly #containment: TreeContainment = treeContainment();
+  readonly #startEnvironment: StartEnvironment;
 
-  constructor(log: DaemonLog) {
+  constructor(log: DaemonLog, startEnvironment: StartEnvironment) {
     this.#log = log;
+    this.#startEnvironment = startEnvironment;
   }
 
   async discover(start: ConfirmedStart): Promise<JobOutcome<TestDiscovery>> {
@@ -292,6 +298,7 @@ export class Executor {
     const child = fork(entry.file, [], {
       execArgv: [...entry.execArgv, UNHANDLED_REJECTIONS_THROW],
       stdio: ["ignore", "inherit", "inherit", "ipc"],
+      env: executorEnvironment(this.#startEnvironment),
       detached: ownsProcessGroup(),
       windowsHide: true,
     });

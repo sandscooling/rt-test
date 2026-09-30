@@ -29,7 +29,12 @@ import {
   consumerIdentity,
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
-import { fixtureRepository, inConsumerCopy, runTempRoot } from "./harness.js";
+import {
+  fixtureRepository,
+  inConsumerCopy,
+  REPO,
+  runTempRoot,
+} from "./harness.js";
 
 /** What `RawConnection.next` resolves with once the daemon has closed the connection. */
 export const CLOSED = "closed";
@@ -293,19 +298,52 @@ export function settled<T>(work: Promise<T>): Promise<Settled<T>> {
 }
 
 /** Runs `body` with the environment variable `name` set to `value`, then restores what it held before. */
-export async function withEnvironment<T>(
+export function withEnvironment<T>(
   name: string,
   value: string,
   body: () => Promise<T>,
 ): Promise<T> {
-  const saved = process.env[name];
-  process.env[name] = value;
+  return withVariables({ [name]: value }, body);
+}
+
+/** Runs `body` with each variable in `values` set, or unset where its value is undefined, then restores them all. */
+export async function withVariables<T>(
+  values: Readonly<Record<string, string | undefined>>,
+  body: () => Promise<T>,
+): Promise<T> {
+  const saved = Object.keys(values).map(
+    (name) => [name, process.env[name]] as const,
+  );
+  setVariables(Object.entries(values));
   try {
     return await body();
   } finally {
-    if (saved === undefined) delete process.env[name];
-    else process.env[name] = saved;
+    setVariables(saved);
   }
+}
+
+function setVariables(
+  values: Iterable<readonly [string, string | undefined]>,
+): void {
+  for (const [name, value] of values) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
+/** Preloaded through NODE_OPTIONS, it has each executor process report the environment it started with. */
+export const REPORT_ENVIRONMENT = join(
+  REPO,
+  "test/fixtures/daemon/report-environment.mjs",
+);
+
+/** The environments the report-environment preload recorded in `file`, one per executor process, in start order. */
+export function reportedEnvironments(file: string): NodeJS.ProcessEnv[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as NodeJS.ProcessEnv);
 }
 
 const NODE_OPTIONS = "NODE_OPTIONS";

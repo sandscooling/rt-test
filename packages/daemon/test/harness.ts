@@ -20,6 +20,7 @@ import {
   HELD_RECORD_SEPARATOR,
   removeDirectory,
 } from "./temp-root.js";
+import { SnapshotReads } from "../src/inputs/fingerprint.js";
 import type {
   RecordedModule,
   RecordedTest,
@@ -353,6 +354,14 @@ export function settle<T>(run: () => T): T | { thrown: string } {
 
 /** The consumer root a hand-built discovery reports for when its case names none. */
 export const HAND_BUILT_ROOT = resolve(sep, "consumer");
+
+/** A hand-built fingerprint's environment digest, fixed so no variable of the test process reaches it. */
+const HAND_BUILT_ENVIRONMENT = "hand-built environment";
+
+/** The reads one hand-built fingerprint over `root` takes. */
+export function handBuiltReads(root: string): SnapshotReads {
+  return new SnapshotReads(root, HAND_BUILT_ENVIRONMENT);
+}
 
 /**
  * One project's selection facts; a list left out is empty, the pattern directory is the consumer root, and the Vite

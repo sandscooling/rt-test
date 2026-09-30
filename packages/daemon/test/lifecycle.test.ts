@@ -23,6 +23,7 @@ import {
   type DaemonIdentity,
 } from "../src/daemon/protocol.js";
 import { RunWatch, type RunJudgment } from "../src/daemon/run-judgment.js";
+import { takeStartEnvironment } from "../src/inputs/environment-digest.js";
 import {
   ProjectInputs,
   type FingerprintResult,
@@ -461,6 +462,7 @@ async function declaredModuleStart(
       consumerRoot: root,
       exclusions: [],
       log: memoryLog(),
+      startEnvironment: takeStartEnvironment(),
     }),
     quietWindowMs: NO_QUIET_WINDOW_MS,
     closeEndpoint: () => Promise.resolve(),
@@ -543,6 +545,7 @@ async function idleStart(dir: string): Promise<IdleStart> {
       consumerRoot: root,
       exclusions: [],
       log: trackerLog,
+      startEnvironment: takeStartEnvironment(),
     }),
     quietWindowMs: NO_QUIET_WINDOW_MS,
     closeEndpoint: () => Promise.resolve(),

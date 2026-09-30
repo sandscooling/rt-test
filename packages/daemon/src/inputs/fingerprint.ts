@@ -14,7 +14,6 @@ import {
   workspaceEnvFilesKnown,
   type EnvFilesKnown,
 } from "./env-files.js";
-import { countEnvironment } from "./environment-digest.js";
 import { absoluteInputPath } from "./input-filter.js";
 import {
   DIGEST_ALGORITHM,
@@ -39,7 +38,6 @@ const MISSING_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"]);
 const ABSENT_FILE = "absent";
 const TEST_MODULE = "test module";
 const SETUP_FILE = "setup file";
-const NO_DECLARED_VARIABLES: readonly string[] = [];
 /** A path `statSync` finds no entry at, a missing file or one below a file. */
 const NOTHING_THERE = null;
 const ENV_FILES_UNKNOWN = "are not known";
@@ -114,7 +112,7 @@ function workspaceInputs(
  */
 export class SnapshotReads {
   readonly #root: string;
-  /** The environment's digest, as `countEnvironment` gives it; by default with no declared variable entry. */
+  /** The digest of the start environment, as `countEnvironment` gives it, which every fingerprint here takes. */
   readonly environment: string;
   /** By test module path, as `testModuleFile` names it. */
   readonly #modules = new Map<string, FingerprintResult>();
@@ -123,10 +121,7 @@ export class SnapshotReads {
   /** By workspace directory. */
   readonly #versions = new Map<string, string | null>();
 
-  constructor(
-    root: string,
-    environment = countEnvironment(process.env, NO_DECLARED_VARIABLES).digest,
-  ) {
+  constructor(root: string, environment: string) {
     this.#root = root;
     this.environment = environment;
   }
@@ -165,7 +160,7 @@ export class SnapshotReads {
 export function workspaceFingerprint(
   project: ProjectInputs,
   entry: WorkspaceDiscovery,
-  reads = new SnapshotReads(project.root),
+  reads: SnapshotReads,
   narrowed?: ProjectInputs,
 ): FingerprintResult {
   const { vitestVersion } = reads;
@@ -190,7 +185,7 @@ export function workspaceFingerprint(
 export function discoveryFingerprint(
   project: ProjectInputs,
   discovery: TestDiscovery,
-  reads = new SnapshotReads(project.root),
+  reads: SnapshotReads,
 ): FingerprintResult {
   const { vitestVersion } = reads;
   const envFiles = discoveryEnvFilesKnown(discovery);

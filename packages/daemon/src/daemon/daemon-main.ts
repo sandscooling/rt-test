@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import type { Socket } from "node:net";
+import { takeStartEnvironment } from "../inputs/environment-digest.js";
 import { InputTracker } from "../inputs/input-tracker.js";
 import { consumerIdentity } from "../store/consumer-identity.js";
 import { openStore, type RtTestStore } from "../store/open-store.js";
@@ -96,10 +97,12 @@ async function serve(
   log: DaemonLog,
   directory: string,
 ): Promise<DaemonLifecycle | undefined> {
+  const startEnvironment = takeStartEnvironment();
   const inputs = new InputTracker({
     consumerRoot: request.start.consumerRoot,
     exclusions: [directory, log.file],
     log,
+    startEnvironment,
   });
   let accept = (socket: Socket): void => {
     socket.destroy();
@@ -124,8 +127,11 @@ async function serve(
     start: request.start,
     store,
     log,
-    executor: new Executor(log),
-    buildExecutor: new Executor(roleLog(log, BUILD_EXECUTOR_ROLE)),
+    executor: new Executor(log, startEnvironment),
+    buildExecutor: new Executor(
+      roleLog(log, BUILD_EXECUTOR_ROLE),
+      startEnvironment,
+    ),
     inputs,
     quietWindowMs: QUIET_WINDOW_MS,
     closeEndpoint: async () => {
