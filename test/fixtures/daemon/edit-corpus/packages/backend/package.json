@@ -1,0 +1,11 @@
+{
+  "name": "@corpus/backend",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/quote.mjs"
+  },
+  "dependencies": {
+    "@corpus/lib": "workspace:*"
+  }
+}

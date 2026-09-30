@@ -4,6 +4,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
@@ -37,7 +38,10 @@ import {
 } from "../src/vitest/confirmed-start.js";
 import type { WorkspaceDiscovery } from "../src/vitest/discover-tests.js";
 import {
+  findPackageWorkspaces,
   findVitestWorkspaces,
+  PACKAGE_JSON,
+  ROOT_PATH,
   type VitestWorkspace,
 } from "../src/vitest/find-workspaces.js";
 import {
@@ -152,6 +156,23 @@ export function linkVitest(dir: string, install: VitestInstall): void {
   );
   mkdirSync(join(dir, "node_modules"), { recursive: true });
   symlinkSync(target, join(dir, "node_modules/vitest"), "junction");
+}
+
+/** Makes each package workspace under `dir` resolve by its package name, through a directory link as an install makes. */
+export function linkWorkspacePackages(dir: string): void {
+  for (const workspace of findPackageWorkspaces(dir).workspaces) {
+    if (workspace.path === ROOT_PATH) continue;
+    const manifest = join(workspace.directory, PACKAGE_JSON);
+    const { name } = JSON.parse(readFileSync(manifest, "utf8")) as {
+      name?: unknown;
+    };
+    if (typeof name !== "string") {
+      throw new Error(`${manifest} names no package to link`);
+    }
+    const link = join(dir, "node_modules", name);
+    mkdirSync(dirname(link), { recursive: true });
+    symlinkSync(workspace.directory, link, "junction");
+  }
 }
 
 /** A stand-in Vitest install that resolves `vitest/package.json` and `vitest/node` but holds no runner. */

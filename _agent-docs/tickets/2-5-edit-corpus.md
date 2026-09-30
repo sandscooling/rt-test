@@ -13,16 +13,16 @@ Each criterion states an OUTCOME a test or an observation could falsify, never a
 them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review gaps cite them.
 -->
 
-- [ ] AC1: A synthetic consumer committed under `test/fixtures/daemon/edit-corpus/` is shaped like Fleet Cooling: a root `package.json` whose `workspaces` lists `apps/*` and `packages/*`; four Vitest workspaces, a shared library, two packages that each depend on it, and an app that depends on all three, every dependency declared in the dependent's `package.json` and imported by package name; tests that pass and one that is skipped; docs at the root and in a workspace, which the consumer's `rt-test.json` declares non-inputs. Its tests are deterministic, finish in well under a second each, and write nothing into its tree. The corpus runs it on Vitest 4.1, the version Fleet Cooling runs.
-- [ ] AC2: The corpus's edits are these (§ Edit mix gives their basis in Fleet Cooling's history): a source edit to the shared library that breaks tests in each workspace depending on it, and its fix; a source edit to a mid-level package; a test module added, and one deleted; a rename of a library source file whose importers are updated in the same burst of saves except one, whose module then fails to load, and the fix of that import; a docs edit; a save that leaves a file's bytes unchanged; an edit in two parts, the second saved while the daemon is running the first part's selection whenever the check sees it running (AC4); and one Vitest config edit. They are grouped into sequences, each replayed from the committed fixture in a daemon life of its own (the second half of a split sequence starts from the fixture with the first half's edits applied, AC10).
-- [ ] AC3: Each edit declares the exact set of Vitest workspaces the daemon must run for it, the set `docs/architecture.md`'s selection rule gives for its paths: the package workspace holding each changed path and every workspace depending on it; for a config file in a Vitest workspace's directory, that workspace and its dependents; nothing for a declared non-input or a save that changes no bytes. After each edit, a workspace the daemon ran that the edit does not declare, and a declared workspace it did not run, are each a finding naming the edit and the workspace. At the baseline before a sequence's first edit, the declared set is every confirmed workspace, each run once.
-- [ ] AC4: Before the first edit and after each one, the check waits as a coding agent does: it asks the daemon, through ticket 2.4b's `queryWait`, to wait on the files the edit changed (at the baseline, every test module of the fixture), and compares nothing until that wait answers settled and the daemon's schedule shows no round pending and every confirmed workspace idle. For the edit whose second part is saved while a run is going, the check saves that part once it sees a declared workspace running, or once the first part's wait has answered if it sees none first, so it never waits for a run that has already ended; the first part's wait may then answer superseded, and the check waits on both parts' files at the newer revision. Any other superseded answer, an unsettled answer, and a daemon that does not go idle within the check's bound are each a finding naming the edit. After an edit that declares no runs (the docs edit, the unchanged save), the input revision the daemon answers with once the wait has settled must equal the one it answered with before the save; a moved revision is a finding, since such an edit moves none, and a run a daemon wrongly began for it would otherwise store after the check's last read.
-- [ ] AC5: Once the daemon has settled, a full run by plain Vitest 4.1, run through Vitest's own command line in every Vitest workspace and never through RT Test's executor, over the same input snapshot, is compared with the daemon's answers test by test, by workspace, module path and suite and test names: every test the full run reports is one the daemon holds, with the same outcome (passed, failed, or skipped, a todo counting as skipped); every module the full run fails to load, the daemon reports failed to load; the daemon holds no test the full run does not report, other than a test of a module the full run fails to load, which the daemon may hold in that module's failed-to-load state; and every result compared reads current. A failure the full run finds that the daemon's current results do not is a selection miss (NFR2); each other disagreement is a finding too; each names the edit, the test or module, and what each side reported.
-- [ ] AC6: A run the daemon stores for a workspace under the same input fingerprint and adapter version as that workspace's previous stored run, while that previous run was stored under its fingerprint, is a duplicate execution (NFR1), a finding naming the workspace and the edit. A rerun after a run stored not fingerprinted is not one, and neither is a run at a fingerprint only an older, superseded run of the workspace held, as when an edit is reverted.
-- [ ] AC7: The check proves it looked. Each edit also declares the tests and modules the full run fails after it, those an earlier edit of its sequence left failing included, and a full run whose failures differ is a finding, so an edit that no longer breaks what it declares cannot pass as a clean comparison. A full run that writes no report, reports no test for a workspace, or ends other than with Vitest's own exit code for a run that passed or one that failed, is a finding carrying its exit status and output, and nothing is compared for that edit.
-- [ ] AC8: The check returns one report per sequence listing every finding by kind (selection miss, other disagreement, duplicate execution, run outside the declared set, declared run missing, wait not settled, daemon not idle, full run unusable, declared failures not matched, input revision moved), each naming the edit and the tests, modules or workspaces involved, and a sequence with no finding returns exactly one clean value, so a test asserts a whole sequence with one assertion and no hook.
-- [ ] AC9: Each sequence runs in a temporary copy of the fixture made a git repository, with Vitest 4.1 and the workspace packages linked under `node_modules` as a package manager links them, starts the daemon with every workspace confirmed, and ends that daemon and every process it started however the sequence ends; nothing is written into this repository's tree, and the full run writes nothing the daemon counts as an input. The corpus runs in the ordinary suite, so the gate runs it on Windows and on Linux.
-- [ ] AC10: Each sequence, its baseline included, completes on an idle Windows machine in at most half of `DAEMON_TEST_TIMEOUT_MS`, measured and recorded in the Completion Notes with the Linux figure; a sequence that does not fit is split into two, never shortened by dropping an edit; the second half's copy applies the first half's edits before its daemon starts, so each edit changes what it changed in the whole sequence.
+- [x] AC1: A synthetic consumer committed under `test/fixtures/daemon/edit-corpus/` is shaped like Fleet Cooling: a root `package.json` whose `workspaces` lists `apps/*` and `packages/*`; four Vitest workspaces, a shared library, two packages that each depend on it, and an app that depends on all three, every dependency declared in the dependent's `package.json` and imported by package name; tests that pass and one that is skipped; docs at the root and in a workspace, which the consumer's `rt-test.json` declares non-inputs. Its tests are deterministic, finish in well under a second each, and write nothing into its tree. The corpus runs it on Vitest 4.1, the version Fleet Cooling runs.
+- [x] AC2: The corpus's edits are these (§ Edit mix gives their basis in Fleet Cooling's history): a source edit to the shared library that breaks tests in each workspace depending on it, and its fix; a source edit to a mid-level package; a test module added, and one deleted; a rename of a library source file whose importers are updated in the same burst of saves except one, whose module then fails to load, and the fix of that import; a docs edit; a save that leaves a file's bytes unchanged; an edit in two parts, the second saved while the daemon is running the first part's selection whenever the check sees it running (AC4); and one Vitest config edit. They are grouped into sequences, each replayed from the committed fixture in a daemon life of its own (the second half of a split sequence starts from the fixture with the first half's edits applied, AC10).
+- [x] AC3: Each edit declares the exact set of Vitest workspaces the daemon must run for it, the set `docs/architecture.md`'s selection rule gives for its paths: the package workspace holding each changed path and every workspace depending on it; for a config file in a Vitest workspace's directory, that workspace and its dependents; nothing for a declared non-input or a save that changes no bytes. After each edit, a workspace the daemon ran that the edit does not declare, and a declared workspace it did not run, are each a finding naming the edit and the workspace. At the baseline before a sequence's first edit, the declared set is every confirmed workspace, each run once.
+- [x] AC4: Before the first edit and after each one, the check waits as a coding agent does: it asks the daemon, through ticket 2.4b's `queryWait`, to wait on the files the edit changed (at the baseline, every test module of the fixture), and compares nothing until that wait answers settled and the daemon's schedule shows no round pending and every confirmed workspace idle. For the edit whose second part is saved while a run is going, the check saves that part once it sees a declared workspace running, or once the first part's wait has answered if it sees none first, so it never waits for a run that has already ended; the first part's wait may then answer superseded, and the check waits on both parts' files at the newer revision. The baseline's wait may answer superseded once, only when every changed path its answer names is a file `rt-test.json` declares a non-input, since the declaration first applies when the first discovery lands; the check then waits again at the newer revision, and a baseline superseded by any other path is a finding. Any other superseded answer, an unsettled answer, and a daemon that does not go idle within the check's bound are each a finding naming the edit. After an edit that declares no runs (the docs edit, the unchanged save), the input revision the daemon answers with once the wait has settled must equal the one it answered with before the save; a moved revision is a finding, since such an edit moves none, and a run a daemon wrongly began for it would otherwise store after the check's last read.
+- [x] AC5: Once the daemon has settled, a full run by plain Vitest 4.1, run through Vitest's own command line in every Vitest workspace and never through RT Test's executor, over the same input snapshot, is compared with the daemon's answers test by test, by workspace, module path and suite and test names: every test the full run reports is one the daemon holds, with the same outcome (passed, failed, or skipped, a todo counting as skipped); every module the full run fails to load, the daemon reports failed to load; the daemon holds no test the full run does not report, other than a test of a module the full run fails to load, which the daemon may hold in that module's failed-to-load state; and every result compared reads current. A failure the full run finds that the daemon's current results do not is a selection miss (NFR2); each other disagreement is a finding too; each names the edit, the test or module, and what each side reported.
+- [x] AC6: A run the daemon stores for a workspace under the same input fingerprint and adapter version as that workspace's previous stored run, while that previous run was stored under its fingerprint, is a duplicate execution (NFR1), a finding naming the workspace and the edit. A rerun after a run stored not fingerprinted is not one, and neither is a run at a fingerprint only an older, superseded run of the workspace held, as when an edit is reverted.
+- [x] AC7: The check proves it looked. Each edit also declares the tests and modules the full run fails after it, those an earlier edit of its sequence left failing included, and a full run whose failures differ is a finding, so an edit that no longer breaks what it declares cannot pass as a clean comparison. A full run that writes no report, reports no test for a workspace, or ends other than with Vitest's own exit code for a run that passed or one that failed, is a finding carrying its exit status and output, and nothing is compared for that edit.
+- [x] AC8: The check returns one report per sequence listing every finding by kind (selection miss, other disagreement, duplicate execution, run outside the declared set, declared run missing, wait not settled, daemon not idle, full run unusable, declared failures not matched, input revision moved), each naming the edit and the tests, modules or workspaces involved, and a sequence with no finding returns exactly one clean value, so a test asserts a whole sequence with one assertion and no hook.
+- [x] AC9: Each sequence runs in a temporary copy of the fixture made a git repository, with Vitest 4.1 and the workspace packages linked under `node_modules` as a package manager links them, starts the daemon with every workspace confirmed, and ends that daemon and every process it started however the sequence ends; nothing is written into this repository's tree, and the full run writes nothing the daemon counts as an input. The corpus runs in the ordinary suite, so the gate runs it on Windows and on Linux.
+- [x] AC10: Each sequence, its baseline included, completes on an idle Windows machine in at most half of `DAEMON_TEST_TIMEOUT_MS`, measured and recorded in the Completion Notes with the Linux figure; a sequence that does not fit is split into two, never shortened by dropping an edit; the second half's copy applies the first half's edits before its daemon starts, so each edit changes what it changed in the whole sequence.
 
 ## Unverified Assumptions
 
@@ -45,18 +45,18 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Before the first edit, re-read the landed code of ticket 2.4b (`queryWait` and its options in `packages/daemon/src/query-client.ts`, re-exported from `packages/daemon/src/client.ts`; the wait answer's outcome constants in `packages/daemon/src/query/answer.ts`) and 2.4d, and confirm the names this ticket uses; read `packages/daemon/test/harness.ts` and `packages/daemon/test/daemon-harness.ts` for the helpers under § Reuse.
-- [ ] (AC1) Create the fixture under `test/fixtures/daemon/edit-corpus/` by § Fixture shape: the root `package.json`, `rt-test.json` declaring `**/*.md`, `README.md`; `packages/lib`, `packages/ui`, `packages/backend` and `apps/web`, each with a `package.json` naming it `@corpus/<name>` with `type` `module`, an `exports` map, and a `dependencies` entry (`workspace:*`) for each `@corpus` package it imports, a `vitest.config.mjs` exporting a plain object as the other daemon fixtures do, its source and its tests; `apps/web` with a setup file its config names; `packages/lib/README.md`. Write each test so the edits in § Sequences break exactly the tests they declare, and write the fixture's modules as `.mjs`, as every other daemon fixture is.
-- [ ] (AC9) In `packages/daemon/test/harness.ts`, add a helper beside `linkVitest` that links each workspace package under the copy's `node_modules` by its package name, through a directory link as `linkVitest` makes one, so a package-name import resolves as it does after `bun install`.
-- [ ] (AC2, AC3, AC7) Create `packages/daemon/test/edit-corpus-sequences.ts`: the sequences of § Sequences as data. Each edit gives the files it writes, renames or deletes (a rename is a delete and a write in one burst), whether its second part is saved while a run is going, its declared run set, and its declared full-run failures (tests by workspace, module path and names; modules that fail to load), every failure the full run should find after it, an earlier edit's included. Derive each run set from the selection rule quoted in § Rule clauses, never from a run.
-- [ ] (AC4, AC9) Create `packages/daemon/test/edit-corpus.ts`, the check. For one sequence: copy the fixture with `inConsumerCopy` on `vitest-4`, link the packages, make it a repository with `fixtureRepository`, and run inside `withDaemons`, starting the daemon with `started(root, pids, confirmEvery(root))`. At the baseline, call `queryWait` on every test module of the fixture, and after each edit on the edit's files (a renamed file's old and new paths both), with a limit named as a constant; then poll `querySummary` until `schedule.round.state` is not `ROUND.pending` and every `schedule.workspaces` entry is `EXECUTION_STATE.idle`, within a named bound. For the edit saved during a run, save its first part and start its wait, poll the schedule until a declared workspace is `EXECUTION_STATE.running` or that wait has answered, whichever comes first, save the second part, wait on both parts' files, and accept a superseded first answer only there. After an edit that declares no runs, read the answer's `inputs.revision` and compare it with the one read before the save (AC4).
-- [ ] (AC5, AC7) In `edit-corpus.ts`, run the full run: spawn Node on the linked Vitest 4.1's `bin.vitest` entry with `run --reporter=json --outputFile <file>` in each Vitest workspace's directory, the report file in the run's temp root (`runTempRoot`), outside the consumer's copy and this repository's tree, removed with it (C106), with an argument array (P15), the workspaces in parallel. Treat an exit other than Vitest's passed and failed exit codes (named constants, C3), a signal, a missing or unparsable report, or a workspace with no reported test as full run unusable, keeping its exit status, stderr and stdout (C141, C161), and compare nothing else for that edit. Otherwise compare the full run's failed tests and modules with the edit's declared failures, reporting each declared and not produced and each produced and not declared. Map each report entry to the daemon's test identity: module path relative to the workspace's real directory with `/` separators, names from `ancestorTitles` then `title`. Read an entry with `status` `failed`, a non-empty `message` and an empty `assertionResults` as a module that failed to load (§ Settled facts). Type the report from Vitest 4.1's exported JSON reporter types where the package exports them (C14), declaring only the fields read otherwise.
-- [ ] (AC5) In `edit-corpus.ts`, read the daemon's side after settling: each workspace's latest stored run from the store (as `storedRuns` in `daemon-harness.ts` opens it) for each test's outcome and each module's state, and the answers' freshness (`queryPathStatus` of each test module, or `querySummary`'s counts) for currency. Compare by AC5, and classify a failure the full run finds that the daemon does not hold as a current failure as a selection miss.
-- [ ] (AC3, AC6) In `edit-corpus.ts`, read the stored runs added during each step, in sequence order, and report each run outside the declared set, each declared workspace with no run, and each duplicate execution by AC6's rule, comparing each run with its workspace's previous stored run only.
-- [ ] (AC7, AC8) Declare the report: each finding kind as a named constant (C3), each finding naming its edit, and the clean report as one exported value; `edit-corpus.ts` exports one function that runs a sequence and resolves with its report, throwing only when the harness itself cannot run (a failed copy, a daemon that does not start), never turning a failure into a clean report (C30, C32).
-- [ ] (AC10) Run each sequence once through a stand-in test body on Windows and on Linux, record each duration in the Completion Notes, and split any sequence over half of `DAEMON_TEST_TIMEOUT_MS` on Windows. Delete the stand-in before handing off; create-tests writes `packages/daemon/test/edit-corpus.test.ts`.
-- [ ] (Support) Send the orchestrator the doc text in § Doc text with the build (C7).
-- [ ] (Support) Lint and typecheck: `bun x oxlint` over the new and changed files and `bun run --filter @rt-test/daemon typecheck`.
+- [x] (Support) Before the first edit, re-read the landed code of ticket 2.4b (`queryWait` and its options in `packages/daemon/src/query-client.ts`, re-exported from `packages/daemon/src/client.ts`; the wait answer's outcome constants in `packages/daemon/src/query/answer.ts`) and 2.4d, and confirm the names this ticket uses; read `packages/daemon/test/harness.ts` and `packages/daemon/test/daemon-harness.ts` for the helpers under § Reuse.
+- [x] (AC1) Create the fixture under `test/fixtures/daemon/edit-corpus/` by § Fixture shape: the root `package.json`, `rt-test.json` declaring `**/*.md`, `README.md`; `packages/lib`, `packages/ui`, `packages/backend` and `apps/web`, each with a `package.json` naming it `@corpus/<name>` with `type` `module`, an `exports` map, and a `dependencies` entry (`workspace:*`) for each `@corpus` package it imports, a `vitest.config.mjs` exporting a plain object as the other daemon fixtures do, its source and its tests; `apps/web` with a setup file its config names; `packages/lib/README.md`. Write each test so the edits in § Sequences break exactly the tests they declare, and write the fixture's modules as `.mjs`, as every other daemon fixture is.
+- [x] (AC9) In `packages/daemon/test/harness.ts`, add a helper beside `linkVitest` that links each workspace package under the copy's `node_modules` by its package name, through a directory link as `linkVitest` makes one, so a package-name import resolves as it does after `bun install`.
+- [x] (AC2, AC3, AC7) Create `packages/daemon/test/edit-corpus-sequences.ts`: the sequences of § Sequences as data. Each edit gives the files it writes, renames or deletes (a rename is a delete and a write in one burst), whether its second part is saved while a run is going, its declared run set, and its declared full-run failures (tests by workspace, module path and names; modules that fail to load), every failure the full run should find after it, an earlier edit's included. Derive each run set from the selection rule quoted in § Rule clauses, never from a run.
+- [x] (AC4, AC9) Create `packages/daemon/test/edit-corpus.ts`, the check. For one sequence: copy the fixture with `inConsumerCopy` on `vitest-4`, link the packages, make it a repository with `fixtureRepository`, and run inside `withDaemons`, starting the daemon with `started(root, pids, confirmEvery(root))`. At the baseline, call `queryWait` on every test module of the fixture, and after each edit on the edit's files (a renamed file's old and new paths both), with a limit named as a constant; then poll `querySummary` until `schedule.round.state` is not `ROUND.pending` and every `schedule.workspaces` entry is `EXECUTION_STATE.idle`, within a named bound. For the edit saved during a run, save its first part and start its wait, poll the schedule until a declared workspace is `EXECUTION_STATE.running` or that wait has answered, whichever comes first, save the second part, wait on both parts' files, and accept a superseded first answer only there. After an edit that declares no runs, read the answer's `inputs.revision` and compare it with the one read before the save (AC4).
+- [x] (AC5, AC7) In `edit-corpus.ts`, run the full run: spawn Node on the linked Vitest 4.1's `bin.vitest` entry with `run --reporter=json --outputFile <file>` in each Vitest workspace's directory, the report file in the run's temp root (`runTempRoot`), outside the consumer's copy and this repository's tree, removed with it (C106), with an argument array (P15), the workspaces in parallel. Treat an exit other than Vitest's passed and failed exit codes (named constants, C3), a signal, a missing or unparsable report, or a workspace with no reported test as full run unusable, keeping its exit status, stderr and stdout (C141, C161), and compare nothing else for that edit. Otherwise compare the full run's failed tests and modules with the edit's declared failures, reporting each declared and not produced and each produced and not declared. Map each report entry to the daemon's test identity: module path relative to the workspace's real directory with `/` separators, names from `ancestorTitles` then `title`. Read an entry with `status` `failed`, a non-empty `message` and an empty `assertionResults` as a module that failed to load (§ Settled facts). Type the report from Vitest 4.1's exported JSON reporter types where the package exports them (C14), declaring only the fields read otherwise.
+- [x] (AC5) In `edit-corpus.ts`, read the daemon's side after settling: each workspace's latest stored run from the store (as `storedRuns` in `daemon-harness.ts` opens it) for each test's outcome and each module's state, and the answers' freshness (`queryPathStatus` of each test module, or `querySummary`'s counts) for currency. Compare by AC5, and classify a failure the full run finds that the daemon does not hold as a current failure as a selection miss.
+- [x] (AC3, AC6) In `edit-corpus.ts`, read the stored runs added during each step, in sequence order, and report each run outside the declared set, each declared workspace with no run, and each duplicate execution by AC6's rule, comparing each run with its workspace's previous stored run only.
+- [x] (AC7, AC8) Declare the report: each finding kind as a named constant (C3), each finding naming its edit, and the clean report as one exported value; `edit-corpus.ts` exports one function that runs a sequence and resolves with its report, throwing only when the harness itself cannot run (a failed copy, a daemon that does not start), never turning a failure into a clean report (C30, C32).
+- [x] (AC10) Run each sequence once through a stand-in test body on Windows and on Linux, record each duration in the Completion Notes, and split any sequence over half of `DAEMON_TEST_TIMEOUT_MS` on Windows. Delete the stand-in before handing off; create-tests writes `packages/daemon/test/edit-corpus.test.ts`.
+- [x] (Support) Send the orchestrator the doc text in § Doc text with the build (C7).
+- [x] (Support) Lint and typecheck: `bun x oxlint` over the new and changed files and `bun run --filter @rt-test/daemon typecheck`.
 
 ## Reusable Code
 
@@ -132,6 +132,7 @@ Asked by `session_wake` at 04:51 on 2026-09-30, answered at 04:53; decider the o
 - Q4 (AC1): Vitest 4.1 only; 5.x is a known limit (§ Known limits).
 - Q5: 2.5 measures NFR1 and NFR2 only. The costs earlier tickets left "for 2.5 to measure" (the dependency build against its 120 s bound, 2.3j; the rediscovery and protection walk each round, 2.3f; re-judging many pending waits, 2.4b; the accepted-path narrowing, 2.3g T6) are read on the Fleet Cooling trial, since a four-workspace synthetic fixture cannot measure a large consumer and `docs/testing.md` keeps benchmarks out of correctness tests. The sprint's § Ticket 2.3f says so (create-ticket, under the orchestrator's grant).
 - Q6: a finding against unmodified code is reported to the orchestrator as a suspected product defect, with the sequence's report, and never fixed inside this ticket; the edit and its sequence stay as written.
+- Baseline supersede (dev's finding, rt-t2-5-dev at 10:30 on 2026-09-30; ruled at 10:31; decider the orchestrator; AC4): Q: the baseline `queryWait`, sent right after the start, answered superseded at revision 1 in 8 of 8 runs. Before the first discovery no declared pattern applies, so the fixture's `README.md` files are inputs; once the discovery lands they drop out and the revision moves, which the wait correctly reports, and nothing reads current meanwhile. Does the check treat that as a finding? A: option (b). The baseline's wait may answer superseded once, only when every changed path it names is a declared non-input, and the check then waits again at the newer revision; any other baseline supersede stays a finding. With one re-wait, all four sequences reported clean (dev, 10:30).
 
 #### Edit mix
 
@@ -209,6 +210,7 @@ Settled by create-ticket on 2026-09-30.
 - The edit kinds Q2 left out (env files, tsconfig, lockfile and manifest edits, branch switches, a restart) are not measured by the corpus; the tests that built each of them cover them. Root script edits (39 of Fleet Cooling's 400 commits' changes), which Q2 neither included nor ruled out, are not measured either, since a root-owned path selects every workspace, the case the shared library sequence already reaches; the Vitest config edit stands for setup files.
 - A run the daemon interrupts stores nothing, so a duplicate execution that a later edit interrupts before it stores is not seen by AC6; the run set check (AC3) still sees the rerun that follows.
 - The corpus's fixture has no Convex adapter; file-level selection and the adapter are M3, whose acceptance extends this corpus.
+- A wait sent before a consumer's first discovery answers superseded once when `rt-test.json` declares non-inputs, as the declaration first applies: until a discovery is stored no declared pattern applies, so the declared files count as inputs, and they drop out, moving the revision, when it lands (orchestrator, 10:31).
 
 #### Pending siblings and their routing
 
@@ -325,41 +327,173 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId 83d79fdd-44ba-4fdb-a225-da5d98b03268
 
 #### Test Files This Change Broke
 
-None.
+None. `harness.ts` only gains `linkWorkspacePackages`; no existing test changed behavior.
 
 #### ACs Owed a Test
 
-None.
+- AC3: a workspace run outside an edit's declared set, or a declared workspace with no run, is reported. Only a mutation in selection or scheduler code proves the check sees it; every run so far was clean.
+- AC5: a failure the full run finds that the daemon's current results do not hold is reported as a selection miss. That needs a selection mutation, such as a selection that stops at the changed path's own workspace.
+- AC6: a run stored under the fingerprint and adapter version of its workspace's previous fingerprinted run is reported as a duplicate execution. That needs a scheduler mutation that reruns a current workspace.
 
 #### Tests Owed
 
-None.
+- Per Q1, `packages/daemon/test/edit-corpus.test.ts` (new) holds one `D###` test per sequence of `EDIT_CORPUS` (`edit-corpus-sequences.ts`). Each asserts `expect(await checkSequence(SEQUENCE)).toBe(CLEAN)` (`edit-corpus.ts`) with `DAEMON_TEST_TIMEOUT_MS` as its timeout, plus a record whose mutation in selection or scheduler code that sequence detects. Measured cost: about 26 s per sequence on Windows and 15 s on Linux, so four tests add about 100 s of daemon time to the Windows suite.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 6ab805a3-d546-41d0-866b-231fc841bfd5
 
 #### Named Defects
 
-None.
+`packages/daemon/test/edit-corpus.test.ts` holds one test per sequence, each asserting `checkSequence(<sequence>)` is `CLEAN` under `DAEMON_TEST_TIMEOUT_MS`; the records are in `packages/daemon/test/defects.json`.
+
+- D3466: Selection follows no dependency edge, so a change to the shared library selects lib alone, and the shared library sequence reports the failures the full run finds in ui, backend and web as selection misses and those workspaces as declared runs missing (AC5, AC3).
+- D3467: The scheduler reads every workspace as having no stored run, so each new input revision reruns every confirmed workspace, and the inside packages sequence reports each workspace an edit did not reach as a duplicate execution and a run outside the declared set (AC6, AC3).
+- D3468: The tracker's declared non-input match never matches, so the rename sequence's docs edit moves the input revision and runs every workspace, reported as an input revision moved and runs outside the declared set (AC4, AC3).
+- D3469: Selection reads every changed path as owned by the root, so every edit runs every workspace, and the config and run in progress sequence reports runs outside the declared set (AC3).
+- D3470: The daemon records a test that failed as passed, so after the shared library edit it runs exactly the declared workspaces yet holds each test the full run fails as a current pass, which the shared library sequence reports only as selection misses (AC5; review gap, NFR2's comparator).
+- D3471: The corpus's duplicate execution comparison never reports, so a run stored under its workspace's previous fingerprint and adapter version reads clean; a test of `storedRunFindings` over runs shaped as the store returns them (AC6; review gap, NFR1's detector).
+- D3472: The corpus compares a run with its workspace's first stored run rather than its previous one, so a run at a fingerprint only an older, superseded run held, as after a revert, reads as a duplicate execution; the same test also pins that a run after one stored not fingerprinted is none (AC6).
+- D3473: The baseline's run-once check lets a workspace run twice, so a daemon that runs a workspace twice at its start, under two fingerprints, reads clean (AC3; review gap, the baseline run-once rule).
+
+NFR1 has no product mutation that yields a duplicate execution alone: a second run of a workspace needs its stored result to read stale and `ranAlready` to pass at the same revision, two guards, and any one-edit mutation that reruns a current workspace also runs it outside an edit's declared set, as D3467 does. So D3471 and D3472 prove the check's own detector.
+
+The verifier confirms each mutated sequence's report is not clean; it prints no report, so the finding kinds D3466 to D3469 name are traced through the code, not observed. D3470's were observed: in a disposable WSL clone with its record applied, its report held exactly four findings, each a selection miss at "lib's unit price raised", one per declared failure (11:33). The ticket's example of a deleted path that selects nothing is not observable here: the rename's new path and lib's index select the same workspaces, and a workspace's fingerprint is taken over the inputs that exist.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/test/edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-full-run.ts`, `edit-corpus-sequences.ts`: the check is test infrastructure the sequence tests run; D3466 to D3470 prove it reports the finding kinds a selection, scheduler or run-recording defect produces, and D3471 to D3473 prove its duplicate and run-once detectors directly. Its full run unusable, wait not settled and daemon not idle branches fire only on a harness or daemon failure no stable mutation makes (owner ruling, 03:25).
+- The baseline's single supersede by declared non-inputs (orchestrator, 10:31): a wrongly accepted supersede is followed by a second wait and the full-run comparison, so it cannot report a stale result as current.
+- `packages/daemon/test/harness.ts` `linkWorkspacePackages`: every sequence runs it, and a missing link fails the dependents' modules to load in the full run, which each test reports as undeclared failures or a full run unusable.
 
 ### Review Record
 
+Review session: threadId 3ce153d2-2869-4261-8434-f660294989d6
+
+Fixed in review (2026-09-30, 11:17):
+
+- `edit-corpus-full-run.ts`: a workspace whose Vitest exit disagrees with its report (exit 1 with no failed module entry, as on an unhandled error; exit 0 with one) is full run unusable, so a full run cannot fail unnoticed.
+- `edit-corpus.ts`: the during-run edit's first wait may answer superseded only when its second part was saved before that wait answered, and only naming the second part's paths (AC4).
+- `edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-sequences.ts`: the baseline declares each workspace run once, and a second stored run of one is a run outside the declared set (AC3).
+- `edit-corpus.ts`: idle also requires no unread change (`inputs.pendingChanges` 0), since while any remain no result is current.
+- `edit-corpus.ts`: a daemon-not-idle finding with no summary read says so rather than "undefined"; unused exports removed (`EDIT_CORPUS`, `BASELINE`, the workspace constants, the `FINDING` re-export).
+
+Recorded, not fixed (owner ruling 03:25; none can read CLEAN over a failure the fixture produces):
+
+- A workspace whose every module fails to load reads as full run unusable rather than as failed modules (AC7's wording); no corpus edit does this.
+- A module failure beside reported tests (a file-level hook error, an empty `describe`) is compared on neither side; no fixture module has a hook.
+- A duplicate reported after a crashed or failed run's retry at one fingerprint would be a false finding, not a false CLEAN; no sequence produces one.
+- The full run inherits the outer Vitest worker's environment, and the linked Vitest's version is fixed by the `vitest-4` install name only.
+- Outcomes come from the store and freshness from the answers (§ Decisions taken here), so a query-layer defect answering a wrong state is not measured; AC5's "the daemon's answers" reads as that pair.
+
 #### Test Coverage Gaps
 
-None.
+| Source                                                                        | Defect                                                                                                                                                                                                                                                                                                                                                         | Expected test                                                                                                                                                                                                                                                                                                                     | Severity |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `packages/daemon/test/edit-corpus-findings.ts` `daemonFindings`               | The comparison of the daemon's results with the full run reports nothing (for example `reportedTestFindings` returns `[]`), so a daemon that runs the right workspaces but stores or reads a wrong outcome reads CLEAN; D3466 to D3469 all still go red through declared-run-missing or run-outside-declared-set, so no test proves NFR2's own detector fires. | A proof whose only finding is a selection miss or disagreement: for example a record in `packages/daemon/src/vitest/run-states.ts` recording a failed test as passed, detected by the shared library sequence with its run sets unchanged.                                                                                        | HIGH     |
+| `packages/daemon/test/edit-corpus-findings.ts` `duplicateFinding`             | The duplicate execution comparison never reports (an inverted digest or adapter comparison), so a daemon that runs a declared workspace a second time at the same fingerprint within an edit reads CLEAN; D3467's mutation still goes red through run-outside-declared-set, so no test proves NFR1's detector fires.                                           | A proof whose only finding is a duplicate execution, from a scheduler or store mutation if one exists, or otherwise a test of `storedRunFindings` over stored runs built as the store returns them (same digest and adapter version: one finding; a revert to an older digest, or a previous run stored not fingerprinted: none). | HIGH     |
+| `packages/daemon/test/edit-corpus-findings.ts` `storedRunFindings` (baseline) | The baseline's run-once check never fires, so a daemon that runs a workspace twice at its start under two fingerprints (the declared non-inputs dropping out mid-run) reads CLEAN.                                                                                                                                                                             | Decide against the deliberately untested reasons: a proof if a stable mutation makes a baseline double run, otherwise record it untested with its reason.                                                                                                                                                                         | MEDIUM   |
+
+Denominator: 4 named-defect tests in `edit-corpus.test.ts` against the check's finding kinds AC3 to AC8 name; the four proofs reach run-outside-declared-set, declared-run-missing and input-revision-moved observably, and selection-miss and duplicate-execution only alongside them.
 
 ### Completion Notes
 
+Dev, rt-t2-5-dev, 2026-09-30 10:08 to 10:49, Tree 2 (`wt/2` at `638a3ab`).
+
+**Built.**
+
+- The fixture is under `test/fixtures/daemon/edit-corpus/`: 23 files, laid out by § Fixture shape.
+  - lib's tests import through its index; one lib test is skipped.
+  - ui imports `@corpus/lib/pricing` by subpath, and web's `cart.test.mjs` does too, which is what the rename breaks.
+  - web's `checkout.test.mjs` holds the label test, the currency test and a test that reads what `setup.mjs` sets.
+- `harness.ts` gains `linkWorkspacePackages`, which junctions each package workspace under `node_modules/<name>`.
+- `edit-corpus-sequences.ts` holds the four sequences as data. Each change is typed (replace, create, delete, rename, resave), and a change that does not match the fixture throws.
+- The check is split across three files:
+  - `edit-corpus.ts` holds the replay: saves, waits, idle reads, the full run's call, and `checkSequence`.
+  - `edit-corpus-findings.ts` holds the finding kinds and every comparison as pure functions.
+  - `edit-corpus-full-run.ts` holds the plain Vitest 4.1 run through its command line, typed from `vitest-4/reporters`' `JsonTestResults`.
+- The two files past the ticket's list come from `max-lines` (500 code lines). The single `edit-corpus.ts` came to 660.
+
+**Sanity check.** No findings. One task offered `queryPathStatus` of each test module or `querySummary`'s counts for currency. Only per-file counts let a finding name its module (AC5), so the check reads `queryPathStatus` on the consumer root once and uses its `files`. A module's currency comes from its workspace being idle with no `notRunning`, since a failed module has no tests to count.
+
+**Assumptions.** The table had none. The first task confirmed the 2.4b names in the landed code: `queryWait(root, paths, { limitMs })`, `WAIT_OUTCOME`, `ROUND`, `EXECUTION_STATE`, `CURRENT`, and `StoredRun`'s `inputFingerprint` and `adapterVersion`.
+
+**Baseline supersede (Q6).** The first run of every sequence stopped at its baseline: superseded at revision 1 by `README.md` and `packages/lib/README.md`, 8 of 8 times. Reported to the orchestrator at 10:30; ruled (b) at 10:31 (§ Orchestrator rulings). The check follows it through `readNonInputs` and `declaredNonInputs`, with a protection that protects nothing. It accepts one supersede whose named paths are all declared non-inputs, none left unnamed, and waits again.
+
+**Timings (AC10).** Each sequence including its baseline, on the final code:
+
+| Sequence                     | Windows | Linux (WSL, Node 24.13.1) |
+| ---------------------------- | ------- | ------------------------- |
+| shared library               | 25.6 s  | 14.8 s                    |
+| inside packages              | 26.6 s  | 15.5 s                    |
+| rename                       | 24.6 s  | 13.6 s                    |
+| config and a run in progress | 25.3 s  | 14.6 s                    |
+
+- Windows ran at 10:45 with no leased run active. Linux ran through the run lease.
+- Every figure is under 60 s, half of `DAEMON_TEST_TIMEOUT_MS`, so no sequence is split.
+- The Windows run before the review's fixes read 26.1, 27.3, 24.4 and 26.0 s.
+- Every run on the final code reported `clean` on both platforms.
+- The stand-in test is deleted.
+
+**Adversarial review** (10:34 to 10:43, 12 findings):
+
+- F1 (HIGH) fixed: runs stored during the full run were uncounted, or charged to the next edit. Each step now reads the daemon again after the full run: a second idle read, then one store read for the run sets, the duplicates and the daemon side, with the path status and schedule taken at that moment.
+- F3 fixed: the docblock now names every cause of a throw, including a summary, path status or store read that fails. Each fails loudly and never reads clean.
+- F5 fixed: a start that confirms other than the fixture's four workspaces throws.
+- F6 fixed: only a planned round counts as settled, so a held round is `daemon-not-idle`, with `roundText`'s reason.
+- F8 fixed: a rename refuses an existing destination and makes its directory.
+- F9 fixed: module subjects join with `posix.join`.
+- F10 fixed: the store's failed module state is its own typed literal.
+- F11 fixed: runs are read once per step, and `#find` uses the shared `finding`.
+- F12 fixed: the docblock says `.test.mjs`.
+- F2 discarded: AC4 and § Sequences let the second part land after the runs end, and let it trigger on backend running. The settled state and run set are the same either way.
+- F4 discarded: `DeclaredFailures` covers failing tests and modules that fail to load. A module whose hook fails while its tests pass is compared on neither side, and no fixture test has a hook.
+- F7 recorded: a full run that hangs past `FULL_RUN_BOUND_MS` is killed at its own process only. It fires only on a hang, per the 03:25 ruling.
+
+**Validation.**
+
+- `bun run --filter @rt-test/daemon typecheck` exit 0 (10:45).
+- `bun x oxlint` over the four check files and `harness.ts` exit 0.
+- `bun x prettier --check` over them and the fixture exit 0.
+- `node scripts/check-line-citations.mjs` clean.
+
+**README.** No user-visible behavior changed.
+
+**Left for the orchestrator.**
+
+- The doc text in § Doc text.
+- The known-limit sentence for `docs/architecture.md`'s wait text (orchestrator, 10:31).
+
+**Scratch, kept until the orchestrator closes the lane:**
+
+- `_agent-docs/.scratch/2-5/`: each stand-in log and `linux.sh`.
+- The WSL clone `~/rt-test-t2-5-dev`.
+- The logs `~/.rt-test-runs/install-2-5-dev.log` and `~/.rt-test-runs/linux-2-5-dev-standin.log`.
+
+**Change-request candidates.** None.
+
 ### File List
+
+Dev, rt-t2-5-dev (2026-09-30):
+
+- `packages/daemon/test/harness.ts` (modified: `linkWorkspacePackages`)
+- `packages/daemon/test/edit-corpus.ts` (new)
+- `packages/daemon/test/edit-corpus-findings.ts` (new)
+- `packages/daemon/test/edit-corpus-full-run.ts` (new)
+- `packages/daemon/test/edit-corpus-sequences.ts` (new)
+- `test/fixtures/daemon/edit-corpus/` (new, 23 files): `package.json`, `rt-test.json`, `README.md`; `packages/lib/{package.json,vitest.config.mjs,README.md,src/pricing.mjs,src/index.mjs,test/pricing.test.mjs}`; `packages/ui/{package.json,vitest.config.mjs,src/label.mjs,test/label.test.mjs}`; `packages/backend/{package.json,vitest.config.mjs,src/quote.mjs,test/quote.test.mjs}`; `apps/web/{package.json,vitest.config.mjs,src/checkout.mjs,test/checkout.test.mjs,test/cart.test.mjs,test/setup.mjs}`
+- `_agent-docs/tickets/2-5-edit-corpus.md` (modified: task and criterion boxes, Dev Handoff, Completion Notes, File List)
+
+Tests, rt-t2-5-tests (2026-09-30):
+
+- `packages/daemon/test/edit-corpus.test.ts` (new: D3466 to D3469)
+- `packages/daemon/test/defects.json` (modified: D3466 to D3469)
+
+Review, rt-t2-5-review (2026-09-30): `edit-corpus.ts`, `edit-corpus-findings.ts`, `edit-corpus-full-run.ts`, `edit-corpus-sequences.ts` (modified, § Review Record).
 
 Planning files create-ticket wrote (2026-09-30):
 
