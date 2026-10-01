@@ -10967,5 +10967,19 @@
     "file": "packages/daemon/src/defects/worktree-standings.ts",
     "old": "      consumerRoot,\n      assertionErrors,",
     "new": "      consumerRoot: read.stateDirectory,\n      assertionErrors,"
+  },
+  {
+    "id": "D4030",
+    "defect": "The answer lists the invalid entries in another order than the read gives them, so a problem in the declared names stands after an entry the walk makes, or before the defects member's.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    invalidEntries: invalidEntries.map(({ kind, path, reason }) => ({",
+    "new": "    invalidEntries: [...invalidEntries].reverse().map(({ kind, path, reason }) => ({"
+  },
+  {
+    "id": "D4031",
+    "defect": "Definitions of one state are listed in another order than by file, so past the bound of 500 the wrong file's definitions are the ones left unlisted.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    compareFiles(left.definition.file, right.definition.file) ||\n",
+    "new": ""
   }
 ]

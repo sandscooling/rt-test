@@ -3659,5 +3659,106 @@ describe(
         verified: 1,
       });
     });
+
+    it("D4030: the answer lists the invalid entries in the order the read gives them, so with a problem in each member the defects member's stands first, and a problem in the names stands before a definition file that is not JSON", async () => {
+      const listings = await inTempDir(async (root) => {
+        const listed = async (
+          consumer: string,
+          files: DefinitionFilesTree,
+          settings: unknown,
+        ) => {
+          const answer = answered(
+            await defectsOver(
+              join(root, consumer),
+              ONE_DEFINITION.latest,
+              files,
+              undefined,
+              { settings },
+            ),
+          );
+          return {
+            counted: answer.counts.invalidEntries,
+            listed: answer.invalidEntries.map(({ kind, path, reason }) => ({
+              kind,
+              path,
+              says:
+                /names no definition files|declares no assertion error names/.exec(
+                  reason,
+                )?.[0] ?? null,
+            })),
+          };
+        };
+        return [
+          await listed(
+            "both",
+            {},
+            { defects: ["/defects/*.json"], assertionErrors: ["Error"] },
+          ),
+          await listed(
+            "names",
+            { "broken.json": "not json" },
+            { defects: ["defects/*.json"], assertionErrors: ["Error"] },
+          ),
+        ];
+      });
+      const namesProblem = {
+        kind: "settings-unusable",
+        path: "rt-test.json",
+        says: "declares no assertion error names",
+      };
+      expect(listings).toStrictEqual([
+        {
+          counted: 2,
+          listed: [
+            {
+              kind: "settings-unusable",
+              path: "rt-test.json",
+              says: "names no definition files",
+            },
+            namesProblem,
+          ],
+        },
+        {
+          counted: 2,
+          listed: [
+            namesProblem,
+            { kind: "not-json", path: "defects/broken.json", says: null },
+          ],
+        },
+      ]);
+    });
+
+    it("D4031: definitions of one state are listed file by file, each file's in position order, whatever order the walk read the files in", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one", "two", "three", "four"),
+            {
+              "b.json": [
+                defectDefinition("D1", "one"),
+                defectDefinition("D2", "two"),
+              ],
+              "a/x.json": [
+                defectDefinition("D3", "three"),
+                defectDefinition("D4", "four"),
+              ],
+            },
+            undefined,
+            { morePatterns: ["defects/a/*.json"] },
+          ),
+        ),
+      );
+      expect(
+        answer.definitions.map(
+          ({ file, position, state }) => `${state} ${file}#${position}`,
+        ),
+      ).toStrictEqual([
+        "never-verified defects/a/x.json#0",
+        "never-verified defects/a/x.json#1",
+        "never-verified defects/b.json#0",
+        "never-verified defects/b.json#1",
+      ]);
+    });
   },
 );

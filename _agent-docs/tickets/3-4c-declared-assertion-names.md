@@ -283,7 +283,7 @@ Tests session: threadId 062b3144-42d8-47be-8ce8-7c2447f54200
 
 #### Named Defects
 
-D4006 to D4020 and D4028 are in `packages/daemon/test/defects/defects.json`, their tests in `test/defects/definitions.test.ts`; D4021 to D4027 and D4029 are in `packages/daemon/test/defects.json`, their tests in `test/query.test.ts`.
+D4006 to D4020 and D4028 are in `packages/daemon/test/defects/defects.json`, their tests in `test/defects/definitions.test.ts`; D4021 to D4027 and D4029 to D4031 are in `packages/daemon/test/defects.json`, their tests in `test/query.test.ts`.
 
 - D4006: The names `rt-test.json` declares are read and dropped, so no caller is handed a name and a Testing Library failure reads unclear whatever the list holds. (AC1)
 - D4007: What `rt-test.json` declared at the first read is kept and answered for every later read, so a name added to the list is never declared until the daemon restarts. Its test also pins that no file and no member declare no name. (AC1)
@@ -309,6 +309,8 @@ D4006 to D4020 and D4028 are in `packages/daemon/test/defects/defects.json`, the
 - D4027: The answer does not pass on the no-answer of a worktree with no stored discovery, so the query throws rather than saying no discovery is stored. (AC4)
 - D4028: The names are taken from a second read of `rt-test.json`, so a file rewritten between the two reads gives the patterns of one version beside the names of another. (AC1, AC4)
 - D4029: The standings digest each mutation's file relative to another directory than the consumer root the definition checks were given, so all evidence reads stale. Its test binds a detection under the root with `defectStandings` directly, as a job would, and reads it through the answer asked under the same root. (AC4)
+- D4030: The answer lists the invalid entries in another order than the read gives them, so a problem in the declared names stands after an entry the walk makes, or before the `defects` member's. Its test answers a problem in each member and a names problem beside a definition file that is not JSON, and pins two counted in each. (AC2)
+- D4031: Definitions of one state are listed in another order than by file, so past the bound of 500 the wrong file's definitions are the ones left unlisted. Its test holds two definition files the walk reads in the other order than their names sort. (AC4)
 
 Re-anchored, each keeping its defect sentence and its test: D3654 and D3655 (the two arms of `readSettings`), D3656 and D3720 (now in `defects/declared-settings.ts`), D3932, D3933 and D4000 (the digest takes the index), D3694, D3699 and D3725 (`standings.length`), D3695 and D3953 (now `compareStandings` in `defects/defect-standings.ts`), D3710, D3721 and D3955 (now in `defects/worktree-standings.ts`). D3952 keeps its anchor and its `new` text names `standings.length`.
 
@@ -324,9 +326,110 @@ AC4's guarantee that the answer holds what it held before, for every scope, rest
 
 ### Review Record
 
+Review session: threadId cc865cd7-0a22-4e72-b993-08ae0d3a613a
+
+#### What the review ran
+
+On Windows in Tree 2 at ee784b05 (the build e7818ef5, the tests cf0434e8, main merged after each), from 07:54 on 2026-10-01. The reviewed set is `git diff main...wt/2` and the doc lines of the authoring commit 0dcf5032. Lane evidence-read's files (`store/kept-evidence.ts`, `store/open-store.ts`, `test/store.test.ts`, D3990 to D3995 and D3931) are outside it.
+
+- The rules are the ticket's own: 28 checklist rules and 9 project-context rules, by `expand-rules.mjs --from-ticket`.
+- Three fresh-eyes batches read the code cold: settings (`declared-settings.ts`, `definition-files.ts`, `definitions.test.ts` and its records, 2,486 code lines), answer (`defects-answer.ts`, `query.test.ts` and its records, 3,653) and standings (`defect-standings.ts`, `worktree-standings.ts`, 444). None returned a High finding, each confirmed the criteria its files reach, and each of the 24 new tests was read against its record's `new` text and fails at its own assertion.
+- One doc agent checked the changed lines of 0dcf5032 (no discrepancy) and the two texts not yet applied. One agent read installed Vitest 4.1.11 and 5.0.1, chai 6.2.2 and, in Fleet Cooling's checkout, `@testing-library/dom` 10.4.1 and `@testing-library/jest-dom` 6.9.1.
+- The reviewer ran the checklist pass, the criteria sweep and the ADR check (ADR-0007, ADR-0008 and ADR-0009; the diff contradicts none), and compared `defectsAnswer` with main's line by line: rating every definition and then filtering lists, counts and orders as filtering first did.
+- `bun x oxlint` over the five production files exits 0 (07:55); the largest holds 426 of 500 code lines. `check-sprint-keys`, `check-requirement-markers` and `check-line-citations --base main` are clean (08:02). The five production files anchor 90 records (25, 11, 26, 7 and 21), which is the count the tests session proved.
+
+#### Findings fixed
+
+- This record's File List left out the four files the tests session changed. They are listed now.
+
+No finding asks for a change to the built code.
+
+#### Doc text for files the orchestrator owns
+
+Corrections to the text under Completion Notes § Doc text reported to the orchestrator and to `_agent-docs/.scratch/t3-4c-doc-text.md`. Every sentence those hold and this list does not name was checked against the code and stands, and each sentence they replace is in its file verbatim.
+
+`README.md`, the new block:
+
+- Where it goes. Placed after the `rt-test defects` paragraph, its four bullets run into the bullets that follow that paragraph, which apply to every query. Place it after the last bullet of the `rt-test.json` list (the one that begins "Until the daemon holds a discovery"), where its opening paragraph keeps the two lists apart.
+- Replace "A name is matched exactly against the name Vitest reports for the error, so a subclass is declared by its own name." with: "A name is matched exactly against the name Vitest reports for the error, which is the error's own `name`: a subclass that sets a name of its own is declared by that name, and one that sets none carries its parent's." A subclass that sets no name serializes under its parent's name (`@vitest/utils/dist/serialize.js`, the prototype walk, on 4.1.11 and the same code in 5.0.1).
+- Add a fifth bullet, since the README says of `rt-test defects` that no falsification runs yet: "No falsification runs yet, so the names decide no verdict yet: `rt-test defects` reads them, reports a member that cannot be used, and binds each definition's digest to them."
+
+`docs/architecture.md` § Defects query, the added paragraph:
+
+- Replace "or the no-answer of a worktree with no stored discovery" with "or the query basis's no-answer when the store holds no discovery it can read". `queryBasis` in `query/summary.ts` gives a no-answer for a discovery refused as unreadable as well.
+- Replace "and the answer filters the standings by scope, since a definition's standing depends on no other definition" with "and the answer filters the standings by scope once every definition of the worktree is checked and rated, so an id repeated outside the scope still reads invalid inside it". A repeated id makes a definition's state depend on another (`checkDefinitions` in `defects/definitions.ts`); only the rating reads one definition.
+
+`docs/architecture.md` § Defects query, the invalid entry sentence:
+
+- Replace "and the entries for `rt-test.json` come before those the walk finds, the `defects` member's first" with "and a member's entry comes before every other entry, the `defects` member's first". A `pattern-matched-nothing` entry is at the path `rt-test.json` too and stands after the walk's entries.
+
+`docs/testing.md`:
+
+- Item 4: replace "through `settingsDeclaring`, which writes an `rt-test.json` declaring names with a `defects` member only when patterns are given" with "through `settingsDeclaring`, which gives the text of an `rt-test.json` declaring names, with a `defects` member only when patterns are given". The helper returns text and `definitionFilesIn` writes it.
+- Item 6: the sentence's list of files names neither file two of the ids it gains mutate. After "`packages/daemon/src/defects/defect-standings.ts`," add "the names and the consumer root `worktreeStandings` hands the standings in `packages/daemon/src/defects/worktree-standings.ts`,". D4022 and D4029 mutate that file, and D4023 mutates `defects/declared-settings.ts`, which the other section's list covers.
+
+`_agent-docs/sprints/sprint-3-falsification.md` § Ticket 3.4c: "so that a change to the list reads every stored verdict stale" is loose, since a reordered list or a repeated name stales nothing. Exact: "so that a list that gains or loses a name reads every stored verdict stale".
+
+#### Questions and rulings
+
+Given with the review's dispatch by the orchestrator at 07:54 on 2026-10-01, none asked by the review:
+
+- The listing of invalid entries and gap modules with no bound is a recorded known limit, since Fleet Cooling tracks 32 JSON files (orchestrator, 07:27).
+- Ticket 3.4's two folded debt items are weighed and left (orchestrator, 07:26); § Tech debt holds the note.
+- The orchestrator's reading of the owner's rulings: the four criteria bind as written, so a clause with no test that goes red when it breaks, at the layer the criterion names, is a gap to send; a finding beyond the criteria is fixed or sent when Fleet Cooling's codebase would meet it, and is otherwise recorded and left.
+
+#### Findings left
+
+Each was raised by a reviewer and is answered by the record or by the code.
+
+- Names such as `TypeError` are admitted: Dev Notes § Design decisions, "Only `Error` is refused".
+- A name with a space around it is admitted and never matches: § Known limits.
+- The one entry of an `rt-test.json` that cannot be read says it names no definition files and nothing of the names: AC2 and the first task ask for the one entry it returned before, and the entry gives the reason the file cannot be read.
+- `NOTHING_DECLARED` hands every caller one array: the arrays are typed `readonly`, so changing one takes a cast.
+- An edit to `rt-test.json` was thought to read every verdict stale as `inputs-changed`, which would empty AC3's set rule. It does not: `rt-test.json` is excluded from the inputs (`inputs/input-filter.ts`), and its change starts a reconciliation after which results read as before.
+- Rating every definition of the worktree for a scoped query, and `definitions` returned beside `standings`: AC4 and Dev Notes § Design decisions.
+- `StandingIndex.assertionErrors` holds the sorted set under the name `StandingFacts` gives the list as written: each member's comment says which it is, and D4019 and D4020 go red if the digest is handed the list.
+- Three sentences read loosely and none contradicts its code: the comment on `DefinitionFiles.invalidEntries` (a `pattern-matched-nothing` entry is not a member's problem, and D4015 pins the order), the comment on `StandingFacts` (its clause on `rt-test.json` is about the names), and the no-answer text "no problem reading the definition files", which D3699 pins and AC4 keeps as it was. `standings` names a list of defect standings beside test standings in `defectsAnswer`. A consumer reads nothing different, and an edit to any of the three files owes its records' proofs on both platforms.
+- D4028 counts reads through the test file's own mock, and D4029's assertion repeats the first read of D3951: each fails at its assertion under its record, and the orchestrator granted both ids (07:38).
+
+#### Tech debt
+
+- **Ticket 3.4's two folded items, left again.** Its Review Record folds the duplicate `PASSED` constant (`query/changes-answer.ts` and `defects/defect-standings.ts`) and `zeroTally` against `zeroCounts` (`defects/defect-standings.ts` and `query/test-states.ts`) into "the next ticket that edits either file", which this ticket meets literally for `defects/defect-standings.ts`. They were weighed and left (orchestrator, 07:26 on 2026-10-01): each fix opens query-side files this ticket does not touch (`query/answer.ts`, `query/changes-answer.ts`, `query/test-states.ts`) and owes about forty records' proofs on both platforms, and a consumer reads nothing different. They go to the next ticket that edits the query-side file of each pair.
+- `NOT_AN_OBJECT` in `defects/declared-settings.ts` holds the text `declarationProblem` in `inputs/non-inputs.ts` writes inline, for the same file. Fix: export one from `inputs/non-inputs.ts`. The text was inline in `defects/definition-files.ts` before this ticket.
+- `readJsonFile` in `defects/definition-files.ts` words each `presence` state itself, beside `presenceDeclaration` in `inputs/non-inputs.ts`, which words the same states for the same file another way. It predates this ticket.
+- `readMutationFile` in `defects/resolve-definitions.ts` reads a mutation's file whole with no size bound, once for each distinct file at every call of `worktreeStandings`. It predates this ticket and the file is unchanged. Fleet Cooling's mutation files are source files.
+- No test goes red when `MAX_DEFECT_PATTERNS` in `defects/declared-settings.ts` is raised: the `defects` member's bound of 256 has no test on either side, where D4008 and D4009 pin the names' bound. It predates this ticket, which moved the constant. Fleet Cooling would not write 257 patterns.
+
+#### For the tickets that follow
+
+- 3.5: no test goes red when `signal.throwIfAborted()` before `read.moment()` in `worktreeStandings` is dropped, and `readAnchors` checks the signal only at the top of each turn. The guard and its gap predate this ticket (main's `defectsAnswer` held both). A stop that lands between the last anchor read and the moment would read a store the stop may have closed. 3.5's schedule calls the function at every look, so its stop tests are where the guard earns a named test.
+- 3.5: `worktreeStandings` takes the consumer root as a member while the basis's context and the no-answer text name the root of the moment's view. Hand it both from one place, as `daemon/lifecycle.ts` does.
+- 3.5: with no discovery stored the function reads every definition file and every mutation's file before it returns the no-answer, since the moment is taken last. A schedule that looks before the first discovery repeats those reads at each look.
+- 3.5 and 3.4b: each definition's digest serializes the whole set of names again, and every query rates every definition of the worktree. Both are targets until measured. No production code stores evidence yet, so the digest's shape can still change at no cost.
+
+#### Out of scope, reported to the orchestrator
+
+A jest-dom matcher handed a value that is not an element throws from inside itself, before Vitest's `expect.extend` wrapper can mark it: `toBeInTheDocument` calls `checkHtmlElement`, which throws an `HtmlElementTypeError` (`@testing-library/jest-dom` 6.9.1, `dist/matchers-98b869c1.js`). That class sets no name, so Vitest serializes it as `Error` with no assertion name, it reads unclear, and its name cannot be declared. `expect(screen.queryByText(...)).toBeInTheDocument()` fails this way when a mutation removes the element. Fleet Cooling at 20f77f5c holds 4 such calls on a query or `querySelector` result and 45 on a variable, against 2,211 on a `getBy` or `findBy` call, which fail by the declarable `TestingLibraryElementError`. ADR-0008's known limits do not name it. It bears on the judge (ticket 3.3's `falsify/run-facts.ts`), not on this ticket's files.
+
+#### Validation
+
+On Windows, over the tree at ee784b05 with the gap round's two test-side files and this record uncommitted.
+
+- The review's own round edited this ticket file alone, so it takes the outside-the-graph exemption: the typecheck and the suite are inert for it, and the doc's tools ran instead at 08:11 on 2026-10-01. `bun x prettier --check` over this file, `check-sprint-keys` (47 tickets), `check-requirement-markers` (31 requirements), `check-line-citations` and `fill-ticket --check` each exit 0.
+- No production file was edited by the review or the gap round, so the 90 records the tests session proved on both platforms keep their proofs.
+- The gap round's gates are the tests session's, at 08:09: `verify-defects --ids D4030,D4031` through the lease, 2 of 2 detected on Windows and on Linux under Node 24.19.0, each exit 0; `check-defects` exit 0 over 3,251 records; `bun x vitest run packages/daemon/test/query.test.ts`, 1 of 1 file and 143 tests, exit 0; `bun x oxlint` and `bun x prettier --check` over its two files exit 0; the daemon typecheck exit 0. The records already in `query.test.ts` are not proven again: the round's diff of that file removes no line and adds two `it` blocks inside one `describe`, with no hook and no helper change. The review read the diff and both proof logs' ends and ran none of these again.
+- Not run by this lane: `bun run check` over the merged tree on either platform, and the two new tests under Node 22 on Linux, which are the orchestrator's gate.
+
 #### Test Coverage Gaps
 
-None.
+Answered by the tests session at 08:09 on 2026-10-01, each row closed by a named test proved by id on Windows and on Linux under Node 24: row 1 by D4030, row 2 by D4031. The review read both tests and their records against the tree: D4030 goes red when the answer reverses the entries, and D4031 when the file arm is dropped, since the walk reads `defects/b.json` before `defects/a/x.json`. D4032 to D4034 of the reserve are unused and go back to the orchestrator.
+
+Sent to the tests session at 08:07 on 2026-10-01. Each row is a clause of a criterion with no test that goes red at the layer the criterion names; neither defect is in the code today. The denominator: 24 named tests (D4006 to D4029) against the clauses of four criteria, of which these two had none.
+
+| #   | Source                                                                                     | Defect                                                                                                                                                                                     | Expected test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Severity                                                |
+| --- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| 1   | `packages/daemon/src/query/defects-answer.ts` (`defectsAnswer`, the entries it lists), AC2 | The answer lists the invalid entries in another order than the read gives them, so a problem in the declared names stands after an entry the walk makes, or before the `defects` member's. | `query.test.ts`, through `defectsOver` with `settings`: an `rt-test.json` with a problem in each member answers two `settings-unusable` entries, the `defects` member's first, and counts two invalid entries; and a names problem beside a definition file that is not JSON lists the names' entry before the `not-json` entry. Every answer-level test holds one invalid entry today (D3694, D3723, D3724, D4021). D4013 and D4015 pin the order at `readDefinitionFiles`, beneath the layer AC2 names.                                                   | MEDIUM, consumer, the order of a listing; reach unknown |
+| 2   | `packages/daemon/src/defects/defect-standings.ts` (`compareStandings`, its file arm), AC4  | Definitions of one state are listed in another order than by file, so past the bound of 500 the wrong file's definitions are the ones left unlisted.                                       | `query.test.ts`: same-state definitions in two definition files, two in each, are listed file by file, each file's in position order. Every answer-level test keeps its definitions in `a.json`: D3695 pins the state arm and D3953 the not-current arm, and neither goes red when `compareFiles` is inverted or its line dropped. This ticket moved the comparison, and ticket 3.5 takes its work in this order. The position arm cannot be seen through the answer, since the sort is stable over standings already in position order, and needs no test. | MEDIUM, consumer; reach unknown                         |
 
 ### Completion Notes
 
@@ -443,3 +546,8 @@ and after its known limit "A Testing Library query error reads as unclear unless
 - `packages/daemon/src/defects/defect-standings.ts` (dev: modified)
 - `packages/daemon/src/query/defects-answer.ts` (dev: modified)
 - `_agent-docs/tickets/3-4c-declared-assertion-names.md` (dev: task and criterion boxes, the 07:07 question, Dev Handoff, Completion Notes, File List)
+- `packages/daemon/test/defects/definitions.test.ts` (create-tests: modified)
+- `packages/daemon/test/query.test.ts` (create-tests: modified)
+- `packages/daemon/test/defects/defects.json` (create-tests: modified)
+- `packages/daemon/test/defects.json` (create-tests: modified)
+- `_agent-docs/tickets/3-4c-declared-assertion-names.md` (create-tests: the 07:37 question and the Tests Record; review-changes: the Review Record and these lines)
