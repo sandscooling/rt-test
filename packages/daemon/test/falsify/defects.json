@@ -1342,5 +1342,96 @@
     "file": "packages/daemon/src/daemon/canary-reading.ts",
     "old": "    realpathSync.native(stateDirectory),",
     "new": "    stateDirectory,"
+  },
+  {
+    "id": "D4185",
+    "defect": "A confirmed reading is not kept, so the canaries run again before every falsification job and for each workspace that resolves the install.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "      this.#kept.set(installKey(install), reading);\n",
+    "new": ""
+  },
+  {
+    "id": "D4186",
+    "defect": "A reading is kept under the version alone, so one install's reading stands for another install of that version, which no canary job read.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "  return JSON.stringify([directory, version]);",
+    "new": "  return JSON.stringify([version]);"
+  },
+  {
+    "id": "D4187",
+    "defect": "A reading is kept under the directory alone, so a Vitest upgraded in place is falsified under the reading of the version it replaced.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "  return JSON.stringify([directory, version]);",
+    "new": "  return JSON.stringify([directory]);"
+  },
+  {
+    "id": "D4188",
+    "defect": "A reading that disagreed is not kept, so the canaries run again at each look that picks a workspace on the refused install.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "    if (reading.status !== CANARY_READING.none) {",
+    "new": "    if (reading.status === CANARY_READING.confirmed) {"
+  },
+  {
+    "id": "D4189",
+    "defect": "A refusal does not name the falsifier version, so a reader cannot tell which falsifier's canaries disagreed with the Vitest it names.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": " with falsifier version ${FALSIFIER_VERSION} the canaries did not all read as named",
+    "new": " the canaries did not all read as named"
+  },
+  {
+    "id": "D4190",
+    "defect": "A refusal names a canary that disagreed without the judgement named for it, so a reader cannot tell what the canary should have read.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "  return `${id} (read ${judgementText(read)}, named ${judgementText(named)})`;",
+    "new": "  return `${id} (read ${judgementText(read)})`;"
+  },
+  {
+    "id": "D4191",
+    "defect": "A canary job that gave no reading is kept, so its install reads as waiting on a job nothing takes again, and the canaries never run again in the daemon's life.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "    if (reading.status !== CANARY_READING.none) {",
+    "new": "    if (reading.status !== undefined) {"
+  },
+  {
+    "id": "D4192",
+    "defect": "What the gate says of a workspace whose Vitest is not supported leaves out the version that resolved.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "    vitest.version === undefined ? \"\" : `Vitest ${vitest.version}, `;",
+    "new": "    \"\";"
+  },
+  {
+    "id": "D4193",
+    "defect": "What the gate says of a workspace that resolves no supported Vitest leaves out the resolution's reason, so its entry does not say what happened.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "supported ${vitest.supportedRange}): ${vitest.reason}`,",
+    "new": "supported ${vitest.supportedRange})`,"
+  },
+  {
+    "id": "D4194",
+    "defect": "The gate awaits before it hands the canary job to the executor, so an abort asked in the tick the job was taken finds no job and the canary job runs on.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "    const reading = await takeCanaryReading(this.#parts, install);",
+    "new": "    await Promise.resolve();\n    const reading = await takeCanaryReading(this.#parts, install);"
+  },
+  {
+    "id": "D4195",
+    "defect": "The log's entry for a canary job's start leaves out the install's directory, so two installs of one version cannot be told apart in the log.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "    log.entry(`canary job started: ${subject}, install ${install.directory}`);",
+    "new": "    log.entry(`canary job started: ${subject}`);"
+  },
+  {
+    "id": "D4196",
+    "defect": "The log's entry for a canary job that disagreed bounds the canaries it names as an answer's reason does, so a canary past the bound is named nowhere.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "      return `${reading.status}: ${reading.canaries.map(canaryText).join(LIST_SEPARATOR)}`;",
+    "new": "      return `${reading.status}: ${namedList(reading.canaries.map(canaryText))}`;"
+  },
+  {
+    "id": "D4197",
+    "defect": "What is said of a canary job that gave no reading leaves out the reading's detail, so neither the log nor the workspace's entry says why.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "  const detail = \"detail\" in reading ? `: ${reading.detail}` : \"\";",
+    "new": "  const detail = \"\";"
   }
 ]

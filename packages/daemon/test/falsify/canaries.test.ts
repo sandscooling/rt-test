@@ -45,6 +45,9 @@ import { takeStartEnvironment } from "../../src/inputs/environment-digest.js";
 import { resolveWorkspaceVitest } from "../../src/vitest/load-vitest.js";
 import { memoryLog, settled, type Settled } from "../daemon-harness.js";
 import { fakeVitest } from "../harness.js";
+import { sep } from "node:path";
+import { CanaryGate, STANDING } from "../../src/daemon/canary-gate.js";
+import { writeFakeVitest } from "../harness.js";
 
 /** RT Test's canary fixtures: a Vitest project, and the file naming each canary's test, mutation and judgement. */
 const CANARIES = fileURLToPath(new URL("../../canaries/", import.meta.url));
@@ -1414,5 +1417,394 @@ describe("where a canary reading's files lie, and what it leaves", () => {
       left: [KEPT_STATE_FILE],
       log: [],
     });
+  });
+});
+
+/** A gate in a place of its own, with the workspace that resolves the place's stand-in install. */
+interface Gated {
+  readonly place: Place;
+  readonly gate: CanaryGate;
+  /** The directory whose `node_modules` holds the place's install. */
+  readonly workspace: VitestWorkspace;
+  readonly log: readonly string[];
+  /** How many canary jobs the gate has sent. */
+  readonly sent: () => number;
+}
+
+interface GateCase {
+  /** What each canary job replies; a reply in which the set's one canary reads as named when absent. */
+  readonly falsify?: Falsify;
+  /** The canaries the set names; one that names a detection when absent. */
+  readonly named?: readonly Canary[];
+}
+
+/** A version the stand-in install's directory holds once it is upgraded in place. */
+const UPGRADED_VERSION = "5.0.2";
+const READ_AS_NAMED: Falsify = replying(ranReply([["a", READ_DETECTED]]));
+/** Two canaries, of which a reply that reads the first survived and holds no judgement of the second disagrees on both. */
+const TWO_CANARIES = [
+  namedCanary("first-canary", { verdict: "detected" }),
+  namedCanary("second-canary", {
+    verdict: "unclear",
+    reason: "not-an-assertion",
+  }),
+];
+const FIRST_SURVIVED: Falsify = replying(
+  ranReply([["first-canary", READ_SURVIVED]]),
+);
+/** One canary more than a bounded list of 20 names holds. */
+const MORE_THAN_A_LIST_NAMES = Array.from({ length: 21 }, (_, index) =>
+  namedCanary(`canary-${index}`, { verdict: "detected" }),
+);
+
+/** Runs `body` over a gate whose canary jobs the case answers, over a stand-in set, a stand-in install and a state directory under one temp directory. */
+function gated<T>(
+  arranged: GateCase,
+  body: (at: Gated) => T | Promise<T>,
+): Promise<T> {
+  return inTempDir((dir) => {
+    const place = standInPlace(dir);
+    const log = memoryLog();
+    const falsify = arranged.falsify ?? READ_AS_NAMED;
+    let sent = 0;
+    const gate = new CanaryGate({
+      falsify: (...job) => {
+        sent += 1;
+        return falsify(...job);
+      },
+      stateDirectory: place.stateDirectory,
+      log,
+      canaryDirectory: canaryDirectoryOf(
+        dir,
+        setOf(arranged.named ?? [VALID_CANARY]),
+      ),
+    });
+    return body({
+      place,
+      gate,
+      workspace: {
+        path: "a",
+        directory: dirname(dirname(place.install.directory)),
+      },
+      log: log.entries,
+      sent: () => sent,
+    });
+  });
+}
+
+/**
+ * Takes the canary job of the install the gate reads as unread for `workspace`, handed over in the caller's tick. It
+ * refuses an install outside the case's own directory, so no reading is placed over an install the host holds.
+ */
+function takeUnread(
+  at: Gated,
+  workspace: VitestWorkspace = at.workspace,
+): Promise<CanaryReading> {
+  const standing = at.gate.standing(workspace);
+  if (standing.state !== STANDING.unread) {
+    throw new Error(`the gate reads the install ${standing.state}, not unread`);
+  }
+  if (!standing.install.directory.startsWith(`${at.place.dir}${sep}`)) {
+    throw new Error(
+      `no reading is taken of ${standing.install.directory}, which lies outside the case's own directory`,
+    );
+  }
+  return at.gate.take(standing);
+}
+
+/** A second workspace of the place, which reaches the place's install through a directory link. */
+function linkedWorkspace(place: Place, path: string): VitestWorkspace {
+  const directory = join(place.dir, path);
+  mkdirSync(join(directory, MODULES), { recursive: true });
+  symlinkSync(
+    place.install.directory,
+    join(directory, MODULES, VITEST),
+    "junction",
+  );
+  return { path, directory };
+}
+
+/** Whether `text` holds each of `fragments`, each after the one before it. */
+function holdsInOrder(text: string, fragments: readonly string[]): boolean {
+  let from = 0;
+  for (const fragment of fragments) {
+    const found = text.indexOf(fragment, from);
+    if (found < 0) return false;
+    from = found + fragment.length;
+  }
+  return true;
+}
+
+interface GateWait {
+  readonly state: string;
+  readonly what: string;
+  /** What the gate says ends the wait; undefined when it names no ending of its own. */
+  readonly ends: string | undefined;
+}
+
+function waitOf(at: Gated, workspace: VitestWorkspace): GateWait {
+  const standing = at.gate.standing(workspace);
+  return {
+    state: standing.state,
+    what: "what" in standing ? standing.what : "",
+    ends: "ends" in standing ? standing.ends : undefined,
+  };
+}
+
+/** What the gate says of a workspace on an install whose reading disagreed on both of `TWO_CANARIES`. */
+function refusal(): Promise<GateWait> {
+  return gated({ named: TWO_CANARIES, falsify: FIRST_SURVIVED }, async (at) => {
+    await takeUnread(at);
+    return waitOf(at, at.workspace);
+  });
+}
+
+/** What the gate says of a workspace at `name` that `install` sets up, beside the reason its resolution gives. */
+function unsupportedWait(
+  name: string,
+  install: (directory: string) => void,
+): Promise<GateWait & { readonly reason: string }> {
+  return gated({}, (at) => {
+    const directory = join(at.place.dir, name);
+    mkdirSync(directory);
+    install(directory);
+    const resolved = resolveWorkspaceVitest(directory);
+    return {
+      ...waitOf(at, { path: "b", directory }),
+      reason: resolved.supported ? "it resolved" : resolved.reason,
+    };
+  });
+}
+
+function withoutWallTime(entry: string): string {
+  return entry.replace(/\d+ ms$/, "<n> ms");
+}
+
+function endEntries(log: readonly string[]): string[] {
+  return log.filter((entry) => entry.startsWith("canary job ended"));
+}
+
+describe("what the canary gate keeps of a reading", () => {
+  it("D4185: a confirmed reading is kept, so the install then reads confirmed for the workspace it was taken for and for another workspace that resolves it, and no second canary job is sent", async () => {
+    const read = await gated({}, async (at) => ({
+      reading: await takeUnread(at),
+      itsWorkspace: at.gate.standing(at.workspace),
+      anotherWorkspace: at.gate.standing(linkedWorkspace(at.place, "b")),
+      sent: at.sent(),
+    }));
+    expect(read).toEqual({
+      reading: { status: "confirmed", vitestVersion: STAND_IN_VERSION },
+      itsWorkspace: { state: "confirmed" },
+      anotherWorkspace: { state: "confirmed" },
+      sent: 1,
+    });
+  });
+
+  it("D4186: another install of the version a confirmed reading was taken under is unread", async () => {
+    const read = await gated({}, async (at) => {
+      await takeUnread(at);
+      const directory = join(at.place.dir, "second");
+      fakeVitest(directory, STAND_IN_VERSION);
+      const workspace = { path: "b", directory };
+      return {
+        standing: at.gate.standing(workspace),
+        unread: {
+          state: "unread",
+          workspace,
+          install: {
+            directory: join(directory, MODULES, VITEST),
+            version: STAND_IN_VERSION,
+          },
+        },
+      };
+    });
+    expect(read.standing).toEqual(read.unread);
+  });
+
+  it("D4187: an install whose directory holds another version than the one its confirmed reading was taken under is unread", async () => {
+    const read = await gated({}, async (at) => {
+      await takeUnread(at);
+      fakeVitest(at.workspace.directory, UPGRADED_VERSION);
+      return {
+        standing: at.gate.standing(at.workspace),
+        unread: {
+          state: "unread",
+          workspace: at.workspace,
+          install: {
+            directory: at.place.install.directory,
+            version: UPGRADED_VERSION,
+          },
+        },
+      };
+    });
+    expect(read.standing).toEqual(read.unread);
+  });
+
+  it("D4188: a reading that disagreed is kept, so each workspace on the install then waits and no second canary job is sent", async () => {
+    const read = await gated(
+      { falsify: replying(ranReply([["a", READ_SURVIVED]])) },
+      async (at) => ({
+        reading: (await takeUnread(at)).status,
+        itsWorkspace: at.gate.standing(at.workspace).state,
+        anotherWorkspace: at.gate.standing(linkedWorkspace(at.place, "b"))
+          .state,
+        sent: at.sent(),
+      }),
+    );
+    expect(read).toEqual({
+      reading: "disagreed",
+      itsWorkspace: "waits",
+      anotherWorkspace: "waits",
+      sent: 1,
+    });
+  });
+
+  it("D4191: nothing is kept of a canary job that gave no reading, so its install is unread again", async () => {
+    const read = await gated({ falsify: () => died() }, async (at) => ({
+      reading: await takeUnread(at),
+      state: at.gate.standing(at.workspace).state,
+      sent: at.sent(),
+    }));
+    expect(read).toEqual({
+      reading: noReading("no-reply", EXECUTOR_DIED),
+      state: "unread",
+      sent: 1,
+    });
+  });
+
+  it("D4194: a canary job is handed to the executor in the tick the gate is asked to take it", async () => {
+    const sentInTheTick = await gated({}, async (at) => {
+      const reading = takeUnread(at);
+      const sent = at.sent();
+      await reading;
+      return sent;
+    });
+    expect(sentInTheTick).toBe(1);
+  });
+});
+
+describe("what the canary gate says of a workspace it sends no job for", () => {
+  it("D4189: a refusal names the Vitest version and the falsifier version before the canaries, and says apart that another Vitest install or a restart of the daemon ends it", async () => {
+    const { state, what, ends } = await refusal();
+    expect({
+      state,
+      versionsBeforeTheCanaries: holdsInOrder(what, [
+        `Vitest ${STAND_IN_VERSION}`,
+        `falsifier version ${FALSIFIER_VERSION}`,
+        "first-canary",
+      ]),
+      saysWhatEndsIt: holdsInOrder(ends ?? "", [
+        "another Vitest install",
+        "restart",
+      ]),
+    }).toEqual({
+      state: "waits",
+      versionsBeforeTheCanaries: true,
+      saysWhatEndsIt: true,
+    });
+  });
+
+  it("D4190: a refusal names each canary that disagreed by id, with the judgement it read and then the judgement named for it, and a canary that read no judgement with no undefined in its place", async () => {
+    const { what } = await refusal();
+    expect({
+      eachWithWhatItReadAndWhatIsNamed: holdsInOrder(what, [
+        "first-canary",
+        "survived",
+        "detected",
+        "second-canary",
+        "unclear",
+        "not-an-assertion",
+      ]),
+      saysUndefined: what.includes("undefined"),
+    }).toEqual({
+      eachWithWhatItReadAndWhatIsNamed: true,
+      saysUndefined: false,
+    });
+  });
+
+  it("D4192: a workspace whose Vitest is not supported waits with no ending of its own, named with the version that resolved, the supported range and the resolution's reason", async () => {
+    const { state, what, ends, reason } = await unsupportedWait(
+      "no-node-entry",
+      (directory) =>
+        writeFakeVitest(
+          directory,
+          JSON.stringify({
+            name: "vitest",
+            version: STAND_IN_VERSION,
+            exports: { "./package.json": "./package.json" },
+          }),
+        ),
+    );
+    expect({
+      state,
+      ownEnding: ends !== undefined,
+      namesTheVersion: what.includes(`Vitest ${STAND_IN_VERSION}`),
+      namesTheRange: what.includes("4.1.x || 5.x"),
+      saysTheReason: what.includes(reason),
+    }).toEqual({
+      state: "waits",
+      ownEnding: false,
+      namesTheVersion: true,
+      namesTheRange: true,
+      saysTheReason: true,
+    });
+  });
+
+  it("D4193: a workspace from which no Vitest resolves waits with the resolution's reason and names no version", async () => {
+    const { state, what, ends, reason } = await unsupportedWait(
+      "no-vitest",
+      () => undefined,
+    );
+    expect({
+      state,
+      ownEnding: ends !== undefined,
+      namesAVersion: /Vitest \d/.test(what),
+      saysTheReason: what.includes(reason),
+    }).toEqual({
+      state: "waits",
+      ownEnding: false,
+      namesAVersion: false,
+      saysTheReason: true,
+    });
+  });
+});
+
+describe("what the log says of a canary job", () => {
+  it("D4195: the log names a canary job as it starts, with its workspace, the Vitest version and the install's directory, and as it ends confirmed, with its wall time", async () => {
+    const logged = await gated({}, async (at) => {
+      await takeUnread(at);
+      return {
+        entries: at.log.map(withoutWallTime),
+        install: at.place.install.directory,
+      };
+    });
+    expect(logged.entries).toEqual([
+      `canary job started: a, Vitest ${STAND_IN_VERSION}, install ${logged.install}`,
+      `canary job ended: a, Vitest ${STAND_IN_VERSION}, confirmed; <n> ms`,
+    ]);
+  });
+
+  it("D4196: the end entry of a canary job that disagreed names every canary, also where there are more than a reason names", async () => {
+    const ended = await gated(
+      { named: MORE_THAN_A_LIST_NAMES, falsify: replying(ranReply([])) },
+      async (at) => {
+        await takeUnread(at);
+        return endEntries(at.log)[0] ?? "";
+      },
+    );
+    expect({
+      named: ended.match(/canary-\d+ \(/g)?.length,
+      countsARest: /and \d+ more/.test(ended),
+    }).toEqual({ named: 21, countsARest: false });
+  });
+
+  it("D4197: the end entry of a canary job that gave no reading says why, with the kind and what its executor said", async () => {
+    const ended = await gated({ falsify: () => died() }, async (at) => {
+      await takeUnread(at);
+      return endEntries(at.log).map(withoutWallTime);
+    });
+    expect(ended).toEqual([
+      `canary job ended: a, Vitest ${STAND_IN_VERSION}, no reading (no-reply: ${EXECUTOR_DIED}); <n> ms`,
+    ]);
   });
 });
