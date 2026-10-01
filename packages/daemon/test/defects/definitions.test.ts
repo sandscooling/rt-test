@@ -756,7 +756,7 @@ describe(
       });
     });
 
-    it("D4012: a list holding the name Error declares no names and is one invalid entry saying an error must carry a name of its own to be declared", async () => {
+    it("D4012: a list holding the name Error declares no names and is one invalid entry saying an error must have a name or a class of its own to be declared", async () => {
       const read = await inTempDir(async (dir) =>
         namesAndEntries(
           await definitionFilesIn(dir, {
@@ -771,10 +771,29 @@ describe(
         names: [],
         entries: [
           settingsProblem(
-            /^rt-test\.json declares no assertion error names: .*"Error".*an error must carry a name of its own to be declared/,
+            /^rt-test\.json declares no assertion error names: .*"Error".*an error must have a name or a class of its own to be declared/,
           ),
         ],
       });
+    });
+
+    it("D4040: the entry refusing the name Error gives its reason whole, telling the author to throw an error with a name or a class of its own and declare that name, or to fail through expect", async () => {
+      const entries = await inTempDir(
+        async (dir) =>
+          (
+            await definitionFilesIn(dir, {
+              [SETTINGS]: settingsDeclaring(["Error"]),
+            })
+          ).invalidEntries,
+      );
+      expect(entries).toStrictEqual([
+        {
+          kind: "settings-unusable",
+          path: SETTINGS,
+          reason:
+            'rt-test.json declares no assertion error names: the name "Error" is what every plain thrown error is called, a setup failure among them, and an error must have a name or a class of its own to be declared; throw an error with a name or a class of its own and declare that name, or fail through expect',
+        },
+      ]);
     });
 
     it("D4013: a problem in each member is two invalid entries, the defects member's before the names'", async () => {
@@ -1680,6 +1699,17 @@ describe("whether stored evidence still describes what it was decided from", () 
         ...bindings,
         falsifierVersion: FALSIFIER_VERSION + 1,
       });
+    });
+    expect(read).toStrictEqual([
+      CURRENT_EVIDENCE,
+      stale("another-falsifier-version"),
+    ]);
+  });
+
+  it("D4041: evidence stored under falsifier version 3, under which an error was called by the name Vitest serialized alone, reads stale, naming the falsifier version", async () => {
+    const read = await besideCurrent((dir, record) => {
+      const { judgement: _unread, ...bindings } = record;
+      return evidenceOf(dir, { ...bindings, falsifierVersion: 3 });
     });
     expect(read).toStrictEqual([
       CURRENT_EVIDENCE,

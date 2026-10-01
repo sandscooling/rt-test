@@ -758,4 +758,60 @@ describe("an experiment's facts, read from the job's records", () => {
       { kind: "other", name: "queryerror" },
     ]);
   });
+
+  it("D4037: an error whose name is anything but Error, its own or one it inherits, is called by that name whatever class it was built from, so its declared name counts and its declared class does not", () => {
+    expect(
+      errorFactsUnder(
+        [
+          {
+            name: "TestingLibraryElementError",
+            constructor: "Function<Error>",
+          },
+          { name: "SelfNamedError", constructor: "Function<SelfNamed>" },
+          { name: "TypeError", constructor: "Function<OfType>" },
+        ],
+        ["TestingLibraryElementError", "SelfNamed", "OfType"],
+      ),
+    ).toEqual([
+      {
+        kind: "assertion",
+        marker: "declared-name",
+        name: "TestingLibraryElementError",
+      },
+      { kind: "other", name: "SelfNamedError" },
+      { kind: "other", name: "TypeError" },
+    ]);
+  });
+
+  it("D4038: an own constructor field that is not in Vitest's serialized function form leaves the error called by the name Vitest serialized", () => {
+    expect(
+      errorFactsUnder(
+        [{ name: "Error", constructor: "a string of its own" }],
+        ["a string of its own"],
+      ),
+    ).toEqual([{ kind: "other", name: "Error" }]);
+  });
+
+  it("D4039: an error Vitest serialized with no name has no name, whatever its constructor field holds", () => {
+    expect(
+      errorFactsUnder(
+        [{ message: "forged", constructor: "Function<Unnamed>" }],
+        ["Unnamed"],
+      ),
+    ).toStrictEqual([{ kind: "other" }]);
+  });
 });
+
+/** The facts of `errors`, as the intended test's errors in an experiment's run, under the declared `assertionErrors`. */
+function errorFactsUnder(
+  errors: readonly RawError[],
+  assertionErrors: readonly string[],
+): unknown {
+  const facts = firstFacts(
+    jobOf([ran("a", runRecord({ errors }))]),
+    assertionErrors,
+  );
+  return facts !== undefined && "run" in facts
+    ? facts.run.test?.errors
+    : MISSING;
+}

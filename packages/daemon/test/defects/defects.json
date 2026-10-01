@@ -614,5 +614,19 @@
     "file": "packages/daemon/src/defects/definition-files.ts",
     "old": "  const { assertionErrors } = settings;",
     "new": "  const { assertionErrors } = await readSettings(consumerRoot);"
+  },
+  {
+    "id": "D4040",
+    "defect": "The refusal of Error tells an author an error must carry a name of its own, so the author of an error that has only a class of its own, as the error a jest-dom matcher throws has, is never told that declaring the class counts it.",
+    "file": "packages/daemon/src/defects/declared-settings.ts",
+    "old": "  \"is what every plain thrown error is called, a setup failure among them, and an error must have a name or a class of its own to be declared; throw an error with a name or a class of its own and declare that name, or fail through expect\";",
+    "new": "  \"is carried by every plain thrown error, a setup failure among them, and an error must carry a name of its own to be declared; throw an error with a name of its own and declare that name, or fail through expect\";"
+  },
+  {
+    "id": "D4041",
+    "defect": "Only evidence of a newer falsifier version reads stale, so evidence stored under an older version, as version 3 is, reads current though its verdict was decided under another meaning.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "      record.falsifierVersion !== FALSIFIER_VERSION,",
+    "new": "      record.falsifierVersion > FALSIFIER_VERSION,"
   }
 ]
