@@ -8,8 +8,13 @@ import type {
   FalsificationJob,
 } from "../../src/falsify/experiment-record.js";
 import { takeStartEnvironment } from "../../src/inputs/environment-digest.js";
-import { DAEMON_TEST_TIMEOUT_MS, memoryLog } from "../daemon-harness.js";
+import {
+  DAEMON_TEST_TIMEOUT_MS,
+  memoryLog,
+  withVariables,
+} from "../daemon-harness.js";
 import { inConsumerCopy, waitUntil } from "../harness.js";
+import { errorMarkersOf, judgementOf } from "./job-readings.js";
 
 const FIXTURE = "executor-crash";
 const FIXTURE_CONFIG = "vitest.config.mjs";
@@ -22,6 +27,14 @@ const EXPERIMENT_HOLD = "hold-point-2";
 const BASELINE_HOLD = "hold-point";
 /** How a reply that holds no baseline reads in `runsKept`. */
 const NO_RUN = "none";
+/** A fixture with the same two tests, whose config leaks an unhandled rejection on the host thread at one named site. */
+const HOST_REJECTION_FIXTURE = "host-rejection";
+/** Read by the host-rejection fixture's config: the one host-side site that leaks. */
+const LEAK_SITE = "RT_HOST_REJECTION";
+/** Leaks in a plugin's transform of the test module, which runs on the executor's own thread. */
+const PLUGIN_SITE = "plugin";
+/** An error name the fixture's mutated test throws under, which the job counts as an assertion only when told to. */
+const DECLARED_NAME = "FixtureCheckError";
 
 const SECOND: TestIdentity = {
   workspacePath: ".",
@@ -44,7 +57,10 @@ function mutating(
   };
 }
 
-/** Falsifies `experiments` over a copy of the executor-crash fixture in a fresh executor, then closes it. */
+/**
+ * Falsifies `experiments` over a copy of the executor-crash fixture in a fresh executor, counting an error named in
+ * `assertionErrors` as an assertion, then closes it.
+ */
 function falsifiedThroughExecutor(
   experiments: (root: string) => DefectExperiment[],
   during: (
@@ -53,6 +69,7 @@ function falsifiedThroughExecutor(
     job: Promise<unknown>,
   ) => void | Promise<void> = () => undefined,
   crash = "",
+  assertionErrors: readonly string[] = [],
 ): Promise<JobOutcome<FalsificationJob>> {
   return inConsumerCopy(FIXTURE, "vitest", async (root) => {
     writeFileSync(join(root, CRASH_FILE), crash);
@@ -62,6 +79,7 @@ function falsifiedThroughExecutor(
         { path: ".", directory: root },
         FIXTURE_CONFIG,
         experiments(root),
+        assertionErrors,
       );
       await during(root, executor, job);
       return await job;
@@ -162,7 +180,82 @@ describe("a falsification job in the executor", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3773: an error name given to Executor.falsify reaches the judge in the executor process, so that error reads as an assertion and its experiment as detected",
+    async () => {
+      const outcome = await falsifiedThroughExecutor(
+        (root) => [
+          mutating(
+            root,
+            "declared",
+            'it("second", () => {});',
+            `it("second", () => {throw Object.assign(new Error("checked"), { name: "${DECLARED_NAME}" });});`,
+          ),
+        ],
+        undefined,
+        undefined,
+        [DECLARED_NAME],
+      );
+      expect(
+        outcome.ended
+          ? {
+              judgement: judgementOf(outcome.value, "declared"),
+              errors: errorMarkersOf(outcome.value, "declared"),
+            }
+          : outcome,
+      ).toEqual({
+        judgement: { verdict: "detected" },
+        errors: ["declared-name"],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3811: an unhandled rejection on the executor's own thread during the job reaches the judge, so a would-be detection reads job unclean",
+    async () => {
+      expect([
+        await rejectionBesideLeak(undefined),
+        await rejectionBesideLeak(PLUGIN_SITE),
+      ]).toEqual([
+        { verdict: "detected" },
+        { verdict: "unclear", reason: "job-unclean" },
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
 });
+
+/**
+ * The judgement of one experiment whose test rejects its mutation at an assertion, falsified over a copy of the
+ * host-rejection fixture in a fresh executor started while the fixture's leak site is `site`.
+ */
+function rejectionBesideLeak(site: string | undefined): Promise<unknown> {
+  return inConsumerCopy(HOST_REJECTION_FIXTURE, "vitest", (root) =>
+    withVariables({ [LEAK_SITE]: site }, async () => {
+      const executor = new Executor(memoryLog(), takeStartEnvironment());
+      try {
+        const outcome = await executor.falsify(
+          { path: ".", directory: root },
+          FIXTURE_CONFIG,
+          [
+            mutating(
+              root,
+              "rejected",
+              'it("second", () => {});',
+              'it("second", () => {expect(1).toBe(2);});',
+            ),
+          ],
+          [],
+        );
+        return outcome.ended ? judgementOf(outcome.value, "rejected") : outcome;
+      } finally {
+        await executor.close();
+      }
+    }),
+  );
+}
 
 /**
  * Creates the hold directory, waits until the fixture's first test holds on it, aborts the job, and releases the

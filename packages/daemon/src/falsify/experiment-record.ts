@@ -9,6 +9,7 @@ import type {
   TestState,
   TestSuite,
 } from "vitest/node";
+import { isRecord } from "../json-guards.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import {
   identifyTests,
@@ -20,6 +21,7 @@ import {
 } from "../vitest/module-tests.js";
 import type { RunExecution } from "../vitest/run-states.js";
 import type { UnsupportedVitest } from "../vitest/workspace-session.js";
+import type { ExperimentFacts } from "./fact-types.js";
 import type {
   Mutation,
   MutationLoad,
@@ -27,13 +29,14 @@ import type {
 } from "./mutation-transform.js";
 import type { NoProbeSite } from "./reach-probe.js";
 import { REACH_META_KEY, type ReachMark } from "./reach-names.js";
-import type { StaleModule } from "./stale-transform-guard.js";
+import { moduleFileKey, type StaleModule } from "./stale-transform-guard.js";
+import type { Judgement } from "./verdict.js";
 
 /**
- * Raise it whenever what a falsification record, its mutation transform or its reach probe means changes, so evidence
- * recorded under the old meaning can be retired.
+ * Raise it whenever what a falsification record, its mutation transform, its reach probe or a judgement means
+ * changes, so evidence recorded under the old meaning can be retired.
  */
-export const FALSIFIER_VERSION = 1;
+export const FALSIFIER_VERSION = 2;
 
 /** One defect's experiment as the job is asked to run it: the test that should detect it, and its mutation. */
 export interface DefectExperiment {
@@ -67,6 +70,8 @@ export interface RecordedRunTest extends IdentifiedTest {
   readonly mode: TestCase["options"]["mode"];
   readonly state: TestState;
   readonly errors: readonly RawError[];
+  /** How many more times than once Vitest was told to run the test, by its own options or a suite's; absent when none. */
+  readonly repeats?: number;
   /** Absent when Vitest recorded no hook state on the test's result. */
   readonly hooks?: HookStates;
   /** Present only in an experiment's run. */
@@ -98,6 +103,11 @@ export interface RunRecord {
   readonly cancelError?: string;
   readonly modules: readonly RecordedRunModule[];
   readonly unhandledErrors: readonly RawError[];
+  /**
+   * For each unhandled error, in the same order, the run's modules whose file the worker that raised it was running:
+   * several when one file runs under several projects, and none when the error names no file of this run.
+   */
+  readonly unhandledErrorModules: readonly (readonly ModuleReport[])[];
 }
 
 /** A run that left no record. */
@@ -128,6 +138,17 @@ export type ExperimentNotRun =
   /** The job was aborted before this experiment's run finished. */
   | { readonly kind: "interrupted" };
 
+/** The second run of an experiment whose first run would be a detection, made at once in the same instance. */
+export type ConfirmingRun =
+  | {
+      readonly status: "ran";
+      readonly run: RunRecord;
+      readonly mutation: readonly MutationLoad[];
+    }
+  | { readonly status: "unrecorded"; readonly run: UnrecordedRun }
+  /** The job was aborted before the confirming run finished. */
+  | { readonly status: "interrupted" };
+
 export type ExperimentRecord =
   | {
       readonly defectId: string;
@@ -135,6 +156,8 @@ export type ExperimentRecord =
       readonly run: RunRecord;
       /** One entry per transform of the mutated module during the run; none means it was never loaded. */
       readonly mutation: readonly MutationLoad[];
+      /** Present only when the run would be a detection. */
+      readonly confirming?: ConfirmingRun;
     }
   | {
       readonly defectId: string;
@@ -172,13 +195,29 @@ export type SessionJobFacts = {
   | { readonly status: "refused"; readonly refusal: JobRefusal }
 );
 
-type LoadedJob = SessionJobFacts & {
+/** One experiment's judgement, with the facts it was decided from. */
+export type ExperimentJudgement = Judgement & {
+  readonly defectId: string;
+  readonly facts: ExperimentFacts;
+};
+
+/**
+ * A job that ran carries one judgement per experiment it was given, in the order given, decided once its instance
+ * closed. `Job` is a parameter so that the condition is applied to each member of the job's union alone.
+ */
+export type JudgedJobFacts<Job = SessionJobFacts> = Job extends {
+  readonly status: "ran";
+}
+  ? Job & { readonly judgements: readonly ExperimentJudgement[] }
+  : Job;
+
+type LoadedJob = JudgedJobFacts & {
   readonly workspace: VitestWorkspace;
   readonly vitestVersion: string;
   readonly closeError?: string;
 };
 
-/** A falsification job's record: raw facts, never a verdict. */
+/** A falsification job's reply: each run's raw facts, and each experiment's judgement when the job ran. */
 export type FalsificationJob =
   | LoadedJob
   | {
@@ -221,6 +260,8 @@ interface RunEvidence {
 }
 
 const MISSING_MODULE_STATE: RecordedRunModule["state"] = "missing";
+/** The field a worker stamps on an unhandled error with the test file it was running when the error was raised. */
+const TEST_PATH_FIELD = "VITEST_TEST_PATH";
 const BIGINT_SUFFIX = "n";
 const CIRCULAR_TEXT = "[circular]";
 const MAX_ERROR_FIELD_DEPTH = 32;
@@ -278,7 +319,34 @@ export function recordRun(evidence: RunEvidence): RunRecord {
       ...missing,
     ],
     unhandledErrors: evidence.unhandledErrors.map(rawError),
+    unhandledErrorModules: modulesNamed(evidence),
   };
+}
+
+/** Matches each unhandled error's stamped test file to the run's specifications by file, as Vite keys a module's file. */
+function modulesNamed(evidence: RunEvidence): ModuleReport[][] {
+  const { specifications, locate } = evidence;
+  const keys = new Map<TestSpecification, string>();
+  const keyOf = (specification: TestSpecification): string => {
+    let key = keys.get(specification);
+    if (key === undefined) {
+      key = moduleFileKey(specification.moduleId);
+      keys.set(specification, key);
+    }
+    return key;
+  };
+  return evidence.unhandledErrors.map((error) => {
+    const stamped = isRecord(error) ? error[TEST_PATH_FIELD] : undefined;
+    if (typeof stamped !== "string") return [];
+    const named = moduleFileKey(stamped);
+    return specifications
+      .filter((specification) => keyOf(specification) === named)
+      .map((specification) =>
+        moduleReport(
+          locate(specification.project.name, specification.moduleId),
+        ),
+      );
+  });
 }
 
 /** The intended test's result in a run, found by its full identity; undefined when the run recorded none. */
@@ -326,11 +394,13 @@ function recordTest(
 ): RecordedRunTest {
   const result = test.result();
   const hooks = hookStates(test);
+  const repeats = declaredRepeats(test);
   return {
     ...identified,
     mode: test.options.mode,
     state: result.state,
     errors: (result.errors ?? []).map(rawError),
+    ...(repeats === undefined ? {} : { repeats }),
     ...(hooks === undefined ? {} : { hooks }),
     ...(reachOf === undefined ? {} : { reach: reachOf(test) }),
   };
@@ -359,6 +429,12 @@ function reachFromMark(test: TestCase): Reach {
   if (mark.inTest === true) return IN_TEST;
   if (mark.outsideTest === true) return OUTSIDE_TEST;
   return NOT_EXECUTED;
+}
+
+/** The repeats the test's options hold, its own or those a suite gave it; undefined for a test Vitest runs once. */
+function declaredRepeats(test: TestCase): number | undefined {
+  const { repeats } = test.options;
+  return repeats !== undefined && repeats > 0 ? repeats : undefined;
 }
 
 /** The public `TestCase.result()` leaves out the hook states the runner records on its task. */

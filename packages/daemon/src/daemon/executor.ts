@@ -138,19 +138,22 @@ export class Executor {
   }
 
   /**
-   * Falsifies `experiments` in one Vitest instance over the workspace. A job whose executor process ends before it
-   * replies has nothing to store, since none of its experiments can be judged without its restored baseline.
+   * Falsifies `experiments` in one Vitest instance over the workspace, counting an error named in `assertionErrors`
+   * as an assertion. A job whose executor process ends before it replies has nothing to store, since its records and
+   * judgements arrive only in that reply.
    */
   async falsify(
     workspace: VitestWorkspace,
     configFile: string,
     experiments: readonly DefectExperiment[],
+    assertionErrors: readonly string[],
   ): Promise<JobOutcome<FalsificationJob>> {
     const reply = await this.#job({
       type: "falsify",
       workspace,
       configFile,
       experiments,
+      assertionErrors,
     });
     return reply.type === "falsified"
       ? { ended: true, value: reply.job }

@@ -100,6 +100,7 @@ async function falsify(
     request.workspace,
     request.configFile,
     request.experiments,
+    request.assertionErrors,
     signal,
   );
 }

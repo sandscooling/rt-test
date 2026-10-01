@@ -432,5 +432,439 @@
     "file": "packages/daemon/src/falsify/reach-setup.ts",
     "old": "  for (let suite = test.suite; suite !== undefined; suite = suite.suite) {",
     "new": "  for (let suite = test.suite; suite !== undefined; suite = undefined) {"
+  },
+  {
+    "id": "D3750",
+    "defect": "A baseline's unhandled error that counts against the experiment is not read, so a detection stands though the baseline its test passed in leaked an error.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": " && baseline.countedUnhandledErrorCount === 0",
+    "new": ""
+  },
+  {
+    "id": "D3751",
+    "defect": "How a baseline ended is not read, so a detection stands on a baseline whose workers were force-stopped.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "endedCleanly(baseline.ending) && ",
+    "new": ""
+  },
+  {
+    "id": "D3752",
+    "defect": "The judge does not read whether the baseline passed the test, so an experiment that ran against a test the baseline failed is credited as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (!passed(baseline)) return baselineNotPassed(baseline);",
+    "new": ""
+  },
+  {
+    "id": "D3753",
+    "defect": "The baseline-not-passed reason carries the test's state without its mode, so a test declared with it.skip cannot be told from one skipped at run time.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "      : { detail: { state: test.state, mode: test.mode } }),",
+    "new": "      : { detail: { state: test.state } }),"
+  },
+  {
+    "id": "D3754",
+    "defect": "The restored baseline's result for the test is not read, so a detection stands though the test no longer passes unmutated.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (!passed(restoredBaseline)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3755",
+    "defect": "The restored baseline's unhandled errors and ending are not read, so a detection stands though the restored baseline leaked an error that counts against it.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (!untroubled(restoredBaseline)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3756",
+    "defect": "A restored baseline that started and left no record is read as one that failed the test, so an experiment its job did not finish reads invalid experiment where it has no verdict.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (restoredBaseline === undefined || !restoredBaseline.recorded) {",
+    "new": "  if (restoredBaseline === undefined) {"
+  },
+  {
+    "id": "D3757",
+    "defect": "A confirming run that left no record is passed over and the first run judged in its place, so a would-be detection that never repeated gets a verdict.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (confirming !== undefined && confirming.status !== \"ran\") {\n    return { reason: NO_VERDICT_REASON.confirmingRunUnrecorded };\n  }",
+    "new": "  if (confirming !== undefined && confirming.status !== \"ran\") {\n    return judgeRuns(\n      facts.run,\n      { status: \"ran\", ...facts.run },\n      facts.nextRun,\n      facts.job,\n    );\n  }"
+  },
+  {
+    "id": "D3758",
+    "defect": "How an experiment's run ended is not read, so a run that was interrupted, force-stopped or failed to cancel is judged as a whole run.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (!endedCleanly(run.ending)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3759",
+    "defect": "A test with no recorded beforeEach state reads as one whose hooks all passed, so a Vitest that stopped recording hook states would credit a failure in a beforeEach as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (hooks?.[REQUIRED_HOOK] === undefined) {\n    return hookNotPassed(REQUIRED_HOOK, HOOK_NOT_RECORDED);\n  }",
+    "new": "  if (hooks === undefined) return undefined;"
+  },
+  {
+    "id": "D3760",
+    "defect": "A passed test reads survived before its hook states are read, so a test whose hook states were not recorded reads as a survivor.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  return (\n    readHooks(test.hooks) ??\n    readRepeats(test) ??\n    readReach(test.reach, run) ??\n    readBody(test, run.unhandledErrorCount)\n  );",
+    "new": "  if (test.state === PASSED) return { verdict: VERDICT.survived };\n  return (\n    readHooks(test.hooks) ??\n    readRepeats(test) ??\n    readReach(test.reach, run) ??\n    readBody(test, run.unhandledErrorCount)\n  );"
+  },
+  {
+    "id": "D3761",
+    "defect": "A failed test that holds no error counts as holding only assertion errors, so a failure with no assertion behind it is a would-be detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    test.errors.length === 0 ||\n",
+    "new": ""
+  },
+  {
+    "id": "D3762",
+    "defect": "A passed test beside an unhandled error in its own run is not read as a survivor, so a mutation the test let through reads unclear.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (test.state === PASSED) return { verdict: VERDICT.survived };",
+    "new": "  if (test.state === PASSED && unhandledErrorCount === 0) {\n    return { verdict: VERDICT.survived };\n  }"
+  },
+  {
+    "id": "D3763",
+    "defect": "A run started next that left no record is read as a clean one, so a detection stands though a late unhandled error may have been lost with that run.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    !nextRun.recorded ||\n",
+    "new": ""
+  },
+  {
+    "id": "D3764",
+    "defect": "The job's own unhandled errors and its close are not read, so a detection stands though the executor's thread raised an error or the instance failed to close.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (job.unhandledErrorCount > 0 || !job.closed) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3765",
+    "defect": "Reach is read before the hook states, so a test whose beforeEach failed before the site could execute reads site not executed, hiding the hook that failed.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    readHooks(test.hooks) ??\n    readRepeats(test) ??\n    readReach(test.reach, run) ??",
+    "new": "    readReach(test.reach, run) ??\n    readHooks(test.hooks) ??\n    readRepeats(test) ??"
+  },
+  {
+    "id": "D3766",
+    "defect": "The run's unhandled error is read before the kind of the test's errors, so a test that threw a TypeError beside a leaked rejection reads unhandled error where its own error is no assertion.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (\n    test.errors.length === 0 ||\n    test.errors.some((error) => error.kind !== ERROR_KIND.assertion)\n  ) {\n    return { verdict: VERDICT.unclear, reason: UNCLEAR_REASON.notAnAssertion };\n  }\n  if (unhandledErrorCount > 0) {\n    return { verdict: VERDICT.unclear, reason: UNCLEAR_REASON.unhandledError };\n  }",
+    "new": "  if (unhandledErrorCount > 0) {\n    return { verdict: VERDICT.unclear, reason: UNCLEAR_REASON.unhandledError };\n  }\n  if (\n    test.errors.length === 0 ||\n    test.errors.some((error) => error.kind !== ERROR_KIND.assertion)\n  ) {\n    return { verdict: VERDICT.unclear, reason: UNCLEAR_REASON.notAnAssertion };\n  }"
+  },
+  {
+    "id": "D3767",
+    "defect": "A mutated module that was transformed with the anchor occurring other than once reads as never transformed, so the reason loses the count that tells the author the anchor went stale.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (first === undefined) return { mutation: NEVER_TRANSFORMED };",
+    "new": "  if (first === undefined || !first.applied) {\n    return { mutation: NEVER_TRANSFORMED };\n  }"
+  },
+  {
+    "id": "D3768",
+    "defect": "A baseline's unhandled error that names no test module counts against no experiment, so a detection stands beside an error no module can be blamed for.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      modules.length === 0 ||\n",
+    "new": ""
+  },
+  {
+    "id": "D3769",
+    "defect": "An experiment whose run started and left no record is passed over as the run started next, so the detection before it is read against a later run though a late error may have been lost.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  return run.kind === \"run-failed\" ? { recorded: false } : undefined;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D3770",
+    "defect": "A run the stale-transform guard refused counts as a started run that left no record, so the detection before it reads unclear though no run started.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  return run.kind === \"run-failed\" ? { recorded: false } : undefined;",
+    "new": "  return { recorded: false };"
+  },
+  {
+    "id": "D3771",
+    "defect": "A record is judged against the experiment at its position whatever defect it names, so one defect's run is read with another defect's test.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    if (experiment?.defectId !== record.defectId) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D3772",
+    "defect": "A declared assertion error name matches any error whose name contains it, so an error of another name is credited as an assertion.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "assertionErrors.includes(name)",
+    "new": "assertionErrors.some((declared) => name.includes(declared))"
+  },
+  {
+    "id": "D3773",
+    "defect": "The executor process drops the assertion error names its request carries, so an error the consumer declared as an assertion reads as another kind and its experiment as unclear.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "    request.assertionErrors,",
+    "new": "    [],"
+  },
+  {
+    "id": "D3774",
+    "defect": "Every unhandled error of a baseline counts against every experiment, whatever test module it names, so one module's leak makes every defect of the workspace an invalid experiment.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      modules.length === 0 ||\n      modules.some((module) => isTestModule(module, identity)),",
+    "new": "      true,"
+  },
+  {
+    "id": "D3775",
+    "defect": "A baseline's unhandled error that names the experiment's own test module is not counted against it, so the experiment is judged as though its baseline were clean.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "modules.some((module) => isTestModule(module, identity))",
+    "new": "false"
+  },
+  {
+    "id": "D3776",
+    "defect": "The unhandled errors of the run started next are not read, so a detection stands though a late error of its own run may have landed in the run after it.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    nextRun.unhandledErrorCount > 0\n",
+    "new": "    false\n"
+  },
+  {
+    "id": "D3777",
+    "defect": "The confirming run's reading is not compared, so a failure that did not repeat is credited as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (second.verdict !== WOULD_DETECT) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3778",
+    "defect": "Every experiment that ran is run a second time, not only one whose run would be a detection, so a job runs its survivors and invalid experiments twice.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "        if (!this.#wouldDetect(experiment, step)) return record;\n",
+    "new": ""
+  },
+  {
+    "id": "D3779",
+    "defect": "An unhandled error is recorded as naming every test module of its run, so one module's leak counts against every experiment of the job.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "      .filter((specification) => keyOf(specification) === named)",
+    "new": "      .filter(() => true)"
+  },
+  {
+    "id": "D3780",
+    "defect": "An unhandled error names only the first project that runs its file, so the same file's experiments under another project read the baseline as clean.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "      .filter((specification) => keyOf(specification) === named)\n      .map((specification) =>",
+    "new": "      .filter((specification) => keyOf(specification) === named)\n      .slice(0, 1)\n      .map((specification) =>"
+  },
+  {
+    "id": "D3781",
+    "defect": "An error's fact carries its message, so the text of an assertion, which can quote source and values, reaches the facts a judgement is stored with.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  const named = typeof name === \"string\" ? { name } : {};",
+    "new": "  const named =\n    typeof name === \"string\" ? { name, message: error[\"message\"] } : {};"
+  },
+  {
+    "id": "D3782",
+    "defect": "The falsifier version is not raised, so evidence recorded before a confirming run and a judgement existed is kept as current.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "export const FALSIFIER_VERSION = 2;",
+    "new": "export const FALSIFIER_VERSION = 1;"
+  },
+  {
+    "id": "D3783",
+    "defect": "A job that ran nothing carries an empty list of judgements, so it reads as a job that judged every experiment it was given.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "  if (job.status !== \"ran\") return job;",
+    "new": "  if (job.status !== \"ran\") return { ...job, judgements: [] };"
+  },
+  {
+    "id": "D3784",
+    "defect": "A confirming run an abort interrupted is kept as a run that finished, so the reply holds the record of a run cut short, and the experiment's missing verdict is put down to the restored baseline where its confirming run is what did not finish.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    if (execution === \"interrupted\" && this.#signal.aborted) {",
+    "new": "    if (execution === \"interrupted\" && !this.#signal.aborted) {"
+  },
+  {
+    "id": "D3785",
+    "defect": "The anchor-count reason carries a count of zero whatever the anchor's count was, so an anchor that occurs twice reads as one that is missing.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "        detail: { count: notRun.count },",
+    "new": "        detail: { count: 0 },"
+  },
+  {
+    "id": "D3786",
+    "defect": "The canary file names detected for the canary whose test passes after executing the site, so the set vouches for a Vitest on which a passing test is credited.",
+    "file": "packages/daemon/canaries/canaries.json",
+    "old": "        \"verdict\": \"survived\"",
+    "new": "        \"verdict\": \"detected\""
+  },
+  {
+    "id": "D3787",
+    "defect": "An error Vitest serialized with the name AssertionError is not read as an assertion, so a plain expect failure reads unclear.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  if (name === ASSERTION_ERROR_NAME) return ASSERTION_MARKER.assertionErrorName;\n",
+    "new": ""
+  },
+  {
+    "id": "D3788",
+    "defect": "The failure of a matcher added by expect.extend is not read as an assertion, so a jest-dom style matcher's rejection reads unclear.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  if (isExtendedMatcherFailure(error)) return ASSERTION_MARKER.extendedMatcher;\n",
+    "new": ""
+  },
+  {
+    "id": "D3789",
+    "defect": "The assertion error names the job was given are not read, so an error the consumer declared as an assertion reads as another kind.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  if (name !== undefined && assertionErrors.includes(name)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3790",
+    "defect": "A site executed outside the test, while its module loaded, reads not executed, so a test that rejects what load-time code built can never detect its mutation.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    case \"in-test\":\n    case \"outside-test\":\n      return undefined;\n    case \"no\": {",
+    "new": "    case \"in-test\":\n      return undefined;\n    case \"outside-test\":\n    case \"no\": {"
+  },
+  {
+    "id": "D3791",
+    "defect": "A hook state other than pass is not read, so an assertion that failed in a beforeEach is credited as a detection and a thrown afterEach reads as a failure of the body.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    if (state !== HOOK_PASSED) return hookNotPassed(hook, state);\n",
+    "new": ""
+  },
+  {
+    "id": "D3792",
+    "defect": "A suite's error is not read, so a test its failing beforeAll skipped reads as a test that did not run, with no suite named.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (suite === undefined) return undefined;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D3793",
+    "defect": "A module's own errors are not read, so a mutated module that threw while it loaded reads as a test absent from the run.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (module === undefined || !module.collected || module.errorCount > 0) {",
+    "new": "  if (module === undefined || !module.collected) {"
+  },
+  {
+    "id": "D3794",
+    "defect": "A reach of not executed is read as executed, so a test that failed an assertion without running the mutated site is credited as a detection and one that passed reads as a survivor.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    case \"no\": {",
+    "new": "    case \"never\": {"
+  },
+  {
+    "id": "D3795",
+    "defect": "A reach that is unknown is read as executed, so the failure of a test that ran beside others is credited though no probe says it ran the site.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    case \"unknown\":",
+    "new": "    case \"unobserved\":"
+  },
+  {
+    "id": "D3796",
+    "defect": "The kind of a failed test's errors is not read, so a thrown TypeError, a timeout, an assertion count failure, a snapshot mismatch or an undeclared error is credited as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    test.errors.length === 0 ||\n    test.errors.some((error) => error.kind !== ERROR_KIND.assertion)\n",
+    "new": "    test.errors.length === 0\n"
+  },
+  {
+    "id": "D3797",
+    "defect": "One assertion error is enough for a detection, so a test that also threw an error of another kind is credited though its failure may be a setup failure carried over a retry.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    test.errors.some((error) => error.kind !== ERROR_KIND.assertion)",
+    "new": "    test.errors.every((error) => error.kind !== ERROR_KIND.assertion)"
+  },
+  {
+    "id": "D3798",
+    "defect": "An unhandled error in the experiment's own run is not read, so an assertion failure beside a leaked rejection is credited as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (unhandledErrorCount > 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3799",
+    "defect": "An experiment whose run left no record reads invalid experiment, as a change with no probe site, so the author is told to fix a definition a failed run says nothing about.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    case \"run-unrecorded\":\n      return { reason: NO_VERDICT_REASON.runUnrecorded };\n",
+    "new": "    case \"run-unrecorded\":\n"
+  },
+  {
+    "id": "D3800",
+    "defect": "A failed test that declares repeats is read as any failed test, so an assertion that failed in a beforeEach or afterEach on an earlier repeat, its last repeat's hooks and body passing, is credited as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    readRepeats(test) ??\n",
+    "new": ""
+  },
+  {
+    "id": "D3801",
+    "defect": "A passed test that declares repeats reads invalid experiment, so a mutation that every repeat let through is not reported as a survivor.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (test.state !== FAILED || test.repeats === undefined) return undefined;",
+    "new": "  if (test.repeats === undefined) return undefined;"
+  },
+  {
+    "id": "D3802",
+    "defect": "The repeats a test declares are not carried from the record to the facts, so the judge reads a failed repeated test as any failed test.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    ...(test.repeats === undefined ? {} : { repeats: test.repeats }),\n",
+    "new": ""
+  },
+  {
+    "id": "D3803",
+    "defect": "The job's own unhandled errors count as none in the facts, so a detection stands though the executor's thread raised an error.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    unhandledErrorCount: end.unhandledErrors.length,",
+    "new": "    unhandledErrorCount: 0,"
+  },
+  {
+    "id": "D3804",
+    "defect": "The instance reads closed in the facts whatever its close error, so a detection stands though the instance failed to close.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    closed: end.closeError === undefined,",
+    "new": "    closed: true,"
+  },
+  {
+    "id": "D3805",
+    "defect": "A run's force-stop is not carried from the record to the facts, so a run whose workers Vitest force-stopped is judged as one that ended cleanly.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      forceStopped: record.forceStopped,",
+    "new": "      forceStopped: false,"
+  },
+  {
+    "id": "D3806",
+    "defect": "A run's cancel error is not carried from the record to the facts, so a run whose cancel raised an error is judged as one that ended cleanly.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      cancelFailed: record.cancelError !== undefined,",
+    "new": "      cancelFailed: false,"
+  },
+  {
+    "id": "D3807",
+    "defect": "How a run's execution ended is not carried from the record to the facts, so a run something interrupted is judged as one that completed.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      execution: record.execution,",
+    "new": "      execution: \"completed\","
+  },
+  {
+    "id": "D3808",
+    "defect": "Baseline trouble is read before whether the experiment has a verdict, so an experiment of a job that left no restored baseline, or whose confirming run left no record, reads invalid experiment where it has no verdict.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (confirming !== undefined && confirming.status !== \"ran\") {",
+    "new": "  const trouble = baselineTrouble(\n    baseline,\n    restoredBaseline as BaselineFacts,\n  );\n  if (trouble !== undefined) return trouble;\n  if (confirming !== undefined && confirming.status !== \"ran\") {"
+  },
+  {
+    "id": "D3809",
+    "defect": "The repeats Vitest was told to give a test are not recorded, so a test its suite repeats, whose setup assertion failed on an earlier repeat alone, is credited as a detection.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "    ...(repeats === undefined ? {} : { repeats }),\n",
+    "new": ""
+  },
+  {
+    "id": "D3810",
+    "defect": "A test told to run once more than once is recorded as a test Vitest runs once, so the fewest repeats a test can declare escape the reading and its hook failure is credited as a detection.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  return repeats !== undefined && repeats > 0 ? repeats : undefined;",
+    "new": "  return repeats !== undefined && repeats > 1 ? repeats : undefined;"
+  },
+  {
+    "id": "D3811",
+    "defect": "The unhandled errors the job's own thread recorded are not handed to the judging, so a detection stands though the executor's thread raised an error while the instance was open.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    unhandledErrors: job.unhandledErrors,",
+    "new": "    unhandledErrors: [],"
   }
 ]
