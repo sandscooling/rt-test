@@ -1874,6 +1874,68 @@ describe("a summary with nothing to answer", () => {
       ),
     ).toBe(true);
   });
+
+  it("D4110: the reason words a falsification entry as the falsification of its workspace, beside a run's entry worded as the run of it", () => {
+    const reason = noDiscoveryReason({
+      unstoredJobs: [
+        { workspacePath: WORKSPACE_A, reason: "the store write failed" },
+        {
+          workspacePath: WORKSPACE_A,
+          kind: "falsification",
+          reason: "its job did not run",
+        },
+      ],
+    });
+    expect(
+      reason.endsWith(
+        `; ended with nothing stored: the run of ${WORKSPACE_A}: the store write failed; the falsification of ${WORKSPACE_A}: its job did not run`,
+      ),
+    ).toBe(true);
+  });
+
+  it("D4111: the reason says the daemon is falsifying, with the workspace and the number of definitions in the job", () => {
+    const reason = noDiscoveryReason({
+      activity: {
+        state: "falsifying",
+        workspacePath: WORKSPACE_A,
+        definitions: 2,
+      },
+    });
+    expect(
+      reason.includes(
+        `falsifying workspace ${WORKSPACE_A}, defect definitions in the job 2`,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("the worktree's standings once nobody waits for them", () => {
+  it("D4108: a read whose signal aborts while its files are read throws before it takes the daemon's moment", async () => {
+    const outcome = await inTempDir(async (root) => {
+      const controller = new AbortController();
+      let moments = 0;
+      const reading = worktreeStandings({
+        consumerRoot: root,
+        stateDirectory: join(root, ".rt-test"),
+        signal: controller.signal,
+        moment: () => {
+          moments += 1;
+          return {
+            results: results(undefined),
+            view: { ...IDLE, consumerRoot: root },
+            inputs: UNSETTLED,
+          };
+        },
+      });
+      controller.abort();
+      const threw = await reading.then(
+        () => false,
+        () => true,
+      );
+      return { threw, moments };
+    });
+    expect(outcome).toStrictEqual({ threw: true, moments: 0 });
+  });
 });
 
 /**

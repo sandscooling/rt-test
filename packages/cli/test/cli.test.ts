@@ -2880,6 +2880,31 @@ function heldLines(
   );
 }
 
+describe("the human answer's jobs that ended with nothing stored", () => {
+  it("D4112: a falsification entry is worded as the falsification of its workspace, beside a run's entry worded as the run of it", () => {
+    const lines = contextLines(
+      humanAnswer({
+        unstoredJobs: [
+          { workspacePath: WORKSPACE_A, reason: "the store write failed" },
+          {
+            workspacePath: WORKSPACE_A,
+            kind: "falsification",
+            reason: "its job did not run",
+          },
+        ],
+      }),
+    );
+    expect(
+      lines
+        .map((line) => line.trim())
+        .filter((line) => line.includes(`of ${WORKSPACE_A}: `)),
+    ).toStrictEqual([
+      `the run of ${WORKSPACE_A}: the store write failed`,
+      `the falsification of ${WORKSPACE_A}: its job did not run`,
+    ]);
+  });
+});
+
 describe("the human answer for a held workspace", () => {
   it("D3174: a human answer prints a held workspace's reason with each path its runs changed and the run that changed it", () => {
     const lines = heldLines({

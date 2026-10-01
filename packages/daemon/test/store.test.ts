@@ -3823,6 +3823,47 @@ describe("evidence a query reads back", () => {
     });
   });
 
+  it("D4114: a record stored under an older falsifier version reads its bindings and its verdict alone, its reason, detail and facts never parsed", async () => {
+    const read = await inStore((store) => {
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        {
+          ...ranReply([HOOK_FAILED]),
+          falsifierVersion: FALSIFIER_VERSION - 1,
+        },
+        digestsFor([HOOK_FAILED]),
+      );
+      withRawDatabase(store.file, (database) => {
+        database.exec(
+          `UPDATE defect_evidence SET reason = 'a-reason-of-that-version',
+            detail = 'not json', facts = '{"shape":"of that version"}'`,
+        );
+      });
+      const { evidence, evidenceRefusals } =
+        store.readLatestResults(WORKTREE_A);
+      return {
+        records: evidence.map((record) => ({
+          defectId: record.defectId,
+          verdict: record.verdict,
+          falsifierVersion: record.falsifierVersion,
+          interpreted: "judgement" in record,
+        })),
+        refusals: evidenceRefusals,
+      };
+    });
+    expect(read).toStrictEqual({
+      records: [
+        {
+          defectId: "D3",
+          verdict: "invalid-experiment",
+          falsifierVersion: FALSIFIER_VERSION - 1,
+          interpreted: false,
+        },
+      ],
+      refusals: [],
+    });
+  });
+
   it("D3931: the evidence is read from the snapshot the latest discovery is read from, so a discovery and a verdict committed as the read begins are answered together", async () => {
     const read = await inStore((store, stateDirectory) => {
       store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);

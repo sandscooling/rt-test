@@ -1,5 +1,6 @@
 import {
   mkdirSync,
+  readFileSync,
   realpathSync,
   utimesSync,
   watch,
@@ -16,12 +17,23 @@ import {
   type Executor,
   type JobOutcome,
 } from "../src/daemon/executor.js";
+import { JOB_TIME_BOUND_MS } from "../src/daemon/falsification.js";
+import { MAX_JOB_DEFINITIONS } from "../src/daemon/falsification-plan.js";
 import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
 import {
   PROTOCOL_VERSION,
   type DaemonActivity,
   type DaemonIdentity,
+  type UnstoredJob,
 } from "../src/daemon/protocol.js";
+import {
+  FALSIFIER_VERSION,
+  type DefectExperiment,
+  type ExperimentRecord,
+  type FalsificationJob,
+} from "../src/falsify/experiment-record.js";
+import type { ExperimentFacts } from "../src/falsify/fact-types.js";
+import { wholeDigest } from "../src/inputs/input-inventory.js";
 import { RunWatch, type RunJudgment } from "../src/daemon/run-judgment.js";
 import { takeStartEnvironment } from "../src/inputs/environment-digest.js";
 import {
@@ -80,7 +92,17 @@ import {
   memoryLog,
   type MemoryLog,
 } from "./daemon-harness.js";
-import { detection, ranReply } from "./experiment-facts.js";
+import {
+  APPLIED,
+  baseline,
+  CLEAN_JOB,
+  detection,
+  EMPTY_RUN,
+  mutatedRun,
+  ranOnce,
+  ranReply,
+  SURVIVING_TEST,
+} from "./experiment-facts.js";
 import { inTempDir, projectFacts, settle, WAITING } from "./harness.js";
 import { onPlatform } from "./on-platform.js";
 import {
@@ -92,6 +114,7 @@ import {
 } from "./round-fixtures.js";
 import {
   ABSENT_ROOT,
+  DISCOVERED_VITEST_VERSION,
   DISCOVERY_DIGEST,
   Deferred,
   FINGERPRINTED,
@@ -1742,7 +1765,10 @@ describe(
   "beginning each job once the inputs settle",
   { timeout: DAEMON_TEST_TIMEOUT_MS },
   () => {
-    /** How many jobs have begun while the given wait is held, and how many once it is released. */
+    /**
+     * How many jobs have begun while the given wait is held, and how many once it is released: the discovery, the
+     * guard around its protection, the run, and the window the falsification look opens once nothing is due.
+     */
     async function jobsAroundHeldSettle(
       heldSettle: number,
     ): Promise<{ held: number; released: number }> {
@@ -1756,14 +1782,14 @@ describe(
     it("D2080: the discovery's job begins only once the inputs have settled", async () => {
       expect(await jobsAroundHeldSettle(1)).toStrictEqual({
         held: 0,
-        released: 3,
+        released: 4,
       });
     });
 
     it("D2081: the guard around protecting the discovery's test modules begins only once the inputs have settled", async () => {
       expect(await jobsAroundHeldSettle(2)).toStrictEqual({
         held: 1,
-        released: 3,
+        released: 4,
       });
     });
 
@@ -1776,7 +1802,7 @@ describe(
       await flush();
       expect({ held, released: inputs.jobsBegun }).toStrictEqual({
         held: 2,
-        released: 3,
+        released: 4,
       });
     });
 
@@ -4886,3 +4912,1597 @@ describe("answering a defects query", () => {
     expect(answered).toStrictEqual({ path: "a", testsInScope: 1 });
   });
 });
+
+type FalsifyOutcome = JobOutcome<FalsificationJob>;
+
+/** One falsification job the executor was given. */
+interface SentJob {
+  readonly workspacePath: string;
+  readonly configFile: string;
+  readonly experiments: readonly DefectExperiment[];
+  readonly assertionErrors: readonly string[];
+}
+
+/** A job that stays in progress until an abort or the test ends it. */
+const HELD = "held";
+
+interface JobScript {
+  /** What each job replies, given the job and its index from 0; every experiment detected when absent. */
+  readonly replies?: (
+    job: SentJob,
+    call: number,
+  ) => FalsifyOutcome | typeof HELD;
+  /** What an abort that finds a held job makes it reply; the job stays held when absent. */
+  readonly aborted?: (job: SentJob, call: number) => FalsifyOutcome | undefined;
+}
+
+const TEST_ENDED: FalsifyOutcome = { ended: false, reason: "the test ended" };
+/** The module every hand-built discovery and run of the rig holds its tests in. */
+const TEST_MODULE = "a.test.ts";
+
+/**
+ * An executor that also answers each falsification job from a script, and records the jobs it was given. An abort
+ * answers whether it found a job as `abortFinds` says, and ends a held job it found as the script says.
+ */
+class FalsifyingExecutor extends ScriptedExecutor {
+  readonly jobs: SentJob[] = [];
+  abortFinds = true;
+  readonly #script: JobScript;
+  #held: Deferred<FalsifyOutcome> | undefined;
+
+  constructor(
+    discovery: JobOutcome<TestDiscovery>,
+    runs: (path: string) => RunOutcome,
+    script: JobScript,
+  ) {
+    super(discovery, runs);
+    this.#script = script;
+  }
+
+  falsify(
+    entry: VitestWorkspace,
+    configFile: string,
+    experiments: readonly DefectExperiment[],
+    assertionErrors: readonly string[],
+  ): Promise<FalsifyOutcome> {
+    const job = {
+      workspacePath: entry.path,
+      configFile,
+      experiments,
+      assertionErrors,
+    };
+    this.jobs.push(job);
+    const reply =
+      this.#script.replies?.(job, this.jobs.length - 1) ?? replied(job);
+    if (reply !== HELD) return Promise.resolve(reply);
+    this.#held = new Deferred<FalsifyOutcome>();
+    return this.#held.promise;
+  }
+
+  /** Ends the held job with `outcome`, as its executor's reply does. */
+  end(outcome: FalsifyOutcome): void {
+    this.#held?.resolve(outcome);
+    this.#held = undefined;
+  }
+
+  override abort(purpose: AbortPurpose = ABORT_PURPOSE.stop): boolean {
+    super.abort(purpose);
+    const job = this.jobs.at(-1);
+    if (this.abortFinds && this.#held !== undefined && job !== undefined) {
+      const left = this.#script.aborted?.(job, this.jobs.length - 1);
+      if (left !== undefined) this.end(left);
+    }
+    return this.abortFinds;
+  }
+}
+
+/** An experiment that ran in a job whose restored baseline left no record, so its judgement has no verdict. */
+const NO_VERDICT: ExperimentFacts = {
+  baseline: baseline(),
+  job: CLEAN_JOB,
+  run: mutatedRun(),
+  confirming: { status: "ran", ...mutatedRun() },
+};
+const NO_VERDICT_REASON = "restored-baseline-unrecorded";
+const SURVIVED: ExperimentFacts = ranOnce({ test: SURVIVING_TEST });
+/** An experiment the job decided before any run: no module holds its test, which reads invalid experiment. */
+const DECIDED: ExperimentFacts = {
+  job: CLEAN_JOB,
+  notRun: { kind: "no-module" },
+};
+const INTERRUPTED: ExperimentFacts = {
+  baseline: baseline(),
+  job: CLEAN_JOB,
+  notRun: { kind: "interrupted" },
+};
+const CONFIRMING_INTERRUPTED: ExperimentFacts = {
+  baseline: baseline(),
+  job: CLEAN_JOB,
+  run: mutatedRun(),
+  confirming: { status: "interrupted" },
+};
+
+/** The digest a job records of a mutation's file: of its text as the file stands. */
+function fileDigest(file: string): string {
+  return wholeDigest(readFileSync(file, "utf8"));
+}
+
+/** The reply of a job that ran to its end and gave each experiment what `factsOf` gives its defect; a detection when absent. */
+function ranOver(
+  job: SentJob,
+  factsOf: (defectId: string) => ExperimentFacts = () => detection(),
+): Extract<FalsificationJob, { status: "ran" }> {
+  return {
+    ...ranReply(
+      job.experiments.map(({ defectId, mutation }) => ({
+        defectId,
+        facts: factsOf(defectId),
+        mutationFileDigest: fileDigest(mutation.file),
+      })),
+    ),
+    workspace: workspace(job.workspacePath),
+  };
+}
+
+function replied(
+  job: SentJob,
+  factsOf?: (defectId: string) => ExperimentFacts,
+): FalsifyOutcome {
+  return { ended: true, value: ranOver(job, factsOf) };
+}
+
+/** How an abort left a job. */
+interface AbortedJob {
+  /** The definition whose run the abort ended; none when a baseline was the run in progress. */
+  readonly running?: string;
+  /** Whether the abort ended that definition's confirming run rather than its first. */
+  readonly inConfirming?: boolean;
+  /** Whether the first baseline had ended; true when absent. */
+  readonly baselineEnded?: boolean;
+  /** Definitions the job decided before any run, which carry a verdict. */
+  readonly decided?: readonly string[];
+}
+
+/** What an abort left of each experiment, in the job's order: those before the running one ran, those after it did not. */
+function leftBy(job: SentJob, how: AbortedJob): ExperimentFacts[] {
+  const ids = job.experiments.map(({ defectId }) => defectId);
+  const at = how.running === undefined ? ids.length : ids.indexOf(how.running);
+  return ids.map((defectId, index) => {
+    if (how.decided?.includes(defectId) === true) return DECIDED;
+    if (how.baselineEnded === false || index > at) return INTERRUPTED;
+    if (index < at) return NO_VERDICT;
+    return how.inConfirming === true ? CONFIRMING_INTERRUPTED : INTERRUPTED;
+  });
+}
+
+function recordOf(
+  experiment: DefectExperiment,
+  facts: ExperimentFacts,
+): ExperimentRecord {
+  const { defectId, mutation } = experiment;
+  const mutationFileDigest = fileDigest(mutation.file);
+  if ("notRun" in facts) {
+    const kind =
+      facts.notRun.kind === "no-module" ? "no-module" : "interrupted";
+    return {
+      defectId,
+      status: "not-run",
+      reason: { kind },
+      mutationFileDigest,
+    };
+  }
+  return {
+    defectId,
+    status: "ran",
+    run: EMPTY_RUN,
+    mutation: [APPLIED],
+    ...(facts.confirming?.status === "interrupted"
+      ? { confirming: { status: "interrupted" as const } }
+      : {}),
+    mutationFileDigest,
+  };
+}
+
+/** The reply of a job whose experiments read `facts`, in its order, each record as the job leaves it. */
+function repliedWith(
+  job: SentJob,
+  facts: readonly ExperimentFacts[],
+  more: { readonly interrupted: boolean; readonly baselineEnded: boolean },
+): FalsifyOutcome {
+  const reply = ranOver(job, (defectId) => {
+    const index = job.experiments.findIndex(
+      (experiment) => experiment.defectId === defectId,
+    );
+    return facts[index] ?? INTERRUPTED;
+  });
+  return {
+    ended: true,
+    value: {
+      ...reply,
+      interrupted: more.interrupted,
+      ...(more.baselineEnded
+        ? { baseline: { ran: true as const, record: EMPTY_RUN } }
+        : {}),
+      experiments: job.experiments.map((experiment, index) =>
+        recordOf(experiment, facts[index] ?? INTERRUPTED),
+      ),
+    },
+  };
+}
+
+/** The reply of a job an abort ended as `how` says: marked interrupted, with no restored baseline. */
+function aborted(job: SentJob, how: AbortedJob = {}): FalsifyOutcome {
+  return repliedWith(job, leftBy(job, how), {
+    interrupted: true,
+    baselineEnded: how.baselineEnded !== false,
+  });
+}
+
+/** The reply of a job that decided every experiment before any run, so it ran no baseline. */
+function decidedBeforeAnyRun(job: SentJob): FalsifyOutcome {
+  return repliedWith(
+    job,
+    job.experiments.map(() => DECIDED),
+    { interrupted: false, baselineEnded: false },
+  );
+}
+
+function sourceOf(path: string): string {
+  return `${path}/src/${path}.ts`;
+}
+
+/** The definition `id` of the test `t<index>` of `path`, whose mutation is that test's own line of the workspace's source. */
+function definitionOf(
+  id: string,
+  path = "a",
+  index = 0,
+  more: Readonly<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    defect: `f${index} returns another number`,
+    required: `f${index} returns ${index}`,
+    test: { module: `${path}/${TEST_MODULE}`, name: [`t${index}`] },
+    mutation: {
+      file: sourceOf(path),
+      old: `return ${index};`,
+      new: `return ${index} + 1;`,
+    },
+    ...more,
+  };
+}
+
+interface FalsifyingCase extends JobScript {
+  /** How many tests each confirmed workspace holds, by its path; one test of `a` when absent. */
+  readonly tests?: Readonly<Record<string, number>>;
+  /** Each run of a workspace; one in which every test passed when absent. */
+  readonly ran?: (path: string) => WorkspaceRun;
+  /**
+   * The definition files under `defects/`, by name; `all.json` defining every test, workspace by workspace, as
+   * `<PATH><index>`, when absent.
+   */
+  readonly files?: Readonly<Record<string, readonly unknown[]>>;
+  /** What `rt-test.json` holds beside the definition files' pattern. */
+  readonly settings?: Readonly<Record<string, unknown>>;
+  readonly inputs?: StandInInputs;
+  readonly store?: RecordingStore;
+  /** The confirmed start; one confirming every workspace when absent. */
+  readonly start?: ConfirmedStart;
+  readonly quietWindowMs?: number;
+}
+
+interface Falsifying extends Daemon {
+  readonly executor: FalsifyingExecutor;
+  readonly root: string;
+}
+
+function testsOf(given: FalsifyingCase): Readonly<Record<string, number>> {
+  return given.tests ?? { a: 1 };
+}
+
+function indexes(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index);
+}
+
+function writeFiles(
+  root: string,
+  files: Readonly<Record<string, string>>,
+): void {
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), text);
+  }
+}
+
+/** Writes the consumer a case describes: each workspace's source, the definition files and `rt-test.json`. */
+function writeConsumer(root: string, given: FalsifyingCase): void {
+  const tests = Object.entries(testsOf(given));
+  const files = given.files ?? {
+    "all.json": tests.flatMap(([path, count]) =>
+      indexes(count).map((index) =>
+        definitionOf(`${path.toUpperCase()}${index}`, path, index),
+      ),
+    ),
+  };
+  writeFiles(root, {
+    "rt-test.json": JSON.stringify({
+      defects: ["defects/*.json"],
+      ...given.settings,
+    }),
+    ...Object.fromEntries(
+      tests.map(([path, count]) => [
+        sourceOf(path),
+        indexes(count)
+          .map(
+            (index) => `export function f${index}() {\n  return ${index};\n}\n`,
+          )
+          .join(""),
+      ]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(files).map(([name, definitions]) => [
+        `defects/${name}`,
+        JSON.stringify({ defects: definitions }),
+      ]),
+    ),
+  });
+}
+
+/**
+ * Runs `body` over a daemon begun in a consumer written under a temporary directory: each workspace discovered with
+ * its tests and run once with every test passed, and its definitions waiting. The daemon is stopped when `body` ends.
+ */
+function falsifying<T>(
+  given: FalsifyingCase,
+  body: (started: Falsifying) => Promise<T>,
+): Promise<T> {
+  return inTempDir(async (root) => {
+    writeConsumer(root, given);
+    const tests = testsOf(given);
+    const paths = Object.keys(tests);
+    const executor = new FalsifyingExecutor(
+      {
+        ended: true,
+        value: discovery(
+          ...paths.map((path) =>
+            discoveredIn(
+              path,
+              indexes(tests[path] ?? 0).map(() => TEST_MODULE),
+            ),
+          ),
+        ),
+      },
+      (path) => ({
+        ended: true,
+        value:
+          given.ran?.(path) ??
+          ranWorkspace(
+            path,
+            indexes(tests[path] ?? 0).map(() => "passed"),
+          ),
+      }),
+      given,
+    );
+    const started = daemon(
+      given.start ?? confirmed(...paths),
+      executor,
+      given.store ?? new RecordingStore(),
+      {
+        ...IDENTITY,
+        consumerRoot: root,
+        stateDirectory: join(root, ".rt-test"),
+      },
+      given.inputs ?? new StandInInputs(),
+      new ScriptedBuilds(),
+      given.quietWindowMs ?? NO_QUIET_WINDOW_MS,
+    );
+    started.lifecycle.begin();
+    try {
+      return await body({ ...started, executor, root });
+    } finally {
+      executor.end(TEST_ENDED);
+      started.lifecycle.stop();
+      await started.lifecycle.stopped();
+    }
+  });
+}
+
+/** How long a wait for the daemon lets the event loop turn, on the process's own clock, which no test fakes. */
+const REACH_BOUND_NS = 3_000_000_000n;
+
+/**
+ * Lets the event loop turn until `ready`, since a look's file reads end on no turn a test can count. It returns at
+ * the bound whether or not the daemon got there, so one that never does fails the test's own assertion.
+ */
+async function reached(ready: () => boolean): Promise<void> {
+  const deadline = process.hrtime.bigint() + REACH_BOUND_NS;
+  while (!ready() && process.hrtime.bigint() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+/** Until `count` falsification jobs have been sent. */
+function sent(started: Falsifying, count: number): Promise<void> {
+  return reached(() => started.executor.jobs.length >= count);
+}
+
+/** Until the scheduler has gone idle `count` times: it logs so each time a look takes nothing after work. */
+function idled(started: Falsifying, count = 1): Promise<void> {
+  return reached(
+    () =>
+      started.log.entries.filter((entry) => entry === IDLE_ENTRY).length >=
+      count,
+  );
+}
+
+/** Ends a periodic reconciliation with the revision unmoved, and waits for the look the plan after it takes. */
+async function afterPeriodicReconciliation(started: Falsifying): Promise<void> {
+  const { inputs } = started;
+  const windows = inputs.jobsEnded;
+  inputs.endPeriodicReconciliation();
+  await reached(() => inputs.jobsEnded > windows);
+  await flush();
+}
+
+/** The ids each job sent held, in the order the jobs were sent. */
+function jobIds(started: Falsifying): string[][] {
+  return started.executor.jobs.map((job) =>
+    job.experiments.map(({ defectId }) => defectId),
+  );
+}
+
+function falsificationEntries(started: Falsifying): UnstoredJob[] {
+  return started.lifecycle
+    .status()
+    .unstoredJobs.filter((job) => job.kind === "falsification");
+}
+
+/** Each defect the store holds evidence for, with its verdict. */
+function storedVerdicts(started: Falsifying): Record<string, string> {
+  return Object.fromEntries(
+    started.store
+      .readLatestResults(SCOPE)
+      .evidence.map(({ defectId, verdict }) => [defectId, verdict]),
+  );
+}
+
+/** Inputs whose workspaces' fingerprints change when the test sets `edited`, as an edit inside every workspace does. */
+class EditableInputs extends StandInInputs {
+  edited = false;
+
+  constructor() {
+    super({
+      fingerprintOf: (path) => ({
+        ok: true,
+        digest: this.edited ? `${path}-edited` : `${path}-digest`,
+      }),
+    });
+  }
+}
+
+/** Why a job's window does not vouch for its inputs, when an event named one while it ran at an unmoved revision. */
+const NAMED_EVENT: JobVerdict = {
+  fingerprinted: false,
+  reason: "an input event named a/src/a.ts while the job ran",
+  changedWhileRunning: true,
+};
+
+/** Inputs whose next job to end reads the verdict the test set, as a job reads an event that named an input. */
+class NamingInputs extends StandInInputs {
+  named: JobVerdict | undefined;
+
+  override async endJob(
+    mark: Parameters<StandInInputs["endJob"]>[0],
+  ): Promise<JobVerdict> {
+    const verdict = await super.endJob(mark);
+    const { named } = this;
+    this.named = undefined;
+    return named ?? verdict;
+  }
+}
+
+describe(
+  "which waiting definitions a falsification job takes",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4050: a definition that is invalid, whose anchor is missing, or whose test holds no current pass is given no experiment, and the others are", async () => {
+      const jobs = await falsifying(
+        {
+          tests: { a: 4 },
+          ran: (path) =>
+            ranWorkspace(path, ["passed", "passed", "failed", "passed"]),
+          files: {
+            "all.json": [
+              definitionOf("INVALID", "a", 0, { mutation: undefined }),
+              definitionOf("NO-ANCHOR", "a", 1, {
+                mutation: {
+                  file: sourceOf("a"),
+                  old: "return 99;",
+                  new: "return 98;",
+                },
+              }),
+              definitionOf("NO-PASS", "a", 2),
+              definitionOf("GOOD", "a", 3),
+            ],
+          },
+        },
+        async (started) => {
+          await idled(started);
+          return jobIds(started);
+        },
+      );
+      expect(jobs).toStrictEqual([["GOOD"]]);
+    });
+
+    it("D4051: a definition whose evidence reads current is not waiting, so a later input revision that leaves it current starts no job for it", async () => {
+      const jobs = await falsifying({ tests: { a: 2 } }, async (started) => {
+        await idled(started);
+        started.inputs.moveRevision();
+        await idled(started, 2);
+        return jobIds(started);
+      });
+      expect(jobs).toStrictEqual([["A0", "A1"]]);
+    });
+
+    it("D4052: each experiment holds its definition's id, its resolved test's identity, and its mutation with the file as an absolute path", async () => {
+      const experiments = await falsifying({}, async (started) => {
+        await sent(started, 1);
+        const file = join(started.root, "a", "src", "a.ts");
+        return started.executor.jobs[0]?.experiments.map((experiment) => ({
+          ...experiment,
+          mutation: {
+            ...experiment.mutation,
+            file:
+              experiment.mutation.file === file
+                ? "<root>/a/src/a.ts"
+                : experiment.mutation.file,
+          },
+        }));
+      });
+      expect(experiments).toStrictEqual([
+        {
+          defectId: "A0",
+          test: {
+            workspacePath: "a",
+            projectName: "unit",
+            modulePath: "a.test.ts",
+            namePath: ["t0"],
+            occurrence: 0,
+          },
+          mutation: {
+            file: "<root>/a/src/a.ts",
+            old: "return 0;",
+            new: "return 0 + 1;",
+          },
+        },
+      ]);
+    });
+
+    it("D4053: a job is handed its workspace's confirmed config file and the assertion error names rt-test.json declares", async () => {
+      const handed = await falsifying(
+        { settings: { assertionErrors: ["HtmlElementTypeError"] } },
+        async (started) => {
+          await sent(started, 1);
+          const [job] = started.executor.jobs;
+          return {
+            configFile: job?.configFile,
+            assertionErrors: job?.assertionErrors,
+          };
+        },
+      );
+      expect(handed).toStrictEqual({
+        configFile: "a/vitest.config.mjs",
+        assertionErrors: ["HtmlElementTypeError"],
+      });
+    });
+
+    it("D4054: a job holds at most 25 definitions, and the next job holds the rest", async () => {
+      const sizes = await falsifying(
+        { tests: { a: MAX_JOB_DEFINITIONS + 1 } },
+        async (started) => {
+          await idled(started);
+          return jobIds(started).map((ids) => ids.length);
+        },
+      );
+      expect(sizes).toStrictEqual([25, 1]);
+    });
+
+    it("D4055: a job holds only the definitions of the first waiting definition's workspace, in the listing's order, and the next job the other workspace's", async () => {
+      const jobs = await falsifying(
+        {
+          tests: { a: 1, b: 2 },
+          files: {
+            "1.json": [definitionOf("B0", "b", 0)],
+            "2.json": [definitionOf("A0", "a", 0), definitionOf("B1", "b", 1)],
+          },
+        },
+        async (started) => {
+          await idled(started);
+          return started.executor.jobs.map((job) => ({
+            workspacePath: job.workspacePath,
+            ids: job.experiments.map(({ defectId }) => defectId),
+          }));
+        },
+      );
+      expect(jobs).toStrictEqual([
+        { workspacePath: "b", ids: ["B0", "B1"] },
+        { workspacePath: "a", ids: ["A0"] },
+      ]);
+    });
+
+    it("D4056: the waiting definitions are taken in the order a defects answer lists them, a survivor whose evidence is stale before a never verified one that precedes it in its file", async () => {
+      const inputs = new EditableInputs();
+      const jobs = await falsifying(
+        {
+          tests: { a: 3 },
+          inputs,
+          replies: (job) =>
+            replied(job, (id) => (id === "A2" ? SURVIVED : NO_VERDICT)),
+        },
+        async (started) => {
+          await idled(started);
+          inputs.edited = true;
+          inputs.moveRevision();
+          await idled(started, 2);
+          return jobIds(started);
+        },
+      );
+      expect(jobs).toStrictEqual([
+        ["A0", "A1", "A2"],
+        ["A2", "A0", "A1"],
+      ]);
+    });
+  },
+);
+
+describe(
+  "what a falsification job stores",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4057: each verdict a job's reply carries is stored bound to its definition's digest, so a defects answer then reads it with evidence freshness current", async () => {
+      const read = await falsifying({ tests: { a: 2 } }, async (started) => {
+        await idled(started);
+        const answer = await started.lifecycle.defects(
+          undefined,
+          stillWaited(),
+        );
+        return "noAnswer" in answer
+          ? answer
+          : answer.definitions.map(({ id, state, evidence }) => ({
+              id,
+              state,
+              freshness: evidence?.freshness,
+            }));
+      });
+      expect(read).toStrictEqual([
+        { id: "A0", state: "detected", freshness: "current" },
+        { id: "A1", state: "detected", freshness: "current" },
+      ]);
+    });
+
+    it("D4058: a job's whole reply is stored in one write, bound to the digest of the workspace's fingerprint its standings were read at", async () => {
+      const writes = await falsifying({ tests: { a: 2 } }, async (started) => {
+        await idled(started);
+        return started.store.evidenceWrites.map((write) => ({
+          bindings: write.bindings,
+          defects: [...write.definitionDigests.keys()],
+        }));
+      });
+      expect(writes).toStrictEqual([
+        {
+          bindings: { ...SCOPE, inputFingerprintDigest: "a-digest" },
+          defects: ["A0", "A1"],
+        },
+      ]);
+    });
+
+    it("D4059: the verdicts of a job in which no run happened, each decided before any run, are stored", async () => {
+      const stored = await falsifying(
+        { replies: decidedBeforeAnyRun },
+        async (started) => {
+          await idled(started);
+          return storedVerdicts(started);
+        },
+      );
+      expect(stored).toStrictEqual({ A0: "invalid-experiment" });
+    });
+
+    it("D4060: nothing of a job is stored when an event named an input while it ran, though the input revision and the workspace's fingerprint are as at its start", async () => {
+      const inputs = new NamingInputs();
+      const writes = await falsifying(
+        {
+          inputs,
+          replies: (job) => {
+            inputs.named = NAMED_EVENT;
+            return replied(job);
+          },
+        },
+        async (started) => {
+          await idled(started);
+          return started.store.evidenceWrites.length;
+        },
+      );
+      expect(writes).toBe(0);
+    });
+
+    it("D4061: a workspace whose job an event named an input during, at a revision that did not move, gets no further job, and its entry says which event and what ends the wait", async () => {
+      const inputs = new NamingInputs();
+      const outcome = await falsifying(
+        {
+          tests: { a: 26 },
+          inputs,
+          replies: (job) => {
+            inputs.named = NAMED_EVENT;
+            return replied(job);
+          },
+        },
+        async (started) => {
+          await idled(started);
+          const [entry] = falsificationEntries(started);
+          return {
+            jobs: started.executor.jobs.length,
+            namesTheEvent: entry?.reason.includes(NAMED_EVENT.reason),
+            saysWhatEndsTheWait: entry?.reason.includes(
+              "until the input revision changes",
+            ),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        jobs: 1,
+        namesTheEvent: true,
+        saysWhatEndsTheWait: true,
+      });
+    });
+
+    it("D4062: a reply that carries no verdict is never handed to the store", async () => {
+      const writes = await falsifying(
+        { replies: (job) => replied(job, () => NO_VERDICT) },
+        async (started) => {
+          await idled(started);
+          return started.store.evidenceWrites.length;
+        },
+      );
+      expect(writes).toBe(0);
+    });
+
+    it("D4063: a stop during a job stores nothing of it and leaves no definition and no workspace waiting", async () => {
+      const outcome = await falsifying(
+        {
+          tests: { a: 2 },
+          replies: () => HELD,
+          aborted: (job) => aborted(job, { running: "A0", decided: ["A1"] }),
+        },
+        async (started) => {
+          await sent(started, 1);
+          started.lifecycle.stop();
+          await started.lifecycle.stopped();
+          return {
+            writes: started.store.evidenceWrites.length,
+            entries: falsificationEntries(started),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({ writes: 0, entries: [] });
+    });
+  },
+);
+
+describe(
+  "a falsification job a change of the input revision ends",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    /** A job of three definitions, held until an abort ends it while `A0` runs; every other job gives no verdict. */
+    function endedWhileA0Runs(held: readonly number[]): FalsifyingCase {
+      return {
+        tests: { a: 3 },
+        replies: (job, call) =>
+          held.includes(call) ? HELD : replied(job, () => NO_VERDICT),
+        aborted: (job) => aborted(job, { running: "A0" }),
+      };
+    }
+
+    it("D4064: a change of the input revision while a job runs aborts the job as an interruption", async () => {
+      const purposes = await falsifying(
+        endedWhileA0Runs([0]),
+        async (started) => {
+          await sent(started, 1);
+          started.inputs.moveRevision();
+          await reached(() => started.executor.aborts > 0);
+          return [...started.executor.purposes];
+        },
+      );
+      expect(purposes).toStrictEqual([ABORT_PURPOSE.interruption]);
+    });
+
+    it("D4065: a periodic reconciliation that ends while a job runs, the input revision unmoved, does not abort the job", async () => {
+      const aborts = await falsifying(
+        endedWhileA0Runs([0]),
+        async (started) => {
+          await sent(started, 1);
+          started.inputs.endPeriodicReconciliation();
+          await flush();
+          return started.executor.aborts;
+        },
+      );
+      expect(aborts).toBe(0);
+    });
+
+    it("D4066: one input change that ends a job marks none of its definitions, so the one that was running is taken first again", async () => {
+      const jobs = await falsifying(endedWhileA0Runs([0]), async (started) => {
+        await sent(started, 1);
+        started.inputs.moveRevision();
+        await idled(started);
+        return jobIds(started);
+      });
+      expect(jobs).toStrictEqual([
+        ["A0", "A1", "A2"],
+        ["A0", "A1", "A2"],
+      ]);
+    });
+
+    it("D4067: a definition that was the one running when an input change ended its job, in two jobs in a row, is left without a verdict and not taken at the revision the second returned at", async () => {
+      const outcome = await falsifying(
+        endedWhileA0Runs([0, 1]),
+        async (started) => {
+          await sent(started, 1);
+          started.inputs.moveRevision();
+          await sent(started, 2);
+          started.inputs.moveRevision();
+          await idled(started);
+          return {
+            third: jobIds(started)[2],
+            names: falsificationEntries(started).map((entry) =>
+              entry.reason.includes("A0 (repeated-input-change)"),
+            ),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({ third: ["A1", "A2"], names: [true] });
+    });
+
+    it("D4068: a job that ran to its end between two jobs an input change ended while one definition ran ends that run of endings, so the definition is taken again", async () => {
+      const jobs = await falsifying(
+        endedWhileA0Runs([0, 2]),
+        async (started) => {
+          await sent(started, 1);
+          started.inputs.moveRevision();
+          await idled(started);
+          started.inputs.moveRevision();
+          await sent(started, 3);
+          started.inputs.moveRevision();
+          await idled(started, 2);
+          return jobIds(started)[3];
+        },
+      );
+      expect(jobs).toStrictEqual(["A0", "A1", "A2"]);
+    });
+
+    it("D4069: once a job has returned, a later change of the input revision aborts nothing", async () => {
+      const aborts = await falsifying({}, async (started) => {
+        await idled(started);
+        started.inputs.moveRevision();
+        await idled(started, 2);
+        return started.executor.aborts;
+      });
+      expect(aborts).toBe(0);
+    });
+  },
+);
+
+/** What every workspace's entry says ends its wait. */
+const WORKSPACE_WAIT_ENDS = "until the input revision changes";
+const EXECUTOR_DIED =
+  "the executor process 7 exited during the job (exit code 1)";
+const FAILED_TO_LOAD: FalsificationJob = {
+  status: "failed",
+  workspace: workspace("a"),
+  vitestVersion: DISCOVERED_VITEST_VERSION,
+  error: "Error: config boom",
+};
+
+/** A reply of a shape no executor sends, as a value that crossed a process boundary can be. */
+function replyOf(value: unknown): FalsifyOutcome {
+  return { ended: true, value: value as FalsificationJob };
+}
+
+describe(
+  "a falsification job the time bound ends",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    /**
+     * Runs `body` under the fake clock once a job of three definitions is in progress, held until an abort, which
+     * leaves it as `how` says. Every later job runs to its end and gives no verdict.
+     */
+    function heldForTheBound<T>(
+      how: AbortedJob,
+      body: (started: Falsifying) => Promise<T>,
+    ): Promise<T> {
+      return underFakeClock(() =>
+        falsifying(
+          {
+            tests: { a: 3 },
+            replies: (job, call) =>
+              call === 0 ? HELD : replied(job, () => NO_VERDICT),
+            aborted: (job) => aborted(job, how),
+          },
+          async (started) => {
+            await sent(started, 1);
+            return body(started);
+          },
+        ),
+      );
+    }
+
+    /** The jobs sent once the bound ended the first, and whether each falsification entry names the bound and a baseline. */
+    async function afterTheBoundInABaseline(how: AbortedJob): Promise<unknown> {
+      return heldForTheBound(how, async (started) => {
+        await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+        await idled(started);
+        return {
+          jobs: jobIds(started),
+          saysTheBoundInABaseline: falsificationEntries(started).map(
+            ({ reason }) =>
+              reason.includes("time bound") && reason.includes("baseline"),
+          ),
+        };
+      });
+    }
+
+    const ONE_JOB_AND_THE_WORKSPACE_WAITS = {
+      jobs: [["A0", "A1", "A2"]],
+      saysTheBoundInABaseline: [true],
+    };
+
+    it("D4070: a job that has not ended 10 minutes after it was sent is aborted as an interruption, and no sooner", async () => {
+      const purposes = await heldForTheBound(
+        { running: "A0" },
+        async (started) => {
+          await vi.advanceTimersByTimeAsync(599_999);
+          const before = [...started.executor.purposes];
+          await vi.advanceTimersByTimeAsync(1);
+          return { before, after: [...started.executor.purposes] };
+        },
+      );
+      expect(purposes).toStrictEqual({
+        before: [],
+        after: [ABORT_PURPOSE.interruption],
+      });
+    });
+
+    it("D4071: the definition that was running when the bound ended its job is left without a verdict, named with the bound, and the job's other definitions are taken again at once", async () => {
+      const outcome = await heldForTheBound(
+        { running: "A1" },
+        async (started) => {
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          await idled(started);
+          return {
+            next: jobIds(started)[1],
+            names: falsificationEntries(started).map(({ reason }) =>
+              reason.includes("A1 (time-bound)"),
+            ),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({ next: ["A0", "A2"], names: [true] });
+    });
+
+    it("D4072: a definition the bound left without a verdict is taken again once the input revision moves, after every other definition", async () => {
+      const third = await heldForTheBound(
+        { running: "A0" },
+        async (started) => {
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          await idled(started);
+          started.inputs.moveRevision();
+          await idled(started, 2);
+          return jobIds(started)[2];
+        },
+      );
+      expect(third).toStrictEqual(["A1", "A2", "A0"]);
+    });
+
+    it("D4073: the verdicts carried by the reply of a job the bound ended are stored", async () => {
+      const stored = await heldForTheBound(
+        { running: "A1", decided: ["A2"] },
+        async (started) => {
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          await idled(started);
+          return storedVerdicts(started);
+        },
+      );
+      expect(stored).toStrictEqual({ A2: "invalid-experiment" });
+    });
+
+    it("D4074: a job the bound ended in its first baseline names no definition, so its workspace gets no further job and no definition is left behind the others", async () => {
+      expect(
+        await afterTheBoundInABaseline({ baselineEnded: false }),
+      ).toStrictEqual(ONE_JOB_AND_THE_WORKSPACE_WAITS);
+    });
+
+    it("D4075: a job the bound ended in its restored baseline, every experiment run, names no definition, so its workspace gets no further job", async () => {
+      expect(await afterTheBoundInABaseline({})).toStrictEqual(
+        ONE_JOB_AND_THE_WORKSPACE_WAITS,
+      );
+    });
+
+    it("D4076: an experiment whose confirming run the bound ended is the one that was running, not the experiment after it", async () => {
+      const next = await heldForTheBound(
+        { running: "A0", inConfirming: true },
+        async (started) => {
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          await idled(started);
+          return jobIds(started)[1];
+        },
+      );
+      expect(next).toStrictEqual(["A1", "A2"]);
+    });
+
+    it("D4077: a bound whose abort found no job in progress ended nothing, so the reply that follows is read as the job's own", async () => {
+      const says = await underFakeClock(() =>
+        falsifying({ replies: () => HELD }, async (started) => {
+          await sent(started, 1);
+          started.executor.abortFinds = false;
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          started.executor.end({ ended: true, value: FAILED_TO_LOAD });
+          await idled(started);
+          const [entry] = falsificationEntries(started);
+          return {
+            theFailure: entry?.reason.includes("config boom"),
+            theBound: entry?.reason.includes("time bound"),
+          };
+        }),
+      );
+      expect(says).toStrictEqual({ theFailure: true, theBound: false });
+    });
+
+    it("D4078: a reply that holds every run, from a job whose last run had ended when the bound's abort reached it, is stored as a job that ran to its end", async () => {
+      const outcome = await underFakeClock(() =>
+        falsifying(
+          { replies: () => HELD, aborted: (job) => replied(job) },
+          async (started) => {
+            await sent(started, 1);
+            await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+            await idled(started);
+            return {
+              stored: storedVerdicts(started),
+              entries: falsificationEntries(started),
+            };
+          },
+        ),
+      );
+      expect(outcome).toStrictEqual({
+        stored: { A0: "detected" },
+        entries: [],
+      });
+    });
+  },
+);
+
+describe(
+  "a workspace whose falsification job did not run or could not be stored",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    /** How many jobs a workspace was sent, and what its entry holds of `fragments`, once its job ended as `outcome`. */
+    async function afterJob(
+      outcome: FalsifyOutcome,
+      fragments: readonly string[],
+      given: FalsifyingCase = {},
+    ): Promise<unknown> {
+      return falsifying(
+        { replies: () => outcome, ...given },
+        async (started) => {
+          await idled(started);
+          const [entry] = falsificationEntries(started);
+          return {
+            jobs: started.executor.jobs.length,
+            workspacePath: entry?.workspacePath,
+            kind: entry?.kind,
+            missing: [...fragments, WORKSPACE_WAIT_ENDS].filter(
+              (fragment) => entry?.reason.includes(fragment) !== true,
+            ),
+          };
+        },
+      );
+    }
+
+    /** One job, then none: the workspace's one entry, marked as a falsification's, says each fragment asked for. */
+    const WAITS_AFTER_ONE_JOB = {
+      jobs: 1,
+      workspacePath: "a",
+      kind: "falsification",
+      missing: [],
+    };
+
+    it("D4079: a definition of a job that ran to its end is not taken again at that revision, with a verdict or without, and a periodic reconciliation does not lift that", async () => {
+      const jobs = await falsifying(
+        { replies: (job) => replied(job, () => NO_VERDICT) },
+        async (started) => {
+          await idled(started);
+          await afterPeriodicReconciliation(started);
+          return jobIds(started);
+        },
+      );
+      expect(jobs).toStrictEqual([["A0"]]);
+    });
+
+    it("D4080: a workspace whose job was refused for an on-disk module cache gets no further job, and its entry names the projects and their settings", async () => {
+      expect(
+        await afterJob(
+          replyOf({
+            status: "refused",
+            workspace: workspace("a"),
+            vitestVersion: DISCOVERED_VITEST_VERSION,
+            falsifierVersion: FALSIFIER_VERSION,
+            unhandledErrors: [],
+            refusal: {
+              kind: "module-cache",
+              caches: [
+                { projectName: "unit", setting: "experimental.fsModuleCache" },
+              ],
+            },
+          }),
+          ["unit", "experimental.fsModuleCache"],
+        ),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4081: a workspace whose job was refused because its Vitest instance could not be prepared gets no further job, and its entry says why", async () => {
+      expect(
+        await afterJob(
+          replyOf({
+            status: "refused",
+            workspace: workspace("a"),
+            vitestVersion: DISCOVERED_VITEST_VERSION,
+            falsifierVersion: FALSIFIER_VERSION,
+            unhandledErrors: [],
+            refusal: { kind: "not-prepared", error: "Error: no reach setup" },
+          }),
+          ["Error: no reach setup"],
+        ),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4082: a workspace whose Vitest is not supported gets no further job, and its entry says why it is not", async () => {
+      expect(
+        await afterJob(
+          replyOf({
+            status: "unsupported",
+            workspace: workspace("a"),
+            vitest: { supported: false, reason: "Vitest 3.2.4 is too old" },
+          }),
+          ["Vitest 3.2.4 is too old"],
+        ),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4083: a workspace whose job replied that its config is not the one confirmed gets no further job, and its entry says so", async () => {
+      expect(
+        await afterJob(
+          replyOf({
+            status: "not-confirmed",
+            workspace: workspace("a"),
+            reason: CONFIG_NOT_CONFIRMED,
+          }),
+          [CONFIG_NOT_CONFIRMED],
+        ),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4084: a workspace that failed to load in its job gets no further job, and its entry holds the failure", async () => {
+      expect(
+        await afterJob(replyOf(FAILED_TO_LOAD), ["Error: config boom"]),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4085: a workspace whose executor ended without a reply gets no further job, and its entry says how the executor ended", async () => {
+      expect(
+        await afterJob({ ended: false, reason: EXECUTOR_DIED }, [
+          EXECUTOR_DIED,
+        ]),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4086: a reply whose job is not an object is a job that did not run, so its workspace gets no further job", async () => {
+      expect(await afterJob(replyOf(null), [])).toStrictEqual(
+        WAITS_AFTER_ONE_JOB,
+      );
+    });
+
+    it("D4087: a reply of a status no job has is a job that did not run, so its workspace gets no further job", async () => {
+      expect(await afterJob(replyOf({ status: "mystery" }), [])).toStrictEqual(
+        WAITS_AFTER_ONE_JOB,
+      );
+    });
+
+    it("D4088: a reply that reads ran without its list of judgements is a job that did not run, so its workspace gets no further job", async () => {
+      expect(
+        await afterJob(replyOf({ ...ranReply([]), judgements: "none" }), []),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4089: a workspace the confirmed start no longer holds is sent no job and gets none, and its entry says its config is not confirmed", async () => {
+      const store = new RecordingStore();
+      store.seedDiscovery(discovery(discoveredIn("a", [TEST_MODULE])), {
+        kind: "digest",
+        digest: DISCOVERY_DIGEST,
+      });
+      store.seedRun(ranWorkspace("a"), { kind: "digest", digest: "a-digest" });
+      expect(
+        await afterJob(TEST_ENDED, ["confirmed"], {
+          store,
+          start: confirmed(),
+        }),
+      ).toStrictEqual({ ...WAITS_AFTER_ONE_JOB, jobs: 0 });
+    });
+
+    it("D4090: a workspace whose verdicts the store could not write gets no further job, and its entry says they could not be stored", async () => {
+      const store = new RecordingStore();
+      store.failingEvidence = "database is locked";
+      expect(
+        await afterJob(TEST_ENDED, ["could not be stored"], {
+          tests: { a: MAX_JOB_DEFINITIONS + 1 },
+          store,
+          replies: (job) => replied(job),
+        }),
+      ).toStrictEqual(WAITS_AFTER_ONE_JOB);
+    });
+
+    it("D4091: a workspace whose executor ended without a reply after the bound's abort gets no further job, and its entry names the bound and how the executor ended", async () => {
+      const outcome = await underFakeClock(() =>
+        falsifying(
+          {
+            replies: () => HELD,
+            aborted: () => ({ ended: false, reason: EXECUTOR_DIED }),
+          },
+          async (started) => {
+            await sent(started, 1);
+            await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+            await idled(started);
+            const [entry] = falsificationEntries(started);
+            return {
+              jobs: started.executor.jobs.length,
+              missing: [
+                "time bound",
+                EXECUTOR_DIED,
+                WORKSPACE_WAIT_ENDS,
+              ].filter((fragment) => entry?.reason.includes(fragment) !== true),
+            };
+          },
+        ),
+      );
+      expect(outcome).toStrictEqual({ jobs: 1, missing: [] });
+    });
+
+    /** A load error longer than an answer keeps of a reason, over several lines. */
+    const LONG_ERROR = `Error: config boom\n${"x".repeat(3000)}\n    at load`;
+
+    it("D4092: a long, multi-line error ahead of it leaves what ends the wait on the reason's one line, inside the 1,000 characters an answer keeps", async () => {
+      const reason = await falsifying(
+        {
+          replies: () => replyOf({ ...FAILED_TO_LOAD, error: LONG_ERROR }),
+        },
+        async (started) => {
+          await idled(started);
+          const [entry] = falsificationEntries(started);
+          const text = entry?.reason ?? "";
+          return {
+            lines: text.split("\n").length,
+            waitEndsBy:
+              text.includes(WORKSPACE_WAIT_ENDS) &&
+              text.indexOf(WORKSPACE_WAIT_ENDS) + WORKSPACE_WAIT_ENDS.length <=
+                1000,
+          };
+        },
+      );
+      expect(reason).toStrictEqual({ lines: 1, waitEndsBy: true });
+    });
+
+    it("D4093: the log holds the whole of an error a workspace's entry cuts", async () => {
+      const logged = await falsifying(
+        {
+          replies: () => replyOf({ ...FAILED_TO_LOAD, error: LONG_ERROR }),
+        },
+        async (started) => {
+          await idled(started);
+          return started.log.entries.filter((entry) =>
+            entry.includes(LONG_ERROR),
+          ).length;
+        },
+      );
+      expect(logged).toBe(1);
+    });
+
+    it("D4094: a look that throws after it opened its window on the tracker closes the window before the throw goes on", async () => {
+      const windows = await falsifying(
+        {
+          replies: () => {
+            throw new Error("the executor could not take the job");
+          },
+        },
+        async (started) => {
+          await sent(started, 1);
+          await flush();
+          return {
+            begun: started.inputs.jobsBegun,
+            ended: started.inputs.jobsEnded,
+          };
+        },
+      );
+      expect(windows).toStrictEqual({ begun: 4, ended: 4 });
+    });
+  },
+);
+
+/** A store whose run writes fail while the test says so, as a locked database fails them. */
+class RunFailingStore extends RecordingStore {
+  failingRuns = false;
+
+  override writeRun(bindings: StoreBindings, run: WorkspaceRun): StoredRun {
+    if (this.failingRuns) throw new Error("database is locked");
+    return super.writeRun(bindings, run);
+  }
+}
+
+/** A case whose every job runs to its end and gives no definition a verdict. */
+const NO_VERDICTS: FalsifyingCase = {
+  replies: (job) => replied(job, () => NO_VERDICT),
+};
+
+describe(
+  "what answers and status say of falsification",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4095: while a falsification job runs, the activity reads falsifying, with its workspace and the number of definitions in the job", async () => {
+      const activity = await falsifying(
+        { tests: { a: 2 }, replies: () => HELD },
+        async (started) => {
+          await sent(started, 1);
+          return started.lifecycle.status().activity;
+        },
+      );
+      expect(activity).toStrictEqual({
+        state: "falsifying",
+        workspacePath: "a",
+        definitions: 2,
+      });
+    });
+
+    it("D4096: after a job a change ended, while the scheduler waits out the next quiet window, the activity is idle", async () => {
+      const activity = await underFakeClock(() =>
+        falsifying(
+          {
+            quietWindowMs: 1000,
+            replies: () => HELD,
+            aborted: (job) => aborted(job, { running: "A0" }),
+          },
+          async (started) => {
+            await flush();
+            await vi.advanceTimersByTimeAsync(1000);
+            await sent(started, 1);
+            started.inputs.moveRevision();
+            await reached(() =>
+              started.log.entries.some((entry) =>
+                entry.startsWith("falsification ended"),
+              ),
+            );
+            await flush();
+            return started.lifecycle.status().activity;
+          },
+        ),
+      );
+      expect(activity).toStrictEqual({ state: "idle" });
+    });
+
+    it("D4097: a workspace's falsification entry is marked as a falsification job, and stands beside the entry of that workspace's run that stored nothing", async () => {
+      const inputs = new EditableInputs();
+      const store = new RunFailingStore();
+      const jobs = await falsifying(
+        { ...NO_VERDICTS, inputs, store },
+        async (started) => {
+          await idled(started);
+          store.failingRuns = true;
+          inputs.edited = true;
+          inputs.moveRevision();
+          await idled(started, 2);
+          inputs.edited = false;
+          inputs.moveRevision();
+          await idled(started, 3);
+          return started.lifecycle
+            .status()
+            .unstoredJobs.map(({ workspacePath, kind }) => ({
+              workspacePath,
+              kind: kind ?? "a run",
+            }));
+        },
+      );
+      expect(jobs).toStrictEqual([
+        { workspacePath: "a", kind: "a run" },
+        { workspacePath: "a", kind: "falsification" },
+      ]);
+    });
+
+    it("D4098: a workspace whose reply could not be stored and whose definitions got no verdict has one entry, what happened to the workspace before its definitions", async () => {
+      const inputs = new NamingInputs();
+      const entries = await falsifying(
+        {
+          inputs,
+          replies: (job) => {
+            inputs.named = NAMED_EVENT;
+            return replied(job, () => NO_VERDICT);
+          },
+        },
+        async (started) => {
+          await idled(started);
+          return falsificationEntries(started).map(({ reason }) => ({
+            workspaceFirst:
+              reason.includes(NAMED_EVENT.reason) &&
+              reason.indexOf(NAMED_EVENT.reason) < reason.indexOf("A0 ("),
+          }));
+        },
+      );
+      expect(entries).toStrictEqual([{ workspaceFirst: true }]);
+    });
+
+    it("D4099: an entry names at most 20 of the definitions left without a verdict and counts the rest", async () => {
+      const names = await falsifying(
+        { ...NO_VERDICTS, tests: { a: 22 } },
+        async (started) => {
+          await idled(started);
+          const reason = falsificationEntries(started)[0]?.reason ?? "";
+          return {
+            named: reason.match(/A\d+ \(/g)?.length,
+            countsTheRest: reason.endsWith(" and 2 more"),
+          };
+        },
+      );
+      expect(names).toStrictEqual({ named: 20, countsTheRest: true });
+    });
+
+    it("D4100: an entry says what ends its definitions' wait before it names one, each with its reason, and holds no mutation text", async () => {
+      const says = await falsifying(NO_VERDICTS, async (started) => {
+        await idled(started);
+        const reason = falsificationEntries(started)[0]?.reason ?? "";
+        const name = reason.indexOf("A0 (");
+        return {
+          endsBeforeTheName: [
+            "the input revision",
+            "the definition",
+            "the declared assertion error names",
+          ].map((end) => reason.includes(end) && reason.indexOf(end) < name),
+          namesItsReason: reason.includes(`A0 (${NO_VERDICT_REASON})`),
+          holdsMutationText: reason.includes("return 0"),
+        };
+      });
+      expect(says).toStrictEqual({
+        endsBeforeTheName: [true, true, true],
+        namesItsReason: true,
+        holdsMutationText: false,
+      });
+    });
+
+    it("D4101: the entry of definitions left without a verdict leaves the list once the input revision moves", async () => {
+      const entries = await falsifying(NO_VERDICTS, async (started) => {
+        await idled(started);
+        const before = falsificationEntries(started).length;
+        started.inputs.moveRevision();
+        return { before, after: falsificationEntries(started).length };
+      });
+      expect(entries).toStrictEqual({ before: 1, after: 0 });
+    });
+
+    it("D4102: the entry of a workspace whose job did not run leaves the list once the input revision moves", async () => {
+      const entries = await falsifying(
+        { replies: () => replyOf(FAILED_TO_LOAD) },
+        async (started) => {
+          await idled(started);
+          const before = falsificationEntries(started).length;
+          started.inputs.moveRevision();
+          return { before, after: falsificationEntries(started).length };
+        },
+      );
+      expect(entries).toStrictEqual({ before: 1, after: 0 });
+    });
+
+    it("D4103: a summary carries a falsification entry marked as one", async () => {
+      const jobs = await falsifying(NO_VERDICTS, async (started) => {
+        await idled(started);
+        const answer = started.lifecycle.summary();
+        return "noAnswer" in answer
+          ? answer
+          : answer.unstoredJobs.map(({ workspacePath, kind }) => ({
+              workspacePath,
+              kind,
+            }));
+      });
+      expect(jobs).toStrictEqual([
+        { workspacePath: "a", kind: "falsification" },
+      ]);
+    });
+
+    it("D4104: while a workspace is falsified, a summary reads its execution state idle beside the falsifying activity, and the job has stored no run and no discovery", async () => {
+      const read = await falsifying(
+        { replies: () => HELD },
+        async (started) => {
+          await sent(started, 1);
+          const answer = started.lifecycle.summary();
+          return "noAnswer" in answer
+            ? answer
+            : {
+                activity: answer.activity.state,
+                execution: answer.schedule.workspaces,
+                runs: started.store.runs.length,
+                discoveries: started.store.discoveries.length,
+              };
+        },
+      );
+      expect(read).toStrictEqual({
+        activity: "falsifying",
+        execution: [{ workspacePath: "a", state: "idle" }],
+        runs: 1,
+        discoveries: 1,
+      });
+    });
+  },
+);
+
+describe(
+  "what the log says of falsification",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4106: the log names a job as it starts: its workspace, the number of definitions, and the first definition's id and state", async () => {
+      const entries = await falsifying({ tests: { a: 2 } }, async (started) => {
+        await idled(started);
+        return started.log.entries.filter((entry) =>
+          entry.startsWith("falsification started"),
+        );
+      });
+      expect(entries).toStrictEqual([
+        "falsification started: a, definitions 2, first A0 (never-verified)",
+      ]);
+    });
+
+    it("D4107: the log names a job as it ends: how it ended, the verdicts stored of each kind, each definition left without one with its reason, and its wall time", async () => {
+      const entries = await falsifying(
+        {
+          tests: { a: 3 },
+          replies: (job) =>
+            replied(job, (id) =>
+              id === "A0" ? detection() : id === "A1" ? SURVIVED : NO_VERDICT,
+            ),
+        },
+        async (started) => {
+          await idled(started);
+          return started.log.entries
+            .filter((entry) => entry.startsWith("falsification ended"))
+            .map((entry) => entry.replace(/\d+ ms$/, "<n> ms"));
+        },
+      );
+      expect(entries).toStrictEqual([
+        `falsification ended: a, it ran to its end; verdicts stored: 1 detected, 1 survived; left without a verdict 1: A2 (${NO_VERDICT_REASON}); <n> ms`,
+      ]);
+    });
+
+    it("D4109: a look that found definitions waiting and took none is logged once for each input revision, naming the revision", async () => {
+      const logged = await falsifying(NO_VERDICTS, async (started) => {
+        const noneTaken = (): string[] =>
+          started.log.entries.filter((entry) =>
+            entry.startsWith(
+              "falsification: none of the waiting definitions is taken",
+            ),
+          );
+        await idled(started);
+        await afterPeriodicReconciliation(started);
+        const atOneRevision = noneTaken();
+        started.inputs.moveRevision();
+        await idled(started, 2);
+        return {
+          atOneRevision: atOneRevision.map((entry) =>
+            entry.includes("input revision 1"),
+          ),
+          afterAMove: noneTaken().length,
+        };
+      });
+      expect(logged).toStrictEqual({ atOneRevision: [true], afterAMove: 2 });
+    });
+  },
+);

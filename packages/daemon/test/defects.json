@@ -2879,9 +2879,9 @@
   {
     "id": "D1879",
     "defect": "A discovery is stored under its digest although a file it protects by path, which the inputs leave out, may have changed while it ran.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const changed = unwatched ?? released;\n",
-    "new": "    const changed = released;\n"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  const changed = unwatched ?? released;\n",
+    "new": "  const changed = released;\n"
   },
   {
     "id": "D1880",
@@ -3328,22 +3328,22 @@
     "id": "D1987",
     "defect": "The discovery's fingerprint is taken before its test modules are protected, so a module a declared pattern covered is missing from the stored digest and the discovery reads unknown or stale from then on.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    let movedOnceComposed = false;\n    const bindings = storeBindings(\n      this.#parts,\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        movedOnceComposed = moved !== undefined;\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
-    "new": "    let movedOnceComposed = false;\n    const bindings = storeBindings(this.#parts, \"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    const held = await this.#protectDiscovered(discovery, verdict, startedAt);\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
+    "old": "    const held = await protectDiscovered(\n      inputs,\n      () => this.isStopping(),\n      discovery,\n      verdict,\n      startedAt,\n    );\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }\n    let movedOnceComposed = false;\n    const bindings = storeBindings(\n      this.#parts,\n      \"the discovery\",\n      held,\n      (): FingerprintResult => {\n        const now = inputs.current();\n        const print = now.discoveryFingerprint(discovery);\n        // Checked again once composed: an unwatched file edited since the first check was read with content it never collected.\n        const moved = now.protectedFileChangedSince(discovery, startedAt);\n        movedOnceComposed = moved !== undefined;\n        return moved === undefined ? print : { ok: false, reason: moved };\n      },\n    );",
+    "new": "    let movedOnceComposed = false;\n    const bindings = storeBindings(this.#parts, \"the discovery\", verdict, () =>\n      inputs.current().discoveryFingerprint(discovery),\n    );\n    const held = await protectDiscovered(\n      inputs,\n      () => this.isStopping(),\n      discovery,\n      verdict,\n      startedAt,\n    );\n    if (this.isStopping()) {\n      this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);\n      return report(false);\n    }"
   },
   {
     "id": "D1988",
     "defect": "The check for test modules the inputs left out runs after protection has moved them into the inputs, so a declared module edited during the discovery's job is skipped and the discovery is stored under a digest.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    const guard = inputs.beginJob();\n    let released: string | undefined;\n    try {\n      released = await inputs.protectInputs(discovery, startedAt);\n    } catch (error) {\n      await inputs.endJob(guard);\n      throw error;\n    }\n",
-    "new": "    const guard = inputs.beginJob();\n    let released: string | undefined;\n    try {\n      released = await inputs.protectInputs(discovery, startedAt);\n    } catch (error) {\n      await inputs.endJob(guard);\n      throw error;\n    }\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  const unwatched = inputs\n    .current()\n    .protectedFileChangedSince(discovery, startedAt);\n  const guard = inputs.beginJob();\n  let released: string | undefined;\n  try {\n    released = await inputs.protectInputs(discovery, startedAt);\n  } catch (error) {\n    await inputs.endJob(guard);\n    throw error;\n  }\n",
+    "new": "  const guard = inputs.beginJob();\n  let released: string | undefined;\n  try {\n    released = await inputs.protectInputs(discovery, startedAt);\n  } catch (error) {\n    await inputs.endJob(guard);\n    throw error;\n  }\n  const unwatched = inputs\n    .current()\n    .protectedFileChangedSince(discovery, startedAt);\n"
   },
   {
     "id": "D1989",
     "defect": "The verdict of the job window around protection is dropped, so an input event while the discovery's test modules are protected leaves the discovery stored under a digest.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    return guarded;",
-    "new": "    return verdict;"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  return guarded;",
+    "new": "  return verdict;"
   },
   {
     "id": "D1990",
@@ -3670,9 +3670,9 @@
   {
     "id": "D2081",
     "defect": "The guard around protecting the discovery's test modules begins without waiting for the inputs to settle.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched = inputs",
-    "new": "    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched = inputs"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  await inputs.settled();\n  if (isStopping())\n    return {\n      fingerprinted: false,\n      reason: DISCOVERY_STOPPED_REASON,\n      changedWhileRunning: false,\n    };\n  const unwatched = inputs",
+    "new": "  if (isStopping())\n    return {\n      fingerprinted: false,\n      reason: DISCOVERY_STOPPED_REASON,\n      changedWhileRunning: false,\n    };\n  const unwatched = inputs"
   },
   {
     "id": "D2082",
@@ -3684,9 +3684,9 @@
   {
     "id": "D2083",
     "defect": "A stop that arrives while the guard waits for the inputs to settle is followed by the guard's job.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched",
-    "new": "    const unwatched"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  if (isStopping())\n    return {\n      fingerprinted: false,\n      reason: DISCOVERY_STOPPED_REASON,\n      changedWhileRunning: false,\n    };\n  const unwatched",
+    "new": "  const unwatched"
   },
   {
     "id": "D2084",
@@ -3719,9 +3719,9 @@
   {
     "id": "D2090",
     "defect": "The check for files the discovery protects by path runs before the guard's wait for the inputs to settle, so a declared module edited during that wait is read by protection without marking a job, and the discovery is stored under a digest.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    await inputs.settled();\n    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n",
-    "new": "    const unwatched = inputs\n      .current()\n      .protectedFileChangedSince(discovery, startedAt);\n    await inputs.settled();\n    if (this.isStopping())\n      return {\n        fingerprinted: false,\n        reason: DISCOVERY_STOPPED_REASON,\n        changedWhileRunning: false,\n      };\n"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  await inputs.settled();\n  if (isStopping())\n    return {\n      fingerprinted: false,\n      reason: DISCOVERY_STOPPED_REASON,\n      changedWhileRunning: false,\n    };\n  const unwatched = inputs\n    .current()\n    .protectedFileChangedSince(discovery, startedAt);\n",
+    "new": "  const unwatched = inputs\n    .current()\n    .protectedFileChangedSince(discovery, startedAt);\n  await inputs.settled();\n  if (isStopping())\n    return {\n      fingerprinted: false,\n      reason: DISCOVERY_STOPPED_REASON,\n      changedWhileRunning: false,\n    };\n"
   },
   {
     "id": "D2091",
@@ -4174,7 +4174,7 @@
   {
     "id": "D2163",
     "defect": "The lifecycle gives protection no job start, so a file only the walk finds, edited during the discovery's job, leaves the discovery stored under its digest.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
     "old": "inputs.protectInputs(discovery, startedAt)",
     "new": "inputs.protectInputs(discovery)"
   },
@@ -4230,9 +4230,9 @@
   {
     "id": "D2159",
     "defect": "The reason protection's walk resolves with is dropped, so a discovery whose job read a file only the walk found mid-edit is stored under its digest.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    const changed = unwatched ?? released;\n",
-    "new": "    const changed = unwatched;\n"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  const changed = unwatched ?? released;\n",
+    "new": "  const changed = unwatched;\n"
   },
   {
     "id": "D2211",
@@ -5112,7 +5112,7 @@
   {
     "id": "D2658",
     "defect": "A discovery that is not current at a settled revision is not rediscovered, so the due runs are taken from a discovery of another revision.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "file": "packages/daemon/src/daemon/discovery-history.ts",
     "old": "    current: recordFreshness(stored, fingerprintDigest(print)) === CURRENT,",
     "new": "    current: true,"
   },
@@ -5189,9 +5189,9 @@
   {
     "id": "D2668",
     "defect": "A selected workspace that is due is logged as not run because it holds current results.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      const holdsCurrent = !dueNow.has(path) && !this.#runs.isHeld(path);",
-    "new": "      const holdsCurrent = !this.#runs.isHeld(path);"
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    const holdsCurrent = !dueNow.has(path) && !reading.isHeld(path);",
+    "new": "    const holdsCurrent = !reading.isHeld(path);"
   },
   {
     "id": "D2669",
@@ -5350,9 +5350,9 @@
   {
     "id": "D2695",
     "defect": "A round whose inputs' digests cannot be read logs a plain entry instead of the warning naming the cause.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      log.entry(NO_SNAPSHOT_ENTRY);",
-    "new": "      log.entry(\"no selection round\");"
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    log.entry(NO_SNAPSHOT_ENTRY);",
+    "new": "    log.entry(\"no selection round\");"
   },
   {
     "id": "D2731",
@@ -7149,14 +7149,14 @@
   {
     "id": "D3000",
     "defect": "The first round of a daemon life, which has no earlier round to compare with, is explained as one whose inputs' digests could not be read.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      return unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON);",
-    "new": "      return unselectedRound(revision, INPUT_DIGESTS_UNREAD, FIRST_ROUND_REASON);"
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "      selection: unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON),",
+    "new": "      selection: unselectedRound(revision, INPUT_DIGESTS_UNREAD, FIRST_ROUND_REASON),"
   },
   {
     "id": "D3001",
     "defect": "A round whose inputs' digests could not be read is explained as a first round, hiding that the inputs were unreadable.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "file": "packages/daemon/src/daemon/round-selection.ts",
     "old": "        INPUT_DIGESTS_UNREAD,\n        NO_SNAPSHOT_REASON,",
     "new": "        FIRST_ROUND,\n        NO_SNAPSHOT_REASON,"
   },
@@ -7759,15 +7759,15 @@
     "id": "D3107",
     "defect": "A round's selection is marked done before it can throw, so after a selection that throws the round planned again at that revision records no explanation for it.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      const selection = this.#selectRound(revision, view, eligible, due);\n      this.#selectionOwed = false;",
-    "new": "      this.#selectionOwed = false;\n      const selection = this.#selectRound(revision, view, eligible, due);"
+    "old": "    if (this.#selectionOwed) {\n      const { selection, snapshot } = selectRound(revision, {\n",
+    "new": "    if (this.#selectionOwed) {\n      this.#selectionOwed = false;\n      const { selection, snapshot } = selectRound(revision, {\n"
   },
   {
     "id": "D3108",
     "defect": "The inputs' snapshot advances before the round's selection can throw, so the round planned again at that revision compares the inputs with themselves and its changed paths are never explained.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    const selection = explainRound(\n      log,\n      narrowing(),\n      revision,\n      changedPaths(before, now),\n    );\n    this.#snapshot = now;",
-    "new": "    this.#snapshot = now;\n    const selection = explainRound(\n      log,\n      narrowing(),\n      revision,\n      changedPaths(before, now),\n    );"
+    "old": "      const { selection, snapshot } = selectRound(revision, {\n        log: this.#parts.log,\n        narrowing: this.#parts.narrowing,\n        before: this.#snapshot,\n",
+    "new": "      const before = this.#snapshot;\n      this.#snapshot = view.inputs.snapshot?.comparedDigests ?? before;\n      const { selection, snapshot } = selectRound(revision, {\n        log: this.#parts.log,\n        narrowing: this.#parts.narrowing,\n        before,\n"
   },
   {
     "id": "D3109",
@@ -8178,9 +8178,9 @@
   {
     "id": "D3171",
     "defect": "A held workspace that the round's selection chose is logged as not run because it holds current results.",
-    "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "      const holdsCurrent = !dueNow.has(path) && !this.#runs.isHeld(path);",
-    "new": "      const holdsCurrent = !dueNow.has(path);"
+    "file": "packages/daemon/src/daemon/round-selection.ts",
+    "old": "    const holdsCurrent = !dueNow.has(path) && !reading.isHeld(path);",
+    "new": "    const holdsCurrent = !dueNow.has(path);"
   },
   {
     "id": "D3172",
@@ -8403,8 +8403,8 @@
     "id": "D3243",
     "defect": "A round compares the inputs' digests alone, so a changed listed file the inputs leave out is never among the paths selection is asked about.",
     "file": "packages/daemon/src/daemon/scheduler.ts",
-    "old": "    const now = view.inputs.snapshot?.comparedDigests;",
-    "new": "    const now = view.inputs.snapshot?.digests;"
+    "old": "        now: view.inputs.snapshot?.comparedDigests,",
+    "new": "        now: view.inputs.snapshot?.digests,"
   },
   {
     "id": "D3244",
@@ -9088,16 +9088,16 @@
   {
     "id": "D3327",
     "defect": "The discovery's report drops the change its own job window named, so a discovery stored not fingerprinted by a codegen write while it ran is never discovered once more.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "    if (!verdict.fingerprinted) return verdict;",
-    "new": "    if (!verdict.fingerprinted) return { ...verdict, changedWhileRunning: false };"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "  if (!verdict.fingerprinted) return verdict;",
+    "new": "  if (!verdict.fingerprinted) return { ...verdict, changedWhileRunning: false };"
   },
   {
     "id": "D3328",
     "defect": "The discovery's report drops a change protection's check found, so a discovery stored not fingerprinted by it is never discovered once more.",
-    "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "        reason: changed,\n        changedWhileRunning: true,",
-    "new": "        reason: changed,\n        changedWhileRunning: false,"
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "      reason: changed,\n      changedWhileRunning: true,",
+    "new": "      reason: changed,\n      changedWhileRunning: false,"
   },
   {
     "id": "D3329",
@@ -10981,5 +10981,481 @@
     "file": "packages/daemon/src/defects/defect-standings.ts",
     "old": "    compareFiles(left.definition.file, right.definition.file) ||\n",
     "new": ""
+  },
+  {
+    "id": "D4045",
+    "defect": "A falsification look that asks for another plan is followed by the idle wait, so the next falsification job never follows until an input changes.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    return (await this.#falsify(revision)) || this.#idle();",
+    "new": "    await this.#falsify(revision);\n    return this.#idle();"
+  },
+  {
+    "id": "D4046",
+    "defect": "A falsification look is taken while a run is due, so the run waits for a falsification job.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    if (next.kind === \"run\") {\n      await this.#run(next.queued, revision);",
+    "new": "    if (next.kind === \"run\") {\n      if (await this.#falsify(revision)) return true;\n      await this.#run(next.queued, revision);"
+  },
+  {
+    "id": "D4047",
+    "defect": "A falsification look is taken while a discovery is due, so the discovery waits for a falsification job.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    if (next.kind === \"discover\") {\n      await this.#discover(revision);",
+    "new": "    if (next.kind === \"discover\") {\n      if (await this.#falsify(revision)) return true;\n      await this.#discover(revision);"
+  },
+  {
+    "id": "D4048",
+    "defect": "A falsification look that asked for another plan leaves the round unmarked, so the log holds no idle entry after the job and reads as if the daemon were still falsifying.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    if (again) this.#dirty = true;\n    return again;",
+    "new": "    return again;"
+  },
+  {
+    "id": "D4049",
+    "defect": "A falsification job is not marked in progress on the schedule, so an answer at a later revision names a wait the scheduler is not in, where it waits for the job.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    const again = await this.#schedule.during(\n      this.#parts.falsify(revision),\n      revision,\n    );",
+    "new": "    const again = await this.#parts.falsify(revision);"
+  },
+  {
+    "id": "D4050",
+    "defect": "A definition that cannot be falsified now is given an experiment: one whose anchor is missing, or whose test holds no current pass.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "  if (!standing.eligible || standing.evidence?.freshness === CURRENT) return [];",
+    "new": "  if (standing.evidence?.freshness === CURRENT) return [];"
+  },
+  {
+    "id": "D4051",
+    "defect": "A definition whose evidence reads current counts as waiting, so every input revision falsifies every definition again.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "  if (!standing.eligible || standing.evidence?.freshness === CURRENT) return [];",
+    "new": "  if (!standing.eligible) return [];"
+  },
+  {
+    "id": "D4052",
+    "defect": "An experiment's mutation names its file as the definition spells it, relative to the consumer root, so the executor reads another file or none.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "        mutation: { file: mutationPath, old: mutation.old, new: mutation.new },",
+    "new": "        mutation: { file: mutation.file, old: mutation.old, new: mutation.new },"
+  },
+  {
+    "id": "D4053",
+    "defect": "A falsification job is handed no assertion error names, so a consumer's declared error reads as no assertion and its detections read unclear.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "          read.assertionErrors,",
+    "new": "          [],"
+  },
+  {
+    "id": "D4054",
+    "defect": "A job holds every waiting definition of its workspace, so any input change loses the whole job's work.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "          .slice(0, MAX_JOB_DEFINITIONS)\n",
+    "new": ""
+  },
+  {
+    "id": "D4055",
+    "defect": "A job holds the waiting definitions of every workspace, so one workspace's Vitest instance is asked for another workspace's tests.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "          .filter((waits) => waits.workspacePath === first.workspacePath)\n",
+    "new": ""
+  },
+  {
+    "id": "D4056",
+    "defect": "The waiting definitions are taken in the order their files give them, so a survivor whose evidence went stale waits behind every never verified definition before it.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "          compareStandings(left.standing, right.standing),",
+    "new": "          0,"
+  },
+  {
+    "id": "D4057",
+    "defect": "A verdict is stored bound to something other than its definition's digest, so its evidence reads stale the moment it is stored.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        new Map(job.definitions.map(({ id, digest }) => [id, digest])),",
+    "new": "        new Map(job.definitions.map(({ id }) => [id, id])),"
+  },
+  {
+    "id": "D4058",
+    "defect": "A job's verdicts are stored bound to something other than the digest of the workspace's input fingerprint its standings were read at.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        { ...scope, inputFingerprintDigest: fingerprintDigest },",
+    "new": "        { ...scope, inputFingerprintDigest: job.workspacePath },"
+  },
+  {
+    "id": "D4059",
+    "defect": "A reply of a job in which no run happened reads as a job that did not run, so the verdicts it decided before any run are dropped.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return Array.isArray(job.judgements) && Array.isArray(job.experiments)",
+    "new": "      return job.baseline !== undefined &&\n        Array.isArray(job.judgements) &&\n        Array.isArray(job.experiments)"
+  },
+  {
+    "id": "D4060",
+    "defect": "A job's verdicts are stored although its window does not vouch that no input changed while it ran.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (!verdict.fingerprinted) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D4061",
+    "defect": "A workspace whose reply could not be stored for an event that named an input at an unmoved revision is not marked, so its next job begins at once and no answer says why nothing was stored.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (this.#revision() === revision) {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D4062",
+    "defect": "A reply that carries no verdict is handed to the store, whose every evidence write makes its next read rebuild every record.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (reply.judgements.every(({ verdict: given }) => given === undefined)) {\n      return [];\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D4063",
+    "defect": "A job a stop ended is read as one that returned by itself, so its verdicts are stored and its definitions marked after the stop.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (this.#parts.stopSignal.aborted) return ENDING.stop;\n",
+    "new": ""
+  },
+  {
+    "id": "D4064",
+    "defect": "A change of the input revision while a falsification job runs does not abort it, so the discovery or run the change made due waits for the job's remaining experiments.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        if (this.#revision() !== revision) return end(ENDING.change);",
+    "new": "        if (this.#revision() !== revision) return;"
+  },
+  {
+    "id": "D4065",
+    "defect": "A job is aborted whenever the tracker signals, a periodic reconciliation's end with the revision unmoved included, so no job outlives the reconciliation interval.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        if (this.#revision() !== revision) return end(ENDING.change);",
+    "new": "        return end(ENDING.change);"
+  },
+  {
+    "id": "D4066",
+    "defect": "The first input change that ends a job marks the definition that was running, so an agent's own new definition is left without a verdict by whichever save lands on it.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "    if (again) {",
+    "new": "    if (true) {"
+  },
+  {
+    "id": "D4067",
+    "defect": "A definition running when an input change ended its job is never remembered as such, so a mutation that never ends holds the front of the order under an agent that keeps saving.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "    this.#mark(job, running).endedRunning = true;\n",
+    "new": ""
+  },
+  {
+    "id": "D4068",
+    "defect": "A job that ran to its end leaves a definition's run of input-change endings standing, so one later input change marks it as two in a row would.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "      mark.reason = left.get(definition.id);\n      mark.endedRunning = false;",
+    "new": "      mark.reason = left.get(definition.id);"
+  },
+  {
+    "id": "D4069",
+    "defect": "The watch of a job that has returned stays armed, so the next change of the input revision aborts whatever job the executor runs then.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        watching = false;\n",
+    "new": ""
+  },
+  {
+    "id": "D4070",
+    "defect": "The time bound on a falsification job is another duration than 10 minutes.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "export const JOB_TIME_BOUND_MS = 600_000;",
+    "new": "export const JOB_TIME_BOUND_MS = 660_000;"
+  },
+  {
+    "id": "D4071",
+    "defect": "The definition that was running when the time bound ended its job is not left behind, so a mutation that never ends is taken first again and costs the bound each time.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "    this.#leave(job, runningId, revision, LEFT_REASON.timeBound);\n",
+    "new": ""
+  },
+  {
+    "id": "D4072",
+    "defect": "A definition a job was ended on keeps its place in the order, so it is taken before every other definition at each new input revision.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "          Number(this.#takenLast(left)) - Number(this.#takenLast(right)) ||\n",
+    "new": ""
+  },
+  {
+    "id": "D4073",
+    "defect": "The verdicts carried by the reply of a job the time bound ended are dropped.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    this.#plan.endedByBound(job, revision, running);\n    return this.#store(sent, reply, verdict);",
+    "new": "    this.#plan.endedByBound(job, revision, running);\n    return [];"
+  },
+  {
+    "id": "D4074",
+    "defect": "A job the time bound ended in its first baseline blames its first definition, which never ran, and its workspace is sent another job at once.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "  if (!reply.interrupted || reply.baseline === undefined) return undefined;",
+    "new": "  if (!reply.interrupted) return undefined;"
+  },
+  {
+    "id": "D4075",
+    "defect": "An experiment that ran with no confirming run reads as the one an abort ended, so a job ended in its restored baseline blames a definition whose runs had finished.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    ? record.confirming?.status === \"interrupted\"",
+    "new": "    ? record.confirming?.status !== \"ran\""
+  },
+  {
+    "id": "D4076",
+    "defect": "An experiment whose confirming run an abort ended is not read as the one running, so the experiment after it, which never started, is blamed.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    ? record.confirming?.status === \"interrupted\"",
+    "new": "    ? false"
+  },
+  {
+    "id": "D4077",
+    "defect": "An abort that found no job in progress is recorded as what ended the job, so a reply that settled as the bound fired is read as a job the bound ended.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (executor.abort(ABORT_PURPOSE.interruption)) asked ??= ending;",
+    "new": "      executor.abort(ABORT_PURPOSE.interruption);\n      asked ??= ending;"
+  },
+  {
+    "id": "D4078",
+    "defect": "A reply that ran and reads not interrupted is treated as ended by the bound whose abort reached it, so every verdict it carries is dropped and its workspace reads as ended in a baseline.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (ran?.interrupted === false) return unasked;\n",
+    "new": ""
+  },
+  {
+    "id": "D4079",
+    "defect": "A definition of a job that ran to its end is not held at that revision, so one that got no verdict is given experiment after experiment with no input changed.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "      mark.heldAt = revision;\n      mark.reason = left.get(definition.id);",
+    "new": "      mark.reason = left.get(definition.id);"
+  },
+  {
+    "id": "D4080",
+    "defect": "A refused job's entry does not say what refused it, so an author cannot tell which project's module cache setting to change.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return refusalReason(job.refusal);",
+    "new": "      return NO_JOB_IN_REPLY;"
+  },
+  {
+    "id": "D4081",
+    "defect": "The entry of a job refused because its Vitest instance could not be prepared leaves out why it could not.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    return `it was refused, since its Vitest instance could not be prepared: ${refusal.error}`;",
+    "new": "    return \"it was refused, since its Vitest instance could not be prepared\";"
+  },
+  {
+    "id": "D4082",
+    "defect": "The entry of a workspace whose Vitest is not supported leaves out why it is not.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return `its workspace's Vitest is not supported: ${job.vitest.reason}`;",
+    "new": "      return \"its workspace's Vitest is not supported\";"
+  },
+  {
+    "id": "D4083",
+    "defect": "The entry of a job that replied its config is not the one confirmed does not say so.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return job.reason;",
+    "new": "      return NO_JOB_IN_REPLY;"
+  },
+  {
+    "id": "D4084",
+    "defect": "The entry of a workspace that failed to load in its job leaves out the failure.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return `its workspace failed to load: ${job.error}`;",
+    "new": "      return \"its workspace failed to load\";"
+  },
+  {
+    "id": "D4085",
+    "defect": "The entry of a workspace whose executor ended without a reply leaves out how the executor ended.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "  if (!outcome.ended) return `it ended with no reply: ${outcome.reason}`;",
+    "new": "  if (!outcome.ended) return \"it ended with no reply\";"
+  },
+  {
+    "id": "D4086",
+    "defect": "A reply whose job is not an object is read as a job, so the look throws, its workspace is never marked and the same job is sent again.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "  if (!isRecord(job as unknown)) return NO_JOB_IN_REPLY;\n",
+    "new": ""
+  },
+  {
+    "id": "D4087",
+    "defect": "A reply of a status no job has is read as nothing at all, so the look throws, its workspace is never marked and the same job is sent again.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    default:\n      return NO_JOB_IN_REPLY;\n",
+    "new": ""
+  },
+  {
+    "id": "D4088",
+    "defect": "A reply that reads ran without its lists of judgements and experiments is read as a job that ran, so the look throws on it and its workspace is never marked.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        : NO_JOB_IN_REPLY;\n    case \"refused\":",
+    "new": "        : job;\n    case \"refused\":"
+  },
+  {
+    "id": "D4089",
+    "defect": "A workspace the confirmed start no longer holds is not marked, so no answer says why its waiting definitions are given no experiment.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return this.#waits(job, revision, NOT_CONFIRMED_REASON);",
+    "new": "      return false;"
+  },
+  {
+    "id": "D4090",
+    "defect": "A workspace whose verdicts the store could not write is not marked, so its next job begins at once against the same store and no answer says the verdicts were lost.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      this.#waits(\n        job,\n        revision,\n        `the verdicts of its job could not be stored: ${storeFailureReason(error)}`,\n      );\n      return [];",
+    "new": "      return [];"
+  },
+  {
+    "id": "D4091",
+    "defect": "The entry of a workspace whose job the time bound ended with no usable reply does not name the bound.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    ? `${BOUND_ENDED}: ${reply}`",
+    "new": "    ? reply"
+  },
+  {
+    "id": "D4092",
+    "defect": "What happened to a workspace is put in its mark uncut, so a long or multi-line error pushes what ends the wait off the reason's first line and past the 1,000 characters an answer keeps.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      `${markText(what)}, ${WORKSPACE_WAIT}`,",
+    "new": "      `${what}, ${WORKSPACE_WAIT}`,"
+  },
+  {
+    "id": "D4093",
+    "defect": "The log holds what happened to a workspace cut as its mark is, so the rest of a long error is nowhere.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      `the falsification of ${job.workspacePath} waits: ${what}, ${WORKSPACE_WAIT}`,",
+    "new": "      `the falsification of ${job.workspacePath} waits: ${markText(what)}, ${WORKSPACE_WAIT}`,"
+  },
+  {
+    "id": "D4094",
+    "defect": "A look that throws after it opened its window on the tracker leaves the window open, so the tracker goes on recording changes for a job that never began.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    try {\n      begun = this.#begin(read, plannedRevision, opened.mark);\n    } finally {\n      if (typeof begun === \"boolean\") await this.#close(opened.mark);\n    }",
+    "new": "    begun = this.#begin(read, plannedRevision, opened.mark);\n    if (typeof begun === \"boolean\") await this.#close(opened.mark);"
+  },
+  {
+    "id": "D4095",
+    "defect": "The activity is not set when a falsification job is sent, so status and every answer read the daemon idle while it falsifies.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    setActivity({\n      state: \"falsifying\",\n      workspacePath,\n      definitions: definitions.length,\n    });\n",
+    "new": ""
+  },
+  {
+    "id": "D4096",
+    "defect": "The activity stays falsifying once a job has ended, so while the scheduler waits out the next quiet window every answer says a job runs that does not.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "        this.#idleAfter(this.#falsification.look(revision)),",
+    "new": "        this.#falsification.look(revision),"
+  },
+  {
+    "id": "D4097",
+    "defect": "A falsification entry carries no kind, so beside a run's entry for the same workspace it reads as a second run that stored nothing.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "        kind: FALSIFICATION_JOB,\n",
+    "new": ""
+  },
+  {
+    "id": "D4098",
+    "defect": "An entry of a workspace of which both are true names its definitions before it says what happened to the workspace, so a reason cut for length loses the workspace's part.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "          ...workspaceReason(this.#workspaces.get(workspacePath), revision),\n          ...leftReason(left.get(workspacePath) ?? []),",
+    "new": "          ...leftReason(left.get(workspacePath) ?? []),\n          ...workspaceReason(this.#workspaces.get(workspacePath), revision),"
+  },
+  {
+    "id": "D4099",
+    "defect": "An entry names every definition left without a verdict, so a workspace of thousands makes every answer carry them all.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "  const names = namedList(\n    marks.map((mark) => `${cutReason(mark.id).reason} (${mark.reason})`),\n  );",
+    "new": "  const names = marks\n    .map((mark) => `${cutReason(mark.id).reason} (${mark.reason})`)\n    .join(\", \");"
+  },
+  {
+    "id": "D4100",
+    "defect": "An entry names its definitions before it says what ends their wait, so a reason an answer cuts for length loses what ends the wait.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "  return [`${LEFT_LEAD} ${DEFINITIONS_WAIT}: ${names}`];",
+    "new": "  return [`${LEFT_LEAD}: ${names} ${DEFINITIONS_WAIT}`];"
+  },
+  {
+    "id": "D4101",
+    "defect": "A definition left without a verdict at an earlier input revision stays listed after the revision moved, though it may be taken again.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "      if (mark.heldAt !== revision || mark.reason === undefined) continue;",
+    "new": "      if (mark.reason === undefined) continue;"
+  },
+  {
+    "id": "D4102",
+    "defect": "A workspace whose job did not run at an earlier input revision stays listed after the revision moved, though it gets a job again.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "      .filter(([, mark]) => mark.revision === revision)\n",
+    "new": ""
+  },
+  {
+    "id": "D4103",
+    "defect": "An answer builds each listed job member by member and drops its kind, so a falsification entry reads in every answer as a run that stored nothing.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "  return { ...job, reason: `${reason}${omittedText(omittedCharacters)}` };",
+    "new": "  return {\n    workspacePath: job.workspacePath,\n    reason: `${reason}${omittedText(omittedCharacters)}`,\n  };"
+  },
+  {
+    "id": "D4104",
+    "defect": "A workspace reads running whenever the activity names it, so a workspace being falsified reads as running its tests.",
+    "file": "packages/daemon/src/daemon/workspace-schedule.ts",
+    "old": "      activity.state === \"running\" &&",
+    "new": "      \"workspacePath\" in activity &&"
+  },
+  {
+    "id": "D4106",
+    "defect": "The log's entry for a job's start leaves out the first definition's id and state.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}",
+    "new": ""
+  },
+  {
+    "id": "D4107",
+    "defect": "The log's entry for a job's end names every definition of the job as left without a verdict, those whose verdict was stored included.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      .filter(({ id }) => !storedIds.has(id))\n",
+    "new": ""
+  },
+  {
+    "id": "D4108",
+    "defect": "The worktree's standings take the daemon's moment after their signal aborted, when nobody waits for them and a stop may have closed the store.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "  signal.throwIfAborted();\n",
+    "new": ""
+  },
+  {
+    "id": "D4109",
+    "defect": "A look that found definitions waiting and took none is logged at every look, so each periodic reconciliation adds the same entry again.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (look.kind === \"none-taken\" && look.firstAtRevision) {",
+    "new": "    if (look.kind === \"none-taken\") {"
+  },
+  {
+    "id": "D4110",
+    "defect": "A query's no-answer reason words a falsification entry as the run of its workspace.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "    ? `the falsification of ${workspacePath}`",
+    "new": "    ? `the run of ${workspacePath}`"
+  },
+  {
+    "id": "D4111",
+    "defect": "The falsifying activity's text leaves out the number of definitions in the job.",
+    "file": "packages/daemon/src/query/answer.ts",
+    "old": "      return `falsifying workspace ${activity.workspacePath}, defect definitions in the job ${activity.definitions}`;",
+    "new": "      return `falsifying workspace ${activity.workspacePath}`;"
+  },
+  {
+    "id": "D4113",
+    "defect": "The protocol version stays 5, so a version 5 client takes a daemon whose answers carry a falsifying activity and a job kind it does not know for its own.",
+    "file": "packages/daemon/src/daemon/protocol.ts",
+    "old": "export const PROTOCOL_VERSION = 6;",
+    "new": "export const PROTOCOL_VERSION = 5;"
+  },
+  {
+    "id": "D4114",
+    "defect": "Evidence stored under an older falsifier version is read as the current version's, so its reason, detail and facts are parsed under meanings they were not recorded with.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (falsifierVersion !== FALSIFIER_VERSION) {",
+    "new": "  if (falsifierVersion > FALSIFIER_VERSION) {"
   }
 ]

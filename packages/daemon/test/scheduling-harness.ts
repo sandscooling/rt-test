@@ -22,8 +22,13 @@ import {
   NON_INPUTS_FILE,
   type NonInputsDeclaration,
 } from "../src/inputs/non-inputs.js";
+import type { FalsificationJob } from "../src/falsify/experiment-record.js";
 import type { InputFacts } from "../src/query/answer.js";
-import type { StoredEvidence } from "../src/store/defect-evidence.js";
+import type {
+  EvidenceBindings,
+  StoredEvidence,
+} from "../src/store/defect-evidence.js";
+import type { StoredJudgement } from "../src/store/evidence-facts.js";
 import type { LatestResults, RtTestStore } from "../src/store/open-store.js";
 import type {
   StoreBindings,
@@ -84,13 +89,16 @@ export function confirmed(...paths: readonly string[]): ConfirmedStart {
   };
 }
 
+/** The Vitest a hand-built discovery reports having loaded. */
+export const DISCOVERED_VITEST_VERSION = "5.0.1";
+
 export function discovered(
   path: string,
 ): Extract<WorkspaceDiscovery, { status: "discovered" }> {
   return {
     status: "discovered",
     workspace: workspace(path),
-    vitestVersion: "5.0.1",
+    vitestVersion: DISCOVERED_VITEST_VERSION,
     tests: [],
     failedModules: [],
     typecheckModules: [],
@@ -151,14 +159,42 @@ function runIdAt(index: number): string {
   return `run-${index}`;
 }
 
+/** Each discovery a recording store holds has its own id, as the store gives each one it writes. */
+export function discoveryIdAt(index: number): string {
+  return `discovery-${index}`;
+}
+
+/** One evidence write a recording store was handed, whether or not it then failed. */
+export interface EvidenceWrite {
+  readonly bindings: EvidenceBindings;
+  readonly job: FalsificationJob;
+  readonly definitionDigests: ReadonlyMap<string, string>;
+}
+
+/** A judgement of a reply that carries a verdict, as the store keeps it: without the defect it names. */
+function storedJudgement(
+  judgement: Extract<FalsificationJob, { status: "ran" }>["judgements"][number],
+): StoredJudgement | undefined {
+  if (judgement.verdict === undefined) return undefined;
+  const { defectId: _defectId, ...stored } = judgement;
+  return stored;
+}
+
 /**
  * A store that records what was written to it, and refuses a write once closed, as a closed store does. It reads each
- * record back under the fingerprint, adapter version and run id it was written with.
+ * record back under the fingerprint, adapter version and run id it was written with, each discovery under an id of its
+ * own, and each verdict of an evidence write under the bindings and digests handed in with it.
  */
 export class RecordingStore implements RtTestStore {
   readonly file = "/consumer/.rt-test/store.sqlite";
   readonly runs: WorkspaceRun[] = [];
   readonly discoveries: TestDiscovery[] = [];
+  /** Each evidence write handed over, in call order. */
+  readonly evidenceWrites: EvidenceWrite[] = [];
+  /** Makes each evidence write throw this text once it is recorded, as a store that cannot write does. */
+  failingEvidence: string | undefined;
+  /** Each defect's one evidence record, by its id. */
+  readonly #evidence = new Map<string, StoredEvidence>();
   /** The fingerprint each run and each discovery was written under, in the order written. */
   readonly runFingerprints: StoreBindings["inputFingerprint"][] = [];
   readonly discoveryFingerprints: StoreBindings["inputFingerprint"][] = [];
@@ -196,7 +232,7 @@ export class RecordingStore implements RtTestStore {
     return {
       ...bindings,
       adapterVersion: VITEST_ADAPTER_VERSION,
-      discoveryId: "discovery",
+      discoveryId: discoveryIdAt(this.discoveries.length - 1),
       discovery: written,
     };
   }
@@ -232,9 +268,53 @@ export class RecordingStore implements RtTestStore {
     this.#refused.set(index, reason);
   }
 
-  /** Refused, so a caller that starts storing evidence through a stand-in fails rather than losing it. */
-  writeEvidence(): StoredEvidence[] {
-    throw new Error("a recording store keeps no defect evidence");
+  /**
+   * Keeps one record for each judgement of a `ran` reply that has a verdict, replacing that defect's earlier one, and
+   * returns them in the reply's order, as the store does. It checks nothing of the reply's facts.
+   */
+  writeEvidence(
+    bindings: EvidenceBindings,
+    job: FalsificationJob,
+    definitionDigests: ReadonlyMap<string, string>,
+  ): StoredEvidence[] {
+    if (this.closed) throw new Error("the store is closed");
+    const write = this.evidenceWrites.length;
+    this.evidenceWrites.push({ bindings, job, definitionDigests });
+    if (this.failingEvidence !== undefined) {
+      throw new Error(this.failingEvidence);
+    }
+    if (job.status !== "ran") {
+      throw new Error("a reply that did not run holds no evidence to store");
+    }
+    const stored = job.judgements.flatMap((entry): StoredEvidence[] => {
+      const judgement = storedJudgement(entry);
+      if (judgement === undefined) return [];
+      const { defectId } = entry;
+      const record = job.experiments.find(
+        (experiment) => experiment.defectId === defectId,
+      );
+      return [
+        {
+          ...bindings,
+          evidenceId: `evidence-${write}`,
+          defectId,
+          definitionDigest: definitionDigests.get(defectId) ?? "",
+          mutationFileDigest: record?.mutationFileDigest ?? "",
+          vitestVersion: job.vitestVersion,
+          falsifierVersion: job.falsifierVersion,
+          adapterVersion: VITEST_ADAPTER_VERSION,
+          verdict: judgement.verdict,
+          judgement,
+        },
+      ];
+    });
+    this.seedEvidence(stored);
+    return stored;
+  }
+
+  /** Holds evidence as an earlier job stored it. */
+  seedEvidence(records: readonly StoredEvidence[]): void {
+    for (const record of records) this.#evidence.set(record.defectId, record);
   }
 
   readRuns(): StoredRun[] {
@@ -266,7 +346,7 @@ export class RecordingStore implements RtTestStore {
                 this.discoveryFingerprints[last] ?? UNFINGERPRINTED,
               adapterVersion:
                 this.discoveryVersions[last] ?? VITEST_ADAPTER_VERSION,
-              discoveryId: "discovery",
+              discoveryId: discoveryIdAt(last),
               discovery,
             },
       discoveryRefusal: undefined,
@@ -290,7 +370,7 @@ export class RecordingStore implements RtTestStore {
         const reason = this.#refused.get(index);
         return reason === undefined ? [] : [{ workspacePath, reason }];
       }),
-      evidence: [],
+      evidence: [...this.#evidence.values()],
       evidenceRefusals: [],
     };
   }

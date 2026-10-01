@@ -3,7 +3,6 @@ import {
   FALSIFIER_VERSION,
   type ExperimentJudgement,
   type ExperimentRecord,
-  type FalsificationJob,
   type Reach,
   type RunRecord,
 } from "../src/falsify/experiment-record.js";
@@ -21,17 +20,17 @@ import type { MutationLoad } from "../src/falsify/mutation-transform.js";
 import { judge } from "../src/falsify/verdict.js";
 import type { StoredEvidence } from "../src/store/defect-evidence.js";
 import { VITEST_ADAPTER_VERSION } from "../src/vitest/adapter-version.js";
-import { DISCOVERED_VITEST_VERSION } from "./harness.js";
+import type { RanJob } from "./falsify/job-readings.js";
+import { DISCOVERED_VITEST_VERSION } from "./scheduling-harness.js";
 
 export type RanFacts = Extract<ExperimentFacts, { run: ExperimentRunFacts }>;
-export type RanJob = Extract<FalsificationJob, { status: "ran" }>;
 
 export const CLEAN_END: RunEnding = {
   execution: "completed",
   forceStopped: false,
   cancelFailed: false,
 };
-export const COLLECTED: ModuleFacts = {
+const COLLECTED: ModuleFacts = {
   collected: true,
   errorCount: 0,
   failingSuites: [],
@@ -164,10 +163,7 @@ export const EMPTY_RUN: RunRecord = {
 };
 
 /** The judgement the judge gives the experiment's facts, as a job's reply carries it. */
-export function judgementOf({
-  defectId,
-  facts,
-}: ReplyExperiment): ExperimentJudgement {
+function judged({ defectId, facts }: ReplyExperiment): ExperimentJudgement {
   return { ...judge(facts), defectId, facts };
 }
 
@@ -195,6 +191,6 @@ export function ranReply(experiments: readonly ReplyExperiment[]): RanJob {
     unhandledErrors: [],
     interrupted: false,
     experiments: experiments.map(recordOf),
-    judgements: experiments.map(judgementOf),
+    judgements: experiments.map(judged),
   };
 }

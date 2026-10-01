@@ -3,6 +3,7 @@ import { STOP_DEADLINE_MS } from "../src/client.js";
 import { EXECUTOR_BOUND_MS } from "../src/daemon/executor-jobs.js";
 import {
   LineDecoder,
+  PROTOCOL_VERSION,
   RESPONSE_BOUND_MS,
   type DecodedLine,
 } from "../src/daemon/protocol.js";
@@ -56,5 +57,9 @@ describe("the named bounds", () => {
 
   it("D1443: the stop deadline covers the 15 s executor bound, one 5 s store wait and a 5 s margin", () => {
     expect(STOP_DEADLINE_MS).toBe(25_000);
+  });
+
+  it("D4113: the protocol version is 6, the version whose answers carry the falsifying activity and a falsification entry's kind", () => {
+    expect(PROTOCOL_VERSION).toBe(6);
   });
 });
