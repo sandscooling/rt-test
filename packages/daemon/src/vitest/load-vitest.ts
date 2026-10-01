@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -30,11 +30,12 @@ type VitestNodeModule = typeof VitestNode;
 export type ResolvedVitest =
   | {
       readonly supported: true;
-      /** The directory of the package's manifest as Node resolved it, which resolves each link unless told to preserve them. */
+      /** The real directory of the package's manifest, as it is on disk at the call. */
       readonly directory: string;
       readonly version: string;
       /** The major of `version`. */
       readonly major: number;
+      /** As Node resolved it in this process, which keeps its answer: read it only in a process started for one job. */
       readonly nodeEntry: string;
     }
   | {
@@ -49,7 +50,7 @@ export function resolveWorkspaceVitest(directory: string): ResolvedVitest {
   const require = createRequire(join(directory, PACKAGE_JSON));
   let manifestPath: string;
   try {
-    manifestPath = require.resolve(VITEST_MANIFEST);
+    manifestPath = installedManifest(require, directory);
   } catch (error) {
     return unsupported(undefined, `no Vitest resolves: ${errorText(error)}`);
   }
@@ -86,6 +87,30 @@ export function resolveWorkspaceVitest(directory: string): ResolvedVitest {
       version,
       `vitest/node does not resolve: ${errorText(error)}`,
     );
+  }
+}
+
+/**
+ * The manifest a process started now would resolve from the workspace, found on disk at each call over Node's own
+ * lookup list. Node keeps what it resolved for the life of a process, so its own resolution goes on naming an install
+ * that a link no longer leads to.
+ */
+function installedManifest(require: NodeJS.Require, directory: string): string {
+  for (const modules of require.resolve.paths(VITEST_MANIFEST) ?? []) {
+    const manifest = join(modules, VITEST_MANIFEST);
+    if (isFile(manifest)) return realpathSync(manifest);
+  }
+  throw new Error(
+    `none of the directories Node looks in from ${directory} holds ${VITEST_MANIFEST}`,
+  );
+}
+
+/** As Node's lookup reads a path: one it cannot stat, for any reason, holds no file, and the lookup goes on. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
   }
 }
 

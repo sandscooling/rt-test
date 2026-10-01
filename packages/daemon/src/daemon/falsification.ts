@@ -2,6 +2,7 @@ import {
   worktreeStandings,
   type WorktreeStandings,
 } from "../defects/worktree-standings.js";
+import { CANARY_READING } from "../falsify/canary-set.js";
 import type {
   ExperimentRecord,
   FalsificationJob,
@@ -22,6 +23,12 @@ import {
   confirmedEntry,
   type ConfirmedStart,
 } from "../vitest/confirmed-start.js";
+import {
+  readingWait,
+  STANDING,
+  type CanaryGate,
+  type UnreadInstall,
+} from "./canary-gate.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
 import { FalsificationPlan, type PlannedJob } from "./falsification-plan.js";
@@ -33,7 +40,7 @@ import type {
 } from "./protocol.js";
 import type { WaitMoment } from "./waits.js";
 
-/** A target until measured: how long after a falsification job was sent to its executor it is aborted. */
+/** A target until measured: how long after a falsification job or a canary job was sent to its executor it is aborted. */
 export const JOB_TIME_BOUND_MS = 600_000;
 const MS_PER_MINUTE = 60_000;
 const BOUND_ENDED = `the time bound of ${JOB_TIME_BOUND_MS / MS_PER_MINUTE} minutes ended its job`;
@@ -52,6 +59,8 @@ const LIST_SEPARATOR = ", ";
 const MAX_HAPPENED_CHARACTERS = 400;
 const LINE_BREAKS = /\s*[\r\n]+\s*/;
 const LINE_JOIN = " ";
+/** A canary job holds none of the picked workspace's definitions. */
+const CANARY_JOB_DEFINITIONS = 0;
 
 /** What ended a job: what this module asked of it first, or that it returned unasked. */
 const ENDING = {
@@ -74,6 +83,8 @@ export interface FalsificationParts {
   readonly log: DaemonLog;
   /** The executor the runs use, whose jobs the scheduler takes one at a time. */
   readonly executor: Pick<Executor, "falsify" | "abort">;
+  /** Asked before a workspace's job is sent; its canary jobs run on `executor`, so an abort reaches them. */
+  readonly canaryGate: Pick<CanaryGate, "standing" | "take">;
   readonly inputs: TrackedInputs;
   readonly stopSignal: AbortSignal;
   /** The latest stored results, the daemon's view and the inputs, read when it is called. */
@@ -97,10 +108,17 @@ interface SentJob {
   readonly release: () => void;
 }
 
+/** A canary job to take in place of the look's falsification job, once the look's window is closed. */
+interface CanaryJob {
+  readonly job: PlannedJob;
+  readonly unread: UnreadInstall;
+}
+
 /**
  * Falsifies the worktree's waiting definitions for the scheduler, one job of one workspace at a time: it reads the
  * standings, sends the next job on the runs' executor, ends it at a change of the input revision or at the time bound,
- * and stores its verdicts as evidence only when no input changed from that read to the job's end.
+ * and stores its verdicts as evidence only when no input changed from that read to the job's end. A workspace's job is
+ * sent only once the canary gate holds a confirmed reading of the Vitest install the workspace resolves.
  */
 export class Falsification {
   readonly #parts: FalsificationParts;
@@ -117,7 +135,8 @@ export class Falsification {
 
   /**
    * One look for waiting definitions and at most one job. Resolves true when the scheduler is to plan again: a job
-   * began, or the look found a workspace it cannot send a job for; false when it took nothing.
+   * began, a canary job was taken in its place, or the look found a workspace it cannot send a job for; false when it
+   * took nothing.
    */
   async look(plannedRevision: number): Promise<boolean> {
     const { inputs, stopSignal } = this.#parts;
@@ -143,13 +162,16 @@ export class Falsification {
       if (stopSignal.aborted) return false;
       throw error;
     }
-    let begun: SentJob | boolean = false;
+    let begun: SentJob | CanaryJob | boolean = false;
     try {
       begun = this.#begin(read, plannedRevision, opened.mark);
     } finally {
-      if (typeof begun === "boolean") await this.#close(opened.mark);
+      if (typeof begun === "boolean" || "unread" in begun) {
+        await this.#close(opened.mark);
+      }
     }
     if (typeof begun === "boolean") return begun;
+    if ("unread" in begun) return this.#readCanaries(begun, plannedRevision);
     let outcome: JobOutcome<FalsificationJob>;
     try {
       outcome = await begun.outcome;
@@ -171,13 +193,14 @@ export class Falsification {
 
   /**
    * Decides the look and sends its job with no await, so the stop and the revision it checks are the ones the job
-   * begins under. True when the look found a workspace it cannot send a job for, false when it took nothing.
+   * begins under. True when the look found a workspace it cannot send a job for, false when it took nothing. A canary
+   * job is handed back unsent, for the look to take once its window is closed.
    */
   #begin(
     read: WorktreeStandings | NoAnswer,
     plannedRevision: number,
     mark: JobMark | undefined,
-  ): SentJob | boolean {
+  ): SentJob | CanaryJob | boolean {
     const { stopSignal, log } = this.#parts;
     if (mark === undefined || "noAnswer" in read || stopSignal.aborted) {
       return false;
@@ -197,8 +220,8 @@ export class Falsification {
     read: WorktreeStandings,
     revision: number,
     mark: JobMark,
-  ): SentJob | true {
-    const { start, executor, log, setActivity } = this.#parts;
+  ): SentJob | CanaryJob | true {
+    const { start, executor, log, setActivity, canaryGate } = this.#parts;
     const { workspacePath, definitions } = job;
     const entry = read.basis.discovery.discovery.workspaces.find(
       (listed) => listed.workspace.path === workspacePath,
@@ -211,6 +234,11 @@ export class Falsification {
     const fingerprintDigest = read.basis.currentFingerprint(workspacePath);
     if (fingerprintDigest === undefined) {
       return this.#waits(job, revision, NO_FINGERPRINT_REASON);
+    }
+    const standing = canaryGate.standing(entry.workspace);
+    if (standing.state === STANDING.unread) return { job, unread: standing };
+    if (standing.state === STANDING.waits) {
+      return this.#waits(job, revision, standing.what, standing.ends);
     }
     const [first] = definitions;
     log.entry(
@@ -270,15 +298,49 @@ export class Falsification {
     };
   }
 
-  /** The workspace gets no further job at `revision`; true, since the scheduler is to plan again. */
-  #waits(job: PlannedJob, revision: number, what: string): true {
-    this.#plan.workspaceWaits(
-      job,
-      revision,
-      `${markText(what)}, ${WORKSPACE_WAIT}`,
-    );
+  /**
+   * Takes the reading of the picked workspace's install as the look's one job, under the watch a falsification job
+   * runs under and with no window on the tracker, since it stores nothing. The reading marks its workspace only at the
+   * revision it was planned at. False when it was not taken; true otherwise, since the scheduler is to plan again.
+   */
+  async #readCanaries(canary: CanaryJob, revision: number): Promise<boolean> {
+    const { canaryGate, stopSignal, setActivity } = this.#parts;
+    const { job, unread } = canary;
+    const outdated = (): boolean =>
+      stopSignal.aborted || this.#revision() !== revision;
+    if (outdated()) return false;
+    setActivity({
+      state: "falsifying",
+      workspacePath: job.workspacePath,
+      definitions: CANARY_JOB_DEFINITIONS,
+    });
+    const watch = this.#watch(revision);
+    try {
+      const reading = await canaryGate.take(unread);
+      if (outdated()) return true;
+      const wait = readingWait(unread.install, reading);
+      if (wait === undefined) return true;
+      // A job that gave a reading ran every canary, whatever was asked of it, so the bound words only one that gave none.
+      const bound =
+        reading.status === CANARY_READING.none &&
+        watch.asked() === ENDING.bound;
+      const what = bound ? boundReason(wait.what) : wait.what;
+      return this.#waits(job, revision, what, wait.ends);
+    } finally {
+      watch.release();
+    }
+  }
+
+  /** The workspace gets no further job at `revision`, until `ends` says; true, since the scheduler is to plan again. */
+  #waits(
+    job: PlannedJob,
+    revision: number,
+    what: string,
+    ends = WORKSPACE_WAIT,
+  ): true {
+    this.#plan.workspaceWaits(job, revision, `${markText(what)}, ${ends}`);
     this.#parts.log.entry(
-      `the falsification of ${job.workspacePath} waits: ${what}, ${WORKSPACE_WAIT}`,
+      `the falsification of ${job.workspacePath} waits: ${what}, ${ends}`,
     );
     return true;
   }
