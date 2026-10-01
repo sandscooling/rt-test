@@ -731,8 +731,8 @@
     "id": "D3175",
     "defect": "The CLI's line for a held workspace names the discovery as a run.",
     "file": "packages/cli/src/answer-text.ts",
-    "old": "    ? DISCOVERY_JOB",
-    "new": "    ? RUN_JOB"
+    "old": "  if (workspacePath === undefined) return DISCOVERY_JOB;",
+    "new": "  if (workspacePath === undefined) return RUN_JOB;"
   },
   {
     "id": "D3176",
@@ -766,8 +766,8 @@
     "id": "D3183",
     "defect": "The CLI prints the workspace of a run that changed a held workspace's path as the consumer's tree spells it, so a line break in it breaks the answer's line.",
     "file": "packages/cli/src/answer-text.ts",
-    "old": "    : `${RUN_JOB} ${oneLine(workspacePath)}`;",
-    "new": "    : `${RUN_JOB} ${workspacePath}`;"
+    "old": "KIND_JOBS[kind]} ${oneLine(workspacePath)}`;",
+    "new": "KIND_JOBS[kind]} ${workspacePath}`;"
   },
   {
     "id": "D3278",
@@ -1356,5 +1356,12 @@
     "file": "packages/cli/src/commands/defects.ts",
     "old": "  if (Array.isArray(detail)) {\n    return `[${detail.map(detailText).join(LIST_SEPARATOR)}]`;\n  }\n",
     "new": ""
+  },
+  {
+    "id": "D4112",
+    "defect": "The CLI words a falsification entry as the run of its workspace.",
+    "file": "packages/cli/src/answer-text.ts",
+    "old": "  falsification: \"the falsification of\",",
+    "new": "  falsification: \"the run of\","
   }
 ]

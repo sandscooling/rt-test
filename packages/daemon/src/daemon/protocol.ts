@@ -24,7 +24,7 @@ export const MAX_LINE_BYTES = 1024 * 1024;
 const NEWLINE_BYTE = 0x0a;
 const LINE_END = "\n";
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** The daemon's event loop runs no Vitest code; its longest wait is one store write held by another worktree's daemon, and the second wait is margin. */
 const STORE_WAITS_PER_RESPONSE = 2;
@@ -147,12 +147,25 @@ export interface HelloResponse extends Proven {
 export type DaemonActivity =
   | { readonly state: "discovering" }
   | { readonly state: "running"; readonly workspacePath: string }
+  | {
+      readonly state: "falsifying";
+      readonly workspacePath: string;
+      /** How many definitions the falsification job in progress holds. */
+      readonly definitions: number;
+    }
   | { readonly state: "idle" };
 
-/** A job since the start that ended with nothing stored. */
+export const FALSIFICATION_JOB = "falsification";
+
+/**
+ * A job since the start that ended with nothing stored, or a workspace's falsification that left a job or a
+ * definition waiting for an input change.
+ */
 export interface UnstoredJob {
   /** Undefined for the discovery. */
   readonly workspacePath?: string;
+  /** Only a falsification's entry carries one; a run's and the discovery's carry none. */
+  readonly kind?: typeof FALSIFICATION_JOB;
   readonly reason: string;
 }
 

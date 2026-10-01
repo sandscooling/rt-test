@@ -217,7 +217,7 @@ A defect definition RT Test cannot apply as written, such as one naming no disco
 _Avoid_: bad defect, broken spec
 
 **Falsification job**:
-One executor job that runs a Vitest workspace's baseline, each of its defects' experiments and the restored baseline in one Vitest instance.
+One executor job that runs, for some of one Vitest workspace's waiting defects, the baseline, each defect's experiment and the restored baseline in one Vitest instance.
 _Avoid_: mutation run, falsification run
 
 **Experiment**:
@@ -251,6 +251,10 @@ _Avoid_: unclassified, maybe-kill
 **Eligible defect**:
 A defect whose definition is valid, whose anchor matches, and whose test holds a current pass, so it can be falsified now.
 _Avoid_: runnable defect, pending defect
+
+**Waiting defect**:
+An eligible defect whose evidence is missing or not current, which the daemon falsifies when no ordinary job is due.
+_Avoid_: queued defect, stale defect
 
 **Canary fixture**:
 A test that fails on purpose in one known way, so RT Test can check that it reads that failure's facts correctly on a Vitest version.

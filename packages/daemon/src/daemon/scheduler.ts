@@ -1,15 +1,8 @@
 import type { InputDigests } from "../inputs/input-inventory.js";
 import type { CurrentInputs, TrackedInputs } from "../inputs/input-tracker.js";
 import type { QueryNarrowing } from "../inputs/narrowed-inputs.js";
-import {
-  CURRENT,
-  FIRST_ROUND,
-  INPUT_DIGESTS_UNREAD,
-  ROUND_WAIT,
-  type DueReason,
-  type RoundWait,
-} from "../query/answer.js";
-import { fingerprintDigest, recordFreshness } from "../query/test-states.js";
+import { ROUND_WAIT, type DueReason, type RoundWait } from "../query/answer.js";
+import { fingerprintDigest } from "../query/test-states.js";
 import type { LatestResults } from "../store/open-store.js";
 import type { StoredRun } from "../store/stored-records.js";
 import {
@@ -22,8 +15,8 @@ import type { EditReport } from "./change-record.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
   DiscoveryHistory,
+  discoveryInEffect,
   type DiscoverReport,
-  type DiscoveryInEffect,
 } from "./discovery-history.js";
 import {
   DUE_REASON_TEXT,
@@ -36,13 +29,7 @@ import {
   testModulesKey,
   type QueuedWorkspace,
 } from "./due-workspaces.js";
-import {
-  changedPaths,
-  explainRound,
-  NO_SELECTION_CONSEQUENCE,
-  unselectedRound,
-  type RoundSelection,
-} from "./round-selection.js";
+import { selectRound } from "./round-selection.js";
 import {
   RunHistory,
   type BegunRun,
@@ -59,10 +46,6 @@ import {
 export const QUIET_WINDOW_MS = 1_000;
 
 const IDLE_ENTRY = "idle: no confirmed workspace is due";
-const NO_SNAPSHOT_REASON = "the inputs' digests cannot be read now";
-const NO_SNAPSHOT_ENTRY = `warning: no selection was made, because ${NO_SNAPSHOT_REASON}, ${NO_SELECTION_CONSEQUENCE}`;
-const FIRST_ROUND_REASON = "no previous round read the inputs to compare with";
-const FIRST_ROUND_ENTRY = `round without a selection: ${FIRST_ROUND_REASON}`;
 
 /** What a run job left: with the stored run's id, its verdict when stored not fingerprinted, and what interrupted it. */
 export interface RunReport extends EndedRun, HistoryReport {}
@@ -95,6 +78,12 @@ export interface SchedulerParts {
     revision: number,
     uninterruptible: string | undefined,
   ) => Promise<RunReport | undefined>;
+  /**
+   * Taken when a plan at `revision` finds no discovery and no workspace due: one look for waiting defect definitions
+   * and at most one falsification job. Resolves true when the round is to be planned again, whether a job began or
+   * the look only found a workspace it cannot send a job for.
+   */
+  readonly falsify: (revision: number) => Promise<boolean>;
   readonly idle: () => void;
 }
 
@@ -123,6 +112,7 @@ type Step =
  * Decides what the daemon discovers and runs and when: once the input revision has held still and the dependency
  * build at it has ended, it discovers again when the discovery in effect is not current, then runs each confirmed
  * workspace whose latest run is not bound to its current fingerprint, one job at a time and planning again after each.
+ * When none of those is due it takes one falsification look, and plans again after a job of it.
  */
 export class Scheduler {
   readonly #parts: SchedulerParts;
@@ -215,7 +205,18 @@ export class Scheduler {
       await this.#run(next.queued, revision);
       return true;
     }
-    return next.kind === "again" || this.#idle();
+    if (next.kind === "again") return true;
+    return (await this.#falsify(revision)) || this.#idle();
+  }
+
+  /** A job in progress at the planned revision leaves the plan in effect, and a later revision's round reads it. */
+  async #falsify(revision: number): Promise<boolean> {
+    const again = await this.#schedule.during(
+      this.#parts.falsify(revision),
+      revision,
+    );
+    if (again) this.#dirty = true;
+    return again;
   }
 
   #isStopping(): boolean {
@@ -285,7 +286,7 @@ export class Scheduler {
     if (view.inputs.facts.revision !== revision) return { kind: "again" };
     this.#noteRevision(revision);
     this.#runs.observed(view.inputs.snapshot?.comparedDigests);
-    const inEffect = discoveryInEffect(view);
+    const inEffect = discoveryInEffect(view.results, view.inputs);
     this.#discoveries.decide(inEffect);
     const eligible = this.#eligible(view);
     this.#armRetries(view, eligible, revision);
@@ -420,7 +421,16 @@ export class Scheduler {
     due: readonly DueWorkspace[],
   ): void {
     if (this.#selectionOwed) {
-      const selection = this.#selectRound(revision, view, eligible, due);
+      const { selection, snapshot } = selectRound(revision, {
+        log: this.#parts.log,
+        narrowing: this.#parts.narrowing,
+        before: this.#snapshot,
+        now: view.inputs.snapshot?.comparedDigests,
+        due: due.map(({ entry }) => entry.workspace.path),
+        confirmed: eligible.map(({ entry }) => entry.workspace.path),
+        isHeld: (path) => this.#runs.isHeld(path),
+      });
+      this.#snapshot = snapshot;
       this.#selectionOwed = false;
       this.#directTargets = selection.directTargets;
       this.#schedule.selected(selection.explanation);
@@ -432,50 +442,6 @@ export class Scheduler {
       this.#announced.set(path, key);
       this.#parts.log.entry(`due: ${path}, ${DUE_REASON_TEXT[reason]}`);
     }
-  }
-
-  #selectRound(
-    revision: number,
-    view: ScheduleView,
-    eligible: readonly EligibleWorkspace[],
-    due: readonly DueWorkspace[],
-  ): RoundSelection {
-    const { log, narrowing } = this.#parts;
-    const now = view.inputs.snapshot?.comparedDigests;
-    const before = this.#snapshot;
-    if (now === undefined) {
-      log.entry(NO_SNAPSHOT_ENTRY);
-      return unselectedRound(
-        revision,
-        INPUT_DIGESTS_UNREAD,
-        NO_SNAPSHOT_REASON,
-      );
-    }
-    if (before === undefined) {
-      this.#snapshot = now;
-      log.entry(FIRST_ROUND_ENTRY);
-      return unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON);
-    }
-    const selection = explainRound(
-      log,
-      narrowing(),
-      revision,
-      changedPaths(before, now),
-    );
-    this.#snapshot = now;
-    const dueNow = new Set(due.map(({ entry }) => entry.workspace.path));
-    const confirmed = new Set(
-      eligible.map(({ entry }) => entry.workspace.path),
-    );
-    for (const path of selection.selected) {
-      const holdsCurrent = !dueNow.has(path) && !this.#runs.isHeld(path);
-      if (confirmed.has(path) && holdsCurrent) {
-        log.entry(
-          `not run: ${path} was selected, and holds results bound to its current input fingerprint`,
-        );
-      }
-    }
-    return selection;
   }
 
   /** A discovery that did not begin leaves the record as it was, its retry kept; one that throws counts as having stored nothing. */
@@ -543,13 +509,11 @@ export class Scheduler {
     }
   }
 
-  /** Logs once after work, then waits for a change of revision or a periodic reconciliation; false after a stop. */
+  /**
+   * Waits for a change of revision or a periodic reconciliation, logging once after work when neither has come since
+   * the plan; false after a stop.
+   */
   async #idle(): Promise<boolean> {
-    if (this.#dirty) {
-      this.#dirty = false;
-      this.#parts.log.entry(IDLE_ENTRY);
-      this.#parts.idle();
-    }
     const { inputs } = this.#parts;
     while (!this.#isStopping()) {
       if (
@@ -558,19 +522,13 @@ export class Scheduler {
       ) {
         return true;
       }
+      if (this.#dirty) {
+        this.#dirty = false;
+        this.#parts.log.entry(IDLE_ENTRY);
+        this.#parts.idle();
+      }
       await this.#untilChangeOrStop();
     }
     return false;
   }
-}
-
-/** Undefined when no discovery is in effect: none is stored, or the latest was refused. */
-function discoveryInEffect(view: ScheduleView): DiscoveryInEffect | undefined {
-  const stored = view.results.discovery;
-  if (stored === undefined) return undefined;
-  const print = view.inputs.discoveryFingerprint(stored.discovery);
-  return {
-    current: recordFreshness(stored, fingerprintDigest(print)) === CURRENT,
-    fingerprinted: print.ok,
-  };
 }

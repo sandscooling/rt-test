@@ -612,6 +612,8 @@ export function activityText(activity: DaemonActivity): string {
       return "discovering tests";
     case "running":
       return `running workspace ${activity.workspacePath}`;
+    case "falsifying":
+      return `falsifying workspace ${activity.workspacePath}, with ${activity.definitions} of its defect definitions in the job`;
     case "idle":
       return "idle";
   }

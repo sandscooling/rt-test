@@ -5,6 +5,8 @@ import {
   type QueryNarrowing,
 } from "../inputs/narrowed-inputs.js";
 import {
+  FIRST_ROUND,
+  INPUT_DIGESTS_UNREAD,
   NO_BUILD_ENDED,
   ROUND_SELECTION,
   SELECTION_REFUSED,
@@ -24,10 +26,14 @@ import {
 import type { DaemonLog } from "./daemon-log.js";
 
 const LIST_SEPARATOR = ", ";
-export const NO_SELECTION_CONSEQUENCE =
+const NO_SELECTION_CONSEQUENCE =
   "so every workspace whose latest run is not bound to its current fingerprint still runs";
 const NO_BUILD_ENDED_REASON =
   "no dependency build ended at this input revision, because the wait for it was released";
+const NO_SNAPSHOT_REASON = "the inputs' digests cannot be read now";
+const NO_SNAPSHOT_ENTRY = `warning: no selection was made, because ${NO_SNAPSHOT_REASON}, ${NO_SELECTION_CONSEQUENCE}`;
+const FIRST_ROUND_REASON = "no previous round read the inputs to compare with";
+const FIRST_ROUND_ENTRY = `round without a selection: ${FIRST_ROUND_REASON}`;
 
 /** What a round logged of its selection: the changed paths, fallbacks and counts, or why it made none. */
 export type RoundExplanation = { readonly revision: number } & (
@@ -42,7 +48,7 @@ export type RoundExplanation = { readonly revision: number } & (
 );
 
 /** What a round's selection gives the scheduler. */
-export interface RoundSelection {
+interface RoundSelection {
   /** Workspaces owning a path that changed since the previous round; none when no selection was made. */
   readonly directTargets: ReadonlySet<string>;
   /** Workspaces some changed path selected; none when no selection was made. */
@@ -51,7 +57,7 @@ export interface RoundSelection {
 }
 
 /** A round that selected nothing, because no selection was made, with the kind and reason the log gives. */
-export function unselectedRound(
+function unselectedRound(
   revision: number,
   kind: NoRoundSelection,
   reason: string,
@@ -61,6 +67,71 @@ export function unselectedRound(
     selected: new Set(),
     explanation: { revision, state: ROUND_SELECTION.notMade, kind, reason },
   };
+}
+
+/** What a round's selection reads beside its revision. */
+interface RoundReading {
+  readonly log: DaemonLog;
+  /** The dependency builds' state, read only when two snapshots can be compared. */
+  readonly narrowing: () => QueryNarrowing;
+  /** The inputs the latest round that made or tried a selection read. */
+  readonly before: InputDigests | undefined;
+  /** The inputs this round reads; undefined when their digests cannot be read now. */
+  readonly now: InputDigests | undefined;
+  /** The workspaces the round finds due, by path. */
+  readonly due: readonly string[];
+  /** The confirmed workspaces of the discovery in effect, by path. */
+  readonly confirmed: readonly string[];
+  readonly isHeld: (path: string) => boolean;
+}
+
+/**
+ * The round's selection over the paths that changed since the previous round's snapshot, with the snapshot the next
+ * round compares with: this round's when its digests could be read, otherwise the one it was given.
+ */
+export function selectRound(
+  revision: number,
+  reading: RoundReading,
+): {
+  readonly selection: RoundSelection;
+  readonly snapshot: InputDigests | undefined;
+} {
+  const { log, before, now } = reading;
+  if (now === undefined) {
+    log.entry(NO_SNAPSHOT_ENTRY);
+    return {
+      selection: unselectedRound(
+        revision,
+        INPUT_DIGESTS_UNREAD,
+        NO_SNAPSHOT_REASON,
+      ),
+      snapshot: before,
+    };
+  }
+  if (before === undefined) {
+    log.entry(FIRST_ROUND_ENTRY);
+    return {
+      selection: unselectedRound(revision, FIRST_ROUND, FIRST_ROUND_REASON),
+      snapshot: now,
+    };
+  }
+  const selection = explainRound(
+    log,
+    reading.narrowing(),
+    revision,
+    changedPaths(before, now),
+  );
+  const dueNow = new Set(reading.due);
+  const confirmed = new Set(reading.confirmed);
+  for (const path of selection.selected) {
+    const holdsCurrent = !dueNow.has(path) && !reading.isHeld(path);
+    if (confirmed.has(path) && holdsCurrent) {
+      log.entry(
+        `not run: ${path} was selected, and holds results bound to its current input fingerprint`,
+      );
+    }
+  }
+  return { selection, snapshot: now };
 }
 
 /** The paths whose digest changed, appeared or disappeared between two snapshots of the inputs, in path order. */
@@ -79,7 +150,7 @@ export function changedPaths(
  * each broad fallback and the counts; when no build narrows the revision or selection refuses, logs why at warning
  * level and selects nothing.
  */
-export function explainRound(
+function explainRound(
   log: DaemonLog,
   narrowing: QueryNarrowing,
   revision: number,

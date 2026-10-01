@@ -56,6 +56,9 @@ import type {
   ReportedAlias,
   SelectionFacts,
 } from "../src/vitest/selection-facts.js";
+import { DISCOVERED_VITEST_VERSION } from "./scheduling-harness.js";
+
+export { DISCOVERED_VITEST_VERSION };
 
 export const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 const FIXTURES = join(REPO, "test/fixtures/daemon");
@@ -453,9 +456,6 @@ export function projectFacts(facts: FactsCase = {}): ProjectSelectionFacts {
 export function slashed(path: string): string {
   return path.replaceAll(sep, "/");
 }
-
-/** The Vitest a hand-built discovery reports having loaded. */
-export const DISCOVERED_VITEST_VERSION = "5.0.1";
 
 /** A discovered workspace listing one test in each of `modules`, relative to it, and reporting `facts`. */
 export function discoveredWorkspace(

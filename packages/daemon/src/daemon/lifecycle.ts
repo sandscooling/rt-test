@@ -1,5 +1,4 @@
 import type { FingerprintResult } from "../inputs/fingerprint.js";
-import type { JobVerdict } from "../inputs/input-jobs.js";
 import type { CurrentInputs, TrackedInputs } from "../inputs/input-tracker.js";
 import { narrowingAt, type QueryNarrowing } from "../inputs/narrowed-inputs.js";
 import type {
@@ -29,10 +28,13 @@ import { Changes, type ChangesMoment } from "./changes.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
 import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
+import { Falsification } from "./falsification.js";
 import {
+  DISCOVERY_STOPPED_REASON,
   discoverySummary,
   interruptedRun,
   logMissingConfirmed,
+  protectDiscovered,
   runToStore,
   storeBindings,
   storeFailureReason,
@@ -55,8 +57,6 @@ import { StopSequence } from "./stop-sequence.js";
 import { NOT_AWAITED_REASON, Waits } from "./waits.js";
 import type { EndedRun } from "./workspace-schedule.js";
 
-const DISCOVERY_STOPPED_REASON =
-  "the stop arrived during the discovery, so it was not stored";
 const NOT_INTERRUPTED =
   "will not be interrupted by a change, so it runs to its end, and a change inside its inputs while it runs leaves the run it stores invalidated";
 const UNCONFIRMED_RUN_REASON =
@@ -86,7 +86,7 @@ export interface LifecycleParts {
  * input events seen before it are read, and a run once the dependency build at that revision has ended or none can
  * begin. A discovery is stored under the input fingerprint it started from, or not fingerprinted when its inputs
  * moved while it ran; a run is judged by its workspace's inputs alone, and interrupted with nothing stored once a
- * change inside them makes it worthless.
+ * change inside them makes it worthless. While nothing is due, it falsifies the waiting defect definitions.
  */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;
@@ -95,6 +95,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   readonly #scheduler: Scheduler;
   readonly #waits: Waits;
   readonly #changes: Changes;
+  readonly #falsification: Falsification;
   #activity: DaemonActivity = { state: "discovering" };
   readonly #unstored: UnstoredJobs;
   readonly #refusals: RefusalNotes;
@@ -116,6 +117,14 @@ export class DaemonLifecycle implements DaemonHandlers {
       stateDirectory: parts.identity.stateDirectory,
       log: parts.log,
     });
+    this.#falsification = new Falsification({
+      ...parts,
+      stopSignal: this.stopSignal,
+      moment: () => this.#moment(),
+      setActivity: (activity) => {
+        this.#activity = activity;
+      },
+    });
     this.#scheduler = new Scheduler({
       inputs: parts.inputs,
       log: parts.log,
@@ -128,6 +137,8 @@ export class DaemonLifecycle implements DaemonHandlers {
       discover: (revision) => this.#idleAfter(this.#discover(revision)),
       run: (entry, revision, uninterruptible) =>
         this.#idleAfter(this.#run(entry, revision, uninterruptible)),
+      falsify: (revision) =>
+        this.#idleAfter(this.#falsification.look(revision)),
       idle: () => {
         this.#activity = { state: "idle" };
       },
@@ -169,7 +180,10 @@ export class DaemonLifecycle implements DaemonHandlers {
     return {
       activity: this.#activity,
       stopping: this.isStopping(),
-      unstoredJobs: this.#unstored.jobs(),
+      unstoredJobs: [
+        ...this.#unstored.jobs(),
+        ...this.#falsification.entries(),
+      ],
     };
   }
 
@@ -338,7 +352,13 @@ export class DaemonLifecycle implements DaemonHandlers {
       return report(false);
     }
     const discovery = outcome.value;
-    const held = await this.#protectDiscovered(discovery, verdict, startedAt);
+    const held = await protectDiscovered(
+      inputs,
+      () => this.isStopping(),
+      discovery,
+      verdict,
+      startedAt,
+    );
     if (this.isStopping()) {
       this.#nothingStored(undefined, DISCOVERY_STOPPED_REASON);
       return report(false);
@@ -365,49 +385,6 @@ export class DaemonLifecycle implements DaemonHandlers {
     const changed =
       movedOnceComposed || (!held.fingerprinted && held.changedWhileRunning);
     return report(stored, changed);
-  }
-
-  /**
-   * Protects the discovery's files before its fingerprint is taken, so the stored digest counts them as every later
-   * answer does. The tracker dropped the events of a file a pattern covered through the job, so the time of each one
-   * the discovery names is read before protection moves it into the inputs, and protection reads the time of each one
-   * only its walk finds; an input event during protection fails the fingerprint, and protection's own reads do not.
-   */
-  async #protectDiscovered(
-    discovery: TestDiscovery,
-    verdict: JobVerdict,
-    startedAt: number,
-  ): Promise<JobVerdict> {
-    const { inputs } = this.#parts;
-    await inputs.settled();
-    if (this.isStopping())
-      return {
-        fingerprinted: false,
-        reason: DISCOVERY_STOPPED_REASON,
-        changedWhileRunning: false,
-      };
-    const unwatched = inputs
-      .current()
-      .protectedFileChangedSince(discovery, startedAt);
-    const guard = inputs.beginJob();
-    let released: string | undefined;
-    try {
-      released = await inputs.protectInputs(discovery, startedAt);
-    } catch (error) {
-      await inputs.endJob(guard);
-      throw error;
-    }
-    const guarded = await inputs.endJob(guard);
-    if (!verdict.fingerprinted) return verdict;
-    const changed = unwatched ?? released;
-    if (changed !== undefined) {
-      return {
-        fingerprinted: false,
-        reason: changed,
-        changedWhileRunning: true,
-      };
-    }
-    return guarded;
   }
 
   /**

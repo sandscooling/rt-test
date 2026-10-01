@@ -36,7 +36,7 @@ import type { StoredRun } from "../src/store/stored-records.js";
 import { VITEST_ADAPTER_VERSION } from "../src/vitest/adapter-version.js";
 import type { TestDiscovery } from "../src/vitest/discover-tests.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
-import { memoryLog, type MemoryLog } from "./daemon-harness.js";
+import { IDLE_ENTRY, memoryLog, type MemoryLog } from "./daemon-harness.js";
 import {
   DISCOVERY_DIGEST,
   RecordingStore,
@@ -138,6 +138,15 @@ interface RigOptions {
   readonly discoveryChanged?: (call: number) => readonly string[];
   /** What each discovery does beside the options above, given its index from 0; nothing more when absent. */
   readonly discovered?: (call: number) => DiscoveryJob;
+  /**
+   * Whether each falsification look asks for the round to be planned again, given its index from 0 and the inputs,
+   * which it may move as a change during its job does; a look that took nothing when absent. Each scripted look is
+   * recorded in the rig's calls as `look@<revision>`.
+   */
+  readonly falsified?: (
+    call: number,
+    inputs: StandInInputs,
+  ) => boolean | Promise<boolean>;
 }
 
 /** What one discovery job the test scripts does. */
@@ -177,6 +186,7 @@ function rig(options: RigOptions = {}): Rig {
   const inputs = new StandInInputs(options.script);
   const log = memoryLog();
   const calls: string[] = [];
+  let looks = 0;
   const runsOf = new Map<string, number>();
   let discoveries = 0;
   let stopping = false;
@@ -285,6 +295,14 @@ function rig(options: RigOptions = {}): Rig {
         ...(notKept === undefined ? {} : { notKept }),
         ...(interruptedBy === undefined ? {} : { interruptedBy }),
       };
+    },
+    falsify: async (revision) => {
+      const call = looks;
+      looks += 1;
+      if (options.falsified === undefined) return false;
+      calls.push(`look@${revision}`);
+      await nextTurn();
+      return options.falsified(call, inputs);
     },
     idle: () => {
       calls.push("idle");
@@ -4110,5 +4128,161 @@ describe("an agent's reported edits for every subject", () => {
         record.jobEnded(stillWindow([FIXTURE]), undefined);
       }),
     ).toStrictEqual({ byJobs: [], edits: [FIXTURE] });
+  });
+});
+
+/** A job of the first look that moves the input revision as a change while it ran does, and asks for another plan. */
+function movedByFirstLook(
+  call: number,
+  inputs: StandInInputs,
+  change: () => void,
+): boolean {
+  if (call > 0) return false;
+  change();
+  inputs.moveRevision();
+  return true;
+}
+
+describe("the falsification look once nothing is due", () => {
+  it("D4045: a look that asks for another plan is followed by one at the same revision, and the next look by it, until a look takes nothing", async () => {
+    const calls = await running(
+      { seed: currentResults("a"), falsified: (call) => call < 2 },
+      async (started) => {
+        await untilQuiet(started);
+        return started.calls;
+      },
+    );
+    expect(calls).toStrictEqual(["look@1", "look@1", "look@1", "idle"]);
+  });
+
+  it("D4046: a run that became due while a falsification job ran goes before the next look", async () => {
+    const edited = { a: false };
+    const calls = await running(
+      {
+        seed: currentResults("a"),
+        script: {
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: edited.a ? `${path}-edited` : `${path}-digest`,
+          }),
+        },
+        falsified: (call, inputs) =>
+          movedByFirstLook(call, inputs, () => {
+            edited.a = true;
+          }),
+      },
+      async (started) => {
+        await untilQuiet(started);
+        return started.calls;
+      },
+    );
+    expect(calls).toStrictEqual(["look@1", "run:a@2", "look@2", "idle"]);
+  });
+
+  it("D4047: a discovery that became due while a falsification job ran goes before the next look", async () => {
+    const stale = { discovery: false };
+    const calls = await running(
+      {
+        seed: currentResults("a"),
+        script: {
+          discoveryFingerprintOf: () => ({
+            ok: true,
+            digest: stale.discovery ? "moved" : DISCOVERY_DIGEST,
+          }),
+        },
+        discovered: () => ({
+          afterEnd: () => {
+            stale.discovery = false;
+          },
+        }),
+        falsified: (call, inputs) =>
+          movedByFirstLook(call, inputs, () => {
+            stale.discovery = true;
+          }),
+      },
+      async (started) => {
+        await untilQuiet(started);
+        return started.calls;
+      },
+    );
+    expect(calls).toStrictEqual(["look@1", "discover@2", "look@2", "idle"]);
+  });
+
+  it("D4048: the idle entry is logged again after a look that asked for another plan, and not after a round that took nothing", async () => {
+    const entries = await running(
+      { seed: currentResults("a"), falsified: (call) => call === 2 },
+      async (started) => {
+        await untilQuiet(started);
+        started.inputs.endPeriodicReconciliation();
+        await untilQuiet(started);
+        const quiet = [...started.log.entries];
+        started.inputs.endPeriodicReconciliation();
+        await untilQuiet(started);
+        return {
+          afterAQuietRound: quiet.filter((entry) => entry === IDLE_ENTRY),
+          afterAJob: started.log.entries.filter(
+            (entry) => entry === IDLE_ENTRY,
+          ),
+        };
+      },
+    );
+    expect(entries).toStrictEqual({
+      afterAQuietRound: [IDLE_ENTRY],
+      afterAJob: [IDLE_ENTRY, IDLE_ENTRY],
+    });
+  });
+
+  it("D4049: while a falsification job planned at an earlier revision runs, the round at the revision now reads pending on the job in progress", async () => {
+    const job = new Deferred<boolean>();
+    const round = await running(
+      { seed: currentResults("a"), falsified: () => job.promise },
+      async (started) => {
+        await flush();
+        started.inputs.moveRevision();
+        const during = roundOf(started);
+        job.resolve(false);
+        await flush();
+        return during;
+      },
+    );
+    expect(round).toStrictEqual({
+      state: "pending",
+      waitsFor: "job-in-progress",
+    });
+  });
+
+  it("D4156: a look that took nothing because the input revision moved during it is followed by the run the move made due, with no idle entry and no idle call before it", async () => {
+    const edited = { a: false };
+    const outcome = await running(
+      {
+        seed: currentResults("a"),
+        script: {
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: edited.a ? `${path}-edited` : `${path}-digest`,
+          }),
+        },
+        falsified: (call, inputs) => {
+          if (call === 0) {
+            edited.a = true;
+            inputs.moveRevision();
+          }
+          return false;
+        },
+      },
+      async (started) => {
+        await untilQuiet(started);
+        return {
+          calls: started.calls,
+          idleEntries: started.log.entries.filter(
+            (entry) => entry === IDLE_ENTRY,
+          ).length,
+        };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      calls: ["look@1", "run:a@2", "look@2", "idle"],
+      idleEntries: 1,
+    });
   });
 });
