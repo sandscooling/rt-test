@@ -579,6 +579,17 @@ On the final tree: `wt/2` at 7d380642 with the uncommitted diff of `packages/` w
 
 UNVERIFIED: none on either platform for the review's gates. Not run by the review: `bun run check` over the merged tree, which is the orchestrator's.
 
+#### Tech debt pass
+
+Against 49311b0c, at 15:38 on 2026-10-01. `node scripts/list-open-issues.mjs` printed "0 open issues, complete", so no open issue matched this changeset or any item. The pass applied no fix.
+
+- The job's name spelled once per package, and `markText` beside `cutReason`: carried by the orchestrator, each waiting on the next ticket that edits its file (orchestrator, 15:37; ticket 3.4b, which would have taken both, was dropped at 15:23). D4160 pins the bound's arithmetic meanwhile.
+- `wasInterrupted` twice: left for the next ticket that edits `falsify/falsify-workspace.ts` (orchestrator, 14:26).
+- The two lenient test stand-ins: dismissed. `input-tracker.test.ts` pins a window recording a change and D3917 pins the store refusing a verdict with no definition digest, so the stand-ins leave no real behavior unproven.
+- The CLI's heading above the list of jobs that stored nothing and the first-line cut of a reason in it (`contextLines` in `packages/cli/src/answer-text.ts`): **folded into the next ticket that edits `packages/cli/test/cli.test.ts` or `packages/cli/src/answer-text.ts`**, as two named defects for that ticket's tests session, and not a debt change of its own. **Decided by the orchestrator (threadId e88c9bb1) at 15:39 on 2026-10-01:** they are two tests of behavior that is built and unchanged, the same item is in the debt carried from ticket 3.4b's author, and a round of its own (ids, two platforms' proofs, a commit, a ride on a gate) is not worth more than taking it with the next ticket that opens that file. The two defects: "The list of jobs that stored nothing prints with no heading, so its entries read as execution states." and "An unstored job's reason is printed whole, so a multi-line error spills across the list's lines."
+- `#quietWindow`'s comment: dismissed. It is true while the scheduler waits; after a job a change ended, the window starts at the job's return, the latency U1's known limit records.
+- `INTERRUPTED_BEFORE_SEND_REASON`: left (orchestrator, 14:26).
+
 ### Completion Notes
 
 #### Questions and rulings
