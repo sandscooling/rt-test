@@ -659,10 +659,10 @@
   },
   {
     "id": "D3782",
-    "defect": "The falsifier version is not raised, so evidence recorded before a confirming run and a judgement existed is kept as current.",
+    "defect": "The falsifier version is not raised, so evidence recorded before an experiment record held its mutation file's digest is kept as current.",
     "file": "packages/daemon/src/falsify/experiment-record.ts",
-    "old": "export const FALSIFIER_VERSION = 2;",
-    "new": "export const FALSIFIER_VERSION = 1;"
+    "old": "export const FALSIFIER_VERSION = 3;",
+    "new": "export const FALSIFIER_VERSION = 2;"
   },
   {
     "id": "D3783",
@@ -866,5 +866,47 @@
     "file": "packages/daemon/src/falsify/falsify-workspace.ts",
     "old": "    unhandledErrors: job.unhandledErrors,",
     "new": "    unhandledErrors: [],"
+  },
+  {
+    "id": "D3870",
+    "defect": "The record of an experiment that ran carries no digest of its mutation file's text, so a detection has nothing to bind to and cannot be stored as evidence.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    return fileText?.read === true",
+    "new": "    return fileText?.read === true && record.status !== \"ran\""
+  },
+  {
+    "id": "D3871",
+    "defect": "The record of an experiment decided without a run carries no digest though the job read its file, so a verdict such as invalid experiment for no probe site or no module has nothing to bind to and cannot be stored.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    return fileText?.read === true",
+    "new": "    return fileText?.read === true && record.status === \"ran\""
+  },
+  {
+    "id": "D3872",
+    "defect": "The record of an experiment whose mutation file could not be read carries a digest, so it reads as bound to a text the job never read.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "      : record;",
+    "new": "      : { ...record, mutationFileDigest: wholeDigest(\"\") };"
+  },
+  {
+    "id": "D3873",
+    "defect": "The digest is taken from the mutation file as it reads when the job's records are collected, so a file edited mid-job carries the digest of the edited text, and evidence planned from the old text reads current.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "      ? { ...record, mutationFileDigest: fileText.digest }",
+    "new": "      ? { ...record, mutationFileDigest: wholeDigest(readFileSync(experiment.mutation.file, \"utf8\")) }"
+  },
+  {
+    "id": "D3874",
+    "defect": "The digest is taken of the text with its byte order mark dropped, so a file that starts with one never digests as a query reads it and its evidence reads stale forever.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    return { read: true, text, digest: wholeDigest(text) };",
+    "new": "    return { read: true, text, digest: wholeDigest(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) };"
+  },
+  {
+    "id": "D3875",
+    "defect": "The digest is taken of the text with its carriage returns dropped, so a file with CRLF line endings never digests as a query reads it and its evidence reads stale forever.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    return { read: true, text, digest: wholeDigest(text) };",
+    "new": "    return { read: true, text, digest: wholeDigest(text.replaceAll(String.fromCharCode(13), \"\")) };"
   }
 ]

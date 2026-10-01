@@ -36,7 +36,7 @@ import type { Judgement } from "./verdict.js";
  * Raise it whenever what a falsification record, its mutation transform, its reach probe or a judgement means
  * changes, so evidence recorded under the old meaning can be retired.
  */
-export const FALSIFIER_VERSION = 2;
+export const FALSIFIER_VERSION = 3;
 
 /** One defect's experiment as the job is asked to run it: the test that should detect it, and its mutation. */
 export interface DefectExperiment {
@@ -158,11 +158,15 @@ export type ExperimentRecord =
       readonly mutation: readonly MutationLoad[];
       /** Present only when the run would be a detection. */
       readonly confirming?: ConfirmingRun;
+      /** `wholeDigest` of the mutation file's text as the job read it when it started, a byte order mark kept. */
+      readonly mutationFileDigest?: string;
     }
   | {
       readonly defectId: string;
       readonly status: "not-run";
       readonly reason: ExperimentNotRun;
+      /** As on a record that ran; absent when the job could not read the file. */
+      readonly mutationFileDigest?: string;
     };
 
 /** Why a loaded workspace ran nothing at all. */
