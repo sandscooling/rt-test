@@ -106,6 +106,8 @@ C106. **Clean up temporary state in the test body**: A test that creates a tempo
 
 C107. **Drive a CLI through its exit code and streams**: A script test asserts the exit code and the stdout or stderr content a user sees, not an internal helper alone.
 
+C176. **Test a decision through the code that builds its inputs**: A decision proven over hand-built inputs also has a test through the code that builds those inputs, for each input the decision reads. FAIL when the builder could hand the decision a constant in place of a recorded value and no test would go red.
+
 ## Suite hygiene
 
 C108. **One owning test per behavior**: A new test does not re-cover a path already asserted in the same file or a sibling suite; overlap keeps the strongest test.
