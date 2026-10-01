@@ -1,16 +1,12 @@
 import type { Dirent } from "node:fs";
 import { opendir, readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { isRecord } from "../json-guards.js";
 import {
-  listProblem,
   matchesBelow,
   matchesPath,
   NON_INPUTS_FILE,
-  patternProblem,
   presence,
   PRESENCE,
-  type ListMember,
 } from "../inputs/non-inputs.js";
 import {
   readCheckedIgnored,
@@ -29,17 +25,15 @@ import {
   relativePosixPath,
   ROOT_PATH,
 } from "../vitest/find-workspaces.js";
+import {
+  declaredSettings,
+  NOTHING_DECLARED,
+  unreadSettings,
+  type DeclaredSettings,
+} from "./declared-settings.js";
 
+/** The member of a definition file that holds its definitions. */
 const DEFECTS_MEMBER = "defects";
-/** Every entry the walk reaches is tested against every pattern, so this bounds that work. */
-const MAX_DEFECT_PATTERNS = 256;
-const DEFECTS_RULE: ListMember = {
-  member: DEFECTS_MEMBER,
-  max: MAX_DEFECT_PATTERNS,
-  items: "patterns",
-  item: "pattern",
-  problem: patternProblem,
-};
 const MISSING_CODES = ["ENOENT", "ENOTDIR"];
 /**
  * The numbers V8 ends its message with for where a parse failed, when it gives any. Its message may quote the file's
@@ -66,7 +60,10 @@ const INVALID_ENTRY = {
 export type InvalidEntryKind =
   (typeof INVALID_ENTRY)[keyof typeof INVALID_ENTRY];
 
-/** A problem that keeps the definitions a file or directory may hold from being read; each counts in the total. */
+/**
+ * A problem in `rt-test.json`, or one that keeps the definitions a file or directory may hold from being read; each
+ * counts in the total.
+ */
 export interface InvalidEntry {
   readonly kind: InvalidEntryKind;
   /** Relative to the consumer root, `/`-separated; `ROOT_PATH` for the root itself. */
@@ -85,7 +82,10 @@ export interface DefinitionSource {
 
 export interface DefinitionFiles {
   readonly definitions: readonly DefinitionSource[];
+  /** A problem in a member of `rt-test.json` comes before every entry the walk makes. */
   readonly invalidEntries: readonly InvalidEntry[];
+  /** The error names `rt-test.json` declares as assertions, as it writes them; none while its member has a problem. */
+  readonly assertionErrors: readonly string[];
 }
 
 interface Pattern {
@@ -124,31 +124,34 @@ type Parsed =
 const ABSENT: Parsed = { state: "absent" };
 
 /**
- * The definitions in the files the `defects` member of `rt-test.json` names, and each problem that keeps some from
- * being read. Reads JSON files only, and never follows a directory link.
+ * The definitions in the files the `defects` member of `rt-test.json` names, each problem that keeps some from being
+ * read, and the assertion error names the same read of `rt-test.json` declares. Reads JSON files only, and never
+ * follows a directory link.
  */
 export async function readDefinitionFiles(
   consumerRoot: string,
   stateDirectory: string,
   signal: AbortSignal,
 ): Promise<DefinitionFiles> {
-  const declared = await declaredPatterns(consumerRoot);
-  if ("entry" in declared) {
-    return { definitions: [], invalidEntries: [declared.entry] };
-  }
-  if (declared.patterns.length === 0) {
-    return { definitions: [], invalidEntries: [] };
+  const settings = await readSettings(consumerRoot);
+  const { assertionErrors } = settings;
+  const invalidEntries = settings.problems.map(settingsEntry);
+  if (settings.patterns.length === 0) {
+    return { definitions: [], invalidEntries, assertionErrors };
   }
   const walk: Walk = {
     root: resolve(consumerRoot),
-    patterns: declared.patterns,
+    patterns: settings.patterns.map((text) => ({
+      text,
+      segments: text.split(POSIX_SEPARATOR),
+    })),
     ignored: new Set(),
     unconfirmed: new Map(),
     stateDirectory: resolve(stateDirectory),
     signal,
     files: [],
     matched: new Set(),
-    invalidEntries: [],
+    invalidEntries,
   };
   await walkRoot(walk);
   walk.invalidEntries.push(...unmatchedPatterns(walk));
@@ -159,40 +162,23 @@ export async function readDefinitionFiles(
     if ("entry" in read) walk.invalidEntries.push(read.entry);
     else definitions.push(...read.definitions);
   }
-  return { definitions, invalidEntries: walk.invalidEntries };
+  return { definitions, invalidEntries: walk.invalidEntries, assertionErrors };
 }
 
-/** No patterns when there is no `rt-test.json` or it has no `defects` member. */
-async function declaredPatterns(
-  consumerRoot: string,
-): Promise<
-  { readonly patterns: Pattern[] } | { readonly entry: InvalidEntry }
-> {
-  const settings = await readJsonFile(consumerRoot, NON_INPUTS_FILE);
-  if (settings.state === "absent") return { patterns: [] };
-  if (settings.state === "invalid") {
-    return { entry: settingsEntry(settings.entry.reason) };
-  }
-  if (!isRecord(settings.value)) {
-    return { entry: settingsEntry("its top level is not a JSON object") };
-  }
-  const problem = listProblem(settings.value, DEFECTS_RULE);
-  if (problem !== undefined) return { entry: settingsEntry(problem) };
-  const member = objectField(settings.value, DEFECTS_MEMBER);
-  if (member === undefined) return { patterns: [] };
-  return {
-    patterns: (member as string[]).map((text) => ({
-      text,
-      segments: text.split(POSIX_SEPARATOR),
-    })),
-  };
+/** Nothing is declared when there is no `rt-test.json`. */
+async function readSettings(consumerRoot: string): Promise<DeclaredSettings> {
+  const read = await readJsonFile(consumerRoot, NON_INPUTS_FILE);
+  if (read.state === "absent") return NOTHING_DECLARED;
+  return read.state === "invalid"
+    ? unreadSettings(read.entry.reason)
+    : declaredSettings(read.value);
 }
 
-function settingsEntry(problem: string): InvalidEntry {
+function settingsEntry(reason: string): InvalidEntry {
   return {
     kind: INVALID_ENTRY.settingsUnusable,
     path: NON_INPUTS_FILE,
-    reason: `${NON_INPUTS_FILE} names no definition files: ${problem}`,
+    reason,
   };
 }
 
