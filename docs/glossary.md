@@ -241,7 +241,7 @@ An experiment whose run cannot say whether the test rejects the mutation, such a
 _Avoid_: void, setup kill
 
 **Unclear experiment**:
-An experiment whose test failed in its own body with an error that is not an assertion, failed beside an unhandled error, or failed at an assertion and then did not fail the same way in its confirming run.
+An experiment whose test failed in its own body with no error or one that is not an assertion, failed beside an unhandled error, or failed at an assertion that its confirming run, the run the job started next or the job's own end did not bear out.
 _Avoid_: unclassified, maybe-kill
 
 **Eligible defect**:
