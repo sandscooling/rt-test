@@ -197,7 +197,7 @@ Whether a defect's evidence still describes its definition, its mutation's file,
 _Avoid_: evidence staleness, validity
 
 **Definition digest**:
-A digest of a defect definition's id, test identity and mutation, to which its evidence is bound.
+A digest of a defect definition's id, test identity and mutation and of the assertion error names `rt-test.json` declares, to which its evidence is bound.
 _Avoid_: definition hash
 
 **Survivor**:
