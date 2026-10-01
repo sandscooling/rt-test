@@ -224,6 +224,10 @@ _Avoid_: retry, rerun check
 The recorder call a mutation's transform places at the mutated site, so an experiment records which tests executed the mutated code.
 _Avoid_: coverage marker, reach flag
 
+**Probe site**:
+The place in a mutated module where its reach probe stands. A mutation whose change has none is not run.
+_Avoid_: probe point, instrumentation point
+
 **Invalid experiment**:
 An experiment whose run cannot say whether the test rejects the mutation, such as one whose test failed in a hook or never executed the mutated site.
 _Avoid_: void, setup kill
