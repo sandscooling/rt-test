@@ -1,5 +1,9 @@
 import { MODIFIED_TIME_RESOLUTION_MS } from "../inputs/input-inventory.js";
 import type { JobWindow } from "../inputs/input-jobs.js";
+import type { CurrentInputs } from "../inputs/input-tracker.js";
+import { CURRENT } from "../query/answer.js";
+import { fingerprintDigest, recordFreshness } from "../query/test-states.js";
+import type { LatestResults } from "../store/open-store.js";
 import type { JobsByPath, SubjectChanges } from "./change-record.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
@@ -38,6 +42,20 @@ export interface DiscoveryInEffect {
   readonly current: boolean;
   /** Whether a current fingerprint over every input can be computed. */
   readonly fingerprinted: boolean;
+}
+
+/** Undefined when no discovery is in effect: none is stored, or the latest was refused. */
+export function discoveryInEffect(
+  results: LatestResults,
+  inputs: CurrentInputs,
+): DiscoveryInEffect | undefined {
+  const stored = results.discovery;
+  if (stored === undefined) return undefined;
+  const print = inputs.discoveryFingerprint(stored.discovery);
+  return {
+    current: recordFreshness(stored, fingerprintDigest(print)) === CURRENT,
+    fingerprinted: print.ok,
+  };
 }
 
 /** The discovery's part of the change record, whose one owner records every job. */

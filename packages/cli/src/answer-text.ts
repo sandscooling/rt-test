@@ -133,6 +133,10 @@ const DISCOVERY_HELD_UNTIL_IN_HELD_ROUND = `an edit, a change the daemon cannot 
 const DISCOVERY_SELF_CHANGING_CAUSE = `${KEEP_CHANGING} the inputs`;
 const DISCOVERY_JOB = "the discovery";
 const RUN_JOB = "the run of";
+type NamedJob = Pick<Answer["unstoredJobs"][number], "workspacePath" | "kind">;
+const KIND_JOBS: Record<NonNullable<NamedJob["kind"]>, string> = {
+  falsification: "the falsification of",
+};
 /** Joins the details of one entry on its line. */
 export const DETAIL_SEPARATOR = "; ";
 const INCOMPLETE_MARK = " (incomplete)";
@@ -362,12 +366,10 @@ function selfChangedText({ path, jobs }: SelfChangedPath): string {
   return `${oneLine(path)} (during ${namedText(jobs, jobText)})`;
 }
 
-function jobText({
-  workspacePath,
-}: SelfChangedPath["jobs"]["named"][number]): string {
-  return workspacePath === undefined
-    ? DISCOVERY_JOB
-    : `${RUN_JOB} ${oneLine(workspacePath)}`;
+/** A hold's job carries no kind, so it reads as a run or the discovery. */
+function jobText({ workspacePath, kind }: NamedJob): string {
+  if (workspacePath === undefined) return DISCOVERY_JOB;
+  return `${kind === undefined ? RUN_JOB : KIND_JOBS[kind]} ${oneLine(workspacePath)}`;
 }
 
 function dueText(due: DueFacts): string {

@@ -1,4 +1,8 @@
-import type { StatusResponse, UnstoredJob } from "../daemon/protocol.js";
+import {
+  FALSIFICATION_JOB,
+  type StatusResponse,
+  type UnstoredJob,
+} from "../daemon/protocol.js";
 import type { ScheduleReader } from "../daemon/workspace-schedule.js";
 import type { FingerprintResult } from "../inputs/fingerprint.js";
 import type { CurrentInputs } from "../inputs/input-tracker.js";
@@ -331,15 +335,18 @@ function unstoredClause(jobs: readonly UnstoredJob[]): string {
   if (jobs.length === 0) return "";
   const named = jobs.slice(0, MAX_NAMED_UNSTORED_JOBS).map((job) => {
     const { reason, omittedCharacters } = cutReason(job.reason);
-    const who =
-      job.workspacePath === undefined
-        ? "the discovery"
-        : `the run of ${job.workspacePath}`;
-    return `${who}: ${reason}${omittedText(omittedCharacters)}`;
+    return `${jobName(job)}: ${reason}${omittedText(omittedCharacters)}`;
   });
   const more = jobs.length - named.length;
   const rest = more === 0 ? "" : `${JOB_SEPARATOR}and ${more} more`;
   return `; ended with nothing stored: ${named.join(JOB_SEPARATOR)}${rest}`;
+}
+
+function jobName({ workspacePath, kind }: UnstoredJob): string {
+  if (workspacePath === undefined) return "the discovery";
+  return kind === FALSIFICATION_JOB
+    ? `the falsification of ${workspacePath}`
+    : `the run of ${workspacePath}`;
 }
 
 /** Cuts by code point, so no character is split. */

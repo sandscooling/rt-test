@@ -1,5 +1,6 @@
 import type { FingerprintResult } from "../inputs/fingerprint.js";
 import type { JobVerdict } from "../inputs/input-jobs.js";
+import type { TrackedInputs } from "../inputs/input-tracker.js";
 import { FINGERPRINT_DIGEST, NOT_FINGERPRINTED } from "../store/schema.js";
 import type { StoreBindings, StoreScope } from "../store/stored-records.js";
 import { NewerStoreSchemaError } from "../store/transaction.js";
@@ -13,10 +14,56 @@ import type { UnstoredJob } from "./protocol.js";
 
 const JOB_THREW_REASON = "the job could not be run";
 const STORE_WRITE_FAILED_REASON = "the store write failed";
+export const DISCOVERY_STOPPED_REASON =
+  "the stop arrived during the discovery, so it was not stored";
 
 /** A job that threw ended with nothing, the same as one whose process died. */
 export function threwOutcome<T>(error: unknown): JobOutcome<T> {
   return { ended: false, reason: `${JOB_THREW_REASON}: ${errorText(error)}` };
+}
+
+/**
+ * Protects the discovery's files before its fingerprint is taken, so the stored digest counts them as every later
+ * answer does. The tracker dropped the events of a file a pattern covered through the job, so the time of each one
+ * the discovery names is read before protection moves it into the inputs, and protection reads the time of each one
+ * only its walk finds; an input event during protection fails the fingerprint, and protection's own reads do not.
+ */
+export async function protectDiscovered(
+  inputs: TrackedInputs,
+  isStopping: () => boolean,
+  discovery: TestDiscovery,
+  verdict: JobVerdict,
+  startedAt: number,
+): Promise<JobVerdict> {
+  await inputs.settled();
+  if (isStopping())
+    return {
+      fingerprinted: false,
+      reason: DISCOVERY_STOPPED_REASON,
+      changedWhileRunning: false,
+    };
+  const unwatched = inputs
+    .current()
+    .protectedFileChangedSince(discovery, startedAt);
+  const guard = inputs.beginJob();
+  let released: string | undefined;
+  try {
+    released = await inputs.protectInputs(discovery, startedAt);
+  } catch (error) {
+    await inputs.endJob(guard);
+    throw error;
+  }
+  const guarded = await inputs.endJob(guard);
+  if (!verdict.fingerprinted) return verdict;
+  const changed = unwatched ?? released;
+  if (changed !== undefined) {
+    return {
+      fingerprinted: false,
+      reason: changed,
+      changedWhileRunning: true,
+    };
+  }
+  return guarded;
 }
 
 /** A run its abort ended: interrupted before or after it loaded, or with nothing, as an exit after an abort ends it. */
