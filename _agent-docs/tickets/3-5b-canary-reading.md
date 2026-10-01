@@ -16,10 +16,10 @@ them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review 
 A workspace's **Vitest install** is the Vitest that resolves from its directory, told apart by the package's real directory and its version. A **canary reading** of an install is what one falsification job over the canary set showed under it: **confirmed** when the job's reply read `ran`, was not interrupted, carried the install's version, and gave every canary the verdict and the reason `canaries.json` names for it; **disagreed**, with each canary that read otherwise, when such a reply did not; and otherwise **no reading**, with why.
 
 - [x] AC1: Resolving a workspace's Vitest gives, beside its version, the install's directory: the real directory of the package whose version it reports, also when the workspace reaches that package through a directory link. An unsupported resolution is as it was. (FR23)
-- [ ] AC2: A reading taken through an `Executor`, over the bundled set, of each Vitest install this repository holds (4.1 and 5) is confirmed, on Windows and on Linux, with the state directory under a root whose nearest Vitest is the other line: the job runs under the install it was given and no other. The job's experiments are the canaries in the order the file lists them, with the file's project name and assertion error names. (FR11, FR23)
-- [ ] AC3: A reply that read `ran`, was not interrupted and carried the install's version reads disagreed when, for any canary, it holds no judgement whose `defectId` is the canary's id, or that judgement's verdict or reason is not exactly what `canaries.json` names for it: another verdict, no verdict, another reason, no reason where one is named, or a reason where none is named. The reading names each such canary by id, in the file's order, with the verdict and reason the reply read, each absent when the reply gave none, and the verdict and reason named. A detail or a fact that differs changes no reading. (FR23)
-- [ ] AC4: A reading is no reading, of one kind from a closed set, with a detail where the kind has one. The kinds, the first that holds: the canary directory's `canaries.json` cannot be read or does not hold the members § The canary file names; the set cannot be placed in the state directory; the job did not end with a reply, which a call that throws also is; the reply does not read `ran`; the reply was interrupted; the reply carries another Vitest version than the install's. In the first two no job is sent. (FR23)
-- [ ] AC5: A reading's files lie only in the state directory it was given, in a directory of its own whose name no other reading, daemon or worktree shares: a copy of the canary directory and one directory link to the install. When the reading has been taken, however it ended (confirmed, disagreed, an aborted job, an executor that died, a set that could not be placed), that directory is gone, and the install and every file outside the state directory but the log the reading was given are byte-identical to what they were before it. A directory that cannot be removed is named in that log, and the reading is what it would have been. (FR23, NFR6)
+- [x] AC2: A reading taken through an `Executor`, over the bundled set, of each Vitest install this repository holds (4.1 and 5) is confirmed, on Windows and on Linux, with the state directory under a root whose nearest Vitest is the other line: the job runs under the install it was given and no other. The job's experiments are the canaries in the order the file lists them, with the file's project name and assertion error names. (FR11, FR23)
+- [x] AC3: A reply that read `ran`, was not interrupted and carried the install's version reads disagreed when, for any canary, it holds no judgement whose `defectId` is the canary's id, or that judgement's verdict or reason is not exactly what `canaries.json` names for it: another verdict, no verdict, another reason, no reason where one is named, or a reason where none is named. The reading names each such canary by id, in the file's order, with the verdict and reason the reply read, each absent when the reply gave none, and the verdict and reason named. A detail or a fact that differs changes no reading. (FR23)
+- [x] AC4: A reading is no reading, of one kind from a closed set, with a detail where the kind has one. The kinds, the first that holds: the canary directory's `canaries.json` cannot be read or does not hold the members § The canary file names; the set cannot be placed in the state directory; the job did not end with a reply, which a call that throws also is; the reply does not read `ran`; the reply was interrupted; the reply carries another Vitest version than the install's. In the first two no job is sent. (FR23)
+- [x] AC5: A reading's files lie only in the state directory it was given, in a directory of its own whose name no other reading, daemon or worktree shares: a copy of the canary directory and one directory link to the install. When the reading has been taken, however it ended (confirmed, disagreed, an aborted job, an executor that died, a set that could not be placed), that directory is gone, and the install and every file outside the state directory but the log the reading was given are byte-identical to what they were before it. A directory that cannot be removed is named in that log, and the reading is what it would have been. (FR23, NFR6)
 
 ## Unverified Assumptions
 
@@ -293,15 +293,66 @@ Two facts a test of AC5 should know. Vitest 5 writes its API token file to the u
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId ce15dd52-8233-4f43-9ae8-45b532f83151
 
 #### Named Defects
 
-None.
+D4115 is in `packages/daemon/test/load-vitest.test.ts` with its record in `packages/daemon/test/defects.json`; D4116 through D4147 are in `packages/daemon/test/falsify/canaries.test.ts` with their records in `packages/daemon/test/falsify/defects.json`.
+
+- D4115: The resolution gives the path the workspace reaches Vitest by, a link's own path, in place of the package's real directory, so two workspaces that link one install read as two installs. (AC1)
+- D4116: The reading's job is sent no config file name, so it loads no workspace and replies not confirmed, and no install this repository holds is ever confirmed. (AC2; the one test that links the real installs, and its assertion also holds AC5 for a real job: the directory gone with the executor still open, both installs and the consumer's files as they were, nothing logged)
+- D4117: The copy gets no directory link to the install, so its job runs under whichever Vitest lies nearest above the state directory. (AC2)
+- D4118: The job's experiments are sorted by canary id, so the canary that leaks a rejection no longer follows one that does not read detected, and a canary before it reads unclear. (AC2)
+- D4119: Each experiment names its test under no project, so the job finds no module that holds it and every canary reads no module. (AC2; the same assertion holds occurrence 0 and the workspace path)
+- D4120: Each mutation keeps its file relative to the canary directory, so the job reads it from the daemon's working directory and no canary's file is found. (AC2)
+- D4121: The job is sent no assertion error names, so the canary whose error the set declares reads not an assertion. (AC2; the same assertion holds the config file the copy holds)
+- D4122: A canary's verdict is not compared, so a Vitest under which a detection reads survived is confirmed. (AC3)
+- D4123: A canary's reason is not compared, so a Vitest under which a hook failure reads as a site not executed is confirmed. (AC3)
+- D4124: An absent reason agrees with any reason, so a judgement that lost its reason, or gained one the canary file does not name, is confirmed. (AC3)
+- D4125: A canary the reply holds no judgement of agrees, so a job that judged no canary confirms the install. (AC3)
+- D4126: The canaries that disagree are named in the order the reply holds its judgements, not the canary file's. (AC3; one of its canaries reads no verdict)
+- D4127: A judgement that carries a detail disagrees, so a Vitest whose every verdict and reason holds is refused for a detail the canary file never names. (AC3)
+- D4128: A canary file that cannot be read is not checked for, so the set is placed anyway and the reading says its job gave no reply. (AC4)
+- D4129: A canary file that lists no canary is read as usable, so its job judges nothing and every install is confirmed. (AC4; the same assertion holds a missing or mistyped project name, assertion error names and canary list, beside a whole file that is used)
+- D4130: A canary whose judgement names no verdict is read as usable, so the set is run and that canary agrees with any reply that gives it no verdict. (AC4; the same assertion holds each member of a canary missing or of another type, eleven cases beside a whole canary that is used)
+- D4131: A state directory in which the reading's directory cannot be made rejects the reading, where it is to read as a set that could not be placed. (AC4)
+- D4132: The copy's node_modules is made over one the canary directory brought, so the link is written into a directory the set holds and the job is sent. (AC4)
+- D4133: A placement that fails leaves the directory it made in the state directory. (AC5)
+- D4134: An outcome that did not end is read on as a reply, so the reason the executor gave for its end is lost. (AC4)
+- D4135: A call that throws rejects the reading, where it is to read as a job that ended with no reply. (AC4)
+- D4136: An ended outcome whose value is no object is read as a reply, so it reads as a reply that did not run, with no status. (AC4)
+- D4137: A reply that was not confirmed reads with its status alone, so the reading cannot say why the job loaded nothing. (AC4; the same assertion holds the detail of a failed, a refused, an unsupported and an interrupted-before-load reply)
+- D4138: The reply's Vitest version is compared before whether it ran, so a reply that failed under another version reads as another Vitest version and its error is lost. (AC4)
+- D4139: The reply's Vitest version is compared before its interruption, so an interrupted reply under another version reads as another Vitest version. (AC4)
+- D4140: The reply's Vitest version is not compared, so a job that ran under another Vitest than the install's confirms the install. (AC4)
+- D4141: The reading's directory is made beside the state directory, in the consumer root, so its files lie outside the state directory. (AC5; the same assertion holds the copy, the one link and where it leads)
+- D4142: Every reading's directory has one fixed name, so a second reading from the same state directory cannot be placed while the first runs. (AC5)
+- D4143: The reading's directory is not removed when the reading has been taken, so every reading leaves a copy and a link in the state directory. (AC5; a confirmed, a disagreed and an interrupted reply, an executor that died and a call that throws)
+- D4144: The removal does not check that the directory still resolves to the path the reading placed, so it follows a path that now leads elsewhere and logs nothing. (AC5)
+- D4145: The removal goes on though the link to the install could not be unlinked, so the directory is removed with whatever stands where the link was. (AC5)
+- D4146: A reading's directory that is already gone is logged as a removal that failed. (AC5)
+- D4147: A link to the install that is already gone is logged as a failure and ends the removal, so the directory is left. (AC5)
+
+Every test but D4116 takes its reading of a stand-in install under the test's own temp directory, with a stand-in job, so no weakened placement or removal ever has one of this repository's installs as its link's target. D4116's mutation leaves placement and removal as written.
+
+Proven by id with `node scripts/verify-defects.mjs --ids`, through the run lease, on 2026-10-01, over the tree at e88ef0ac with this lane's four test paths: the 33 records above and the 8 anchored in `vitest/load-vitest.ts`, whose mutated file the build edited (D1020 through D1026 and D1028). Windows, Node 24.19.0: 24 of 24 detected, exit 0, ended 13:46, and 17 of 17 detected, exit 0, ended 13:48. Linux (WSL, a clone at `~/rt-test-t3-5b-tests`), Node 24.19.0: 41 of 41 detected, exit 0, 13:55 to 13:57. Each run's baseline was green before and after. The two test files pass whole, 56 tests: on Windows under Node 24.19.0 at 13:38, on Linux under Node 24.19.0 at 13:55 and under Node 22.23.3 at 13:57. AC2's real reading of each install is confirmed on both platforms. Both Vitest installs hash the same before the first proof and after the last on each platform (107 and 118 entries).
+
+The step's scoped suite ran first: `bun x vitest related` over the three production files selected 43 of 84 test files, 2365 tests passed, exit 0, 13:19 to 13:25 on Windows. No test was stale and none was a code bug.
+
+`packages/daemon/test/falsify/canaries.test.ts` and `packages/daemon/test/load-vitest.test.ts` gained lines only (imports, declarations and new test blocks), so the 15 records already in the first keep running the same code and were not proven again. `canaries.test.ts` keeps its own reader of the canary file (`canarySet`, `experiments`), which is what the new tests' expected values are read from.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/daemon/canary-reading.ts`: a recursive removal that fails once the link is gone (the `catch` around `rmSync` in `removePlaced`). No stand-in makes `rmSync` fail on both platforms without replacing `node:fs`; the cost is that a reading which rejected there, in place of logging, would go unseen.
+- `packages/daemon/src/daemon/canary-reading.ts`: a real path that cannot be read for another reason than a missing directory (the `log.error` arm of `removePlaced`'s first `catch`). The same: nothing but a permission the test cannot set on Windows makes `realpathSync.native` fail there; the cost is an unlogged refusal.
+- `packages/daemon/src/daemon/canary-reading.ts`: the removal on Windows under Node 22. This machine holds no Node 22 for Windows and the pre-push gate runs none, so no test claims it.
+- `packages/daemon/src/falsify/canary-set.ts`: each member check of `checkedSet`, `checkedCanary`, `checkedTest`, `checkedMutation` and `checkedJudgement` is asserted (D4129, D4130) and two of them are proven by mutation. A proof for each of the other guards would need a record and a test apiece for a file that is RT Test's own and that D3786 and D4116 read whole; the cost is that a guard dropped from one member would be caught only when that member is next wrong.
+- `packages/daemon/src/falsify/canary-set.ts`: `BUNDLED_CANARY_DIRECTORY` from `dist`. Tests run from `src`, where D4116 and D4118 to D4121 read the bundled set through it.
+
+#### Questions to the orchestrator
+
+- 13:25 on 2026-10-01, asked: six more defect ids, and whether AC2's real reading may carry a record that mutates only the config file name its job is sent, with the link proven over a stand-in. Answered by the orchestrator (threadId e88c9bb1-bd61-4792-a533-a28c842bc9a7) at 13:26: D4145 to D4150 allocated; no objection, "the real installs are linked only by code whose placement and removal are unmutated".
+- 13:40, sent: the 17 records that mutate `daemon/canary-reading.ts`, each with its old and new text and what its mutated code removes. Answered by the orchestrator at 13:42: 16 approved as listed; D4145 changed from deleting the statement `if (!unlinkInstall(log, placed)) return;` to `unlinkInstall(log, placed);`, so the mutated code still unlinks first and only the refusal is skipped, and no mutated path removes a tree that still holds a link. Applied before any proof ran.
 
 ### Review Record
 
@@ -351,6 +402,11 @@ Dev, 2026-10-01, in Tree 1 on `wt/1` at main's d095063a. No test was written or 
 - `packages/daemon/src/falsify/canary-set.ts` (dev, created)
 - `packages/daemon/src/daemon/canary-reading.ts` (dev, created)
 - `_agent-docs/tickets/3-5b-canary-reading.md` (dev: task and criterion boxes, Dev Handoff, Completion Notes, File List; the author: the sanity-check and removal corrections)
+- `packages/daemon/test/falsify/canaries.test.ts` (tests, modified: D4116 through D4147 and their helpers, lines added only)
+- `packages/daemon/test/load-vitest.test.ts` (tests, modified: D4115, lines added only)
+- `packages/daemon/test/falsify/defects.json` (tests, modified: 32 records appended)
+- `packages/daemon/test/defects.json` (tests, modified: one record appended)
+- `_agent-docs/tickets/3-5b-canary-reading.md` (tests: the boxes of AC2 to AC5, Tests Record, File List)
 
 - `_agent-docs/tickets/3-5b-canary-reading.md` (created by create-ticket)
 - `_agent-docs/tickets/3-6-canary-gate.md` (created by create-ticket: the gate's draft, at backlog)

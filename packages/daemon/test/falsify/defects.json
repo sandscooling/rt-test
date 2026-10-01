@@ -1111,5 +1111,229 @@
     "file": "packages/daemon/src/falsify/run-facts.ts",
     "old": "  if (typeof name !== \"string\") return undefined;",
     "new": "  if (typeof name !== \"string\") return className(error);"
+  },
+  {
+    "id": "D4116",
+    "defect": "The reading's job is sent no config file name, so it loads no workspace and replies not confirmed, and no install this repository holds is ever confirmed.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "      chosenConfigFile(workspace) ?? NO_CONFIG_FILE,",
+    "new": "      NO_CONFIG_FILE,"
+  },
+  {
+    "id": "D4117",
+    "defect": "The copy gets no directory link to the install, so its job runs under whichever Vitest lies nearest above the state directory.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    symlinkSync(\n      install.directory,\n      join(modules, VITEST_PACKAGE),\n      DIRECTORY_LINK,\n    );\n",
+    "new": ""
+  },
+  {
+    "id": "D4118",
+    "defect": "The job's experiments are sorted by canary id, so the canary that leaks a rejection no longer follows one that does not read detected, and a canary before it reads unclear.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  return set.canaries.map((canary) => ({",
+    "new": "  return set.canaries\n    .toSorted((left, right) => left.id.localeCompare(right.id))\n    .map((canary) => ({"
+  },
+  {
+    "id": "D4119",
+    "defect": "Each experiment names its test under no project, so the job finds no module that holds it and every canary reads no module.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "      projectName: set.projectName,",
+    "new": "      projectName: \"\","
+  },
+  {
+    "id": "D4120",
+    "defect": "Each mutation keeps its file relative to the canary directory, so the job reads it from the daemon's working directory and no canary's file is found.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "    mutation: { ...canary.mutation, file: join(root, canary.mutation.file) },",
+    "new": "    mutation: canary.mutation,"
+  },
+  {
+    "id": "D4121",
+    "defect": "The job is sent no assertion error names, so the canary whose error the set declares reads not an assertion.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "      set.assertionErrors,",
+    "new": "      [],"
+  },
+  {
+    "id": "D4122",
+    "defect": "A canary's verdict is not compared, so a Vitest under which a detection reads survived is confirmed.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (verdict === named.verdict && reason === named.reason) return [];",
+    "new": "  if (reason === named.reason) return [];"
+  },
+  {
+    "id": "D4123",
+    "defect": "A canary's reason is not compared, so a Vitest under which a hook failure reads as a site not executed is confirmed.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (verdict === named.verdict && reason === named.reason) return [];",
+    "new": "  if (verdict === named.verdict) return [];"
+  },
+  {
+    "id": "D4124",
+    "defect": "An absent reason agrees with any reason, so a judgement that lost its reason, or gained one the canary file does not name, is confirmed.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (verdict === named.verdict && reason === named.reason) return [];",
+    "new": "  if (\n    verdict === named.verdict &&\n    (reason ?? named.reason) === (named.reason ?? reason)\n  ) {\n    return [];\n  }"
+  },
+  {
+    "id": "D4125",
+    "defect": "A canary the reply holds no judgement of agrees, so a job that judged no canary confirms the install.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  const verdict = found?.verdict;",
+    "new": "  if (found === undefined) return [];\n  const verdict = found.verdict;"
+  },
+  {
+    "id": "D4126",
+    "defect": "The canaries that disagree are named in the order the reply holds its judgements, not the canary file's.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  const disagreed = set.canaries.flatMap((canary) =>\n    disagreement(canary, job.judgements),\n  );",
+    "new": "  const disagreed = job.judgements.flatMap(({ defectId }) =>\n    set.canaries\n      .filter((canary) => canary.id === defectId)\n      .flatMap((canary) => disagreement(canary, job.judgements)),\n  );"
+  },
+  {
+    "id": "D4127",
+    "defect": "A judgement that carries a detail disagrees, so a Vitest whose every verdict and reason holds is refused for a detail the canary file never names.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (verdict === named.verdict && reason === named.reason) return [];",
+    "new": "  if (\n    verdict === named.verdict &&\n    reason === named.reason &&\n    !(found !== undefined && \"detail\" in found)\n  ) {\n    return [];\n  }"
+  },
+  {
+    "id": "D4128",
+    "defect": "A canary file that cannot be read is not checked for, so the set is placed anyway and the reading says its job gave no reply.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "  if (!read.usable) return noReading(NO_READING_KIND.setUnusable, read.reason);\n",
+    "new": ""
+  },
+  {
+    "id": "D4129",
+    "defect": "A canary file that lists no canary is read as usable, so its job judges nothing and every install is confirmed.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (!Array.isArray(listed) || listed.length === 0) {",
+    "new": "  if (!Array.isArray(listed)) {"
+  },
+  {
+    "id": "D4130",
+    "defect": "A canary whose judgement names no verdict is read as usable, so the set is run and that canary agrees with any reply that gives it no verdict.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (typeof verdict !== \"string\") return undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D4131",
+    "defect": "A state directory in which the reading's directory cannot be made rejects the reading, where it is to read as a set that could not be placed.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "  } catch (error) {\n    return { placed: false, reason: errorText(error) };\n  }\n  try {\n    cpSync(",
+    "new": "  } catch (error) {\n    throw error;\n  }\n  try {\n    cpSync("
+  },
+  {
+    "id": "D4132",
+    "defect": "The copy's node_modules is made over one the canary directory brought, so the link is written into a directory the set holds and the job is sent.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    mkdirSync(modules);",
+    "new": "    mkdirSync(modules, { recursive: true });"
+  },
+  {
+    "id": "D4133",
+    "defect": "A placement that fails leaves the directory it made in the state directory.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    removePlaced(parts.log, directory);\n    return { placed: false, reason: errorText(error) };",
+    "new": "    return { placed: false, reason: errorText(error) };"
+  },
+  {
+    "id": "D4134",
+    "defect": "An outcome that did not end is read on as a reply, so the reason the executor gave for its end is lost.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    if (!outcome.ended) {\n      return noReading(NO_READING_KIND.noReply, outcome.reason);\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D4135",
+    "defect": "A call that throws rejects the reading, where it is to read as a job that ended with no reply.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "  } catch (error) {\n    return noReading(NO_READING_KIND.noReply, errorText(error));\n  }",
+    "new": "  } catch (error) {\n    throw error;\n  }"
+  },
+  {
+    "id": "D4136",
+    "defect": "An ended outcome whose value is no object is read as a reply, so it reads as a reply that did not run, with no status.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    if (!isRecord(outcome.value)) {\n      return noReading(NO_READING_KIND.noReply, NOT_A_JOB_REASON);\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D4137",
+    "defect": "A reply that was not confirmed reads with its status alone, so the reading cannot say why the job loaded nothing.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "    case \"not-confirmed\":\n      return job.reason;",
+    "new": "    case \"not-confirmed\":\n      return undefined;"
+  },
+  {
+    "id": "D4138",
+    "defect": "The reply's Vitest version is compared before whether it ran, so a reply that failed under another version reads as another Vitest version and its error is lost.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (job.status !== \"ran\") {\n    return noReading(NO_READING_KIND.notRan, notRanDetail(job));\n  }",
+    "new": "  if (\"vitestVersion\" in job && job.vitestVersion !== installVersion) {\n    return noReading(NO_READING_KIND.otherVitestVersion, job.vitestVersion);\n  }\n  if (job.status !== \"ran\") {\n    return noReading(NO_READING_KIND.notRan, notRanDetail(job));\n  }"
+  },
+  {
+    "id": "D4139",
+    "defect": "The reply's Vitest version is compared before its interruption, so an interrupted reply under another version reads as another Vitest version.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (job.interrupted) {\n    return { status: CANARY_READING.none, kind: NO_READING_KIND.interrupted };\n  }\n  if (job.vitestVersion !== installVersion) {\n    return noReading(NO_READING_KIND.otherVitestVersion, job.vitestVersion);\n  }",
+    "new": "  if (job.vitestVersion !== installVersion) {\n    return noReading(NO_READING_KIND.otherVitestVersion, job.vitestVersion);\n  }\n  if (job.interrupted) {\n    return { status: CANARY_READING.none, kind: NO_READING_KIND.interrupted };\n  }"
+  },
+  {
+    "id": "D4140",
+    "defect": "The reply's Vitest version is not compared, so a job that ran under another Vitest than the install's confirms the install.",
+    "file": "packages/daemon/src/falsify/canary-set.ts",
+    "old": "  if (job.vitestVersion !== installVersion) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D4141",
+    "defect": "The reading's directory is made beside the state directory, in the consumer root, so its files lie outside the state directory.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    realpathSync.native(stateDirectory),\n    `${PLACED_PREFIX}${randomUUID()}`,",
+    "new": "    realpathSync.native(stateDirectory),\n    \"..\",\n    `${PLACED_PREFIX}${randomUUID()}`,"
+  },
+  {
+    "id": "D4142",
+    "defect": "Every reading's directory has one fixed name, so a second reading from the same state directory cannot be placed while the first runs.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    `${PLACED_PREFIX}${randomUUID()}`,",
+    "new": "    `${PLACED_PREFIX}reading`,"
+  },
+  {
+    "id": "D4143",
+    "defect": "The reading's directory is not removed when the reading has been taken, so every reading leaves a copy and a link in the state directory.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "  } finally {\n    removePlaced(parts.log, placement.directory);\n  }",
+    "new": "  } finally {\n  }"
+  },
+  {
+    "id": "D4144",
+    "defect": "The removal does not check that the directory still resolves to the path the reading placed, so it follows a path that now leads elsewhere and logs nothing.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "  if (directory !== placed) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D4145",
+    "defect": "The removal goes on though the link to the install could not be unlinked, so the directory is removed with whatever stands where the link was.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "  if (!unlinkInstall(log, placed)) return;",
+    "new": "  unlinkInstall(log, placed);"
+  },
+  {
+    "id": "D4146",
+    "defect": "A reading's directory that is already gone is logged as a removal that failed.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    if (isMissing(error)) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D4147",
+    "defect": "A link to the install that is already gone is logged as a failure and ends the removal, so the directory is left.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    if (isMissing(error)) return true;\n",
+    "new": ""
   }
 ]
