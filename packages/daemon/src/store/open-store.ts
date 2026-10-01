@@ -1,10 +1,18 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import type { FalsificationJob } from "../falsify/experiment-record.js";
 import type { TestDiscovery } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
 import { UnreadableRecordError } from "./columns.js";
+import {
+  selectEvidence,
+  writeEvidence,
+  type EvidenceBindings,
+  type LatestEvidence,
+  type StoredEvidence,
+} from "./defect-evidence.js";
 import {
   readLatestDiscovery,
   selectLatestDiscovery,
@@ -40,7 +48,7 @@ import { writeDiscovery } from "./write-discovery.js";
 import { writeRun } from "./write-run.js";
 
 /** What a query counts from, read from one snapshot. */
-export interface LatestResults extends LatestRuns {
+export interface LatestResults extends LatestRuns, LatestEvidence {
   /** Undefined when none was stored, or when the one stored last was refused. */
   readonly discovery: StoredDiscovery | undefined;
   /** Why the discovery stored last was refused as unreadable. */
@@ -54,6 +62,12 @@ export interface RtTestStore {
     bindings: StoreBindings,
     discovery: TestDiscovery,
   ): StoredDiscovery;
+  /** The records stored, in the order of the reply's judgements; none when no judgement has a verdict. */
+  writeEvidence(
+    bindings: EvidenceBindings,
+    job: FalsificationJob,
+    definitionDigests: ReadonlyMap<string, string>,
+  ): StoredEvidence[];
   /** In the order they were stored. */
   readRuns(scope: StoreScope): StoredRun[];
   readRun(scope: StoreScope, runId: string): StoredRun | undefined;
@@ -189,6 +203,8 @@ function storeHandle(database: DatabaseSync, file: string): RtTestStore {
     writeRun: (bindings, run) => writeRun(database, bindings, run),
     writeDiscovery: (bindings, discovery) =>
       writeDiscovery(database, bindings, discovery),
+    writeEvidence: (bindings, job, definitionDigests) =>
+      writeEvidence(database, bindings, job, definitionDigests),
     readRuns: (scope) => readRuns(database, scope),
     readRun: (scope, runId) => readRun(database, scope, runId),
     readLatestDiscovery: (scope) => readLatestDiscovery(database, scope),
@@ -205,6 +221,7 @@ function readLatestResults(
   return inRecordRead(database, () => ({
     ...latestDiscovery(database, scope),
     ...selectLatestRuns(database, scope),
+    ...selectEvidence(database, scope),
   }));
 }
 

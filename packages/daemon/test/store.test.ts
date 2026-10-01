@@ -16,7 +16,18 @@ import {
   consumerIdentity,
   defaultStateDirectory,
 } from "../src/store/consumer-identity.js";
+import {
+  FALSIFIER_VERSION,
+  type ExperimentNotRun,
+  type ExperimentRecord,
+  type FalsificationJob,
+  type Reach,
+} from "../src/falsify/experiment-record.js";
+import type { ErrorFact } from "../src/falsify/fact-types.js";
+import type { MutationLoad } from "../src/falsify/mutation-transform.js";
+import type { NoProbeSite } from "../src/falsify/reach-probe.js";
 import { column, UnreadableRecordError } from "../src/store/columns.js";
+import type { EvidenceBindings } from "../src/store/defect-evidence.js";
 import {
   openStore,
   type LatestResults,
@@ -47,6 +58,20 @@ import {
   type SelectionFacts,
   type TestFilePatterns,
 } from "../src/vitest/selection-facts.js";
+import {
+  baseline,
+  CLEAN_JOB,
+  detection,
+  EMPTY_RUN,
+  IN_TEST,
+  mutatedRun,
+  ranOnce,
+  ranReply,
+  REJECTING_TEST,
+  SURVIVING_TEST,
+  TYPE_ERROR,
+  type ReplyExperiment,
+} from "./experiment-facts.js";
 import { inTempDir, linkedWorktree, mainCheckout, settle } from "./harness.js";
 
 type Settled<T> = T | { thrown: string };
@@ -501,13 +526,17 @@ function withRawDatabase<T>(
   }
 }
 
-/** Takes a current store's header back to `userVersion`, dropping the not-covered column every older version lacks. */
+/** Takes a current store's header back to `userVersion`, dropping the evidence table and the not-covered column every version below 10 lacks. */
 function lowerSchemaVersion(database: DatabaseSync, userVersion: number): void {
+  database.exec("DROP TABLE defect_evidence");
   database.exec("ALTER TABLE discoveries DROP COLUMN not_covered");
   database.exec(`PRAGMA user_version = ${userVersion}`);
 }
 
-function countRows(file: string, table: "runs" | "discoveries"): unknown {
+function countRows(
+  file: string,
+  table: "runs" | "discoveries" | "defect_evidence",
+): unknown {
   return withRawDatabase(
     file,
     (database) =>
@@ -1600,7 +1629,7 @@ describe("opening a store written before the force-stop field", () => {
     expect(opened).toBe(OPENED);
   });
 
-  it("D1280: the store is at schema version 10 once opened", async () => {
+  it("D1280: the store is at schema version 11 once opened", async () => {
     const version = await inForceStopUnawareStore(
       [RAN_RUN],
       (stateDirectory, file) => {
@@ -1608,7 +1637,7 @@ describe("opening a store written before the force-stop field", () => {
         return schemaVersionOf(file);
       },
     );
-    expect(version).toBe(10);
+    expect(version).toBe(11);
   });
 
   it("D1281: only ran runs are marked not force-stopped, and every other run holds no force-stop value", async () => {
@@ -2024,7 +2053,7 @@ describe("opening a store written before selection facts", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2097: the store is at schema version 10 once opened", async () => {
+  it("D2097: the store is at schema version 11 once opened", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2035,7 +2064,7 @@ describe("opening a store written before selection facts", () => {
         return schemaVersionOf(file);
       }),
     );
-    expect(version).toBe(10);
+    expect(version).toBe(11);
   });
 
   it("D2122: every run and discovery a version 2 store held reads back, a force-stopped run still force-stopped", async () => {
@@ -2097,7 +2126,7 @@ describe("opening a store written before each project's Vite root", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2846: a version 3 store opens at version 10, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
+  it("D2846: a version 3 store opens at version 11, so the selection facts a discovery stores after it read back once the store is reopened", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2111,12 +2140,12 @@ describe("opening a store written before each project's Vite root", () => {
         };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 10, facts: [SELECTION_FACTS] });
+    expect(outcome).toStrictEqual({ version: 11, facts: [SELECTION_FACTS] });
   });
 });
 
 describe("opening a store written before crashed runs", () => {
-  it("D2791: a version 4 store opens at version 10, every run it held unchanged", async () => {
+  it("D2791: a version 4 store opens at version 11, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2134,7 +2163,7 @@ describe("opening a store written before crashed runs", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 11, runs: [RAN_RUN, FAILED_RUN] });
   });
 
   it("D2829: each discovered workspace of a version 4 store reads back as not reporting selection facts, and the rest of the discovery unchanged", async () => {
@@ -2142,7 +2171,7 @@ describe("opening a store written before crashed runs", () => {
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2792: a new store is created at schema version 10", async () => {
+  it("D2792: a new store is created at schema version 11", async () => {
     const version = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2150,7 +2179,7 @@ describe("opening a store written before crashed runs", () => {
         return schemaVersionOf(join(stateDirectory, STORE_FILE_NAME));
       }),
     );
-    expect(version).toBe(10);
+    expect(version).toBe(11);
   });
 });
 
@@ -2162,7 +2191,7 @@ describe("opening a store written before Vitest's spellings of the pattern direc
     expect(discovery).toStrictEqual(withoutReportedFacts(DISCOVERY));
   });
 
-  it("D2831: a version 5 store opens at version 10, every run it held unchanged", async () => {
+  it("D2831: a version 5 store opens at version 11, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2178,12 +2207,12 @@ describe("opening a store written before Vitest's spellings of the pattern direc
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 11, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
 describe("opening a store written before the directory links Vitest's crawl follows", () => {
-  it("D2859: a version 6 store opens at version 10, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
+  it("D2859: a version 6 store opens at version 11, each discovered workspace reading back as not reporting selection facts rather than its report without crawled links being read", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2200,14 +2229,14 @@ describe("opening a store written before the directory links Vitest's crawl foll
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 10,
+      version: 11,
       discovery: withoutReportedFacts(DISCOVERY),
     });
   });
 });
 
 describe("opening a store written before each project's env sources", () => {
-  it("D3040: a version 7 store opens at version 10, each discovered workspace reading back as not reporting selection facts rather than its report without env sources being read", async () => {
+  it("D3040: a version 7 store opens at version 11, each discovered workspace reading back as not reporting selection facts rather than its report without env sources being read", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2224,12 +2253,12 @@ describe("opening a store written before each project's env sources", () => {
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 10,
+      version: 11,
       discovery: withoutReportedFacts(DISCOVERY),
     });
   });
 
-  it("D3041: a version 7 store opens at version 10, every run it held unchanged", async () => {
+  it("D3041: a version 7 store opens at version 11, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2245,7 +2274,7 @@ describe("opening a store written before each project's env sources", () => {
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 11, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
@@ -2299,7 +2328,7 @@ describe("storing env sources that are not known", () => {
 });
 
 describe("opening a store written before env sources could be not known", () => {
-  it("D3128: a version 8 store opens at version 10, each discovered workspace reading back as not reporting selection facts rather than its report being read as complete", async () => {
+  it("D3128: a version 8 store opens at version 11, each discovered workspace reading back as not reporting selection facts rather than its report being read as complete", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2316,12 +2345,12 @@ describe("opening a store written before env sources could be not known", () => 
       }),
     );
     expect(outcome).toStrictEqual({
-      version: 10,
+      version: 11,
       discovery: withoutReportedFacts(DISCOVERY),
     });
   });
 
-  it("D3129: a version 8 store opens at version 10, every run it held unchanged", async () => {
+  it("D3129: a version 8 store opens at version 11, every run it held unchanged", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2337,7 +2366,7 @@ describe("opening a store written before env sources could be not known", () => 
         return { version: schemaVersionOf(file), runs };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 10, runs: [RAN_RUN, FAILED_RUN] });
+    expect(outcome).toStrictEqual({ version: 11, runs: [RAN_RUN, FAILED_RUN] });
   });
 });
 
@@ -2401,7 +2430,7 @@ describe("storing a discovery's workspaces with a test script that are not Vites
 });
 
 describe("opening a store written before not-covered workspaces", () => {
-  it("D3350: a version 9 store opens at version 10, its discovery reading back unchanged and not reporting not-covered workspaces", async () => {
+  it("D3350: a version 9 store opens at version 11, its discovery reading back unchanged and not reporting not-covered workspaces", async () => {
     const outcome = await inTempDir((dir) =>
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
@@ -2417,7 +2446,7 @@ describe("opening a store written before not-covered workspaces", () => {
         return { version: schemaVersionOf(file), discovery };
       }),
     );
-    expect(outcome).toStrictEqual({ version: 10, discovery: DISCOVERY });
+    expect(outcome).toStrictEqual({ version: 11, discovery: DISCOVERY });
   });
 
   it("D3351: a version 2 store's discovery reads back once migrated, not reporting not-covered workspaces", async () => {
@@ -2961,5 +2990,906 @@ describe("a store a newer RT Test migrated while this one held it open", () => {
       }
     });
     expect(refusal).toStrictEqual(READ_REFUSAL);
+  });
+});
+
+/** The schema version before a defect's falsification evidence was stored. */
+const EVIDENCE_UNAWARE_VERSION = 10;
+/** Every schema version the opener migrates. */
+const MIGRATED_VERSIONS = Array.from(
+  { length: EVIDENCE_UNAWARE_VERSION },
+  (_, index) => index + 1,
+);
+/** The digest of the workspace's input fingerprint each job below ran at. */
+const PRINT = "sha256:2C26B46B68FFC68F";
+/** A text no evidence row may hold. */
+const SECRET = "SECRET";
+
+const DETECTING: ReplyExperiment = {
+  defectId: "D1",
+  facts: detection(),
+  mutationFileDigest: "file-digest-1",
+};
+const SURVIVING: ReplyExperiment = {
+  defectId: "D2",
+  facts: ranOnce({ test: SURVIVING_TEST }),
+  mutationFileDigest: "file-digest-2",
+};
+/** Its test failed in a hook, so it reads invalid experiment with a detail. */
+const HOOK_FAILED: ReplyExperiment = {
+  defectId: "D3",
+  facts: ranOnce({
+    test: { ...REJECTING_TEST, hooks: { beforeEach: "fail" } },
+  }),
+  mutationFileDigest: "file-digest-3",
+};
+const HOOK_FAILED_JUDGEMENT = {
+  verdict: "invalid-experiment",
+  reason: "hook-not-passed",
+  detail: { hook: "beforeEach", state: "fail" },
+  facts: HOOK_FAILED.facts,
+};
+/** An aborted job's experiment: its confirming run was interrupted, so it has no verdict. */
+const UNDECIDED_FACTS = detection({ confirming: { status: "interrupted" } });
+/** Its run would be a detection and its confirming run passed, so it reads unclear with what the confirming run read. */
+const UNCONFIRMED: ReplyExperiment = {
+  defectId: "D6",
+  facts: detection({
+    confirming: { status: "ran", ...mutatedRun({ test: SURVIVING_TEST }) },
+  }),
+  mutationFileDigest: "file-digest-6",
+};
+/** Where a probe would alter what the module does, as the job's check before any run names the place. */
+const UNPROBED_SITE: NoProbeSite = {
+  kind: "position",
+  line: 4,
+  column: 12,
+  nodeKind: "Identifier",
+  role: "CallExpression.callee",
+};
+
+/** Why a job gives an experiment no run and still a verdict. */
+type DecidedBeforeRun = Extract<
+  ExperimentNotRun,
+  { kind: "no-probe-site" | "no-module" }
+>;
+interface UnrunExperiment extends ReplyExperiment {
+  readonly reason: DecidedBeforeRun;
+  readonly mutationFileDigest: string;
+}
+
+/** An experiment the job decided before any run, beside others it ran: it shares their baselines and holds no run. */
+function decidedBeforeRun(
+  defectId: string,
+  reason: DecidedBeforeRun,
+): UnrunExperiment {
+  return {
+    defectId,
+    reason,
+    facts: {
+      baseline: baseline(),
+      restoredBaseline: { recorded: true, ...baseline() },
+      job: CLEAN_JOB,
+      notRun: reason,
+    },
+    mutationFileDigest: `file-digest-${defectId}`,
+  };
+}
+
+const UNPROBED = decidedBeforeRun("D4", {
+  kind: "no-probe-site",
+  site: UNPROBED_SITE,
+});
+const UNLOCATED = decidedBeforeRun("D5", { kind: "no-module" });
+
+/** The reply of a job that ran `ran` and gave each of `unrun` no run, whose record holds its reason and its mutation file's digest. */
+function replyWithUnrun(
+  ran: readonly ReplyExperiment[],
+  unrun: readonly UnrunExperiment[],
+): FalsificationJob {
+  const reply = ranReply([...ran, ...unrun]);
+  const records: ExperimentRecord[] = unrun.map(
+    ({ defectId, reason, mutationFileDigest }) => ({
+      defectId,
+      status: "not-run",
+      reason,
+      mutationFileDigest,
+    }),
+  );
+  return {
+    ...reply,
+    experiments: [...reply.experiments.slice(0, ran.length), ...records],
+  };
+}
+
+function evidenceBound(scope: StoreScope): EvidenceBindings {
+  return { ...scope, inputFingerprintDigest: PRINT };
+}
+
+/** The definition digest handed in for each experiment's defect. */
+function digestsFor(
+  experiments: readonly ReplyExperiment[],
+): Map<string, string> {
+  return new Map(
+    experiments.map(({ defectId }) => [
+      defectId,
+      `definition-digest-${defectId}`,
+    ]),
+  );
+}
+
+/** Stores the reply of a job that ran `experiments`, a definition digest handed in for each defect. */
+function storeReply(
+  store: RtTestStore,
+  scope: StoreScope,
+  experiments: readonly ReplyExperiment[],
+) {
+  return store.writeEvidence(
+    evidenceBound(scope),
+    ranReply(experiments),
+    digestsFor(experiments),
+  );
+}
+
+/** Each defect a query of `scope` reads evidence for, with its verdict. */
+function verdictsIn(store: RtTestStore, scope: StoreScope): string[][] {
+  return store
+    .readLatestResults(scope)
+    .evidence.map(({ defectId, verdict }) => [defectId, verdict]);
+}
+
+/** Each defect a query of worktree A reads evidence for, with its judgement whole. */
+function judgementsRead(store: RtTestStore): unknown[][] {
+  return store
+    .readLatestResults(WORKTREE_A)
+    .evidence.map(({ defectId, judgement }) => [defectId, judgement]);
+}
+
+/** What storing each of `replies` says, and what the store holds once every one was tried. */
+function refusalsOf(
+  store: RtTestStore,
+  replies: readonly unknown[],
+  experiments: readonly ReplyExperiment[] = [DETECTING, SURVIVING],
+) {
+  return {
+    reasons: replies.map((reply) =>
+      rejection(
+        settle(() =>
+          store.writeEvidence(
+            evidenceBound(WORKTREE_A),
+            reply as FalsificationJob,
+            digestsFor(experiments),
+          ),
+        ),
+      ),
+    ),
+    stored: verdictsIn(store, WORKTREE_A),
+  };
+}
+
+/** `value` with members its type does not name, as a reply built by other code could carry them. */
+function withExtra<T extends object>(
+  value: T,
+  extra: Readonly<Record<string, string>>,
+): T {
+  return { ...value, ...extra };
+}
+
+/** How many evidence rows the file holds, and each column of one whose text holds `SECRET`. */
+function secretsStored(file: string): { rows: number; holding: string[] } {
+  return withRawDatabase(file, (database) => {
+    const rows = database.prepare("SELECT * FROM defect_evidence").all();
+    return {
+      rows: rows.length,
+      holding: rows.flatMap((row) =>
+        Object.entries(row)
+          .filter(([, value]) => String(value).includes(SECRET))
+          .map(([name]) => name),
+      ),
+    };
+  });
+}
+
+/** A store holding `DISCOVERY` and a run, taken back to `version` as that version's migration's inverse. */
+function writeStoreAt(stateDirectory: string, version: number): string {
+  if (version === FORCE_STOP_UNAWARE_VERSION) {
+    return writeForceStopUnawareStore(stateDirectory, [FAILED_RUN]);
+  }
+  if (version === SELECTION_FACTS_UNAWARE_VERSION) {
+    return writeSelectionFactsUnawareStore(
+      stateDirectory,
+      [DISCOVERY],
+      [FAILED_RUN],
+    );
+  }
+  if (version < EVIDENCE_UNAWARE_VERSION) {
+    return writeFactsUnawareStore(stateDirectory, version, unchangedProject, [
+      FAILED_RUN,
+    ]);
+  }
+  withOpenStore(stateDirectory, (store) => {
+    store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+    store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+  });
+  const file = join(stateDirectory, STORE_FILE_NAME);
+  withRawDatabase(file, (database) => {
+    database.exec("DROP TABLE defect_evidence");
+    database.exec(`PRAGMA user_version = ${EVIDENCE_UNAWARE_VERSION}`);
+  });
+  return file;
+}
+
+describe("storing a falsification reply's verdicts as defect evidence", () => {
+  it("D3910: each verdict is stored with the mutation file digest of the experiment record naming its defect, whatever the order of the reply's records", async () => {
+    const digests = await inStore((store) => {
+      const experiments = [DETECTING, SURVIVING];
+      const reply = ranReply(experiments);
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        { ...reply, experiments: [...reply.experiments].reverse() },
+        digestsFor(experiments),
+      );
+      return store
+        .readLatestResults(WORKTREE_A)
+        .evidence.map(({ defectId, mutationFileDigest }) => [
+          defectId,
+          mutationFileDigest,
+        ]);
+    });
+    expect(digests).toStrictEqual([
+      ["D1", "file-digest-1"],
+      ["D2", "file-digest-2"],
+    ]);
+  });
+
+  it("D3911: a stored record carries its verdict, reason, detail and facts, bound to its scope, the definition digest handed in, its record's mutation file digest, the fingerprint digest, the reply's versions and adapter version 3", async () => {
+    const stored = await inStore((store) => {
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        { ...ranReply([HOOK_FAILED]), vitestVersion: "4.1.11" },
+        digestsFor([HOOK_FAILED]),
+      );
+      return store
+        .readLatestResults(WORKTREE_A)
+        .evidence.map(({ evidenceId, ...record }) => ({
+          ...record,
+          hasEvidenceId: evidenceId !== "",
+        }));
+    });
+    expect(stored).toStrictEqual([
+      {
+        ...WORKTREE_A,
+        inputFingerprintDigest: PRINT,
+        defectId: "D3",
+        definitionDigest: "definition-digest-D3",
+        mutationFileDigest: "file-digest-3",
+        vitestVersion: "4.1.11",
+        falsifierVersion: FALSIFIER_VERSION,
+        adapterVersion: 3,
+        verdict: "invalid-experiment",
+        judgement: HOOK_FAILED_JUDGEMENT,
+        hasEvidenceId: true,
+      },
+    ]);
+  });
+
+  it("D3912: a new verdict replaces that defect's record in that worktree alone, leaving every other defect's and the other worktree's evidence", async () => {
+    const verdicts = await inStore((store) => {
+      storeReply(store, WORKTREE_A, [DETECTING, SURVIVING]);
+      storeReply(store, WORKTREE_B, [DETECTING]);
+      storeReply(store, WORKTREE_A, [{ ...SURVIVING, defectId: "D1" }]);
+      return {
+        a: verdictsIn(store, WORKTREE_A),
+        b: verdictsIn(store, WORKTREE_B),
+      };
+    });
+    expect(verdicts).toStrictEqual({
+      a: [
+        ["D1", "survived"],
+        ["D2", "survived"],
+      ],
+      b: [["D1", "detected"]],
+    });
+  });
+
+  it("D3913: a judgement with no verdict stores nothing and leaves its defect's earlier evidence, while the verdict beside it is stored", async () => {
+    const outcome = await inStore((store) => {
+      storeReply(store, WORKTREE_A, [DETECTING]);
+      const second = storeReply(store, WORKTREE_A, [
+        { ...DETECTING, facts: UNDECIDED_FACTS },
+        SURVIVING,
+      ]);
+      return {
+        stored: second.map(({ defectId }) => defectId),
+        verdicts: verdictsIn(store, WORKTREE_A),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      stored: ["D2"],
+      verdicts: [
+        ["D1", "detected"],
+        ["D2", "survived"],
+      ],
+    });
+  });
+
+  it("D3914: a second store reading while a reply's records are being written sees none of them", async () => {
+    const seen = await inStore((store, stateDirectory) => {
+      const reader = openStore(stateDirectory);
+      const run = StatementSync.prototype.run;
+      const observed: { verdicts: Settled<string[][]> | "never read" } = {
+        verdicts: "never read",
+      };
+      const readAfterFirstInsert = vi
+        .spyOn(StatementSync.prototype, "run")
+        .mockImplementation(function (
+          this: StatementSync,
+          ...parameters: Parameters<StatementSync["run"]>
+        ) {
+          const result = run.apply(this, parameters);
+          if (
+            observed.verdicts === "never read" &&
+            this.sourceSQL.includes("INSERT INTO defect_evidence")
+          ) {
+            observed.verdicts = settle(() => verdictsIn(reader, WORKTREE_A));
+          }
+          return result;
+        });
+      try {
+        storeReply(store, WORKTREE_A, [DETECTING, SURVIVING]);
+        return observed.verdicts;
+      } finally {
+        readAfterFirstInsert.mockRestore();
+        reader.close();
+      }
+    });
+    expect(seen).toStrictEqual([]);
+  });
+
+  it("D3930: a new store holds evidence from its creation, and a store opened again reads each record the first stored, whole", async () => {
+    const judgements = await acrossReopen(
+      (store) => {
+        storeReply(store, WORKTREE_A, [DETECTING, HOOK_FAILED]);
+      },
+      (store) =>
+        store
+          .readLatestResults(WORKTREE_A)
+          .evidence.map(({ defectId, judgement }) => [defectId, judgement]),
+    );
+    expect(judgements).toStrictEqual([
+      ["D1", { verdict: "detected", facts: DETECTING.facts }],
+      ["D3", HOOK_FAILED_JUDGEMENT],
+    ]);
+  });
+
+  it("D3963: a no-probe-site and a no-module verdict, each decided before any run, are stored beside a detection and read back whole by a store opened again, the site's members included", async () => {
+    const judgements = await acrossReopen((store) => {
+      const unrun = [UNPROBED, UNLOCATED];
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        replyWithUnrun([DETECTING], unrun),
+        digestsFor([DETECTING, ...unrun]),
+      );
+    }, judgementsRead);
+    expect(judgements).toStrictEqual([
+      ["D1", { verdict: "detected", facts: DETECTING.facts }],
+      [
+        "D4",
+        {
+          verdict: "invalid-experiment",
+          reason: "no-probe-site",
+          detail: {
+            site: {
+              kind: "position",
+              line: 4,
+              column: 12,
+              nodeKind: "Identifier",
+              role: "CallExpression.callee",
+            },
+          },
+          facts: UNPROBED.facts,
+        },
+      ],
+      [
+        "D5",
+        {
+          verdict: "invalid-experiment",
+          reason: "no-module",
+          facts: UNLOCATED.facts,
+        },
+      ],
+    ]);
+  });
+
+  it("D4002: an unclear verdict whose confirming run differed is stored with what its confirming run alone read, and read back whole by a store opened again", async () => {
+    const judgements = await acrossReopen((store) => {
+      storeReply(store, WORKTREE_A, [UNCONFIRMED]);
+    }, judgementsRead);
+    expect(judgements).toStrictEqual([
+      [
+        "D6",
+        {
+          verdict: "unclear",
+          reason: "confirming-run-differed",
+          detail: { confirming: { verdict: "survived" } },
+          facts: UNCONFIRMED.facts,
+        },
+      ],
+    ]);
+  });
+});
+
+describe("a falsification reply the store refuses whole", () => {
+  it("D3915: a reply that does not read ran, or carries no Vitest version or no falsifier version, stores nothing and says which", async () => {
+    const refusals = await inStore((store) => {
+      const reply = ranReply([DETECTING]);
+      return refusalsOf(store, [
+        {
+          status: "failed",
+          workspace: reply.workspace,
+          vitestVersion: reply.vitestVersion,
+          error: "Error: config threw",
+        },
+        { ...reply, vitestVersion: undefined },
+        { ...reply, falsifierVersion: undefined },
+      ]);
+    });
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(/must read ran .* got status "failed"/),
+        expect.stringMatching(/carries no Vitest version/),
+        expect.stringMatching(/carries no falsifier version/),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3916: an empty project identity, worktree identity or fingerprint digest refuses the write, naming it, and stores nothing", async () => {
+    const refusals = await inStore((store) => {
+      const reply = ranReply([DETECTING]);
+      const whole = evidenceBound(WORKTREE_A);
+      const broken: EvidenceBindings[] = [
+        { ...whole, projectIdentity: "" },
+        { ...whole, worktreeIdentity: "" },
+        { ...whole, inputFingerprintDigest: "" },
+      ];
+      return {
+        reasons: broken.map((bindings) =>
+          rejection(
+            settle(() =>
+              store.writeEvidence(bindings, reply, digestsFor([DETECTING])),
+            ),
+          ),
+        ),
+        rows: countRows(store.file, "defect_evidence"),
+      };
+    });
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(/The project identity is required/),
+        expect.stringMatching(/The worktree identity is required/),
+        expect.stringMatching(/The input fingerprint digest is required/),
+      ],
+      rows: 0,
+    });
+  });
+
+  it("D3917: a verdict whose defect has no definition digest handed in refuses the reply, naming the defect, and the verdict beside it is not stored", async () => {
+    const refusals = await inStore((store) =>
+      refusalsOf(store, [ranReply([DETECTING, SURVIVING])], [DETECTING]),
+    );
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(
+          /No definition digest was handed in for defect D2/,
+        ),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3918: a verdict whose defect names no experiment record of the reply, or two, refuses the reply, naming the defect and the count", async () => {
+    const refusals = await inStore((store) => {
+      const reply = ranReply([DETECTING, SURVIVING]);
+      const [first, second] = reply.experiments;
+      return refusalsOf(store, [
+        { ...reply, experiments: [second] },
+        { ...reply, experiments: [first, first, second] },
+      ]);
+    });
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(
+          /defect D1 must name one experiment record .* it names 0$/,
+        ),
+        expect.stringMatching(
+          /defect D1 must name one experiment record .* it names 2$/,
+        ),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3919: a defect two judgements of one reply name, both with a verdict or one without, refuses the reply, naming the defect", async () => {
+    const refusals = await inStore((store) => {
+      const twice = (second: ReplyExperiment) => {
+        const reply = ranReply([DETECTING, { ...second, defectId: "D1" }]);
+        return { ...reply, experiments: reply.experiments.slice(0, 1) };
+      };
+      return refusalsOf(store, [
+        twice(SURVIVING),
+        twice({ ...SURVIVING, facts: UNDECIDED_FACTS }),
+      ]);
+    });
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(/More than one judgement .* names defect D1/),
+        expect.stringMatching(/More than one judgement .* names defect D1/),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3920: a verdict whose experiment record carries no mutation file digest refuses the reply, naming the defect", async () => {
+    const refusals = await inStore((store) =>
+      refusalsOf(store, [
+        ranReply([{ defectId: "D1", facts: DETECTING.facts }, SURVIVING]),
+      ]),
+    );
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(
+          /experiment record for defect D1 carries no mutation file digest/,
+        ),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3921: a reply whose verdict or detail is not the one the judge gives the facts beside it is refused, so a surviving run is never stored as a detection", async () => {
+    const refusals = await inStore((store) => {
+      const survived = ranReply([SURVIVING]);
+      const hookFailed = ranReply([HOOK_FAILED]);
+      return refusalsOf(
+        store,
+        [
+          {
+            ...survived,
+            judgements: survived.judgements.map((judgement) => ({
+              ...judgement,
+              verdict: "detected",
+            })),
+          },
+          {
+            ...hookFailed,
+            judgements: hookFailed.judgements.map((judgement) => ({
+              ...judgement,
+              detail: { hook: "beforeEach", state: "skip" },
+            })),
+          },
+        ],
+        [SURVIVING, HOOK_FAILED],
+      );
+    });
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(/judgement for defect D2 cannot be stored/),
+        expect.stringMatching(/judgement for defect D3 cannot be stored/),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3925: a judgement naming no defect id, an experiment record that is no object, or a reply with no list of experiment records refuses the reply, naming the entry by its place", async () => {
+    const refusals = await inStore((store) => {
+      const reply = ranReply([DETECTING]);
+      return refusalsOf(store, [
+        {
+          ...reply,
+          judgements: [{ verdict: "detected", facts: DETECTING.facts }],
+        },
+        { ...reply, experiments: [null] },
+        { ...reply, experiments: undefined },
+      ]);
+    });
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(
+          /judgement 0 is not an object naming a defect id/,
+        ),
+        expect.stringMatching(
+          /experiment record 0 is not an object naming a defect id/,
+        ),
+        expect.stringMatching(/no list of experiment records/),
+      ],
+      stored: [],
+    });
+  });
+
+  it("D3926: a reply whose facts hold a negative or a fractional count is refused, though the judge gives those facts its verdict", async () => {
+    const refusals = await inStore((store) =>
+      refusalsOf(store, [
+        ranReply([
+          {
+            ...DETECTING,
+            facts: detection({
+              nextRun: { recorded: true, unhandledErrorCount: -1 },
+            }),
+          },
+        ]),
+        ranReply([
+          {
+            ...DETECTING,
+            facts: detection({
+              baseline: baseline({ unnamedUnhandledErrorCount: 0.5 }),
+            }),
+          },
+        ]),
+      ]),
+    );
+    expect(refusals).toStrictEqual({
+      reasons: [
+        expect.stringMatching(/judgement for defect D1 cannot be stored/),
+        expect.stringMatching(/judgement for defect D1 cannot be stored/),
+      ],
+      stored: [],
+    });
+  });
+});
+
+describe("what an evidence row holds", () => {
+  it("D3927: no member the judgement and fact types do not name reaches a row, and no text of the reply's raw run records does", async () => {
+    const stored = await inStore((store) => {
+      const leakingError: ErrorFact = withExtra(TYPE_ERROR, {
+        message: `${SECRET} message`,
+        stack: `${SECRET} stack`,
+      });
+      const reply = ranReply([
+        {
+          ...DETECTING,
+          facts: ranOnce({
+            test: { ...REJECTING_TEST, errors: [leakingError] },
+          }),
+          run: {
+            ...EMPTY_RUN,
+            unhandledErrors: [{ message: `${SECRET} raw record` }],
+          },
+        },
+      ]);
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        {
+          ...reply,
+          judgements: reply.judgements.map((judgement) =>
+            withExtra(
+              {
+                ...judgement,
+                facts: withExtra(judgement.facts, {
+                  codeFrame: `${SECRET} frame`,
+                }),
+              },
+              { old: `${SECRET} old text` },
+            ),
+          ),
+        },
+        digestsFor([DETECTING]),
+      );
+      return secretsStored(store.file);
+    });
+    expect(stored).toStrictEqual({ rows: 1, holding: [] });
+  });
+
+  it("D3928: a member a mutation load, a probe site or a reach does not name reaches no row", async () => {
+    const stored = await inStore((store) => {
+      const load: MutationLoad = withExtra(
+        {
+          applied: true,
+          probe: {
+            placed: true,
+            site: withExtra(
+              { line: 2, column: 10, nodeKind: "BinaryExpression" },
+              { text: `${SECRET} site` },
+            ),
+          },
+        },
+        { code: `${SECRET} load` },
+      );
+      const reach: Reach = withExtra(IN_TEST, { source: `${SECRET} reach` });
+      storeReply(store, WORKTREE_A, [
+        {
+          ...SURVIVING,
+          facts: ranOnce({
+            mutation: [load],
+            test: { ...SURVIVING_TEST, reach },
+          }),
+        },
+      ]);
+      return secretsStored(store.file);
+    });
+    expect(stored).toStrictEqual({ rows: 1, holding: [] });
+  });
+});
+
+describe("evidence a query reads back", () => {
+  /** What a query reads once `stored` is written and `corrupt` has run through a second connection. */
+  function evidenceAfter(
+    stored: readonly ReplyExperiment[],
+    corrupt: string,
+  ): Promise<Settled<{ verdicts: string[][]; refusals: unknown }>> {
+    return inStore((store) => {
+      storeReply(store, WORKTREE_A, stored);
+      withRawDatabase(store.file, (database) => {
+        database.exec(corrupt);
+      });
+      return {
+        verdicts: verdictsIn(store, WORKTREE_A),
+        refusals: store.readLatestResults(WORKTREE_A).evidenceRefusals,
+      };
+    });
+  }
+
+  it("D3922: a row whose verdict its own facts do not give is refused as unreadable, never read as that verdict", async () => {
+    expect(
+      await evidenceAfter(
+        [DETECTING, SURVIVING],
+        "UPDATE defect_evidence SET verdict = 'detected' WHERE defect_id = 'D2'",
+      ),
+    ).toStrictEqual({
+      verdicts: [["D1", "detected"]],
+      refusals: [
+        {
+          defectId: "D2",
+          reason: expect.stringMatching(
+            /unreadable judgement that its facts do not give/,
+          ),
+        },
+      ],
+    });
+  });
+
+  it("D3923: a record that cannot be rebuilt is refused alone, with its reason and cause, and every other defect's evidence still reads", async () => {
+    expect(
+      await evidenceAfter(
+        [DETECTING, SURVIVING],
+        "UPDATE defect_evidence SET facts = 'not json' WHERE defect_id = 'D1'",
+      ),
+    ).toStrictEqual({
+      verdicts: [["D2", "survived"]],
+      refusals: [
+        {
+          defectId: "D1",
+          reason: expect.stringMatching(
+            /^The store holds an unreadable facts: "not json"\n {2}caused by: /,
+          ),
+        },
+      ],
+    });
+  });
+
+  it("D3924: a record stored under another falsifier version reads its bindings and its verdict alone, its reason, detail and facts never parsed", async () => {
+    const read = await inStore((store) => {
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        {
+          ...ranReply([HOOK_FAILED]),
+          falsifierVersion: FALSIFIER_VERSION + 1,
+        },
+        digestsFor([HOOK_FAILED]),
+      );
+      withRawDatabase(store.file, (database) => {
+        database.exec(
+          `UPDATE defect_evidence SET reason = 'a-reason-of-that-version',
+            detail = 'not json', facts = '{"shape":"of that version"}'`,
+        );
+      });
+      const { evidence, evidenceRefusals } =
+        store.readLatestResults(WORKTREE_A);
+      return {
+        records: evidence.map((record) => ({
+          defectId: record.defectId,
+          verdict: record.verdict,
+          falsifierVersion: record.falsifierVersion,
+          interpreted: "judgement" in record,
+        })),
+        refusals: evidenceRefusals,
+      };
+    });
+    expect(read).toStrictEqual({
+      records: [
+        {
+          defectId: "D3",
+          verdict: "invalid-experiment",
+          falsifierVersion: FALSIFIER_VERSION + 1,
+          interpreted: false,
+        },
+      ],
+      refusals: [],
+    });
+  });
+
+  it("D3931: the evidence is read from the snapshot the latest discovery is read from, so a discovery and a verdict committed as the read begins are answered together", async () => {
+    const read = await inStore((store, stateDirectory) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      storeReply(store, WORKTREE_A, [{ ...SURVIVING, defectId: "D1" }]);
+      const writer = openStore(stateDirectory);
+      const prepare = DatabaseSync.prototype.prepare;
+      let written = false;
+      const writeAtVersionRead = vi
+        .spyOn(DatabaseSync.prototype, "prepare")
+        .mockImplementation(function (this: DatabaseSync, sql: string) {
+          if (!written && sql.includes("pragma_user_version")) {
+            written = true;
+            writer.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+            storeReply(writer, WORKTREE_A, [DETECTING]);
+          }
+          return prepare.call(this, sql);
+        });
+      try {
+        const latest = store.readLatestResults(WORKTREE_A);
+        return {
+          discovery: latest.discovery?.discovery,
+          verdicts: latest.evidence.map(({ defectId, verdict }) => [
+            defectId,
+            verdict,
+          ]),
+        };
+      } finally {
+        writeAtVersionRead.mockRestore();
+        writer.close();
+      }
+    });
+    expect(read).toStrictEqual({
+      discovery: DISCOVERY,
+      verdicts: [["D1", "detected"]],
+    });
+  });
+});
+
+describe("opening a store written before defect evidence", () => {
+  it("D3929: a store at each schema version from 1 to 10 opens at version 11 and holds evidence from then on, read by the store opened next", async () => {
+    const outcomes = await inTempDir((dir) =>
+      settle(() =>
+        MIGRATED_VERSIONS.map((from) => {
+          const stateDirectory = defaultStateDirectory(join(dir, `v${from}`));
+          const file = writeStoreAt(stateDirectory, from);
+          withOpenStore(stateDirectory, (store) => {
+            storeReply(store, WORKTREE_A, [DETECTING]);
+          });
+          return {
+            from,
+            version: schemaVersionOf(file),
+            evidence: withOpenStore(stateDirectory, (store) =>
+              verdictsIn(store, WORKTREE_A),
+            ),
+          };
+        }),
+      ),
+    );
+    expect(outcomes).toStrictEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((from) => ({
+        from,
+        version: 11,
+        evidence: [["D1", "detected"]],
+      })),
+    );
+  });
+
+  it("D3964: a version 10 store opens at version 11, its discovery reading back with each workspace's selection facts and its run as they were stored", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeStoreAt(stateDirectory, EVIDENCE_UNAWARE_VERSION);
+        return withOpenStore(stateDirectory, (store) => ({
+          version: schemaVersionOf(file),
+          discovery: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+          runs: runsOf(store, WORKTREE_A),
+        }));
+      }),
+    );
+    expect(outcome).toStrictEqual({
+      version: 11,
+      discovery: DISCOVERY,
+      runs: [FAILED_RUN],
+    });
   });
 });

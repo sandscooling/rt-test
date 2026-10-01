@@ -65,13 +65,18 @@ export type {
   DefectCounts,
   GapModule,
   ListedDefinition,
+  ListedError,
+  ListedEvidence,
   ListedInvalidEntry,
 } from "./query/defects-answer.js";
+export type { StaleCause, UnknownReason } from "./defects/defect-standings.js";
 export {
   DEFECT_STATE,
   DEFECT_STATES,
+  NOT_RUNNABLE_STATES,
+  UNDETECTED_VERDICTS,
   type DefectState,
-} from "./defects/resolve-definitions.js";
+} from "./defects/defect-states.js";
 export {
   identityHash,
   userDirectory,

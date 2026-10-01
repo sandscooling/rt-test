@@ -8,13 +8,23 @@ import {
   type DefinitionTest,
 } from "../defects/definitions.js";
 import {
-  DEFECT_STATES,
+  countDefectStandings,
+  defectStandings,
+  type DefectStanding,
+  type DefectStandingCounts,
+  type EvidenceFreshness,
+  type EvidenceStanding,
+  type VerdictDetail,
+  type VerdictReason,
+} from "../defects/defect-standings.js";
+import { DEFECT_STATES, type DefectState } from "../defects/defect-states.js";
+import {
   readAnchors,
   resolveDefinitions,
-  type DefectState,
   type ResolvedDefinition,
 } from "../defects/resolve-definitions.js";
 import type { WaitMoment } from "../daemon/waits.js";
+import type { ErrorFact } from "../falsify/fact-types.js";
 import { ROOT_PATH } from "../vitest/find-workspaces.js";
 import {
   CURRENT,
@@ -59,9 +69,28 @@ export interface ListedDefinition {
   /** As the definition writes it; null when its mutation is not well-formed. */
   readonly mutationFile: string | null;
   readonly state: DefectState;
-  /** Present when it is invalid or its anchor is missing. */
+  /** Whether it is valid, its anchor matches and its test holds a current pass, so it can be falsified now. */
+  readonly eligible: boolean;
+  /** Present when it is invalid, its anchor is missing, or its stored evidence was refused as unreadable. */
   readonly reason?: CutReason;
+  /** Present only beside a verdict. */
+  readonly evidence?: ListedEvidence;
 }
+
+/** An error of the intended test, by its kind and the name Vitest serialized, cut; no name when it serialized none. */
+export type ListedError = Pick<ErrorFact, "kind" | "name">;
+
+/** What a listed definition's stored evidence says beside its verdict, every text in it cut. */
+export type ListedEvidence = EvidenceFreshness & {
+  /** Absent for a detection and a survivor, and on evidence stored under another falsifier version. */
+  readonly reason?: VerdictReason;
+  readonly detail?: VerdictDetail;
+  /** Present when the reason is that an error is not an assertion, up to the standings' bound. */
+  readonly errors?: readonly ListedError[];
+  readonly errorsNotListed?: number;
+  /** Present beside a detail or errors: how many characters were cut from their texts, which the store holds whole. */
+  readonly omittedCharacters?: number;
+};
 
 /** A definition file problem, which lies in every scope. */
 export type ListedInvalidEntry = CutReason & {
@@ -72,10 +101,10 @@ export type ListedInvalidEntry = CutReason & {
 
 export type DefectStateCounts = Readonly<Record<DefectState, number>>;
 
-export interface DefectCounts {
-  /** Every definition in scope and every definition file problem. */
+/** Counts over every definition in scope, whatever the listing leaves out. */
+export interface DefectCounts extends DefectStandingCounts {
+  /** Every definition in scope and every definition file problem: what `verified` is read against. */
   readonly total: number;
-  readonly states: DefectStateCounts;
   readonly invalidEntries: number;
 }
 
@@ -83,6 +112,12 @@ export interface GapModule {
   /** Relative to the consumer root, `/`-separated. */
   readonly module: string;
   readonly gaps: number;
+}
+
+/** A value with its texts cut, and how many characters the cuts left out in all. */
+interface Cut<T> {
+  readonly value: T;
+  readonly omittedCharacters: number;
 }
 
 export interface ListedGapModule {
@@ -95,7 +130,10 @@ export interface DefectsAnswer extends AnswerContext {
   readonly path: string;
   readonly counts: DefectCounts;
   readonly invalidEntries: readonly ListedInvalidEntry[];
-  /** Invalid first, then anchor missing, then never verified, up to `MAX_LISTED_DEFINITIONS`. */
+  /**
+   * In `DEFECT_STATES` order, within a state evidence that is not current before current, then by file and position,
+   * up to `MAX_LISTED_DEFINITIONS`.
+   */
   readonly definitions: readonly ListedDefinition[];
   readonly definitionsNotListed: DefectStateCounts;
   /** Discovered tests whose module lies in scope. */
@@ -142,11 +180,12 @@ export async function defectsAnswer(
   const { results, view, inputs } = query.moment();
   const basis = queryBasis(results, view, inputs);
   if ("noAnswer" in basis) return basis;
+  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;
   const resolved = resolveDefinitions(
     checked,
     anchors,
     basis.discovery.discovery,
-    basis.context.discovery.freshness === CURRENT,
+    discoveryCurrent,
   );
   const definitions = resolved.filter((definition) =>
     inScope(definition, scope.path),
@@ -174,13 +213,21 @@ export async function defectsAnswer(
   const gaps = tests.filter(
     (standing) => !covered.has(testIdentityKey(standing.test.identity)),
   );
-  const states = stateCounts(definitions);
+  const standings = defectStandings(definitions, {
+    consumerRoot,
+    evidence: results,
+    discovery: basis.discovery.discovery,
+    discoveryCurrent,
+    currentFingerprint: basis.currentFingerprint,
+    testStandings: basis.standings,
+  });
+  const counts = countDefectStandings(standings);
   return {
     ...basis.context,
     path: scope.path,
     counts: {
       total: definitions.length + invalidEntries.length,
-      states,
+      ...counts,
       invalidEntries: invalidEntries.length,
     },
     invalidEntries: invalidEntries.map(({ kind, path, reason }) => ({
@@ -188,7 +235,7 @@ export async function defectsAnswer(
       path,
       ...cutReason(reason),
     })),
-    ...listedDefinitions(definitions, states),
+    ...listedDefinitions(standings, counts.states),
     testsInScope: tests.length,
     gaps: gaps.length,
     ...gapLists(gaps),
@@ -216,47 +263,47 @@ function inScope(definition: ResolvedDefinition, scope: string): boolean {
   );
 }
 
-function stateCounts(
-  definitions: readonly ResolvedDefinition[],
-): Record<DefectState, number> {
-  const counts = zeroStateCounts();
-  for (const definition of definitions) counts[definition.state] += 1;
-  return counts;
-}
-
-function zeroStateCounts(): Record<DefectState, number> {
-  return Object.fromEntries(DEFECT_STATES.map((state) => [state, 0])) as Record<
-    DefectState,
-    number
-  >;
-}
-
-/** The first `MAX_LISTED_DEFINITIONS` in state order, then by file and position, and how many of each state were left out. */
+/**
+ * The first `MAX_LISTED_DEFINITIONS` in state order, within a state those whose evidence is not current first, then
+ * by file and position, and how many of each state were left out.
+ */
 function listedDefinitions(
-  definitions: readonly ResolvedDefinition[],
+  standings: readonly DefectStanding[],
   states: DefectStateCounts,
 ): Pick<DefectsAnswer, "definitions" | "definitionsNotListed"> {
-  const ordered = [...definitions].sort(
+  const ordered = [...standings].sort(
     (left, right) =>
       DEFECT_STATES.indexOf(left.state) - DEFECT_STATES.indexOf(right.state) ||
-      (left.file < right.file ? -1 : left.file > right.file ? 1 : 0) ||
-      left.position - right.position,
+      currentRank(left) - currentRank(right) ||
+      compareFiles(left.definition.file, right.definition.file) ||
+      left.definition.position - right.definition.position,
   );
   const listed = ordered.slice(0, MAX_LISTED_DEFINITIONS);
-  const notListed = zeroStateCounts();
-  for (const state of DEFECT_STATES) {
-    notListed[state] =
-      states[state] -
-      listed.filter((definition) => definition.state === state).length;
-  }
   return {
     definitions: listed.map(listedDefinition),
-    definitionsNotListed: notListed,
+    definitionsNotListed: Object.fromEntries(
+      DEFECT_STATES.map((state) => [
+        state,
+        states[state] -
+          listed.filter((standing) => standing.state === state).length,
+      ]),
+    ) as Record<DefectState, number>,
   };
 }
 
-function listedDefinition(definition: ResolvedDefinition): ListedDefinition {
-  const { resolved, reason } = definition;
+/** Evidence that is not current sorts before current evidence; a state that reads no evidence has one rank. */
+function currentRank(standing: DefectStanding): number {
+  return standing.evidence?.freshness === CURRENT ? 1 : 0;
+}
+
+function compareFiles(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function listedDefinition(standing: DefectStanding): ListedDefinition {
+  const { definition, reason, evidence } = standing;
+  const { resolved } = definition;
   return {
     id: definition.id ?? null,
     file: definition.file,
@@ -267,9 +314,67 @@ function listedDefinition(definition: ResolvedDefinition): ListedDefinition {
         ? null
         : { identity: resolved.identity, duplicate: resolved.isDuplicate },
     mutationFile: definition.mutation?.file ?? null,
-    state: definition.state,
+    state: standing.state,
+    eligible: standing.eligible,
     ...(reason === undefined ? {} : { reason: cutReason(reason) }),
+    ...(evidence === undefined ? {} : { evidence: listedEvidence(evidence) }),
   };
+}
+
+function listedEvidence(evidence: EvidenceStanding): ListedEvidence {
+  const { reason, detail, errors, ...freshness } = evidence;
+  const texts = cutTexts({
+    ...(detail === undefined ? {} : { detail }),
+    ...(errors === undefined ? {} : { errors: errors.listed.map(listedError) }),
+  });
+  return {
+    ...freshness,
+    ...(reason === undefined ? {} : { reason }),
+    ...texts.value,
+    ...(errors === undefined ? {} : { errorsNotListed: errors.notListed }),
+    ...(detail === undefined && errors === undefined
+      ? {}
+      : { omittedCharacters: texts.omittedCharacters }),
+  };
+}
+
+function listedError({ kind, name }: ErrorFact): ListedError {
+  return { kind, ...(name === undefined ? {} : { name }) };
+}
+
+/**
+ * The value with every text in it cut as a reason is, at any depth, so no suite or error name in a listed
+ * definition's evidence is carried whole past the cut. A value of a closed set is shorter than the cut and comes
+ * back whole.
+ */
+function cutTexts<T>(value: T): Cut<T> {
+  if (typeof value === "string") {
+    const { reason, omittedCharacters } = cutReason(value);
+    return { value: reason as T, omittedCharacters };
+  }
+  if (Array.isArray(value)) {
+    const items = value.map((item: unknown) => cutTexts(item));
+    return {
+      value: items.map((item) => item.value) as T,
+      omittedCharacters: omittedIn(items),
+    };
+  }
+  if (typeof value !== "object" || value === null) {
+    return { value, omittedCharacters: 0 };
+  }
+  const members = Object.entries(value).map(
+    ([key, member]) => [key, cutTexts(member as unknown)] as const,
+  );
+  return {
+    value: Object.fromEntries(
+      members.map(([key, member]) => [key, member.value]),
+    ) as T,
+    omittedCharacters: omittedIn(members.map(([, member]) => member)),
+  };
+}
+
+function omittedIn(cuts: readonly Cut<unknown>[]): number {
+  return cuts.reduce((total, cut) => total + cut.omittedCharacters, 0);
 }
 
 /** Every module holding a gap with its count, and the gap tests by module up to `MAX_LISTED_GAP_TESTS`. */

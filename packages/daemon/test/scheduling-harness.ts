@@ -23,6 +23,7 @@ import {
   type NonInputsDeclaration,
 } from "../src/inputs/non-inputs.js";
 import type { InputFacts } from "../src/query/answer.js";
+import type { StoredEvidence } from "../src/store/defect-evidence.js";
 import type { LatestResults, RtTestStore } from "../src/store/open-store.js";
 import type {
   StoreBindings,
@@ -231,6 +232,11 @@ export class RecordingStore implements RtTestStore {
     this.#refused.set(index, reason);
   }
 
+  /** Refused, so a caller that starts storing evidence through a stand-in fails rather than losing it. */
+  writeEvidence(): StoredEvidence[] {
+    throw new Error("a recording store keeps no defect evidence");
+  }
+
   readRuns(): StoredRun[] {
     return [];
   }
@@ -284,6 +290,8 @@ export class RecordingStore implements RtTestStore {
         const reason = this.#refused.get(index);
         return reason === undefined ? [] : [{ workspacePath, reason }];
       }),
+      evidence: [],
+      evidenceRefusals: [],
     };
   }
 
