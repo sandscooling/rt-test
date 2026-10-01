@@ -36,7 +36,7 @@ import type { Judgement } from "./verdict.js";
  * Raise it whenever what a falsification record, its mutation transform, its reach probe or a judgement means
  * changes, so evidence recorded under the old meaning can be retired.
  */
-export const FALSIFIER_VERSION = 3;
+export const FALSIFIER_VERSION = 4;
 
 /** One defect's experiment as the job is asked to run it: the test that should detect it, and its mutation. */
 export interface DefectExperiment {
