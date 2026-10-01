@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as VitestNode from "vitest/node";
 import { errorText } from "./error-text.js";
@@ -30,6 +30,8 @@ type VitestNodeModule = typeof VitestNode;
 export type ResolvedVitest =
   | {
       readonly supported: true;
+      /** The directory of the package's manifest as Node resolved it, which resolves each link unless told to preserve them. */
+      readonly directory: string;
       readonly version: string;
       /** The major of `version`. */
       readonly major: number;
@@ -72,7 +74,13 @@ export function resolveWorkspaceVitest(directory: string): ResolvedVitest {
   }
   try {
     const nodeEntry = pathToFileURL(require.resolve(VITEST_NODE_ENTRY)).href;
-    return { supported: true, version, major, nodeEntry };
+    return {
+      supported: true,
+      directory: dirname(manifestPath),
+      version,
+      major,
+      nodeEntry,
+    };
   } catch (error) {
     return unsupported(
       version,
