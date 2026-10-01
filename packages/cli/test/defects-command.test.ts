@@ -515,4 +515,32 @@ describe("what the text says of stored evidence", () => {
         .map((line) => line.split(/\d+/).join("N"));
     expect(await shapeOf(scope(2))).toStrictEqual(await shapeOf(scope(0)));
   });
+
+  it("D3999: a verdict's detail that holds a list is printed as that list, a failing suite's names in their order and none under an index", async () => {
+    const printed = await printedLines(
+      defectsResponse({
+        counts: {
+          ...NO_COUNTS,
+          total: 1,
+          states: { ...NO_STATES, "invalid-experiment": 1 },
+          freshness: { current: 1, stale: 0, unknown: 0 },
+        },
+        definitions: [
+          listedDefinition("D5", "invalid-experiment", undefined, {
+            evidence: {
+              freshness: "current",
+              reason: "suite-error",
+              detail: { suite: ["cart", "applies a coupon"] },
+              omittedCharacters: 0,
+            },
+          }),
+        ],
+      }),
+      {
+        suite:
+          /\binvalid-experiment D5\b.*\bsuite-error\b.*\bsuite\W+cart\W+applies a coupon\b/,
+      },
+    );
+    expect(printed).toStrictEqual({ suite: 1 });
+  });
 });

@@ -147,7 +147,7 @@ export function detectionFor(
 /** One experiment of a reply: the facts its judgement is decided from, and what its record carries. */
 export interface ReplyExperiment {
   readonly defectId: string;
-  readonly facts: RanFacts;
+  readonly facts: ExperimentFacts;
   /** Absent for a record that carries no mutation file digest. */
   readonly mutationFileDigest?: string;
   /** The raw record of its run; one that recorded nothing when absent. */

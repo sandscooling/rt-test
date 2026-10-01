@@ -1717,6 +1717,23 @@ describe(
           evidenceRefusalEntry("D2", facts),
         ]);
       });
+
+      it("D4001: a second defect's evidence refused for the reason already logged for another is logged too", async () => {
+        const facts = '{"job":5}';
+        const entries = await afterEvidenceStored(
+          ["D1", "D2"],
+          (file, lifecycle) => {
+            setEvidenceFacts(file, "D1", facts);
+            lifecycle.summary();
+            setEvidenceFacts(file, "D2", facts);
+            lifecycle.summary();
+          },
+        );
+        expect(entries).toStrictEqual([
+          evidenceRefusalEntry("D1", facts),
+          evidenceRefusalEntry("D2", facts),
+        ]);
+      });
     });
   },
 );

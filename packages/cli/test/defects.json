@@ -1349,5 +1349,12 @@
     "file": "packages/cli/src/commands/defects.ts",
     "old": "    ...defectCountLines(answer.counts),\n",
     "new": "    ...defectCountLines(answer.counts),\n    ...(answer.counts.verified === answer.counts.total\n      ? [\"Every defect in scope is verified\"]\n      : []),\n"
+  },
+  {
+    "id": "D3999",
+    "defect": "A verdict's detail that holds a list prints each entry under its index.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "  if (Array.isArray(detail)) {\n    return `[${detail.map(detailText).join(LIST_SEPARATOR)}]`;\n  }\n",
+    "new": ""
   }
 ]

@@ -481,5 +481,26 @@
     "file": "packages/daemon/src/defects/defect-standings.ts",
     "old": "            standing.state === PASSED && standing.freshness === CURRENT,",
     "new": "            standing.state === PASSED,"
+  },
+  {
+    "id": "D3965",
+    "defect": "The count of each reason for unknown is never incremented.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "      unknownReasons[reason] += 1;\n",
+    "new": ""
+  },
+  {
+    "id": "D3996",
+    "defect": "Evidence that reads unknown names only the first reason that applies.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    ? { freshness: UNKNOWN, unknownReasons }",
+    "new": "    ? { freshness: UNKNOWN, unknownReasons: unknownReasons.slice(0, 1) }"
+  },
+  {
+    "id": "D4000",
+    "defect": "The definition digest covers the definition file it sits in.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "  const digest = definitionDigest(subject, index.consumerRoot);",
+    "new": "  const digest = definitionDigest(\n    { ...subject, id: `${definition.file}#${subject.id}` },\n    index.consumerRoot,\n  );"
   }
 ]

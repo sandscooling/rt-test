@@ -72,6 +72,7 @@ import {
   projectFacts,
 } from "./harness.js";
 import { detectionFor, ranOnce, REJECTING_TEST } from "./experiment-facts.js";
+import type { ErrorFact } from "../src/falsify/fact-types.js";
 import { narrowingSelecting } from "./round-fixtures.js";
 import {
   defectsAnswer,
@@ -3250,6 +3251,97 @@ describe(
           omittedCharacters: 0,
         },
       });
+    });
+
+    it("D3997: a listed unclear verdict whose intended test held five errors, one not an assertion, lists three of them by kind and name alone, with the 2 it did not list", async () => {
+      const errors: ErrorFact[] = [
+        { kind: "other", name: "TypeError" },
+        { kind: "other" },
+        {
+          kind: "assertion",
+          marker: "assertion-error-name",
+          name: "AssertionError",
+        },
+        {
+          kind: "assertion",
+          marker: "assertion-error-name",
+          name: "AssertionError",
+        },
+        {
+          kind: "assertion",
+          marker: "assertion-error-name",
+          name: "AssertionError",
+        },
+      ];
+      const listed = await inTempDir(async (root) => {
+        const answer = await withDetections(root, {
+          ...ONE_DEFINITION,
+          alter: (stored) =>
+            stored.map((record) => ({
+              ...record,
+              verdict: "unclear",
+              judgement: {
+                verdict: "unclear",
+                reason: "not-an-assertion",
+                facts: ranOnce({ test: { ...REJECTING_TEST, errors } }),
+              },
+            })),
+        });
+        const [only] = (await answer(A_AT_DIGEST)).definitions;
+        return { state: only?.state, evidence: only?.evidence };
+      });
+      expect(listed).toStrictEqual({
+        state: "unclear",
+        evidence: {
+          freshness: "current",
+          reason: "not-an-assertion",
+          errors: [
+            { kind: "other", name: "TypeError" },
+            { kind: "other" },
+            { kind: "assertion", name: "AssertionError" },
+          ],
+          errorsNotListed: 2,
+          omittedCharacters: 0,
+        },
+      });
+    });
+
+    it("D3998: a listed definition whose test holds no current pass says it is not eligible, beside one whose test holds one", async () => {
+      const listed = await inTempDir(async (root) => {
+        const passed = discovered("one");
+        const failed = discovered("two");
+        const answer = await withDetections(root, {
+          latest: results(
+            storedDiscovery([
+              discoveredWorkspace(WORKSPACE_A, [passed, failed]),
+            ]),
+            [
+              storedRun(
+                ranRun([
+                  ranModule([
+                    finished(passed, "passed"),
+                    finished(failed, "failed"),
+                  ]),
+                ]),
+                VITEST_ADAPTER_VERSION,
+                DIGEST,
+              ),
+            ],
+          ),
+          files: {
+            "a.json": [
+              defectDefinition("D1", "one"),
+              defectDefinition("D2", "two"),
+            ],
+          },
+        });
+        const { definitions } = await answer(A_AT_DIGEST);
+        return definitions.map(({ id, eligible }) => [id, eligible]);
+      });
+      expect(listed).toStrictEqual([
+        ["D1", true],
+        ["D2", false],
+      ]);
     });
 
     it("D3955: evidence for a test told apart only by its position reads unknown when the daemon's moment reads the discovery stale, and current when it reads it current", async () => {

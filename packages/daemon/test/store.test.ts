@@ -18,11 +18,14 @@ import {
 } from "../src/store/consumer-identity.js";
 import {
   FALSIFIER_VERSION,
+  type ExperimentNotRun,
+  type ExperimentRecord,
   type FalsificationJob,
   type Reach,
 } from "../src/falsify/experiment-record.js";
 import type { ErrorFact } from "../src/falsify/fact-types.js";
 import type { MutationLoad } from "../src/falsify/mutation-transform.js";
+import type { NoProbeSite } from "../src/falsify/reach-probe.js";
 import { column, UnreadableRecordError } from "../src/store/columns.js";
 import type { EvidenceBindings } from "../src/store/defect-evidence.js";
 import {
@@ -57,9 +60,11 @@ import {
 } from "../src/vitest/selection-facts.js";
 import {
   baseline,
+  CLEAN_JOB,
   detection,
   EMPTY_RUN,
   IN_TEST,
+  mutatedRun,
   ranOnce,
   ranReply,
   REJECTING_TEST,
@@ -3026,6 +3031,76 @@ const HOOK_FAILED_JUDGEMENT = {
 };
 /** An aborted job's experiment: its confirming run was interrupted, so it has no verdict. */
 const UNDECIDED_FACTS = detection({ confirming: { status: "interrupted" } });
+/** Its run would be a detection and its confirming run passed, so it reads unclear with what the confirming run read. */
+const UNCONFIRMED: ReplyExperiment = {
+  defectId: "D6",
+  facts: detection({
+    confirming: { status: "ran", ...mutatedRun({ test: SURVIVING_TEST }) },
+  }),
+  mutationFileDigest: "file-digest-6",
+};
+/** Where a probe would alter what the module does, as the job's check before any run names the place. */
+const UNPROBED_SITE: NoProbeSite = {
+  kind: "position",
+  line: 4,
+  column: 12,
+  nodeKind: "Identifier",
+  role: "CallExpression.callee",
+};
+
+/** Why a job gives an experiment no run and still a verdict. */
+type DecidedBeforeRun = Extract<
+  ExperimentNotRun,
+  { kind: "no-probe-site" | "no-module" }
+>;
+interface UnrunExperiment extends ReplyExperiment {
+  readonly reason: DecidedBeforeRun;
+  readonly mutationFileDigest: string;
+}
+
+/** An experiment the job decided before any run, beside others it ran: it shares their baselines and holds no run. */
+function decidedBeforeRun(
+  defectId: string,
+  reason: DecidedBeforeRun,
+): UnrunExperiment {
+  return {
+    defectId,
+    reason,
+    facts: {
+      baseline: baseline(),
+      restoredBaseline: { recorded: true, ...baseline() },
+      job: CLEAN_JOB,
+      notRun: reason,
+    },
+    mutationFileDigest: `file-digest-${defectId}`,
+  };
+}
+
+const UNPROBED = decidedBeforeRun("D4", {
+  kind: "no-probe-site",
+  site: UNPROBED_SITE,
+});
+const UNLOCATED = decidedBeforeRun("D5", { kind: "no-module" });
+
+/** The reply of a job that ran `ran` and gave each of `unrun` no run, whose record holds its reason and its mutation file's digest. */
+function replyWithUnrun(
+  ran: readonly ReplyExperiment[],
+  unrun: readonly UnrunExperiment[],
+): FalsificationJob {
+  const reply = ranReply([...ran, ...unrun]);
+  const records: ExperimentRecord[] = unrun.map(
+    ({ defectId, reason, mutationFileDigest }) => ({
+      defectId,
+      status: "not-run",
+      reason,
+      mutationFileDigest,
+    }),
+  );
+  return {
+    ...reply,
+    experiments: [...reply.experiments.slice(0, ran.length), ...records],
+  };
+}
 
 function evidenceBound(scope: StoreScope): EvidenceBindings {
   return { ...scope, inputFingerprintDigest: PRINT };
@@ -3061,6 +3136,13 @@ function verdictsIn(store: RtTestStore, scope: StoreScope): string[][] {
   return store
     .readLatestResults(scope)
     .evidence.map(({ defectId, verdict }) => [defectId, verdict]);
+}
+
+/** Each defect a query of worktree A reads evidence for, with its judgement whole. */
+function judgementsRead(store: RtTestStore): unknown[][] {
+  return store
+    .readLatestResults(WORKTREE_A)
+    .evidence.map(({ defectId, judgement }) => [defectId, judgement]);
 }
 
 /** What storing each of `replies` says, and what the store holds once every one was tried. */
@@ -3277,6 +3359,62 @@ describe("storing a falsification reply's verdicts as defect evidence", () => {
     expect(judgements).toStrictEqual([
       ["D1", { verdict: "detected", facts: DETECTING.facts }],
       ["D3", HOOK_FAILED_JUDGEMENT],
+    ]);
+  });
+
+  it("D3963: a no-probe-site and a no-module verdict, each decided before any run, are stored beside a detection and read back whole by a store opened again, the site's members included", async () => {
+    const judgements = await acrossReopen((store) => {
+      const unrun = [UNPROBED, UNLOCATED];
+      store.writeEvidence(
+        evidenceBound(WORKTREE_A),
+        replyWithUnrun([DETECTING], unrun),
+        digestsFor([DETECTING, ...unrun]),
+      );
+    }, judgementsRead);
+    expect(judgements).toStrictEqual([
+      ["D1", { verdict: "detected", facts: DETECTING.facts }],
+      [
+        "D4",
+        {
+          verdict: "invalid-experiment",
+          reason: "no-probe-site",
+          detail: {
+            site: {
+              kind: "position",
+              line: 4,
+              column: 12,
+              nodeKind: "Identifier",
+              role: "CallExpression.callee",
+            },
+          },
+          facts: UNPROBED.facts,
+        },
+      ],
+      [
+        "D5",
+        {
+          verdict: "invalid-experiment",
+          reason: "no-module",
+          facts: UNLOCATED.facts,
+        },
+      ],
+    ]);
+  });
+
+  it("D4002: an unclear verdict whose confirming run differed is stored with what its confirming run alone read, and read back whole by a store opened again", async () => {
+    const judgements = await acrossReopen((store) => {
+      storeReply(store, WORKTREE_A, [UNCONFIRMED]);
+    }, judgementsRead);
+    expect(judgements).toStrictEqual([
+      [
+        "D6",
+        {
+          verdict: "unclear",
+          reason: "confirming-run-differed",
+          detail: { confirming: { verdict: "survived" } },
+          facts: UNCONFIRMED.facts,
+        },
+      ],
     ]);
   });
 });
@@ -3734,5 +3872,24 @@ describe("opening a store written before defect evidence", () => {
         evidence: [["D1", "detected"]],
       })),
     );
+  });
+
+  it("D3964: a version 10 store opens at version 11, its discovery reading back with each workspace's selection facts and its run as they were stored", async () => {
+    const outcome = await inTempDir((dir) =>
+      settle(() => {
+        const stateDirectory = defaultStateDirectory(dir);
+        const file = writeStoreAt(stateDirectory, EVIDENCE_UNAWARE_VERSION);
+        return withOpenStore(stateDirectory, (store) => ({
+          version: schemaVersionOf(file),
+          discovery: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+          runs: runsOf(store, WORKTREE_A),
+        }));
+      }),
+    );
+    expect(outcome).toStrictEqual({
+      version: 11,
+      discovery: DISCOVERY,
+      runs: [FAILED_RUN],
+    });
   });
 });

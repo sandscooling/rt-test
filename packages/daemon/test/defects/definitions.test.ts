@@ -620,17 +620,14 @@ describe(
   },
 );
 
-/** Checks each of `values` as a definition at its position in `DEFINITION_FILE`. */
+/** Checks each of `values` as a definition at its position in `file`. */
 function checked(
   values: readonly unknown[],
   root: string = HAND_BUILT_ROOT,
+  file: string = DEFINITION_FILE,
 ): CheckedDefinition[] {
   return checkDefinitions(
-    values.map((value, position) => ({
-      file: DEFINITION_FILE,
-      position,
-      value,
-    })),
+    values.map((value, position) => ({ file, position, value })),
     root,
   );
 }
@@ -832,11 +829,11 @@ async function resolvedIn(
   dir: string,
   values: readonly unknown[],
   tests: readonly DiscoveredTest[],
-  options: { files?: Tree; current?: boolean } = {},
+  options: { files?: Tree; current?: boolean; definitionFile?: string } = {},
 ): Promise<ResolvedDefinition[]> {
   const root = join(dir, CONSUMER);
   writeTree(root, options.files ?? { [SOURCE]: SOURCE_TEXT });
-  const definitions = checked(values, root);
+  const definitions = checked(values, root, options.definitionFile);
   const anchors = await readAnchors(definitions, new AbortController().signal);
   return resolveDefinitions(
     definitions,
@@ -1102,6 +1099,8 @@ interface StandingCase {
   readonly values?: readonly unknown[];
   readonly tests?: readonly DiscoveredTest[];
   readonly files?: Tree;
+  /** The definition file the values are read from; `DEFINITION_FILE` when absent. */
+  readonly definitionFile?: string;
   /** Replaces members of a moment in which every test holds a current pass and the store holds no evidence. */
   readonly facts?: Partial<StandingFacts>;
 }
@@ -1120,7 +1119,12 @@ async function standingsIn(
     dir,
     given.values ?? [definition("D1")],
     tests,
-    given.files === undefined ? {} : { files: given.files },
+    {
+      ...(given.files === undefined ? {} : { files: given.files }),
+      ...(given.definitionFile === undefined
+        ? {}
+        : { definitionFile: given.definitionFile }),
+    },
   );
   return defectStandings(definitions, {
     consumerRoot: join(dir, CONSUMER),
@@ -1274,6 +1278,17 @@ describe("a definition's digest", () => {
       same: respelled.map((digest) => digest === base),
     }).toStrictEqual({ base: "string", same: [true, true, true, true, true] });
   });
+
+  it("D4000: a definition read from another definition file digests as it does from the first", async () => {
+    const [first, second] = await lastDigests([
+      {},
+      { definitionFile: "defects/b.defects.json" },
+    ]);
+    expect({ first: typeof first, same: second === first }).toStrictEqual({
+      first: "string",
+      same: true,
+    });
+  });
 });
 
 describe("whether stored evidence still describes what it was decided from", () => {
@@ -1412,6 +1427,34 @@ describe("whether stored evidence still describes what it was decided from", () 
         freshness: "unknown",
         unknownReasons: ["duplicate-test-discovery-not-current"],
       },
+    ]);
+  });
+
+  it("D3996: evidence that reads unknown names every reason that applies, not the first alone", async () => {
+    const twins: StandingCase = {
+      values: [definition("D1", { test: { occurrence: 1 } })],
+      tests: [
+        discoveredTest(["t"], { isDuplicate: true }),
+        discoveredTest(["t"], { occurrence: 1, isDuplicate: true }),
+      ],
+    };
+    const evidence = await inTempDir(async (dir) => {
+      const record = await boundDetection(join(dir, "verified"), twins);
+      return evidenceOf(join(dir, "unvouched"), record, {
+        ...twins,
+        facts: {
+          discoveryCurrent: false,
+          currentFingerprint: () => undefined,
+        },
+      });
+    });
+    expect(
+      evidence !== undefined && "unknownReasons" in evidence
+        ? [...evidence.unknownReasons].sort()
+        : evidence,
+    ).toStrictEqual([
+      "duplicate-test-discovery-not-current",
+      "no-current-fingerprint",
     ]);
   });
 
@@ -1610,6 +1653,52 @@ describe("each definition's one state, with its stored evidence", () => {
       unreadableEvidence: 0,
       eligible: 3,
       verified: 1,
+    });
+  });
+
+  it("D3965: the counts give each reason for unknown, a definition counted under every reason that applies to it, beside the freshness counts", async () => {
+    const counts = await inTempDir(async (dir) => {
+      const unprinted = { workspacePath: "pkg", modulePath: "b.test.ts" };
+      const given: StandingCase = {
+        values: [
+          definition("D1"),
+          definition("D2", { test: { name: ["u"], occurrence: 1 } }),
+          definition("D3", {
+            test: { module: "pkg/b.test.ts", name: ["w"], occurrence: 1 },
+          }),
+        ],
+        tests: [
+          discoveredTest(["t"]),
+          discoveredTest(["u"], { isDuplicate: true }),
+          discoveredTest(["u"], { occurrence: 1, isDuplicate: true }),
+          discoveredTest(["w"], { ...unprinted, isDuplicate: true }),
+          discoveredTest(["w"], {
+            ...unprinted,
+            occurrence: 1,
+            isDuplicate: true,
+          }),
+        ],
+      };
+      const bare = await standingsIn(join(dir, "bare"), given);
+      const { freshness, unknownReasons } = countDefectStandings(
+        await standingsIn(join(dir, "stored"), {
+          ...given,
+          facts: {
+            ...holding(...bare.map((standing) => detectionOf(standing))),
+            discoveryCurrent: false,
+            currentFingerprint: (workspacePath) =>
+              workspacePath === "pkg" ? undefined : BOUND_PRINT,
+          },
+        }),
+      );
+      return { freshness, unknownReasons };
+    });
+    expect(counts).toStrictEqual({
+      freshness: { current: 1, stale: 0, unknown: 2 },
+      unknownReasons: {
+        "no-current-fingerprint": 1,
+        "duplicate-test-discovery-not-current": 2,
+      },
     });
   });
 

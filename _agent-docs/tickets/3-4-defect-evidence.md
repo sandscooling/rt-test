@@ -539,11 +539,168 @@ Every record this lane added, re-anchored, holds in an edited test file, mutates
 - The touched suites on Windows: `store.test.ts` 155 of 155, `defects/definitions.test.ts` 69 of 69, `query.test.ts` 131 of 131, `lifecycle.test.ts` 182 of 182, `defects-command.test.ts` 11 of 11, and `waits.test.ts`, `changes.test.ts` and `falsify/verdict.test.ts` 80 of 80. `bun x oxlint` and `bun x prettier --check` over the touched files, `bun run --filter @rt-test/daemon typecheck`, `bun run --filter rt-test typecheck` and `node scripts/check-defects.mjs` (3,185 named defects) each exit 0.
 - Not run by this session: `bun run check`, the repo-wide suite, and any run under Node 22.
 
+#### State for the review's gap rounds
+
+The orchestrator accepted the green report at 05:40 on 2026-10-01 and committed the tests on `wt/1` at d1ee3480, with `main` merged in at d5d092ec; the tree was clean then. The tests session handed off at 05:41 to its successor `rt-t3-4-tests-2`, threadId 99a15760-1848-46fc-9e73-099e2c7add9a, which answers the review's `#### Test Coverage Gaps` rows: wake that threadId with a gap round.
+
+- Reserve ids for gap tests: D4003, D4004 and D4005. The first gap round used D3963, D3964, D3965 and D3996 to D4002.
+- A gap test's helpers: `ranReply`, `judgementOf` and `detectionFor` in `packages/daemon/test/experiment-facts.ts`; `storeReply`, `refusalsOf` and `evidenceAfter` in `store.test.ts`; `standingsIn`, `besideCurrent` and `lastDigests` in `defects/definitions.test.ts`; `withDetections` in `query.test.ts`; `afterEvidenceStored` in `lifecycle.test.ts`; `printedLines` in `defects-command.test.ts`.
+- Proving: the verifier refuses a run if any file under `packages/` changes while it runs, and checks every anchor in the catalog before it proves one. A round proves its own ids with `--ids` through the run lease (`--lane t3-4`), on Windows and then in the WSL clone `~/rt-test-t3-4-tests` (clone of `/mnt/c/source/rt-test`, last at d5d092ec with the first gap round's 9 files copied in, so it needs `git fetch` and a checkout of the lane's HEAD first). Node 24 in WSL is `~/.nvm/versions/node/v24.13.1/bin`, off the login PATH, and bun is `~/.bun/bin`.
+- Scratch, kept until the orchestrator closes the run: `_agent-docs/.scratch/t3-4-tests/` holds `proof-ids.txt` (the 943 ids), `proof-selection.mjs` (recomputes that selection), `show-records.mjs` (prints records and stale anchors), `wsl-clone.sh` and `wsl-prove.sh`, and every run's log.
+
+#### Gap round 1: the review's nine rows
+
+By `rt-t3-4-tests-2`, threadId 99a15760-1848-46fc-9e73-099e2c7add9a, on 2026-10-01 from 05:56 to 06:09, over the tree at d5d092ec, which the review left with no production edit. The orchestrator ruled at 05:53 that all nine rows are worked as one round. Each row was checked against the test files first and is a real gap: no test stored facts holding `notRun`, read a version 10 store's discovery back, counted a reason for unknown above zero, read two reasons, read listed errors or `eligible: false` from the answer, printed a detail holding a list, or took a digest from a second definition file.
+
+Named defects, each proven, by the review's row:
+
+- Row 1, D3963: A verdict decided without a run cannot be stored: the facts' not-run branch is dropped, so a no-probe-site or no-module verdict is refused and takes its whole reply with it. (AC1) In `store.test.ts`, over a reply whose two experiments decided before any run carry `not-run` records, as the job leaves them.
+- Row 1, D4002: An unclear verdict whose confirming run differed is rebuilt without what its confirming run read, so the store refuses it and its whole reply. (AC1) The row offered this shape as a further case of D3963's test. It has a test and a mutation of its own instead, so no title claims more than its record proves. Decided by this session.
+- Row 2, D3964: The version 10 migration drops every workspace's stored selection facts, as the migrations of versions 3 to 8 do. (AC3) A new test beside D3929, whose test is unedited.
+- Row 3, D3965: The count of each reason for unknown is never incremented. (AC7) Its standings hold one definition under one reason and one under both, so it also pins that a definition is counted under every reason that applies.
+- Row 4, D3996: Evidence that reads unknown names only the first reason that applies. (AC5)
+- Row 5, D3997: The answer leaves out the errors of a not-an-assertion verdict, or the number of them it did not list. (AC8) Its mutation leaves out both. Its five errors read the same three first whichever kind is listed first, so it does not pin the order left under Deliberately Untested.
+- Row 6, D3998: Every listed definition says it is eligible. (AC8)
+- Row 7, D3999: A verdict's detail that holds a list prints each entry under its index. (AC10)
+- Row 8, D4000: The definition digest covers the definition file it sits in. (AC4)
+- Row 9, D4001: The logged-once guard keys on the refusal's reason alone, so a second defect refused for the same reason is never logged. (AC7) D3957's test goes red on its mutation too.
+
+Deliberately Untested gains nothing.
+
+Files, each modified and none created:
+
+- Add-only, so the records already in them were not proved again (`_agent-docs/crew.md` § Gates): `packages/daemon/test/store.test.ts`, `packages/daemon/test/query.test.ts`, `packages/daemon/test/lifecycle.test.ts` and `packages/cli/test/defects-command.test.ts`. Each diff deletes no line and adds only imports, declarations and test blocks.
+- `packages/daemon/test/defects/definitions.test.ts`: not add-only. `checked`, `resolvedIn` and `standingsIn` now take the definition file a case names, defaulting to the one they always used, which D4000 needs. Every record whose test is in the file was proved again, 72 with the three new ones.
+- `packages/daemon/test/experiment-facts.ts`: `ReplyExperiment.facts` reads `ExperimentFacts` where it read `RanFacts`, a type alone, so no record whose test calls `ranReply` was proved again.
+- `packages/daemon/test/defects.json` (D3963, D3964, D3997, D3998, D4001, D4002), `packages/daemon/test/defects/defects.json` (D3965, D3996, D4000) and `packages/cli/test/defects.json` (D3999): records appended.
+
+Proof, 79 records (the 72 of `definitions.test.ts` and the seven new ones elsewhere), each platform as one run through the run lease:
+
+- Windows, Node 24.19.0, 06:06 to 06:07: `node scripts/verify-defects.mjs --ids <79 ids>`, 79 of 79 detected, baseline green before and after, exit 0.
+- Linux (WSL clone `~/rt-test-t3-4-tests` at d5d092ec with the 9 files copied in), Node 24.13.1, 06:08: the same command over the same ids, 79 of 79 detected, baseline green before and after, exit 0.
+- The touched suites on Windows, 06:09: `store.test.ts`, `query.test.ts`, `lifecycle.test.ts`, `defects/definitions.test.ts`, `falsify/verdict.test.ts` and `defects-command.test.ts`, 6 of 6 files, 591 of 591 tests, exit 0. `bun x oxlint` and `bun x prettier --check` over the touched files, `bun run --filter @rt-test/daemon typecheck`, `bun run --filter rt-test typecheck` and `node scripts/check-defects.mjs` (3,195 named defects) each exit 0.
+- Not run by this session: `bun run check`, the repo-wide suite, and any run under Node 22.
+- Scratch: `gap-proof-ids.txt` (the 79 ids), `gap-prove-windows-1.log`, `gap-prove-linux-1.log`, `gap-suites-1.log` and `gap-testing-doc-text.md` (the `docs/testing.md` text sent to the orchestrator).
+
 ### Review Record
+
+Review session: threadId 3bbe47c2-8c7e-4f5e-b07a-7f5748b3d2fa (rt-t3-4-review)
+
+By review-changes on 2026-10-01, from 05:40, over `git diff main...wt/1` at d5d092ec (30 files) and the doc lines of the authoring commits 0f6eb4b3 and e473c80b.
+
+#### What the review ran
+
+- Six fresh-eyes batches (store, defects, query, lifecycle, the falsify exports with the protocol and the client, the CLI), one doc verification and one check of installed third-party behavior, beside the reviewer's own pass over the 15 production files against the ticket's 43 checklist rules and 14 project-context rules. `changes.test.ts` and `waits.test.ts`, six added lines between them, were read by the reviewer and not batched.
+- No product guarantee is broken and every criterion holds in the code. The store's rebuild names every member of every fact type and of every judgement that has a verdict, and nothing else. ADR-0004 and ADR-0007 are met: evidence stays in the local store, and the six bindings ADR-0007 names are the six causes of staleness.
+- Third-party behavior, on Vitest 4.1.11 and 5.0.1, read in `node_modules/.bun/`: the resolution under § Unverified Assumptions is confirmed line for line, and each closed set in `store/evidence-facts.ts` (test states and modes, module states, hook names and states) holds every member either line declares or can produce. An error's serialized `name` can be absent or not a string; `errorFact` in `falsify/run-facts.ts` keeps a name only when it is a string, so none reaches a reply's facts as anything else.
+- Size: every production file is under the cap, the closest `store/evidence-facts.ts` at 470 code lines and `client.ts` at 463.
+
+#### Findings fixed
+
+No code finding needed a production edit. The discrepancies in this record, each fixed here:
+
+- The doc text's replacement for "and every other one is never verified." began mid-sentence after a comma, so applying it as written ran two sentences together. It now takes the comma with it.
+- The Results store text listed the write's refusals and left out a reply with no list of judgements or of experiment records (`ranReply` in `store/defect-evidence.ts`).
+- The Results store text was to go "after the sentence on a refused run", of which there are two, and before a sentence whose "It" would then name the wrong subject. The insertion point is now exact.
+- "Fourth paragraph" named the fifth once the third is replaced by two. It now names the paragraph by its opening words.
+- The README text said every valid definition reads `never-verified`; one whose anchor is missing reads `anchor-missing`.
+- The README text gave `unknown` one cause; the standings give two (`no-current-fingerprint`, `duplicate-test-discovery-not-current`).
+- The README text's list of what the command prints left out the section of never verified definitions whose stored evidence could not be read.
+- The File List left out the 13 test files of d1ee3480.
+
+#### Doc text for files the orchestrator owns
+
+- `_agent-docs/sprints/sprint-3-falsification.md` § Ticket 3.5. "A job given no experiment, or whose every experiment was decided before any run, reads `ran` with no baseline and an empty list of judgements (3.3's review)." is false in its second case: `all()` in `falsify/falsify-workspace.ts` returns every record decided before a run when nothing was planned, the judge gives each a judgement, and `no-probe-site` and `no-module` are verdicts. Replace with: "A job given no experiment reads `ran` with no baseline and an empty list of judgements. A job whose every experiment was decided before any run reads `ran` with no baseline and one judgement for each, of which a no-probe-site and a no-module judgement are invalid experiment verdicts that `writeEvidence` stores (3.3's review, corrected by 3.4's)."
+- `docs/architecture.md`, the Section menu's `Defects query` entry still says "the three states"; the replacement is the first item under § Doc text for the orchestrator.
+- `_agent-docs/sprints/sprint-3-falsification.md` § Ticket 3.4b cites "Requirements: FR5, FR22." and FR22's marker in `docs/requirements.md` lists only tickets 3.1 and 3.4. Ticket 3.4 completes the `defects` query FR22 names and 3.4b moves its counts into the summary, which is FR5: drop FR22 from the 3.4b line.
+- The same file, the paragraph under § Ticket 3.3b, says "a file the consumer declares a non-input is in no input fingerprint". That holds for a mutation's file and not in general: `workspaceFingerprint` digests every listed test module, setup file and global setup file the inputs leave out. Replace "a file" with "a source file".
+- `docs/testing.md` holds a paragraph for each ticket's named defects and none for D3910 to D3962, the records re-anchored beside them, or this review's gap round. The tests session owns the wording.
+
+#### Questions and rulings
+
+- Asked of the orchestrator at 05:52; decided by the orchestrator at 05:53. Nine criterion clauses hold in the code with no test that goes red when they break, each a join between a proven function and the layer its criterion names, past the dispatch's line of a third finding of one kind. Ruling: send all nine to the tests session as one gap round. "This is no design question. The kind is a coverage habit, proving the function and not the layer the criterion names, and it ends with this round." Each is the main path of its clause in Fleet Cooling's checkout: refused placements, a version 10 store, `it.each` in 92 of 988 test files, suite hooks in 10, an ordinary `TypeError`.
+- Decided by this session, accepted by the orchestrator at 05:53. AC10's "the number of errors not listed": the text leaves the clause out when the number is zero, and absence reads as zero. Printing it costs an edit to `packages/cli/src/commands/defects.ts` and a proof of each record that mutates it on both platforms.
+- Decided by this session, accepted by the orchestrator at 05:53. `ListedEvidence` carries `reason`, a verdict's reason from a closed set, beside `omittedCharacters`, the characters cut from its detail and errors: the two keys that elsewhere form a cut free text. No number is wrong and each member's type says what it is, so it stays.
+- Decided by this session. The dev's fork on a write refusal's `cause`, which quotes the offending value: keep the value. It reaches an error's text and the local log, never a row, and AC2 speaks of records.
+- Decided by this session. `client.ts` re-exports `StaleCause` and `UnknownReason`, which no file under `packages/cli/src` names. Nine other names it re-exported before this ticket have none either, so that entry is the package's programmatic surface and the two follow it.
+
+#### Findings left
+
+Each says what a consumer would see and what must coincide. None is one Fleet Cooling's checkout meets, by the owner's rule of 04:43 on 2026-10-01.
+
+Unproven clauses, not sent as gaps:
+
+- `daemon/refusal-notes.ts`: a defect refused again for a different reason, or again after a read that did not refuse it, is not logged, so the log lacks the text an answer points to. It needs a refused evidence record, then a second refusal of the same defect in one daemon life.
+- `query/defects-answer.ts` (`listedDefinition`): a listed never verified definition loses the refusal as its reason while the count says one record is unreadable. It needs a refused evidence record.
+- `packages/cli/src/commands/defects.ts` (`evidenceText`): the clause saying characters were cut is printed wrongly or not at all. It needs a suite or error name over 1,000 characters.
+- `packages/cli/src/commands/defects.ts` (`notListedLine`): the hint to ask for a narrower path is tied to the wrong condition. It needs a regression in that one comparison; the per-state numbers beside it are proven (D3729).
+- `store/defect-evidence.ts` (`evidenceId`): each record of one reply gets its own identity, or every reply shares one. No answer and no production code reads the member.
+- `defects/defect-standings.ts`: evidence in one workspace is rated by another's Vitest version or fingerprint. Every standings test holds one workspace; ticket 3.7's corpus holds two.
+- Tests whose title claims more than their record proves, each still detected: D3937 (the record it reads is a detection, which carries no reason under any version; D3924 proves the store withholds them), D3943 (its byte order mark is a literal character in the test's source), D3960 (the error with no name is not asserted), D3962 (it compares two outputs and would pass on two empty ones), D3959 (the unreadable count equals three other counts in its fixture).
+
+Behavior, each loud or in the safe direction:
+
+- `store/evidence-facts.ts` (the closed sets): a Vitest release that records a hook name or a state outside them has every reply holding one refused whole, so that workspace's defects stay never verified. Both supported lines declare exactly the sets held.
+- `store/defect-evidence.ts` (`ranReply`): a reply of another falsifier version is stored with a reason and facts no read interprets. It needs an executor and a daemon of different builds.
+- `store/defect-evidence.ts` (`definitionDigest`): a caller handing in something other than a map gets a `TypeError` and not a named refusal. Ticket 3.5's caller is typed.
+- `defects/defect-standings.ts` (`definitionDigest`): the digest is stable only while every caller hands in the consumer root as `checkDefinitions` was given it, and a file respelled in another letter case reads stale. Stale is the safe direction.
+- `defects/defect-standings.ts` (`judgementParts`): the standings withhold a reason for another falsifier version only because the store hands them no judgement. `StoredEvidence` allows one beside any version.
+- `defects/resolve-definitions.ts` (`listedModuleText`): a definition naming one Vitest project is told its module failed to collect when it failed in another. It needs a module collected under two projects.
+- `defects/resolve-definitions.ts` (`readMutationFile`): the file is read and digested whole with no size bound. It needs a definition naming a very large file.
+- `daemon/refusal-notes.ts` (`EVIDENCE_REFUSED_ENTRY`): the log says the defect reads never verified when its definition is invalid, lost its anchor or was removed. It needs a refused record for such a definition.
+- `packages/cli/src/commands/defects.ts` (`detailText`): a suite name holding a comma and a space reads as two. The heading of the unreadable section names the only reason a never verified definition carries today.
+- `falsify/verdict.ts`: `rt-test defects` loads the judge for four names. AC12 holds, since that module's one run-time import is `fact-types.ts`, which imports types alone.
+
+#### Tech debt
+
+Undisposed, triaged against the committed change.
+
+- `PASSED` is declared at `query/changes-answer.ts:87` and again at `defects/defect-standings.ts:65`. Fix: export one from `query/answer.ts`.
+- `RUN_EXECUTIONS` at `store/evidence-facts.ts:161` equals the private table at `store/read-runs.ts:75`, and `isNonEmptyText` at `store/defect-evidence.ts:367` mirrors the private `requireNonEmpty` at `store/stored-records.ts:85`. Fix: export each from its first home.
+- A zero-filled tally is built by `zeroCounts` at `query/test-states.ts:231`, by `zeroTally` at `defects/defect-standings.ts:227`, and a per-state record again in `listedDefinitions` in `query/defects-answer.ts`, where `DefectStateCounts` restates the type of `DefectStandingCounts.states`. Fix: one exported tally helper and type.
+- `#noteEvidenceRefusals` in `daemon/refusal-notes.ts` is a copy of `#noteRunRefusals` beside it, differing in the key and the entry text, so the run path's five records guard one copy only. Fix: one keyed helper and two thin callers. It moves nine anchored records.
+- `packages/cli/src/commands/defects.ts`: `keyedCounts` over the freshness values repeats half of `countLines` at `packages/cli/src/answer-text.ts:159`; `sectionLines` is the shape `notDiscoveredLines` (`:518`) and `executionLines` (`:304`) write by hand, as `invalidEntryLines` and `gapLines` in the command still do; `errorsText` rebuilds `namedText` (`:399`). Fix: move `keyedCounts` and `sectionLines` to `answer-text.ts`.
+- `packages/daemon/test/experiment-facts.ts`: it imports `./harness.js` (`:24`) for one constant, so `falsify/verdict.test.ts`, which loaded only the judge, now loads the harness with Vitest and the run and fingerprint modules; `RanJob` (`:27`) repeats `test/falsify/job-readings.ts:4`, `judgementOf` (`:167`) shares a name with the different function at `job-readings.ts:22`, and `COLLECTED`, `judgementOf` and `RanJob` are exported with no importer.
+- Before this ticket, `store/schema.ts`: each entry of `STORE_MIGRATIONS` spells its whole path to the current version, so this bump edited nine entries and re-anchored sixteen records. Fix: compose each entry from one step per version.
+- Before this ticket, `packages/cli/src/commands/defects.ts`: "of which 1 are gaps" (`:105`); an empty path argument prints "The path path is empty." (`:62`); and no test prints a definition whose id is null.
+- Before this ticket, `packages/daemon/test/scheduling-harness.ts:199` and `:269`: the stand-in store gives every discovery the id "discovery", where production code keys on that id changing.
+- Before this ticket, `query/summary.ts` holds `queryBasis` and `cutReason`, which every answer and `daemon/workspace-schedule.ts` read.
+
+#### For the tickets that follow
+
+- 3.5: hand `defectStandings` the consumer root exactly as `checkDefinitions` was given it, or every digest it stores differs from the one the query computes and all evidence reads stale. `RecordingStore.writeEvidence` in `test/scheduling-harness.ts` always throws and its latest results hold no evidence, so a lifecycle test over the stand-in cannot see evidence stored: give it a recording write first. `readLatestResults` now parses, rebuilds and judges again every evidence record of the scope on every read (summary, path status, waits, changes and each plan); measure it over a few thousand records before a job fills the table. A job whose every experiment was decided before a run still carries verdicts to store (the sprint text above).
+- 3.7: the two-workspace fixture is the first test of the standings' lookups by workspace.
+- 3.8: a whole-worktree answer at both listing bounds is unmeasured with evidence on every listed definition.
+
+#### Validation
+
+Over the tree at d5d092ec with the gap round's ten changed test files and this record, on Windows, 2026-10-01. This review's own fix round is this file alone, outside every compiled graph, so its typecheck is skipped for that reason; the gap round's files were typechecked by the tests session at 06:09 over the same tree (Tests Record § Gap round 1).
+
+- The suite, 06:10, through the run lease: `bun x vitest related` over the six test and helper files the gap round edited selected 6 of 84 test files; 591 of 591 tests passed, exit 0.
+- `bun x oxlint` over those six files and `bun x prettier --check` over the ten changed files, 06:10: each exit 0.
+- `node scripts/check-defects.mjs`, 06:10: 3,195 named defects, each test with one record and each anchor matching once, exit 0.
+- `node scripts/check-line-citations.mjs`, 06:10: clean.
+- `node scripts/check-sprint-keys.mjs` and `node scripts/check-requirement-markers.mjs`, 06:11: each exit 0.
+- Named defects: the tests session proved the gap round's 79 records by id on Windows and on Linux Node 24, 79 of 79 on each (Tests Record § Gap round 1). The reviewer read each new test and record against its row.
+- Not run by this session: `bun run check`, the repo-wide suite and typecheck, and any run on Linux or under Node 22.
 
 #### Test Coverage Gaps
 
-None.
+Answered by the tests session at 06:09 on 2026-10-01, every row closed by a named test proved on both platforms: row 1 by D3963, with D4002 for the unclear verdict whose confirming run differed; row 2 by D3964; row 3 by D3965; row 4 by D3996; row 5 by D3997; row 6 by D3998; row 7 by D3999; row 8 by D4000; row 9 by D4001.
+
+Sent to the tests session at 05:55 on 2026-10-01 by the orchestrator's ruling of 05:53. Each severity is what the defect would cost if it landed; none is present in the code today. A gap test that only adds lines to its file leaves the records already there unproved again (`_agent-docs/crew.md` § Gates).
+
+| #   | Source                                                                                  | Defect                                                                                                                                                                        | Expected test                                                                                                                                                                                                                                                                                                                                                                                                      | Severity                                               |
+| --- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| 1   | `packages/daemon/src/store/evidence-facts.ts` (`storedFacts`), AC1                      | A verdict decided without a run cannot be stored: the facts' not-run branch is dropped, so a no-probe-site or no-module verdict is refused and takes its whole reply with it. | `store.test.ts`, over a real store through `writeEvidence`: a reply holding a no-probe-site verdict and a no-module verdict beside a detection reads each record back whole, the site's members included. No test stores facts holding `notRun` today, and the reply helper types its facts as `RanFacts`. The test may also drive an unclear verdict whose confirming run differed, the other shape never stored. | MEDIUM, daemon-state, fails loudly                     |
+| 2   | `packages/daemon/src/store/schema.ts` (the version 10 entry of `STORE_MIGRATIONS`), AC3 | The version 10 migration drops every workspace's stored selection facts, as the migrations of versions 3 to 8 do.                                                             | `store.test.ts`: a store written at version 10 reads its run and its discovery back after the migration as they were stored. D3929 opens each version and asserts the header and the evidence alone.                                                                                                                                                                                                               | HIGH, daemon-state, loses stored state without failing |
+| 3   | `packages/daemon/src/defects/defect-standings.ts` (`countDefectStandings`), AC7         | The count of each reason for unknown is never incremented.                                                                                                                    | `defects/definitions.test.ts`, over real standings holding one that reads unknown: the counts give that reason 1 and unknown freshness 1. D3949 expects zero under every reason.                                                                                                                                                                                                                                   | HIGH, consumer                                         |
+| 4   | `packages/daemon/src/defects/defect-standings.ts` (`evidenceFreshness`), AC5            | Evidence that reads unknown names only the first reason that applies.                                                                                                         | `defects/definitions.test.ts`: a test told apart only by its position, the discovery not current and no current fingerprint, reads unknown naming both reasons.                                                                                                                                                                                                                                                    | HIGH, consumer                                         |
+| 5   | `packages/daemon/src/query/defects-answer.ts` (`listedEvidence`), AC8                   | The answer leaves out the errors of a not-an-assertion verdict, or the number of them it did not list.                                                                        | `query.test.ts`, beside D3954: a stored unclear verdict whose intended test held five errors is listed with three, each a kind and a name alone, and 2 not listed.                                                                                                                                                                                                                                                 | HIGH, consumer                                         |
+| 6   | `packages/daemon/src/query/defects-answer.ts` (`listedDefinition`), AC8                 | Every listed definition says it is eligible.                                                                                                                                  | `query.test.ts`: a listed definition whose test holds no current pass reads `eligible: false`. D3954 asserts only `true`.                                                                                                                                                                                                                                                                                          | HIGH, consumer                                         |
+| 7   | `packages/cli/src/commands/defects.ts` (`detailText`), AC10                             | A verdict's detail that holds a list prints each entry under its index.                                                                                                       | `defects-command.test.ts`: a listed invalid experiment whose detail is a suite error's name path prints the names as a list. The only detail any test prints is flat.                                                                                                                                                                                                                                              | MEDIUM, consumer, cosmetic                             |
+| 8   | `packages/daemon/src/defects/defect-standings.ts` (`definitionDigest`), AC4             | The definition digest covers the definition file it sits in.                                                                                                                  | `defects/definitions.test.ts`: one definition read from a second definition file digests as it does from the first. D3933 varies the position, the texts and the spellings, never the file.                                                                                                                                                                                                                        | MEDIUM, consumer, the safe direction                   |
+| 9   | `packages/daemon/src/daemon/refusal-notes.ts` (`#noteEvidenceRefusals`), AC7            | The logged-once guard keys on the refusal's reason alone, so a second defect refused for the same reason is never logged.                                                     | `lifecycle.test.ts`: D3957's test already asserts it and goes red on it; the defect needs a named test and record of its own.                                                                                                                                                                                                                                                                                      | MEDIUM, daemon-state                                   |
 
 ### Completion Notes
 
@@ -591,21 +748,23 @@ Confirmed as the Dev Notes list them. Added by the build, both in Dev Notes § K
 
 #### Doc text for the orchestrator
 
-`docs/architecture.md` § Results store, to add after the sentence on a refused run:
+`docs/architecture.md`, the Section menu's `Defects query` entry. Replace "the anchor count, the three states, the gaps" with "the anchor count, each definition's state and stored evidence, evidence freshness and its causes, the counts, the gaps".
 
-> The store also keeps defect evidence, one record for each defect id in a project and worktree, in the table `defect_evidence`. `writeEvidence` stores a `ran` falsification reply's judgements that have a verdict, each replacing that defect's earlier record, all in one transaction and each read back before it commits. A record holds the verdict, its reason and detail, and its facts, each rebuilt member by member from what its type names, so no error message, stack, code frame or source text reaches a row, and it is bound to the project and worktree identities, an identity the store gives the reply, the definition digest handed in for the defect, the mutation file digest the reply's experiment record carries, the digest of the workspace's input fingerprint handed in, the reply's Vitest and falsifier versions, and the store's Vitest adapter version. The write stores nothing and throws, naming what is wrong, for a reply that does not read `ran` or lacks a version; a missing identity or fingerprint digest; a judgement or experiment record that is not an object naming a defect id; a defect two judgements name; a verdict with no definition digest, with no experiment record or several, or whose record carries no mutation file digest; and a verdict, reason or detail that is not the one the judge gives the facts beside it. A judgement with no verdict stores nothing and leaves the earlier record. Evidence is read with the latest discovery and runs in one read transaction. A record of another falsifier version is read as its bindings and its verdict alone. A record of the current version that cannot be rebuilt, or whose verdict its facts do not give, is refused alone: its defect reads never verified with the refusal, every other record still reads, and the log names the refusal whole, once while it stands. Schema version 11 adds the table: a store of any earlier version the opener migrates gains it empty, and version 10's code refuses the migrated store.
+§ Results store. Insert before the sentence "It refuses, leaving the file unchanged, a store of any other schema version or a file that is not an RT Test store.", and open that sentence with "`openStore` refuses" in place of "It refuses", since the text inserted before it would change what "It" names:
+
+> The store also keeps defect evidence, one record for each defect id in a project and worktree, in the table `defect_evidence`. `writeEvidence` stores a `ran` falsification reply's judgements that have a verdict, each replacing that defect's earlier record, all in one transaction and each read back before it commits. A record holds the verdict, its reason and detail, and its facts, each rebuilt member by member from what its type names, so no error message, stack, code frame or source text reaches a row, and it is bound to the project and worktree identities, an identity the store gives the reply, the definition digest handed in for the defect, the mutation file digest the reply's experiment record carries, the digest of the workspace's input fingerprint handed in, the reply's Vitest and falsifier versions, and the store's Vitest adapter version. The write stores nothing and throws, naming what is wrong, for a reply that does not read `ran`, lacks a version, or carries no list of judgements or of experiment records; a missing identity or fingerprint digest; a judgement or experiment record that is not an object naming a defect id; a defect two judgements name; a verdict with no definition digest, with no experiment record or several, or whose record carries no mutation file digest; and a verdict, reason or detail that is not the one the judge gives the facts beside it. A judgement with no verdict stores nothing and leaves the earlier record. Evidence is read with the latest discovery and runs in one read transaction. A record of another falsifier version is read as its bindings and its verdict alone. A record of the current version that cannot be rebuilt, or whose verdict its facts do not give, is refused alone: its defect reads never verified with the refusal, every other record still reads, and the log names the refusal whole, once while it stands. Schema version 11 adds the table: a store of any earlier version the opener migrates gains it empty, and version 10's code refuses the migrated store.
 
 § Defects query, third paragraph. Replace "No match is invalid as not discovered: the reason says whether the discovery lists that module, and says so when that discovery is not current." with:
 
 > No match is invalid as not discovered: the reason says whether the discovery lists that module, says that the module failed to collect in that discovery, so none of its tests is discovered, when the discovery lists it as failed (or failed in one project, when it holds discovered tests in another), and says so when that discovery is not current.
 
-Replace from "and every other one is never verified." to the paragraph's end with:
+Replace from ", and every other one is never verified." to the paragraph's end, the comma included, with a full stop followed by:
 
 > Invalid wins over anchor missing, and both win over any stored evidence. Every other definition reads the verdict of its stored evidence (`detected`, `survived`, `invalid-experiment`, `unclear`), or `never-verified` when the store holds none for its id; a record the store refuses as unreadable reads as none, with the refusal as the definition's reason. Each state is one value of the Defect evidence dimension.
 >
 > Evidence freshness is a field of its own, present only beside a verdict, decided when the query answers and never stored. It reads stale under every cause that holds: `definition-changed` (the definition digest, a digest of the definition's id, its resolved test's whole identity and its mutation's root-relative file, `old` and `new`, differs from the record's), `mutation-file-changed` (the digest of the mutation file's text, as the anchor count just read it, differs from the one the job recorded), `another-adapter-version`, `another-falsifier-version`, `another-vitest-version` (the record's Vitest version is not the one the latest stored discovery reports for the resolved test's workspace), and `inputs-changed` (that workspace's current input fingerprint, the one its ordinary results are rated against, differs from the record's). When no cause holds it reads unknown with each reason that applies: `no-current-fingerprint`, as before a daemon life's first reconciliation has ended, and `duplicate-test-discovery-not-current`, when the resolved test is told apart only by its position and the latest discovery is not current. Otherwise it reads current. A record stored under another falsifier version gives its verdict, its freshness and its causes and nothing else. A definition is eligible when it is neither invalid nor anchor missing and its resolved test holds a current pass in the answer's own test standings, whatever its evidence. Verified counts the definitions that read detected with evidence freshness current; no field says a scope is verified, so a reader compares it with the total, which keeps every invalid entry and invalid definition.
 
-Fourth paragraph. Replace "the count of each state, the invalid entries and the total;" with:
+The paragraph that begins "A definition whose test's module the latest discovery lists is in scope". Replace "the count of each state, the invalid entries and the total;" with:
 
 > the total and the invalid entries; the count of each state, of each evidence freshness over the definitions that read a verdict, of each cause of staleness and each reason for unknown (a definition counted under every one that holds for it), of the definitions that read never verified because their stored evidence could not be read, of the eligible and of the verified, every count complete whatever the listing leaves out;
 
@@ -621,11 +780,11 @@ and add to the same paragraph: "An id, a test as written, a mutation's file and 
 
 `README.md`, the `rt-test defects [path]` paragraph. Replace "or `never-verified`." with:
 
-> or reads the verdict of its stored falsification evidence (`detected`, `survived`, `invalid-experiment`, `unclear`), or `never-verified` when none is stored. Beside a verdict it gives the evidence's freshness: `stale`, naming each cause (the definition, the mutation's file, the workspace's inputs, or the Vitest, falsifier or adapter version changed since the verdict), `unknown` when the daemon cannot yet vouch for the inputs, or `current`. No falsification runs yet, so every valid definition reads `never-verified` until a later release schedules it.
+> or reads the verdict of its stored falsification evidence (`detected`, `survived`, `invalid-experiment`, `unclear`), or `never-verified` when none is stored. Beside a verdict it gives the evidence's freshness: `stale`, naming each cause (the definition, the mutation's file, the workspace's inputs, or the Vitest, falsifier or adapter version changed since the verdict), `unknown` when nothing it compares has changed but it cannot vouch for the workspace's inputs now, or for the position of a test told apart from same-named tests only by it, or `current`. No falsification runs yet, so every definition that is neither invalid nor anchor missing reads `never-verified` until a later release schedules it.
 
 and replace "It prints the total, each state's count, each definition file problem, each definition that is invalid or anchor missing with its reason and how many more the answer did not list," with:
 
-> It prints the total; how many are verified (detected with current evidence) against that total, and how many are eligible; each state's count; each evidence freshness count with the count of each cause and reason; how many definitions hold evidence that could not be read; each definition file problem; each definition that is invalid or anchor missing with its reason; each verdict that is not a detection with its reason, detail, listed errors and freshness; how many definitions of each state the answer did not list;
+> It prints the total; how many are verified (detected with current evidence) against that total, and how many are eligible; each state's count; each evidence freshness count with the count of each cause and reason; how many definitions hold evidence that could not be read; each definition file problem; each definition that is invalid or anchor missing with its reason; each verdict that is not a detection with its reason, detail, listed errors and freshness; each never verified definition whose stored evidence could not be read, with why; how many definitions of each state the answer did not list;
 
 and replace "Under `--json` it lists up to 500 definitions, problems first," with "Under `--json` it lists up to 500 definitions, problems first and detections last, each with whether it is eligible and its evidence,". No line and no field says a path passed or is verified: compare the verified count with the total.
 
@@ -668,5 +827,28 @@ Modified:
 - `packages/daemon/src/client.ts`
 - `packages/cli/src/commands/defects.ts`
 - `_agent-docs/tickets/3-4-defect-evidence.md` (the task and criterion boxes, the resolutions, the two known limits and the rulings the orchestrator had recorded here, the Dev Handoff, the Completion Notes, this list)
+
+By create-tests, 2026-10-01. Created:
+
+- `packages/daemon/test/experiment-facts.ts`
+
+Modified:
+
+- `packages/daemon/test/store.test.ts`
+- `packages/daemon/test/query.test.ts`
+- `packages/daemon/test/lifecycle.test.ts`
+- `packages/daemon/test/defects/definitions.test.ts`
+- `packages/daemon/test/falsify/verdict.test.ts`
+- `packages/daemon/test/changes.test.ts`
+- `packages/daemon/test/waits.test.ts`
+- `packages/daemon/test/scheduling-harness.ts`
+- `packages/daemon/test/defects.json`
+- `packages/daemon/test/defects/defects.json`
+- `packages/cli/test/defects-command.test.ts`
+- `packages/cli/test/defects.json`
+
+By review-changes, 2026-10-01. Modified:
+
+- `_agent-docs/tickets/3-4-defect-evidence.md` (the doc text for the orchestrator, this list, the Review Record)
 
 No dependency changed: `package.json` files and `bun.lock` are untouched.

@@ -10827,5 +10827,47 @@
     "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "      if (this.#loggedEvidenceRefusals.get(defectId) === reason) continue;\n",
     "new": ""
+  },
+  {
+    "id": "D3963",
+    "defect": "A verdict decided without a run cannot be stored: the facts' not-run branch is dropped, so a no-probe-site or no-module verdict is refused and takes its whole reply with it.",
+    "file": "packages/daemon/src/store/evidence-facts.ts",
+    "old": "  if (notRun !== undefined) return { ...shared, notRun };\n",
+    "new": ""
+  },
+  {
+    "id": "D3964",
+    "defect": "The version 10 migration drops every workspace's stored selection facts, as the migrations of versions 3 to 8 do.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    EVIDENCE_UNAWARE_SCHEMA_VERSION,\n    `${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    EVIDENCE_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D4002",
+    "defect": "An unclear verdict whose confirming run differed is rebuilt without what its confirming run read, so the store refuses it and its whole reply.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "      return { verdict, reason, detail: { confirming } };",
+    "new": "      return { verdict, reason };"
+  },
+  {
+    "id": "D3997",
+    "defect": "The answer leaves out the errors of a not-an-assertion verdict, or the number of them it did not list.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    ...(evidence === undefined ? {} : { evidence: listedEvidence(evidence) }),",
+    "new": "    ...(evidence === undefined\n      ? {}\n      : { evidence: listedEvidence({ ...evidence, errors: undefined }) }),"
+  },
+  {
+    "id": "D3998",
+    "defect": "Every listed definition says it is eligible.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    eligible: standing.eligible,",
+    "new": "    eligible: true,"
+  },
+  {
+    "id": "D4001",
+    "defect": "The logged-once guard keys on the refusal's reason alone, so a second defect refused for the same reason is never logged.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "this.#loggedEvidenceRefusals.get(defectId) === reason",
+    "new": "[...this.#loggedEvidenceRefusals.values()].includes(reason)"
   }
 ]
