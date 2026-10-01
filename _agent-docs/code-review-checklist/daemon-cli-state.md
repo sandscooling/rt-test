@@ -77,7 +77,7 @@ C136. **Keep a disposable copy inside its task directory**: A sandbox path is ve
 
 C137. **Verify the baseline first**: A mutation experiment runs only after the unmutated baseline passes for the same input snapshot, and ordinary results and mutation runs use separate namespaces.
 
-C138. **Count setup failures as invalid, not detected**: A compile, collection, setup, timeout or unrelated failure makes the experiment invalid or unclear; only an assertion failure in the named test counts as detection. A detection or baseline also needs a run that ended cleanly: a missing run end, an unhandled error the runner reports or the runner's own process records, a forced exit (such as a close timeout) or a missing exit record makes it invalid, whatever the report says.
+C138. **Count setup failures as invalid, not detected**: A compile, collection, setup, timeout or unrelated failure makes the experiment invalid or unclear; only an assertion failure in the named test counts as detection. A detection or baseline also needs a run that ended cleanly: a missing run end, an unhandled error the runner reports or the runner's own process records, a forced exit (such as a close timeout) or a missing exit record makes it invalid or unclear, never detected, whatever the report says. An unhandled error a baseline records that names a test module counts against that module's experiments alone, and an experiment whose job never finished its runs gets no verdict.
 
 C139. **Never call an incomplete set verified**: "Verified" requires every defect in the denominator detected; tests with no defect are reported as a gap rather than left out of the count.
 
