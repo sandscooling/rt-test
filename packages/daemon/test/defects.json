@@ -2908,8 +2908,8 @@
     "id": "D1883",
     "defect": "A query never passes a workspace's current fingerprint to the comparison, so a result whose inputs are unchanged reads unknown, never current.",
     "file": "packages/daemon/src/query/summary.ts",
-    "old": "      (path) => fingerprintDigest(fingerprints.get(path)),",
-    "new": "      () => undefined,"
+    "old": "  const currentFingerprint: CurrentFingerprints = (path) =>\n    fingerprintDigest(fingerprints.get(path));",
+    "new": "  const currentFingerprint: CurrentFingerprints = () => undefined;"
   },
   {
     "id": "D1884",
@@ -3769,15 +3769,15 @@
     "id": "D2097",
     "defect": "The version 2 migration never raises the header, so the migrated store still claims version 2.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}`,"
+    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}`,"
   },
   {
     "id": "D2098",
     "defect": "The version 1 migration never adds the selection facts column, so a version 1 store's discoveries cannot be read once migrated.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_FORCE_STOPPED}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_FORCE_STOPPED}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2099",
@@ -3944,8 +3944,8 @@
     "id": "D2122",
     "defect": "The version 2 migration marks each ran run not force-stopped, so a force-stopped run stored at version 2 reads back not force-stopped.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}\nUPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';${SET_SCHEMA_VERSION}`,"
+    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}\nUPDATE runs SET force_stopped = ${NOT_FORCE_STOPPED} WHERE status = 'ran';${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2123",
@@ -4385,8 +4385,8 @@
     "id": "D2260",
     "defect": "The version 3 migration keeps each stored report without its Vite root, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2261",
@@ -5324,7 +5324,7 @@
     "defect": "The daemon reads no stored results when it plans, so a restart rediscovers and reruns every workspace though its results read current.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
     "old": "    const results = this.#parts.store.readLatestResults(this.#parts.scope);",
-    "new": "    const results: LatestResults = { discovery: undefined, discoveryRefusal: undefined, latestRuns: [], runRefusals: [] };"
+    "new": "    const results: LatestResults = { discovery: undefined, discoveryRefusal: undefined, latestRuns: [], runRefusals: [], evidence: [], evidenceRefusals: [] };"
   },
   {
     "id": "D2692",
@@ -5771,15 +5771,15 @@
     "id": "D2791",
     "defect": "A version 4 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
     "id": "D2792",
-    "defect": "A new store is created at schema version 9, so a daemon from before not-covered workspaces opens it and stores discoveries that read back as never reporting them.",
+    "defect": "A new store is created at schema version 10, so a daemon from before defect evidence opens it rather than refusing a store that holds evidence it cannot read.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "export const STORE_SCHEMA_VERSION = 10;",
-    "new": "export const STORE_SCHEMA_VERSION = 9;"
+    "old": "export const STORE_SCHEMA_VERSION = 11;",
+    "new": "export const STORE_SCHEMA_VERSION = 10;"
   },
   {
     "id": "D2793",
@@ -6114,21 +6114,21 @@
     "id": "D2829",
     "defect": "The version 4 migration keeps each stored report, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    CRASH_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2830",
     "defect": "The version 5 migration keeps each stored report, so every discovery stored before it is refused as unreadable instead of reading as not reporting its selection facts.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2831",
     "defect": "A version 5 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
@@ -6149,8 +6149,8 @@
     "id": "D2846",
     "defect": "The version 3 migration never raises the header, so the store stays at version 3 and every open drops the selection facts stored since the last one, and no discovery's facts survive a restart.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}`,"
+    "old": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    VITE_ROOT_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}`,"
   },
   {
     "id": "D2847",
@@ -6499,8 +6499,8 @@
     "id": "D2859",
     "defect": "The version 6 migration keeps the stored selection facts, which lack crawled links, so reading any discovery stored before it fails.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D2860",
@@ -7416,14 +7416,14 @@
     "id": "D3040",
     "defect": "The version 7 migration keeps the stored selection facts, which lack env sources, so reading any discovery stored before it fails.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D3041",
     "defect": "A version 7 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    ENV_SOURCES_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
@@ -7899,14 +7899,14 @@
     "id": "D3128",
     "defect": "The version 8 migration keeps every stored report, so a Vitest 5 workspace whose nested container's env sources the report left out reads complete after the upgrade and its old results read current.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,"
+    "old": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D3129",
     "defect": "A version 8 store has no migration to the current version, so every existing store is refused once the daemon is upgraded.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "  [\n    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,\n  ],\n",
+    "old": "  [\n    ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,\n  ],\n",
     "new": ""
   },
   {
@@ -8816,8 +8816,8 @@
     "id": "D3273",
     "defect": "The query basis never hands the run refusals to the standings, so every test of a refused workspace reads never-run in a summary and a path status alike.",
     "file": "packages/daemon/src/query/summary.ts",
-    "old": "      refusedRuns,\n      (path) => fingerprintDigest",
-    "new": "      new Map(),\n      (path) => fingerprintDigest"
+    "old": "      refusedRuns,\n      currentFingerprint,",
+    "new": "      new Map(),\n      currentFingerprint,"
   },
   {
     "id": "D3274",
@@ -9271,8 +9271,8 @@
     "id": "D3351",
     "defect": "The version 2 migration never adds the not-covered column, so a version 2 store's discoveries cannot be read once migrated.",
     "file": "packages/daemon/src/store/schema.ts",
-    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,",
-    "new": "    `${ADD_SELECTION_FACTS}${SET_SCHEMA_VERSION}`,"
+    "old": "    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    `${ADD_SELECTION_FACTS}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
   },
   {
     "id": "D3352",
@@ -10573,8 +10573,8 @@
     "id": "D3721",
     "defect": "The answer tells the resolver the discovery is current whatever its freshness, so a not-discovered reason never says the discovery is not current.",
     "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "    basis.context.discovery.freshness === CURRENT,",
-    "new": "    true,"
+    "old": "  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;",
+    "new": "  const discoveryCurrent = true;"
   },
   {
     "id": "D3722",
@@ -10607,9 +10607,9 @@
   {
     "id": "D3732",
     "defect": "Anchor-missing definitions are listed after never-verified ones.",
-    "file": "packages/daemon/src/defects/resolve-definitions.ts",
-    "old": "  DEFECT_STATE.anchorMissing,\n  DEFECT_STATE.neverVerified,\n];",
-    "new": "  DEFECT_STATE.neverVerified,\n  DEFECT_STATE.anchorMissing,\n];"
+    "file": "packages/daemon/src/defects/defect-states.ts",
+    "old": "  anchorMissing: \"anchor-missing\",\n  survived: VERDICT.survived,\n  invalidExperiment: VERDICT.invalidExperiment,\n  unclear: VERDICT.unclear,\n  neverVerified: \"never-verified\",",
+    "new": "  survived: VERDICT.survived,\n  invalidExperiment: VERDICT.invalidExperiment,\n  unclear: VERDICT.unclear,\n  neverVerified: \"never-verified\",\n  anchorMissing: \"anchor-missing\","
   },
   {
     "id": "D3733",
@@ -10624,5 +10624,250 @@
     "file": "packages/daemon/src/query/defects-answer.ts",
     "old": "    ...basis.context,",
     "new": "    ...{},"
+  },
+  {
+    "id": "D3910",
+    "defect": "Each verdict takes the mutation file digest of the reply's first experiment record, not of the record naming its defect, so a defect is bound to another defect's file.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "      records.get(defectId) ?? [],",
+    "new": "      [...records.values()][0] ?? [],"
+  },
+  {
+    "id": "D3911",
+    "defect": "A record's definition digest and mutation file digest are stored in each other's column, so neither ever equals the current one.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "        row.definitionDigest,\n        row.mutationFileDigest,",
+    "new": "        row.mutationFileDigest,\n        row.definitionDigest,"
+  },
+  {
+    "id": "D3912",
+    "defect": "A new verdict erases every record of its worktree and that defect's record in every other worktree, not that defect's one record.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "const DELETE_EVIDENCE = `DELETE FROM defect_evidence WHERE ${ONE_DEFECT}`;",
+    "new": "const DELETE_EVIDENCE = `DELETE FROM defect_evidence WHERE ${IN_SCOPE} OR defect_id = ?`;"
+  },
+  {
+    "id": "D3913",
+    "defect": "A judgement with no verdict is treated as one to store, so it refuses the whole reply and the verdicts beside it are never stored.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  return judgements.filter(hasVerdict).map(({ defectId, member }) => ({",
+    "new": "  return judgements.map(({ defectId, member }) => ({"
+  },
+  {
+    "id": "D3914",
+    "defect": "A reply's records are written outside one transaction, so a reader sees some of a reply's verdicts before the rest.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  return inRecordWrite(database, () => {\n    const remove = database.prepare(DELETE_EVIDENCE);",
+    "new": "  return ((_database: unknown, write: () => StoredEvidence[]) => write())(database, () => {\n    const remove = database.prepare(DELETE_EVIDENCE);"
+  },
+  {
+    "id": "D3915",
+    "defect": "A reply with no Vitest version is not refused by name, so the write fails without saying which binding the reply lacks.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (!isNonEmptyText(vitestVersion)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3916",
+    "defect": "An empty fingerprint digest is not refused by name, so the write fails without saying which binding is missing.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  fingerprintColumns({\n    kind: FINGERPRINT_DIGEST,\n    digest: bindings.inputFingerprintDigest,\n  });\n",
+    "new": ""
+  },
+  {
+    "id": "D3917",
+    "defect": "A verdict whose defect has no definition digest handed in is stored under a made-up digest rather than refused.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  const digest: unknown = definitionDigests.get(defectId);\n  if (isNonEmptyText(digest)) return digest;",
+    "new": "  const digest: unknown = definitionDigests.get(defectId);\n  return String(digest);"
+  },
+  {
+    "id": "D3918",
+    "defect": "A verdict whose defect two experiment records name takes the first record's mutation file digest rather than refusing the reply.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (record === undefined || others.length > 0) {",
+    "new": "  if (record === undefined) {"
+  },
+  {
+    "id": "D3919",
+    "defect": "A defect two judgements of one reply name is not refused, so the judgement later in the reply decides what is stored.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  refuseRepeatedJudgements(judgements);\n",
+    "new": ""
+  },
+  {
+    "id": "D3920",
+    "defect": "A verdict whose experiment record carries no mutation file digest is stored under a made-up digest rather than refused.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  const digest = record[\"mutationFileDigest\"];\n  if (isNonEmptyText(digest)) return digest;",
+    "new": "  const digest = record[\"mutationFileDigest\"];\n  return String(digest);"
+  },
+  {
+    "id": "D3921",
+    "defect": "A reply's verdict is stored as handed, whatever the judge gives its facts, so a surviving run claimed detected is stored as a detection.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (!isDeepStrictEqual(reading, judge(facts))) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3922",
+    "defect": "A stored row's verdict is read as its column holds it, whatever the judge gives its facts, so a row altered to detected reads as a detection.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (!isDeepStrictEqual(reading, judge(facts))) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3923",
+    "defect": "One evidence record that cannot be rebuilt fails the whole read, so no defect's evidence, run or discovery is answered.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "      evidenceRefusals.push({ defectId, reason: errorText(error) });",
+    "new": "      throw error;"
+  },
+  {
+    "id": "D3924",
+    "defect": "A record stored under another falsifier version has its reason, detail and facts parsed as the current version's, so a shape of that version is refused as unreadable or read under the wrong meaning.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (falsifierVersion !== FALSIFIER_VERSION) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3925",
+    "defect": "A reply with no list of experiment records is not refused by name, so the write fails without saying what the reply lacks.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "  if (!Array.isArray(judgements) || !Array.isArray(experiments)) {",
+    "new": "  if (!Array.isArray(judgements)) {"
+  },
+  {
+    "id": "D3926",
+    "defect": "A negative count in a reply's facts is stored, so a detection is kept over a count the judge reads as no unhandled error.",
+    "file": "packages/daemon/src/store/columns.ts",
+    "old": "  if (typeof field === \"number\" && Number.isInteger(field) && field >= 0) {",
+    "new": "  if (typeof field === \"number\" && Number.isInteger(field)) {"
+  },
+  {
+    "id": "D3927",
+    "defect": "A judgement's facts are serialized as the reply handed them, so an error's message and stack and any member the fact types do not name reach the row.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "    facts: JSON.stringify(stored.facts),",
+    "new": "    facts: JSON.stringify((judgement as { facts: unknown }).facts),"
+  },
+  {
+    "id": "D3928",
+    "defect": "A probe site is stored as the reply handed it, so a member the site's type does not name, such as source text, reaches the row.",
+    "file": "packages/daemon/src/store/evidence-facts.ts",
+    "old": "    ? { placed: true, site: probeSite(jsonRecord(value, \"site\")) }",
+    "new": "    ? { placed: true, site: jsonRecord(value, \"site\") as never }"
+  },
+  {
+    "id": "D3929",
+    "defect": "The version 10 migration never creates the evidence table, so a migrated store reads version 11 and can hold no evidence.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    EVIDENCE_UNAWARE_SCHEMA_VERSION,\n    `${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    EVIDENCE_UNAWARE_SCHEMA_VERSION,\n    `${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D3930",
+    "defect": "A new store is created without the evidence table, so it can hold no evidence though it reads the current schema version.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "${CREATE_DEFECT_EVIDENCE}\n`;",
+    "new": "`;"
+  },
+  {
+    "id": "D3931",
+    "defect": "The evidence is read before the snapshot the latest discovery and runs are read from, so an answer pairs a new discovery with a verdict stored before it.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),\n    ...selectLatestRuns(database, scope),\n    ...selectEvidence(database, scope),\n  }));",
+    "new": "  const evidence = selectEvidence(database, scope);\n  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),\n    ...selectLatestRuns(database, scope),\n    ...evidence,\n  }));"
+  },
+  {
+    "id": "D3951",
+    "defect": "Evidence nothing made stale reads current while no current fingerprint can be computed, so after a restart a detection reads verified before the daemon has vouched for the inputs.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    ...(fingerprint === UNKNOWN ? [UNKNOWN_REASON.noCurrentFingerprint] : []),",
+    "new": "    ...(false ? [UNKNOWN_REASON.noCurrentFingerprint] : []),"
+  },
+  {
+    "id": "D3952",
+    "defect": "An answer over a scope whose every definition is verified carries a field saying so, which a reader takes for a verdict that leaves the definition file problems out.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    path: scope.path,\n    counts: {",
+    "new": "    path: scope.path,\n    ...(counts.verified > 0 && counts.verified === definitions.length\n      ? { verified: true }\n      : {}),\n    counts: {"
+  },
+  {
+    "id": "D3953",
+    "defect": "Within a state, definitions are listed by file and position alone, so past the listing's bound the stale ones may be the ones left unlisted.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "      currentRank(left) - currentRank(right) ||\n",
+    "new": ""
+  },
+  {
+    "id": "D3954",
+    "defect": "A verdict's detail is left out of its standing, so a listed invalid experiment gives its reason without the hook, state or site that explains it.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    reason: judgement.reason,\n    ...(detail === undefined ? {} : { detail }),",
+    "new": "    reason: judgement.reason,"
+  },
+  {
+    "id": "D3955",
+    "defect": "The answer tells the standings the discovery is current whatever its freshness, so evidence for a test told apart only by its position reads current while that position is not vouched for.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    discoveryCurrent,\n    currentFingerprint: basis.currentFingerprint,",
+    "new": "    discoveryCurrent: true,\n    currentFingerprint: basis.currentFingerprint,"
+  },
+  {
+    "id": "D3956",
+    "defect": "The daemon never logs a refused evidence record, so the log holds no trace of why a defect reads never verified.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "    this.#noteEvidenceRefusals(results.evidenceRefusals);\n",
+    "new": ""
+  },
+  {
+    "id": "D3957",
+    "defect": "A refused evidence record is logged at every read of the latest results, so one refusal fills the log.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "      if (this.#loggedEvidenceRefusals.get(defectId) === reason) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D3963",
+    "defect": "A verdict decided without a run cannot be stored: the facts' not-run branch is dropped, so a no-probe-site or no-module verdict is refused and takes its whole reply with it.",
+    "file": "packages/daemon/src/store/evidence-facts.ts",
+    "old": "  if (notRun !== undefined) return { ...shared, notRun };\n",
+    "new": ""
+  },
+  {
+    "id": "D3964",
+    "defect": "The version 10 migration drops every workspace's stored selection facts, as the migrations of versions 3 to 8 do.",
+    "file": "packages/daemon/src/store/schema.ts",
+    "old": "    EVIDENCE_UNAWARE_SCHEMA_VERSION,\n    `${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,",
+    "new": "    EVIDENCE_UNAWARE_SCHEMA_VERSION,\n    `${DROP_INCOMPLETE_FACTS}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,"
+  },
+  {
+    "id": "D4002",
+    "defect": "An unclear verdict whose confirming run differed is rebuilt without what its confirming run read, so the store refuses it and its whole reply.",
+    "file": "packages/daemon/src/store/defect-evidence.ts",
+    "old": "      return { verdict, reason, detail: { confirming } };",
+    "new": "      return { verdict, reason };"
+  },
+  {
+    "id": "D3997",
+    "defect": "The answer leaves out the errors of a not-an-assertion verdict, or the number of them it did not list.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    ...(evidence === undefined ? {} : { evidence: listedEvidence(evidence) }),",
+    "new": "    ...(evidence === undefined\n      ? {}\n      : { evidence: listedEvidence({ ...evidence, errors: undefined }) }),"
+  },
+  {
+    "id": "D3998",
+    "defect": "Every listed definition says it is eligible.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    eligible: standing.eligible,",
+    "new": "    eligible: true,"
+  },
+  {
+    "id": "D4001",
+    "defect": "The logged-once guard keys on the refusal's reason alone, so a second defect refused for the same reason is never logged.",
+    "file": "packages/daemon/src/daemon/refusal-notes.ts",
+    "old": "this.#loggedEvidenceRefusals.get(defectId) === reason",
+    "new": "[...this.#loggedEvidenceRefusals.values()].includes(reason)"
   }
 ]

@@ -1,38 +1,40 @@
 import { readFile, stat } from "node:fs/promises";
 import { countAnchor } from "../falsify/anchor-match.js";
+import { wholeDigest } from "../inputs/input-inventory.js";
 import { testModuleFile, workspaceTestModules } from "../inputs/non-inputs.js";
 import type {
   DiscoveredTest,
   TestDiscovery,
 } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
+import { DEFECT_STATE } from "./defect-states.js";
 import type { CheckedDefinition, DefinitionTest } from "./definitions.js";
 
-export const DEFECT_STATE = {
-  invalidDefinition: "invalid-definition",
-  anchorMissing: "anchor-missing",
-  neverVerified: "never-verified",
-} as const;
-
-export type DefectState = (typeof DEFECT_STATE)[keyof typeof DEFECT_STATE];
-
-/** Every state a definition can hold before any evidence is stored, those that withhold verified for a problem first. */
-export const DEFECT_STATES: readonly DefectState[] = [
-  DEFECT_STATE.invalidDefinition,
-  DEFECT_STATE.anchorMissing,
-  DEFECT_STATE.neverVerified,
-];
+/** What a definition reads from the files and the discovery alone, before any stored evidence is read for it. */
+type ResolvedState =
+  | typeof DEFECT_STATE.invalidDefinition
+  | typeof DEFECT_STATE.anchorMissing
+  | typeof DEFECT_STATE.neverVerified;
 
 const PROBLEM_SEPARATOR = "; ";
 const FIELD_SEPARATOR = " and ";
 const LIST_SEPARATOR = ", ";
 const ANCHOR_OCCURRENCES_WANTED = 1;
 const ANCHOR_NOT_READ = "its mutation's file was not read";
+const LISTED_MODULE = "the latest discovery lists that module";
+const UNLISTED_MODULE = "the latest discovery does not list that module";
+const FAILED_MODULE =
+  "that module failed to collect in the latest discovery, so none of its tests is discovered";
+/** A module can fail to collect in one project and hold discovered tests in another. */
+const FAILED_IN_A_PROJECT =
+  "that module failed to collect in a project of the latest discovery, so none of its tests there is discovered";
 const FIELD = { project: "project", occurrence: "occurrence" } as const;
 
 /** What reading one definition's anchor found: why it is missing, or nothing when its `old` occurs exactly once. */
 interface AnchorRead {
   readonly missing: string | undefined;
+  /** The digest of the mutation file's text as this read took it; absent when the file was not read. */
+  readonly fileDigest?: string;
 }
 
 /** The anchor read of each definition no check found a problem in. */
@@ -46,9 +48,11 @@ export interface ResolvedDefinition extends CheckedDefinition {
   readonly resolved: DiscoveredTest | undefined;
   /** Its test's module when the latest discovery lists that module; without one no scope can place it. */
   readonly discoveredModule: string | undefined;
-  readonly state: DefectState;
+  readonly state: ResolvedState;
   /** Why it is invalid or its anchor is missing; absent for never verified. */
   readonly reason?: string;
+  /** The digest of its mutation file's text as its anchor was read; absent when that file was not read. */
+  readonly mutationFileDigest?: string;
 }
 
 /** What the latest stored discovery holds, as a definition's test is resolved against it. */
@@ -57,13 +61,17 @@ interface DiscoveryIndex {
   readonly tests: ReadonlyMap<string, readonly DiscoveredTest[]>;
   /** Every module the discovery lists, a failed or typecheck module included. */
   readonly modules: ReadonlySet<string>;
+  /** Each module the discovery lists as failed to collect, in any project. */
+  readonly failedModules: ReadonlySet<string>;
   readonly current: boolean;
 }
 
 type TestResolution =
   { readonly test: DiscoveredTest } | { readonly problem: string } | undefined;
 
-type FileText = { readonly text: string } | { readonly unreadable: string };
+type FileText =
+  | { readonly text: string; readonly digest: string }
+  | { readonly unreadable: string };
 
 /**
  * Reads the anchor of each definition no check found a problem in, in its mutation's file as it is now, reading each
@@ -79,11 +87,35 @@ export async function readAnchors(
   for (const definition of definitions) {
     signal.throwIfAborted();
     if (definition.problems.length > 0) continue;
-    anchors.set(definition, {
-      missing: await anchorProblem(definition, files),
-    });
+    anchors.set(definition, await readAnchor(definition, files));
   }
   return anchors;
+}
+
+async function readAnchor(
+  definition: CheckedDefinition,
+  files: Map<string, FileText>,
+): Promise<AnchorRead> {
+  const content = await mutationFileText(definition, files);
+  const missing = anchorProblem(definition, content);
+  return content !== undefined && "digest" in content
+    ? { missing, fileDigest: content.digest }
+    : { missing };
+}
+
+/** The mutation's file, read once however many definitions name it; undefined when the definition names no file to read. */
+async function mutationFileText(
+  definition: CheckedDefinition,
+  files: Map<string, FileText>,
+): Promise<FileText | undefined> {
+  const { mutationPath } = definition;
+  if (mutationPath === undefined) return undefined;
+  let content = files.get(mutationPath);
+  if (content === undefined) {
+    content = await readMutationFile(mutationPath);
+    files.set(mutationPath, content);
+  }
+  return content;
 }
 
 /** Resolves each definition's test against the latest stored discovery and gives it its one state, reading no file. */
@@ -128,21 +160,16 @@ function resolveDefinition(
       reason: problems.join(PROBLEM_SEPARATOR),
     };
   }
-  const { missing } = anchors.get(definition) ?? UNREAD_ANCHOR;
+  const { missing, fileDigest } = anchors.get(definition) ?? UNREAD_ANCHOR;
+  const read = {
+    ...definition,
+    resolved,
+    discoveredModule,
+    ...(fileDigest === undefined ? {} : { mutationFileDigest: fileDigest }),
+  };
   return missing === undefined
-    ? {
-        ...definition,
-        resolved,
-        discoveredModule,
-        state: DEFECT_STATE.neverVerified,
-      }
-    : {
-        ...definition,
-        resolved,
-        discoveredModule,
-        state: DEFECT_STATE.anchorMissing,
-        reason: missing,
-      };
+    ? { ...read, state: DEFECT_STATE.neverVerified }
+    : { ...read, state: DEFECT_STATE.anchorMissing, reason: missing };
 }
 
 function discoveryIndex(
@@ -151,9 +178,15 @@ function discoveryIndex(
 ): DiscoveryIndex {
   const tests = new Map<string, DiscoveredTest[]>();
   const modules = new Set<string>();
+  const failedModules = new Set<string>();
   for (const entry of discovery.workspaces) {
     for (const module of workspaceTestModules(entry)) modules.add(module);
     if (entry.status !== "discovered") continue;
+    for (const failed of entry.failedModules) {
+      failedModules.add(
+        testModuleFile(entry.workspace.path, failed.modulePath),
+      );
+    }
     for (const test of entry.tests) {
       const file = testModuleFile(
         entry.workspace.path,
@@ -164,7 +197,7 @@ function discoveryIndex(
       else group.push(test);
     }
   }
-  return { tests, modules, current };
+  return { tests, modules, failedModules, current };
 }
 
 /** Undefined when the definition names no usable module, which is already one of its problems. */
@@ -201,12 +234,17 @@ function notDiscoveredReason(
   index: DiscoveryIndex,
 ): string {
   const listing = index.modules.has(modulePath)
-    ? "the latest discovery lists that module"
-    : "the latest discovery does not list that module";
+    ? listedModuleText(modulePath, index)
+    : UNLISTED_MODULE;
   const currency = index.current
     ? ""
     : ", and that discovery is not current, so a test added since it was stored is not discovered until the next one is";
   return `its test is not discovered: no discovered test in ${modulePath} has the name path ${JSON.stringify(test.name)}${narrowingText(test)}; ${listing}${currency}`;
+}
+
+function listedModuleText(modulePath: string, index: DiscoveryIndex): string {
+  if (!index.failedModules.has(modulePath)) return LISTED_MODULE;
+  return index.tests.has(modulePath) ? FAILED_IN_A_PROJECT : FAILED_MODULE;
 }
 
 function narrowingText(test: DefinitionTest): string {
@@ -248,18 +286,13 @@ function ambiguousReason(
 }
 
 /** Why the definition's anchor is missing, or undefined when its `old` occurs exactly once in the file as it is now. */
-async function anchorProblem(
+function anchorProblem(
   definition: CheckedDefinition,
-  files: Map<string, FileText>,
-): Promise<string | undefined> {
-  const { mutation, mutationPath } = definition;
-  if (mutation === undefined || mutationPath === undefined) {
+  content: FileText | undefined,
+): string | undefined {
+  const { mutation } = definition;
+  if (mutation === undefined || content === undefined) {
     return ANCHOR_NOT_READ;
-  }
-  let content = files.get(mutationPath);
-  if (content === undefined) {
-    content = await readMutationFile(mutationPath);
-    files.set(mutationPath, content);
   }
   if ("unreadable" in content) {
     return `its mutation's file ${mutation.file} cannot be read: ${content.unreadable}`;
@@ -269,13 +302,14 @@ async function anchorProblem(
   return `its mutation's old text occurs ${count} times in ${mutation.file}, not once`;
 }
 
-/** Only a regular file is read, since a FIFO's read can block. */
+/** Only a regular file is read, since a FIFO's read can block. The digest is of the text as decoded, a byte order mark kept. */
 async function readMutationFile(path: string): Promise<FileText> {
   try {
     if (!(await stat(path)).isFile()) {
       return { unreadable: "it is not a regular file" };
     }
-    return { text: await readFile(path, "utf8") };
+    const text = await readFile(path, "utf8");
+    return { text, digest: wholeDigest(text) };
   } catch (error) {
     return { unreadable: errorText(error) };
   }
