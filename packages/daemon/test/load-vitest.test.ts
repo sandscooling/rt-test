@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveWorkspaceVitest } from "../src/vitest/load-vitest.js";
@@ -115,5 +115,118 @@ describe("resolving a workspace's Vitest", () => {
       directory: install,
       version: "5.0.1",
     });
+  });
+});
+
+const MODULES = "node_modules";
+const VITEST = "vitest";
+
+/** A stand-in install of `version` in a store of its own under `dir`; its directory. */
+function storedInstall(dir: string, store: string, version: string): string {
+  fakeVitest(join(dir, store), version);
+  return join(dir, store, MODULES, VITEST);
+}
+
+/** A workspace `name` under `dir` that reaches `install` through a directory link, as a store layout links it. */
+function linkedTo(dir: string, name: string, install: string): string {
+  const workspace = join(dir, name);
+  mkdirSync(join(workspace, MODULES), { recursive: true });
+  symlinkSync(install, join(workspace, MODULES, VITEST), "junction");
+  return workspace;
+}
+
+/** Points the workspace's link at `install`, as an upgrade does. */
+function repoint(workspace: string, install: string): void {
+  const link = join(workspace, MODULES, VITEST);
+  unlinkSync(link);
+  symlinkSync(install, link, "junction");
+}
+
+/** The install a workspace resolves, or its whole resolution when it resolves no supported one. */
+function installOf(workspace: string): unknown {
+  const resolved = resolveWorkspaceVitest(workspace);
+  return resolved.supported
+    ? { directory: resolved.directory, version: resolved.version }
+    : resolved;
+}
+
+describe("resolving a workspace's Vitest again in one process", () => {
+  it("D4198: a link pointed at another install gives that install's directory and version at the next resolution, with the first install in place or gone, and a directory from which none resolved gives the install that has since appeared", async () => {
+    const { read, expected } = await inTempDir((dir) => {
+      const first = storedInstall(dir, "first", "5.0.1");
+      const removed = storedInstall(dir, "removed", "5.0.1");
+      const second = storedInstall(dir, "second", "4.1.11");
+      const firstKept = linkedTo(dir, "first-kept", first);
+      const firstGone = linkedTo(dir, "first-gone", removed);
+      const appearing = join(dir, "appearing");
+      mkdirSync(appearing);
+      const before = {
+        firstKept: installOf(firstKept),
+        firstGone: installOf(firstGone),
+        appearing: resolveWorkspaceVitest(appearing).supported,
+      };
+      repoint(firstKept, second);
+      repoint(firstGone, second);
+      rmSync(join(dir, "removed"), { recursive: true });
+      fakeVitest(appearing, "5.0.1");
+      const now = { directory: second, version: "4.1.11" };
+      return {
+        read: {
+          before,
+          after: {
+            firstKept: installOf(firstKept),
+            firstGone: installOf(firstGone),
+            appearing: installOf(appearing),
+          },
+        },
+        expected: {
+          before: {
+            firstKept: { directory: first, version: "5.0.1" },
+            firstGone: { directory: removed, version: "5.0.1" },
+            appearing: false,
+          },
+          after: {
+            firstKept: now,
+            firstGone: now,
+            appearing: {
+              directory: join(appearing, MODULES, VITEST),
+              version: "5.0.1",
+            },
+          },
+        },
+      };
+    });
+    expect(read).toEqual(expected);
+  });
+
+  it("D4199: a link pointed at another install of the same version gives that install's real directory, never the link's own path", async () => {
+    const { read, installs } = await inTempDir((dir) => {
+      const first = storedInstall(dir, "first", "5.0.1");
+      const second = storedInstall(dir, "second", "5.0.1");
+      const workspace = linkedTo(dir, "workspace", first);
+      const before = installOf(workspace);
+      repoint(workspace, second);
+      return {
+        read: [before, installOf(workspace)],
+        installs: [
+          { directory: first, version: "5.0.1" },
+          { directory: second, version: "5.0.1" },
+        ],
+      };
+    });
+    expect(read).toEqual(installs);
+  });
+
+  it("D4200: a workspace that holds no Vitest of its own resolves the one a directory above it holds", async () => {
+    const { read, install } = await inTempDir((dir) => {
+      fakeVitest(dir, "5.0.1");
+      const workspace = join(dir, "packages", "a");
+      mkdirSync(workspace, { recursive: true });
+      return {
+        read: installOf(workspace),
+        install: { directory: join(dir, MODULES, VITEST), version: "5.0.1" },
+      };
+    });
+    expect(read).toEqual(install);
   });
 });

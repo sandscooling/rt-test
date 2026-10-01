@@ -9159,8 +9159,8 @@
     "id": "D3335",
     "defect": "The daemon builds its job executor from its live process.env rather than the start environment, so a variable the daemon gains after it began serving reaches the tests it runs while no fingerprint counts it.",
     "file": "packages/daemon/src/daemon/daemon-main.ts",
-    "old": "    executor: new Executor(log, startEnvironment),",
-    "new": "    executor: new Executor(log, process.env),"
+    "old": "  const executor = new Executor(log, startEnvironment);",
+    "new": "  const executor = new Executor(log, process.env);"
   },
   {
     "id": "D3330",
@@ -11315,22 +11315,22 @@
     "id": "D4092",
     "defect": "What happened to a workspace is put in its mark uncut, so a long or multi-line error pushes what ends the wait off the reason's first line and past the 1,000 characters an answer keeps.",
     "file": "packages/daemon/src/daemon/falsification.ts",
-    "old": "      `${markText(what)}, ${WORKSPACE_WAIT}`,",
-    "new": "      `${what}, ${WORKSPACE_WAIT}`,"
+    "old": "    this.#plan.workspaceWaits(job, revision, `${markText(what)}, ${ends}`);",
+    "new": "    this.#plan.workspaceWaits(job, revision, `${what}, ${ends}`);"
   },
   {
     "id": "D4093",
     "defect": "The log holds what happened to a workspace cut as its mark is, so the rest of a long error is nowhere.",
     "file": "packages/daemon/src/daemon/falsification.ts",
-    "old": "      `the falsification of ${job.workspacePath} waits: ${what}, ${WORKSPACE_WAIT}`,",
-    "new": "      `the falsification of ${job.workspacePath} waits: ${markText(what)}, ${WORKSPACE_WAIT}`,"
+    "old": "      `the falsification of ${job.workspacePath} waits: ${what}, ${ends}`,",
+    "new": "      `the falsification of ${job.workspacePath} waits: ${markText(what)}, ${ends}`,"
   },
   {
     "id": "D4094",
     "defect": "A look that throws after it opened its window on the tracker leaves the window open, so the tracker goes on recording changes for a job that never began.",
     "file": "packages/daemon/src/daemon/falsification.ts",
-    "old": "    try {\n      begun = this.#begin(read, plannedRevision, opened.mark);\n    } finally {\n      if (typeof begun === \"boolean\") await this.#close(opened.mark);\n    }",
-    "new": "    begun = this.#begin(read, plannedRevision, opened.mark);\n    if (typeof begun === \"boolean\") await this.#close(opened.mark);"
+    "old": "    try {\n      begun = this.#begin(read, plannedRevision, opened.mark);\n    } finally {\n      if (typeof begun === \"boolean\" || \"unread\" in begun) {\n        await this.#close(opened.mark);\n      }\n    }",
+    "new": "    begun = this.#begin(read, plannedRevision, opened.mark);\n    if (typeof begun === \"boolean\" || \"unread\" in begun) {\n      await this.#close(opened.mark);\n    }"
   },
   {
     "id": "D4095",
@@ -11483,8 +11483,8 @@
     "id": "D4159",
     "defect": "A look that took nothing leaves its window on the tracker open, so the tracker records every later change into a window no job closes.",
     "file": "packages/daemon/src/daemon/falsification.ts",
-    "old": "      if (typeof begun === \"boolean\") await this.#close(opened.mark);",
-    "new": "      if (begun === true) await this.#close(opened.mark);"
+    "old": "      if (typeof begun === \"boolean\" || \"unread\" in begun) {",
+    "new": "      if (begun === true || (begun !== false && \"unread\" in begun)) {"
   },
   {
     "id": "D4160",
@@ -11499,5 +11499,180 @@
     "file": "packages/daemon/src/vitest/load-vitest.ts",
     "old": "      directory: dirname(manifestPath),",
     "new": "      directory: join(directory, \"node_modules\", \"vitest\"),"
+  },
+  {
+    "id": "D4166",
+    "defect": "A workspace whose Vitest install is unread is sent its falsification job with no canary job taken, so evidence is stored under a Vitest no canary has read.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (standing.state === STANDING.unread) return { job, unread: standing };\n",
+    "new": ""
+  },
+  {
+    "id": "D4167",
+    "defect": "A look resolves false after a canary job that confirmed its install, so the scheduler goes idle and the workspace's own job waits for a change of the inputs.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (wait === undefined) return true;",
+    "new": "      if (wait === undefined) return false;"
+  },
+  {
+    "id": "D4168",
+    "defect": "The gate is asked before the confirmed start is checked, so the canaries run for a workspace whose job is not about to be sent.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (entry === undefined || confirmed === undefined) {\n      return this.#waits(job, revision, NOT_CONFIRMED_REASON);\n    }",
+    "new": "    const early =\n      entry === undefined ? undefined : canaryGate.standing(entry.workspace);\n    if (early?.state === STANDING.unread) return { job, unread: early };\n    if (entry === undefined || confirmed === undefined) {\n      return this.#waits(job, revision, NOT_CONFIRMED_REASON);\n    }"
+  },
+  {
+    "id": "D4169",
+    "defect": "A look whose input revision moved while it closed its window still takes its canary job, planned at a revision that has passed, so the reading it gives marks nothing and the canaries run again.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (outdated()) return false;",
+    "new": "    if (stopSignal.aborted) return false;"
+  },
+  {
+    "id": "D4170",
+    "defect": "A look that a stop reached while it closed its window still takes its canary job, so a job is handed to the executor after the stop.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (outdated()) return false;",
+    "new": "    if (this.#revision() !== revision) return false;"
+  },
+  {
+    "id": "D4171",
+    "defect": "A workspace the gate refuses from a kept reading is sent its falsification job, so evidence is stored under a Vitest whose canaries disagreed.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }\n",
+    "new": ""
+  },
+  {
+    "id": "D4172",
+    "defect": "A refusal made by the look whose canary job disagreed is marked with the input revision's ending, so its entry says a change of the input revision ends a refusal that only another Vitest install or a restart of the daemon ends.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return this.#waits(job, revision, what, wait.ends);",
+    "new": "      return this.#waits(job, revision, what);"
+  },
+  {
+    "id": "D4173",
+    "defect": "A refusal made from the kept reading at a later look is marked with the input revision's ending, so its entry says a change of the input revision ends a refusal that only another Vitest install or a restart of the daemon ends.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return this.#waits(job, revision, standing.what, standing.ends);",
+    "new": "      return this.#waits(job, revision, standing.what);"
+  },
+  {
+    "id": "D4174",
+    "defect": "A reading's mark is made with what happened uncut, a second way beside the one every mark is made, so a refusal that names many canaries pushes what ends it past the 1,000 characters an answer keeps.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return this.#waits(job, revision, what, wait.ends);",
+    "new": "      this.#plan.workspaceWaits(job, revision, `${what}, ${wait.ends}`);\n      return true;"
+  },
+  {
+    "id": "D4175",
+    "defect": "A canary job that a change of the input revision ended marks its workspace at the revision that has passed, so the log says a workspace waits that the next look reads again.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (outdated()) return true;",
+    "new": "      if (stopSignal.aborted) return true;"
+  },
+  {
+    "id": "D4176",
+    "defect": "A canary job that a stop ended marks its workspace after the stop.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (outdated()) return true;",
+    "new": "      if (this.#revision() !== revision) return true;"
+  },
+  {
+    "id": "D4177",
+    "defect": "A canary job that gave no reading marks no workspace, so each look takes the canary job again at the same input revision, without end.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      return this.#waits(job, revision, what, wait.ends);",
+    "new": "      return true;"
+  },
+  {
+    "id": "D4178",
+    "defect": "A mark made with no ending of its own, as one for a workspace that resolves no supported Vitest is, carries no ending, so its entry does not say that a change of the input revision ends the wait.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    ends = WORKSPACE_WAIT,",
+    "new": "    ends = \"\","
+  },
+  {
+    "id": "D4179",
+    "defect": "A canary job runs under no watch, so a change of the input revision does not abort it and the discovery or run the change made due waits for the canaries.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    const watch = this.#watch(revision);",
+    "new": "    const watch = { asked: () => undefined, release: () => undefined };"
+  },
+  {
+    "id": "D4180",
+    "defect": "A canary job the time bound ended is marked without the bound's wording, so its entry does not say that the bound ended it.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      const what = bound ? boundReason(wait.what) : wait.what;",
+    "new": "      const what = wait.what;"
+  },
+  {
+    "id": "D4181",
+    "defect": "The watch of a canary job that has returned stays armed, so its time bound aborts whatever job the executor runs ten minutes after the canary job began.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    } finally {\n      watch.release();\n    }",
+    "new": "    } finally {\n      void watch;\n    }"
+  },
+  {
+    "id": "D4182",
+    "defect": "A look that takes a canary job leaves its window on the tracker open through the job, so a change recorded while the canaries run is counted against a job and not as an edit.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (typeof begun === \"boolean\" || \"unread\" in begun) {",
+    "new": "      if (typeof begun === \"boolean\") {"
+  },
+  {
+    "id": "D4183",
+    "defect": "The activity of a canary job carries the number of definitions the look picked, so status reads a job holding definitions that holds none.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      definitions: CANARY_JOB_DEFINITIONS,",
+    "new": "      definitions: job.definitions.length,"
+  },
+  {
+    "id": "D4184",
+    "defect": "The activity is not set when a canary job is taken, so status and every answer read the daemon idle while an executor job runs.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    setActivity({\n      state: \"falsifying\",\n      workspacePath: job.workspacePath,\n      definitions: CANARY_JOB_DEFINITIONS,\n    });\n",
+    "new": ""
+  },
+  {
+    "id": "D4198",
+    "defect": "The manifest is taken from Node's own resolution, whose answer a process keeps, so once a workspace's link points at another install the daemon goes on naming the install it resolved first, and reads a version that is no longer the workspace's.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "    manifestPath = installedManifest(require, directory);",
+    "new": "    manifestPath = require.resolve(VITEST_MANIFEST);"
+  },
+  {
+    "id": "D4199",
+    "defect": "The walk gives the manifest by the path the workspace reaches it by, a link's own path, so a link pointed at another install of the same version still names one directory and the first install's reading stands for the second.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "    if (isFile(manifest)) return realpathSync(manifest);",
+    "new": "    if (isFile(manifest)) return manifest;"
+  },
+  {
+    "id": "D4200",
+    "defect": "The walk reads only the nearest of the directories Node looks in, so a workspace whose Vitest is installed in a directory above it resolves none.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "    if (isFile(manifest)) return realpathSync(manifest);",
+    "new": "    return realpathSync(manifest);"
+  },
+  {
+    "id": "D4201",
+    "defect": "A canary job that gave no reading for another cause than the time bound is marked in the bound's words, so its entry says the time bound of 10 minutes ended a job that its executor's death ended.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        reading.status === CANARY_READING.none &&\n        watch.asked() === ENDING.bound;",
+    "new": "        reading.status === CANARY_READING.none;"
+  },
+  {
+    "id": "D4202",
+    "defect": "The log's entry for a refused workspace says the input revision's ending, so the log says a change of the input revision ends a refusal that only another Vitest install or a restart of the daemon ends.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      `the falsification of ${job.workspacePath} waits: ${what}, ${ends}`,",
+    "new": "      `the falsification of ${job.workspacePath} waits: ${what}, ${WORKSPACE_WAIT}`,"
+  },
+  {
+    "id": "D4204",
+    "defect": "The gate is asked after the start entry is logged, so the log says a falsification job started for a workspace that was refused or whose canary job was taken in its place.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    const standing = canaryGate.standing(entry.workspace);\n    if (standing.state === STANDING.unread) return { job, unread: standing };\n    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }\n    const [first] = definitions;\n    log.entry(\n      `falsification started: ${workspacePath}, definitions ${definitions.length}${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}`,\n    );",
+    "new": "    const [first] = definitions;\n    log.entry(\n      `falsification started: ${workspacePath}, definitions ${definitions.length}${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}`,\n    );\n    const standing = canaryGate.standing(entry.workspace);\n    if (standing.state === STANDING.unread) return { job, unread: standing };\n    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }"
   }
 ]
