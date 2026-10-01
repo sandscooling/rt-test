@@ -6,13 +6,12 @@ import type { TestDiscovery } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import type { WorkspaceRun } from "../vitest/run-workspace.js";
 import { UnreadableRecordError } from "./columns.js";
-import {
-  selectEvidence,
-  writeEvidence,
-  type EvidenceBindings,
-  type LatestEvidence,
-  type StoredEvidence,
+import type {
+  EvidenceBindings,
+  LatestEvidence,
+  StoredEvidence,
 } from "./defect-evidence.js";
+import { KeptEvidence } from "./kept-evidence.js";
 import {
   readLatestDiscovery,
   selectLatestDiscovery,
@@ -47,7 +46,7 @@ import {
 import { writeDiscovery } from "./write-discovery.js";
 import { writeRun } from "./write-run.js";
 
-/** What a query counts from, read from one snapshot. */
+/** What a query counts from, as one snapshot of the store holds it. */
 export interface LatestResults extends LatestRuns, LatestEvidence {
   /** Undefined when none was stored, or when the one stored last was refused. */
   readonly discovery: StoredDiscovery | undefined;
@@ -198,30 +197,32 @@ function isNotADatabase(error: unknown): boolean {
 }
 
 function storeHandle(database: DatabaseSync, file: string): RtTestStore {
+  const evidence = new KeptEvidence(database);
   return {
     file,
     writeRun: (bindings, run) => writeRun(database, bindings, run),
     writeDiscovery: (bindings, discovery) =>
       writeDiscovery(database, bindings, discovery),
     writeEvidence: (bindings, job, definitionDigests) =>
-      writeEvidence(database, bindings, job, definitionDigests),
+      evidence.write(bindings, job, definitionDigests),
     readRuns: (scope) => readRuns(database, scope),
     readRun: (scope, runId) => readRun(database, scope, runId),
     readLatestDiscovery: (scope) => readLatestDiscovery(database, scope),
-    readLatestResults: (scope) => readLatestResults(database, scope),
+    readLatestResults: (scope) => readLatestResults(database, evidence, scope),
     close: () => database.close(),
   };
 }
 
 function readLatestResults(
   database: DatabaseSync,
+  evidence: KeptEvidence,
   scope: StoreScope,
 ): LatestResults {
   requireScope(scope);
   return inRecordRead(database, () => ({
     ...latestDiscovery(database, scope),
     ...selectLatestRuns(database, scope),
-    ...selectEvidence(database, scope),
+    ...evidence.read(scope),
   }));
 }
 
