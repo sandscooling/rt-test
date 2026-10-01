@@ -192,8 +192,8 @@
     "id": "D1738",
     "defect": "A second positional is accepted and ignored instead of being a usage error.",
     "file": "packages/cli/src/command.ts",
-    "old": "if (positionals.length > MAX_ROOT_POSITIONALS) {",
-    "new": "if (positionals.length > MAX_ROOT_POSITIONALS + 1) {"
+    "old": "if (positionals.length > MAX_OPTIONAL_POSITIONALS) {",
+    "new": "if (positionals.length > MAX_OPTIONAL_POSITIONALS + 1) {"
   },
   {
     "id": "D1739",
@@ -1283,8 +1283,8 @@
   {
     "id": "D3703",
     "defect": "A second path is silently dropped, so the answer covers only the first while the caller believes it covers both.",
-    "file": "packages/cli/src/commands/defects.ts",
-    "old": "  if (positionals.length > MAX_PATH_POSITIONALS) {",
+    "file": "packages/cli/src/command.ts",
+    "old": "  if (positionals.length > MAX_OPTIONAL_POSITIONALS) {",
     "new": "  if (false) {"
   },
   {

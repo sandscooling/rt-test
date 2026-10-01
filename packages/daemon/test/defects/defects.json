@@ -15,10 +15,10 @@
   },
   {
     "id": "D3656",
-    "defect": "A defects pattern the grammar refuses is walked as written, matches nothing, and its definition files silently leave the denominator.",
+    "defect": "A defects pattern the grammar refuses is walked as written, so it is reported only as matching nothing and never as unusable, with why the grammar refuses it.",
     "file": "packages/daemon/src/defects/definition-files.ts",
-    "old": "    const problem = patternProblem(pattern);",
-    "new": "    const problem = undefined;"
+    "old": "  problem: patternProblem,",
+    "new": "  problem: () => undefined,"
   },
   {
     "id": "D3657",

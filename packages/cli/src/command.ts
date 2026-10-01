@@ -27,7 +27,7 @@ export interface Command {
 export const JSON_OPTION = { json: { type: "boolean" } } as const;
 
 const PARSE_ARGS_ERROR_PREFIX = "ERR_PARSE_ARGS_";
-const MAX_ROOT_POSITIONALS = 1;
+const MAX_OPTIONAL_POSITIONALS = 1;
 
 export class UsageError extends Error {}
 
@@ -46,12 +46,20 @@ export function absolutePath(io: CliIo, path: string | undefined): string {
 
 /** The one optional `root` positional. */
 export function optionalRoot(positionals: string[]): string | undefined {
-  if (positionals.length > MAX_ROOT_POSITIONALS) {
+  return optionalPositional(positionals, "root");
+}
+
+/** The one optional path positional a command takes, which its refusal calls `name`. */
+export function optionalPositional(
+  positionals: string[],
+  name: string,
+): string | undefined {
+  if (positionals.length > MAX_OPTIONAL_POSITIONALS) {
     throw new UsageError(
-      `Unexpected argument: ${positionals.slice(MAX_ROOT_POSITIONALS).join(" ")}`,
+      `Unexpected argument: ${positionals.slice(MAX_OPTIONAL_POSITIONALS).join(" ")}`,
     );
   }
-  return nonEmptyPath(positionals[0], "root");
+  return nonEmptyPath(positionals[0], name);
 }
 
 /** One or more file positionals, none empty. */
