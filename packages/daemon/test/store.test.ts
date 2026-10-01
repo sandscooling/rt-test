@@ -2918,6 +2918,22 @@ describe("a store a newer RT Test migrated while this one held it open", () => {
     expect(refusal).toStrictEqual(READ_REFUSAL);
   });
 
+  it("D3995: a read of a scope whose evidence the store has read and kept is refused once a newer RT Test migrated the store, naming both versions, that nothing was read and the restart", async () => {
+    const outcome = await inStore((store) => {
+      storeReply(store, WORKTREE_A, [DETECTING]);
+      const kept = verdictsIn(store, WORKTREE_A);
+      migrateTo(store.file, NEWER);
+      return {
+        kept,
+        refusal: refusalOf(() => store.readLatestResults(WORKTREE_A)),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      kept: [["D1", "detected"]],
+      refusal: READ_REFUSAL,
+    });
+  });
+
   it("D2924: a store one schema version newer is refused by the opener and the transaction guard alike, and one at this version by neither", async () => {
     const verdicts = await inStore((store, stateDirectory) => {
       const verdictsAt = (version: number) => {
@@ -3842,6 +3858,199 @@ describe("evidence a query reads back", () => {
       discovery: DISCOVERY,
       verdicts: [["D1", "detected"]],
     });
+  });
+});
+
+describe("the evidence a store keeps between its reads", () => {
+  /** Each defect a query of worktree A reads evidence for with its verdict, beside each refusal. */
+  function evidenceRead(store: RtTestStore) {
+    const { evidence, evidenceRefusals } = store.readLatestResults(WORKTREE_A);
+    return {
+      verdicts: evidence.map(({ defectId, verdict }) => [defectId, verdict]),
+      refusals: evidenceRefusals,
+    };
+  }
+
+  /** `sql` run through a second connection, then what a query reads. */
+  function readAfter(store: RtTestStore, sql: string) {
+    withRawDatabase(store.file, (database) => {
+      database.exec(sql);
+    });
+    return evidenceRead(store);
+  }
+
+  /** What a query of `kept`, of `other`, then of `kept` again reads, where `kept` holds a detection of D1 and `other` a survival of it. */
+  function readsAcross(kept: StoreScope, other: StoreScope) {
+    return inStore((store) => {
+      storeReply(store, kept, [DETECTING]);
+      storeReply(store, other, [{ ...SURVIVING, defectId: "D1" }]);
+      return [kept, other, kept].map((scope) =>
+        store
+          .readLatestResults(scope)
+          .evidence.map(
+            ({ projectIdentity, worktreeIdentity, defectId, verdict }) => ({
+              projectIdentity,
+              worktreeIdentity,
+              defectId,
+              verdict,
+            }),
+          ),
+      );
+    });
+  }
+
+  /** Each of those three reads answering the scope it was asked for. */
+  function ownEvidence(kept: StoreScope, other: StoreScope) {
+    return [
+      [{ ...kept, defectId: "D1", verdict: "detected" }],
+      [{ ...other, defectId: "D1", verdict: "survived" }],
+      [{ ...kept, defectId: "D1", verdict: "detected" }],
+    ];
+  }
+
+  it("D3990: a read that follows a read of the same scope answers the records and refusals that read kept, fetching no evidence row again, and still reads a run this store wrote between them", async () => {
+    const outcome = await inStore((store) => {
+      storeReply(store, WORKTREE_A, [DETECTING, SURVIVING]);
+      withRawDatabase(store.file, (database) => {
+        database.exec(
+          "UPDATE defect_evidence SET facts = 'not json' WHERE defect_id = 'D2'",
+        );
+      });
+      const all = StatementSync.prototype.all;
+      let evidenceFetches = 0;
+      const countingFetches = vi
+        .spyOn(StatementSync.prototype, "all")
+        .mockImplementation(function (
+          this: StatementSync,
+          ...parameters: Parameters<StatementSync["all"]>
+        ) {
+          if (this.sourceSQL.includes("FROM defect_evidence")) {
+            evidenceFetches += 1;
+          }
+          return all.apply(this, parameters);
+        });
+      try {
+        const first = store.readLatestResults(WORKTREE_A);
+        const second = store.readLatestResults(WORKTREE_A);
+        store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+        const third = store.readLatestResults(WORKTREE_A);
+        return {
+          keptRecords: [second, third].map(
+            ({ evidence }) => evidence === first.evidence,
+          ),
+          keptRefusals: [second, third].map(
+            ({ evidenceRefusals }) =>
+              evidenceRefusals === first.evidenceRefusals,
+          ),
+          evidenceFetches,
+          verdicts: third.evidence.map(({ defectId, verdict }) => [
+            defectId,
+            verdict,
+          ]),
+          refused: third.evidenceRefusals.map(({ defectId }) => defectId),
+          runs: third.latestRuns.map((stored) => stored.run),
+        };
+      } finally {
+        countingFetches.mockRestore();
+      }
+    });
+    expect(outcome).toStrictEqual({
+      keptRecords: [true, true],
+      keptRefusals: [true, true],
+      evidenceFetches: 1,
+      verdicts: [["D1", "detected"]],
+      refused: ["D2"],
+      runs: [FAILED_RUN],
+    });
+  });
+
+  it("D3991: the read after this store's own evidence write holds what the write stored, a replaced verdict and a record for a defect that had none", async () => {
+    const reads = await inStore((store) => {
+      storeReply(store, WORKTREE_A, [DETECTING]);
+      const before = verdictsIn(store, WORKTREE_A);
+      storeReply(store, WORKTREE_A, [
+        { ...SURVIVING, defectId: "D1" },
+        HOOK_FAILED,
+      ]);
+      return { before, after: verdictsIn(store, WORKTREE_A) };
+    });
+    expect(reads).toStrictEqual({
+      before: [["D1", "detected"]],
+      after: [
+        ["D1", "survived"],
+        ["D3", "invalid-experiment"],
+      ],
+    });
+  });
+
+  it("D3992: after another connection commits a change to an evidence row of the scope, the next read holds the rows as they now are: one another store handle replaced, one deleted, and one made unreadable beside its refusal", async () => {
+    const reads = await inStore((store, stateDirectory) => {
+      storeReply(store, WORKTREE_A, [DETECTING, SURVIVING, HOOK_FAILED]);
+      const kept = evidenceRead(store);
+      withOpenStore(stateDirectory, (other) => {
+        storeReply(other, WORKTREE_A, [{ ...SURVIVING, defectId: "D1" }]);
+      });
+      return {
+        kept,
+        replaced: evidenceRead(store),
+        deleted: readAfter(
+          store,
+          "DELETE FROM defect_evidence WHERE defect_id = 'D2'",
+        ),
+        unreadable: readAfter(
+          store,
+          "UPDATE defect_evidence SET facts = 'not json' WHERE defect_id = 'D3'",
+        ),
+      };
+    });
+    expect(reads).toStrictEqual({
+      kept: {
+        verdicts: [
+          ["D1", "detected"],
+          ["D2", "survived"],
+          ["D3", "invalid-experiment"],
+        ],
+        refusals: [],
+      },
+      replaced: {
+        verdicts: [
+          ["D1", "survived"],
+          ["D2", "survived"],
+          ["D3", "invalid-experiment"],
+        ],
+        refusals: [],
+      },
+      deleted: {
+        verdicts: [
+          ["D1", "survived"],
+          ["D3", "invalid-experiment"],
+        ],
+        refusals: [],
+      },
+      unreadable: {
+        verdicts: [["D1", "survived"]],
+        refusals: [
+          {
+            defectId: "D3",
+            reason: expect.stringMatching(
+              /^The store holds an unreadable facts: "not json"\n {2}caused by: /,
+            ),
+          },
+        ],
+      },
+    });
+  });
+
+  it("D3993: a read for another worktree of the project answers that worktree's own evidence, never what the store kept for the worktree read before it", async () => {
+    expect(await readsAcross(WORKTREE_A, WORKTREE_B)).toStrictEqual(
+      ownEvidence(WORKTREE_A, WORKTREE_B),
+    );
+  });
+
+  it("D3994: a read for another project's worktree of the same path answers that project's own evidence, never what the store kept for the project read before it", async () => {
+    expect(await readsAcross(WORKTREE_A, OTHER_PROJECT)).toStrictEqual(
+      ownEvidence(WORKTREE_A, OTHER_PROJECT),
+    );
   });
 });
 
