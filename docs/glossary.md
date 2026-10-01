@@ -261,8 +261,12 @@ A test that fails on purpose in one known way, so RT Test can check that it read
 _Avoid_: selftest, probe
 
 **Canary reading**:
-What one falsification job over the canary fixtures showed under a Vitest install: confirmed when every canary read the verdict and reason named for it, disagreed with the canaries that did not, or no reading otherwise.
+What one canary job showed under a Vitest install: confirmed when every canary read the verdict and reason named for it, disagreed with the canaries that did not, or no reading otherwise.
 _Avoid_: canary result, canary verdict
+
+**Canary job**:
+The one executor job a canary reading takes. It runs the canary fixtures as a falsification job runs a workspace's waiting defects, and is no workspace's falsification job.
+_Avoid_: canary run
 
 **Gap**:
 A test with no defect, or code no named defect reaches.
