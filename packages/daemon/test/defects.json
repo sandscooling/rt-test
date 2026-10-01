@@ -10776,8 +10776,50 @@
     "id": "D3931",
     "defect": "The evidence is read before the snapshot the latest discovery and runs are read from, so an answer pairs a new discovery with a verdict stored before it.",
     "file": "packages/daemon/src/store/open-store.ts",
-    "old": "  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),\n    ...selectLatestRuns(database, scope),\n    ...selectEvidence(database, scope),\n  }));",
-    "new": "  const evidence = selectEvidence(database, scope);\n  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),\n    ...selectLatestRuns(database, scope),\n    ...evidence,\n  }));"
+    "old": "  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),\n    ...selectLatestRuns(database, scope),\n    ...evidence.read(scope),\n  }));",
+    "new": "  const latestEvidence = evidence.read(scope);\n  return inRecordRead(database, () => ({\n    ...latestDiscovery(database, scope),\n    ...selectLatestRuns(database, scope),\n    ...latestEvidence,\n  }));"
+  },
+  {
+    "id": "D3990",
+    "defect": "The store keeps nothing of the evidence it read, so every read of the latest results fetches and rebuilds every evidence record of the scope again.",
+    "file": "packages/daemon/src/store/kept-evidence.ts",
+    "old": "    this.#kept = { projectIdentity, worktreeIdentity, dataVersion, latest };\n",
+    "new": ""
+  },
+  {
+    "id": "D3991",
+    "defect": "The store's own evidence write does not forget the evidence it kept, so the next read answers the verdicts as they were before the write.",
+    "file": "packages/daemon/src/store/kept-evidence.ts",
+    "old": "    this.#kept = undefined;\n",
+    "new": ""
+  },
+  {
+    "id": "D3992",
+    "defect": "The kept evidence is not compared with the data version, so a row another connection replaced, deleted or made unreadable reads as it was kept.",
+    "file": "packages/daemon/src/store/kept-evidence.ts",
+    "old": "    kept.dataVersion === dataVersion &&\n",
+    "new": ""
+  },
+  {
+    "id": "D3993",
+    "defect": "The kept evidence is not compared with the worktree identity, so a read for another worktree of the project answers the evidence kept for the worktree read last.",
+    "file": "packages/daemon/src/store/kept-evidence.ts",
+    "old": "    kept.projectIdentity === scope.projectIdentity &&\n    kept.worktreeIdentity === scope.worktreeIdentity\n",
+    "new": "    kept.projectIdentity === scope.projectIdentity\n"
+  },
+  {
+    "id": "D3994",
+    "defect": "The kept evidence is not compared with the project identity, so a read for another project's worktree of the same path answers the evidence kept for the project read last.",
+    "file": "packages/daemon/src/store/kept-evidence.ts",
+    "old": "    kept.projectIdentity === scope.projectIdentity &&\n",
+    "new": ""
+  },
+  {
+    "id": "D3995",
+    "defect": "The query's read of the latest results skips the schema guard, so a store that has read and kept a scope's evidence goes on answering that scope from a store a newer RT Test migrated.",
+    "file": "packages/daemon/src/store/open-store.ts",
+    "old": "return inRecordRead(database, () => ({",
+    "new": "return inWriteTransaction(database, () => ({"
   },
   {
     "id": "D3951",
