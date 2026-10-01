@@ -16,7 +16,7 @@ them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review 
 - [x] AC1: The `assertionErrors` member of `rt-test.json` declares the error names that count as assertions beside the two forms Vitest marks itself: an array of at most 256 strings, each a non-empty name other than `Error`. With no `rt-test.json`, or no such member, no name is declared. The names are read from the same read of `rt-test.json` that gives the `defects` member's patterns, every time the definition files are read, and nothing of them is kept between two reads. (FR11)
 - [x] AC2: A member that is not such an array declares no names and is one invalid entry of the `defects` answer, of the kind an unusable `defects` member has (`settings-unusable`), at the path `rt-test.json`, with a reason that says `rt-test.json` declares no assertion error names and names the problem: that the member is not an array of strings, how many names it holds past the 256 allowed, or the name that is empty or is `Error`, for which it says that an error must carry a name of its own to be declared. It counts in the total and lies in every scope, as every invalid entry does. A problem in each member is two entries. The entries for `rt-test.json` come before every entry the walk finds, the `defects` member's before the names'. The two members are checked apart: a problem in `assertionErrors` leaves every definition file read and every definition answered, a problem in `defects` leaves the declared names read, and a `rt-test.json` that cannot be read at all is one entry, never two. (FR22)
 - [x] AC3: The definition digest of every valid, resolved definition also covers the declared names, as a set: the same names in another order, or with one repeated, give the same digest, and a list that gains or loses a name gives another for every definition of the worktree. So stored evidence whose digest was computed under another set of names reads stale, naming the cause `definition-changed`, and is not counted verified; evidence stored under the set in effect reads as it did. A member that cannot be used is the empty set. (FR15)
-- [ ] AC4: One function gives a caller the worktree's definition file problems, its declared names, every definition resolved, and every definition's standing, from one read of `rt-test.json`, the definition files and each mutation's file, taking the daemon's moment only once its last awaited read has ended and returning from it without awaiting again. It hands the consumer root it was given to the definition checks and to the standings alike, so a caller of it cannot spell it two ways. `rt-test defects` answers from it, and for every scope its answer holds what it held before this ticket, but for AC2's entry and AC3's digest: the same counts, listing, order, gaps, errors and bounds. (FR22)
+- [x] AC4: One function gives a caller the worktree's definition file problems, its declared names, every definition resolved, and every definition's standing, from one read of `rt-test.json`, the definition files and each mutation's file, taking the daemon's moment only once its last awaited read has ended and returning from it without awaiting again. It hands the consumer root it was given to the definition checks and to the standings alike, so a caller of it cannot spell it two ways. `rt-test defects` answers from it, and for every scope its answer holds what it held before this ticket, but for AC2's entry and AC3's digest: the same counts, listing, order, gaps, errors and bounds. (FR22)
 
 ## Unverified Assumptions
 
@@ -127,6 +127,10 @@ Asked at 06:43 on 2026-10-01; decided by the orchestrator at 06:45.
 Asked by the dev (threadId 3e086469-a6f5-4b43-9c5f-55efd35181b9) at 07:07 on 2026-10-01; decided by the orchestrator at 07:08.
 
 - A new file for the settings check: the first task's change, tallied line by line, was 53 code lines against the 54 of room in `defects/definition-files.ts`, so the file would land at 499 or 500 of 500. Ruling: "create packages/daemon/src/defects/declared-settings.ts as you describe (pure, the two members' rules and bounds, the name check, one function from the parsed value to patterns, names and each member's problem), with definition-files.ts keeping the file read and the entries. A file landing at 499 or 500 of 500 is not a place to squeeze into, and the cost is one file: the ticket touches 11 against the owner's limit of 25." `readDefinitionFiles` keeps the signature and return the first task gives. As built, `defects/definition-files.ts` holds 426 code lines and the new module 81.
+
+Asked by the tests session (threadId 062b3144-42d8-47be-8ce8-7c2447f54200) at 07:37 on 2026-10-01; decided by the orchestrator at 07:38.
+
+- More defect ids: the plan held 22 named tests against a range of 20 (D4006 to D4025). The two past the range are clauses of AC4 at the answer: the moment taken only once the last awaited read has ended, which D3710 does not catch for a moment taken between the two reads, and the no-answer of a worktree with no stored discovery, which no test covered for `defects`. Ruling: "Granted: D4026, D4027, D4028, D4029", and "Both tests you name are clauses of AC4 at the layer it names, so write them".
 
 #### Ticket review
 
@@ -275,15 +279,48 @@ Each is a defect this change makes possible, named for the tests session to weig
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 062b3144-42d8-47be-8ce8-7c2447f54200
 
 #### Named Defects
 
-None.
+D4006 to D4020 and D4028 are in `packages/daemon/test/defects/defects.json`, their tests in `test/defects/definitions.test.ts`; D4021 to D4027 and D4029 are in `packages/daemon/test/defects.json`, their tests in `test/query.test.ts`.
+
+- D4006: The names `rt-test.json` declares are read and dropped, so no caller is handed a name and a Testing Library failure reads unclear whatever the list holds. (AC1)
+- D4007: What `rt-test.json` declared at the first read is kept and answered for every later read, so a name added to the list is never declared until the daemon restarts. Its test also pins that no file and no member declare no name. (AC1)
+- D4008: The bound on declared names is 255, so a list of exactly 256 names, which is allowed, declares none. (AC1)
+- D4009: A 257th declared name is admitted. Its test pins the entry's reason, which says how many names the list holds past the 256 allowed. (AC1, AC2)
+- D4010: A problem in the `assertionErrors` member makes no invalid entry, so an author's typo is unreported. Its test pins the kind `settings-unusable`, the path `rt-test.json` and the reason for a member that is not an array of strings. (AC2)
+- D4011: An empty name is admitted as a declared assertion error name. (AC1, AC2)
+- D4012: The name `Error` is admitted, so every plain thrown error, a setup failure among them, counts as an assertion. Its test pins the reason's sentence that an error must carry a name of its own to be declared. (AC1, AC2)
+- D4013: The entry for the names stands before the entry for the `defects` member. Its test pins that a problem in each member is two entries. (AC2)
+- D4014: A problem in the names stops the walk, so no definition file is read and every definition leaves the answer. (AC2)
+- D4015: The invalid entries are returned latest first, so a problem in the names stands after the entries the walk makes. (AC2)
+- D4016: A problem in the `defects` member drops the declared names. (AC2)
+- D4017: An `rt-test.json` that cannot be read at all is two invalid entries, one for each member. Its test covers a file that is not JSON and one whose top level is not an object, and pins that neither declares a name. (AC2)
+- D4018: The definition digest leaves the declared names out, so a detection that rested on a name since taken off the list still reads current. Its test pins another digest for every definition when the list gains a name, loses one, or loses all. (AC3)
+- D4019: The definition digest covers the names in the order `rt-test.json` writes them, so reordering the list reads every verdict stale. (AC3)
+- D4020: The definition digest counts a repeated name, so writing a name twice reads every verdict stale. (AC3)
+- D4021: The invalid entries are scoped by their path, so a problem in the declared names, which sits at `rt-test.json`, is left out of a folder's total and listing. Its test answers for two workspaces and pins every definition answered beside the entry. (AC2, AC4)
+- D4022: The worktree's standings are computed under no names whatever `rt-test.json` declares, so evidence a job binds under the declared names reads stale as soon as it is stored. Its test pins, through the answer, current and verified under the same set in another order with a repeat, and stale as `definition-changed` with verified 0 once the list gains or loses a name. (AC3, AC4)
+- D4023: A list refused for one name still declares its names, so `Error` is among the names verdicts are bound to. Its test pins the empty set through the answer: a detection stored under no names reads current under a refused list, and the refusal counts in the total. (AC2, AC3)
+- D4024: A path's counts are taken over every definition of the worktree, so a folder's answer counts states, detections and verified definitions that lie outside it. (AC4)
+- D4025: The worktree's standings return no names though every standing's digest covers the declared ones. Its test calls `worktreeStandings` as a caller that is not the answer and pins the names, the definition file problems, and every definition with its standing in both workspaces. (AC4)
+- D4026: The daemon's moment is taken after the definition files are read and before the mutation files are. Its test rewrites the mutation's file from the moment's own callback, so an anchor read after the moment reads anchor missing. D3710 catches a moment taken before any read. (AC4)
+- D4027: The answer does not pass on the no-answer of a worktree with no stored discovery, so the query throws rather than saying no discovery is stored. (AC4)
+- D4028: The names are taken from a second read of `rt-test.json`, so a file rewritten between the two reads gives the patterns of one version beside the names of another. (AC1, AC4)
+- D4029: The standings digest each mutation's file relative to another directory than the consumer root the definition checks were given, so all evidence reads stale. Its test binds a detection under the root with `defectStandings` directly, as a job would, and reads it through the answer asked under the same root. (AC4)
+
+Re-anchored, each keeping its defect sentence and its test: D3654 and D3655 (the two arms of `readSettings`), D3656 and D3720 (now in `defects/declared-settings.ts`), D3932, D3933 and D4000 (the digest takes the index), D3694, D3699 and D3725 (`standings.length`), D3695 and D3953 (now `compareStandings` in `defects/defect-standings.ts`), D3710, D3721 and D3955 (now in `defects/worktree-standings.ts`). D3952 keeps its anchor and its `new` text names `standings.length`.
+
+AC4's guarantee that the answer holds what it held before, for every scope, rests on the answer's existing tests proven again over the built code (D3691 to D3699, D3710, D3713, D3721 to D3725, D3733, D3734, D3951 to D3955, D3997, D3998) beside D4024 for the one defect the move made possible: counts taken over the unscoped standings.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/defects/worktree-standings.ts`: an awaited step after the moment that reads no file (AC4, returning without awaiting again). D4026 goes red for any mutation file read after the moment; a step that reads nothing would show a consumer daemon facts one turn older than the answer's return, and only when a result is stored or an input changes within that same turn.
+- `packages/daemon/src/defects/worktree-standings.ts`: a second call of `readDefinitionFiles` within one answer (AC4, one read). D4028 pins one read of `rt-test.json` inside the reader; a second call would show a consumer the entries of one version of a file beside the definitions of another, and only when the file is rewritten between the two calls of one query.
+- `packages/daemon/src/defects/defect-standings.ts`: the names sorted by code unit rather than by locale. A locale's order would give another digest only for names that differ in case or hold a character outside ASCII, and only when the daemon's locale changes between the job that stored a verdict and the query that reads it, on the one machine that holds the evidence. Fleet Cooling's error classes are ASCII names in one case pattern (read at its 20f77f5c).
+- `packages/daemon/src/defects/declared-settings.ts`: a list holding a value that is not a string. D4010 proves the refusal for a member that is a bare string, the one check decides both, and a consumer would see the same entry.
+- `packages/cli/src/commands/defects.ts`: unchanged by this ticket. The names' entry is of a kind the command already prints (`settings-unusable`), and the answer carries no names to print.
 
 ### Review Record
 

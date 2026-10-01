@@ -10482,15 +10482,15 @@
     "id": "D3694",
     "defect": "A definition file problem is left out of the total, so the denominator is smaller than the definitions that exist.",
     "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "      total: definitions.length + invalidEntries.length,",
-    "new": "      total: definitions.length,"
+    "old": "      total: standings.length + invalidEntries.length,",
+    "new": "      total: standings.length,"
   },
   {
     "id": "D3695",
     "defect": "Listed definitions are ordered by file alone, so past the bound of 500 the invalid ones may be the ones left unlisted.",
-    "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "      DEFECT_STATES.indexOf(left.state) - DEFECT_STATES.indexOf(right.state) ||",
-    "new": "      0 ||"
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    DEFECT_STATES.indexOf(left.state) - DEFECT_STATES.indexOf(right.state) ||",
+    "new": "    0 ||"
   },
   {
     "id": "D3696",
@@ -10517,7 +10517,7 @@
     "id": "D3699",
     "defect": "A path holding nothing is answered with zero counts, so an empty scope reads as a complete one with no problem.",
     "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "    definitions.length === 0 &&",
+    "old": "    standings.length === 0 &&",
     "new": "    false &&"
   },
   {
@@ -10558,9 +10558,9 @@
   {
     "id": "D3710",
     "defect": "The defects answer takes the daemon's moment before it reads the definition files and the anchors, so an input change or a newly stored discovery during the reads is answered with the earlier facts as current.",
-    "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "  const { consumerRoot, signal } = query;",
-    "new": "  const { consumerRoot, signal } = query;\n  const early = query.moment();\n  query = { ...query, moment: () => early };"
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "  const { consumerRoot, signal } = read;",
+    "new": "  const { consumerRoot, signal } = read;\n  const early = read.moment();\n  read = { ...read, moment: () => early };"
   },
   {
     "id": "D3713",
@@ -10572,7 +10572,7 @@
   {
     "id": "D3721",
     "defect": "The answer tells the resolver the discovery is current whatever its freshness, so a not-discovered reason never says the discovery is not current.",
-    "file": "packages/daemon/src/query/defects-answer.ts",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
     "old": "  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;",
     "new": "  const discoveryCurrent = true;"
   },
@@ -10601,7 +10601,7 @@
     "id": "D3725",
     "defect": "A scope holding no test gets nothing-to-answer though a definition lying in every scope lies in it.",
     "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "    definitions.length === 0 &&",
+    "old": "    standings.length === 0 &&",
     "new": "    true &&"
   },
   {
@@ -10791,13 +10791,13 @@
     "defect": "An answer over a scope whose every definition is verified carries a field saying so, which a reader takes for a verdict that leaves the definition file problems out.",
     "file": "packages/daemon/src/query/defects-answer.ts",
     "old": "    path: scope.path,\n    counts: {",
-    "new": "    path: scope.path,\n    ...(counts.verified > 0 && counts.verified === definitions.length\n      ? { verified: true }\n      : {}),\n    counts: {"
+    "new": "    path: scope.path,\n    ...(counts.verified > 0 && counts.verified === standings.length\n      ? { verified: true }\n      : {}),\n    counts: {"
   },
   {
     "id": "D3953",
     "defect": "Within a state, definitions are listed by file and position alone, so past the listing's bound the stale ones may be the ones left unlisted.",
-    "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "      currentRank(left) - currentRank(right) ||\n",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    currentRank(left) - currentRank(right) ||\n",
     "new": ""
   },
   {
@@ -10810,9 +10810,9 @@
   {
     "id": "D3955",
     "defect": "The answer tells the standings the discovery is current whatever its freshness, so evidence for a test told apart only by its position reads current while that position is not vouched for.",
-    "file": "packages/daemon/src/query/defects-answer.ts",
-    "old": "    discoveryCurrent,\n    currentFingerprint: basis.currentFingerprint,",
-    "new": "    discoveryCurrent: true,\n    currentFingerprint: basis.currentFingerprint,"
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "      discoveryCurrent,\n      currentFingerprint: basis.currentFingerprint,",
+    "new": "      discoveryCurrent: true,\n      currentFingerprint: basis.currentFingerprint,"
   },
   {
     "id": "D3956",
@@ -10869,5 +10869,61 @@
     "file": "packages/daemon/src/daemon/refusal-notes.ts",
     "old": "this.#loggedEvidenceRefusals.get(defectId) === reason",
     "new": "[...this.#loggedEvidenceRefusals.values()].includes(reason)"
+  },
+  {
+    "id": "D4021",
+    "defect": "The invalid entries are scoped by their path, so a problem in the declared names, which sits at rt-test.json, is left out of a folder's total and listing.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "  const { basis, invalidEntries } = worktree;",
+    "new": "  const { basis } = worktree;\n  const invalidEntries = worktree.invalidEntries.filter((entry) =>\n    liesAtOrUnder(entry.path, scope.path),\n  );"
+  },
+  {
+    "id": "D4022",
+    "defect": "The worktree's standings are computed under no names whatever rt-test.json declares, so evidence a job binds under the declared names reads stale as soon as it is stored.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "      assertionErrors,\n      evidence: results,",
+    "new": "      assertionErrors: [],\n      evidence: results,"
+  },
+  {
+    "id": "D4023",
+    "defect": "A list refused for one name still declares its names, so Error, which every plain thrown error carries, is among the names verdicts are bound to and judged under.",
+    "file": "packages/daemon/src/defects/declared-settings.ts",
+    "old": "    return { items: [], problems: [problemText(declaresNothing, problem)] };",
+    "new": "    return {\n      items: objectField(value, rule.member) as string[],\n      problems: [problemText(declaresNothing, problem)],\n    };"
+  },
+  {
+    "id": "D4024",
+    "defect": "A path's counts are taken over every definition of the worktree, so a folder's answer counts states, detections and verified definitions that lie outside it.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "  const counts = countDefectStandings(standings);",
+    "new": "  const counts = countDefectStandings(worktree.standings);"
+  },
+  {
+    "id": "D4025",
+    "defect": "The worktree's standings return no names though every standing's digest covers the declared ones, so a job handed its names would judge under none while its evidence is bound to the list.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "    invalidEntries,\n    assertionErrors,\n    definitions,",
+    "new": "    invalidEntries,\n    assertionErrors: [],\n    definitions,"
+  },
+  {
+    "id": "D4026",
+    "defect": "The daemon's moment is taken after the definition files are read and before the mutation files are, so what changes while an anchor is read is answered with the earlier facts as current.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "  const anchors = await readAnchors(checked, signal);\n  signal.throwIfAborted();\n  const { results, view, inputs } = read.moment();",
+    "new": "  signal.throwIfAborted();\n  const { results, view, inputs } = read.moment();\n  const anchors = await readAnchors(checked, signal);"
+  },
+  {
+    "id": "D4027",
+    "defect": "The answer does not pass on the no-answer of a worktree with no stored discovery, so the defects query throws rather than saying no discovery is stored.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "  if (\"noAnswer\" in worktree) return worktree;\n",
+    "new": ""
+  },
+  {
+    "id": "D4029",
+    "defect": "The standings digest each mutation's file relative to another directory than the consumer root the definition checks were given, so every digest differs from the one a job binds and all evidence reads stale.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "      consumerRoot,\n      assertionErrors,",
+    "new": "      consumerRoot: read.stateDirectory,\n      assertionErrors,"
   }
 ]

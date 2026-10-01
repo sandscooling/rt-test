@@ -79,6 +79,7 @@ import {
   type DefectsAnswer,
 } from "../src/query/defects-answer.js";
 import { DAEMON_TEST_TIMEOUT_MS } from "./daemon-harness.js";
+import { worktreeStandings } from "../src/defects/worktree-standings.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 type DiscoveredWorkspace = Extract<
@@ -2541,6 +2542,8 @@ interface DefectsSetup {
   readonly inputs?: CurrentInputs;
   /** Patterns `rt-test.json` names beside `defects/*.json`. */
   readonly morePatterns?: readonly string[];
+  /** What `rt-test.json` holds, in place of one naming the definition files alone. */
+  readonly settings?: unknown;
 }
 
 /**
@@ -2562,6 +2565,9 @@ function defectsOver(
     written["rt-test.json"] = JSON.stringify({
       defects: ["defects/*.json", ...(setup.morePatterns ?? [])],
     });
+  }
+  if (setup.settings !== undefined) {
+    written["rt-test.json"] = JSON.stringify(setup.settings);
   }
   for (const [name, definitions] of Object.entries(files)) {
     written[`defects/${name}`] =
@@ -3077,6 +3083,7 @@ async function detectionsUnder(
     ),
     {
       consumerRoot: root,
+      assertionErrors: files.assertionErrors,
       evidence: { evidence: [], evidenceRefusals: [] },
       discovery,
       discoveryCurrent: true,
@@ -3387,6 +3394,270 @@ describe(
           unknownReasons: ["duplicate-test-discovery-not-current"],
         },
       ]);
+    });
+  },
+);
+
+/** An `rt-test.json` naming `defects/*.json` and declaring `names` as its assertion error names, or no names when undefined. */
+function declaring(names: unknown): DefectsSetup {
+  return { settings: { defects: ["defects/*.json"], assertionErrors: names } };
+}
+
+/**
+ * Writes a case's files under `root` beside an `rt-test.json` declaring `names`, and stores a detection for each of
+ * its definitions bound under those names. It gives the function that answers `defects` once `rt-test.json` declares
+ * the names handed to it, for the absolute path given or the whole worktree.
+ */
+async function detectedDeclaring(
+  root: string,
+  given: EvidenceCase,
+  names: unknown,
+  inputs: CurrentInputs = A_AT_DIGEST,
+): Promise<(declared: unknown, path?: string) => Promise<DefectsAnswer>> {
+  answered(
+    await defectsOver(
+      root,
+      given.latest,
+      given.files,
+      undefined,
+      declaring(names),
+    ),
+  );
+  const latest: LatestResults = {
+    ...given.latest,
+    evidence: await detectionsUnder(root, given.latest),
+  };
+  return async (declared, path) =>
+    answered(
+      await defectsOver(root, latest, given.files, path, {
+        ...declaring(declared),
+        inputs,
+      }),
+    );
+}
+
+/** What an answer's first listed definition reads of its evidence, with the answer's verified count. */
+function evidenceRead({ definitions, counts }: DefectsAnswer) {
+  return { evidence: definitions[0]?.evidence, verified: counts.verified };
+}
+
+describe(
+  "the defects answer from the worktree's standings and its declared names",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    const ONE_DEFINITION: EvidenceCase = {
+      latest: discoveryOfAAndB("one"),
+      files: { "a.json": [defectDefinition("D1", "one")] },
+    };
+    const ONE_IN_EACH_WORKSPACE: DefinitionFilesTree = {
+      "a.json": [
+        defectDefinition("D1", "one"),
+        defectDefinition("D2", "d", B_MODULE),
+      ],
+    };
+
+    it("D4021: a problem in the declared names counts in the total and is listed in every scope, and leaves every definition answered", async () => {
+      const answers = await inTempDir(async (root) => {
+        const over = async (workspace: string) => {
+          const answer = answered(
+            await defectsOver(
+              root,
+              ONE_DEFINITION.latest,
+              ONE_DEFINITION.files,
+              join(root, workspace),
+              declaring(["Error"]),
+            ),
+          );
+          return {
+            total: answer.counts.total,
+            invalidEntries: answer.counts.invalidEntries,
+            ids: answer.definitions.map((definition) => definition.id),
+            listed: answer.invalidEntries.map(({ kind, path, reason }) => ({
+              kind,
+              path,
+              saysNoNames: /declares no assertion error names/.test(reason),
+            })),
+          };
+        };
+        return [await over(WORKSPACE_A), await over(WORKSPACE_B)];
+      });
+      const namesProblem = {
+        kind: "settings-unusable",
+        path: "rt-test.json",
+        saysNoNames: true,
+      };
+      expect(answers).toStrictEqual([
+        { total: 2, invalidEntries: 1, ids: ["D1"], listed: [namesProblem] },
+        { total: 1, invalidEntries: 1, ids: [], listed: [namesProblem] },
+      ]);
+    });
+
+    it("D4022: a detection stored under the declared names reads current and verified while the same names stand, in another order and with one repeated, and stale as definition-changed and not verified once the list gains or loses a name", async () => {
+      const read = await inTempDir(async (root) => {
+        const under = await detectedDeclaring(root, ONE_DEFINITION, [
+          "TestingLibraryElementError",
+          "ZodError",
+        ]);
+        return [
+          evidenceRead(await under(["TestingLibraryElementError", "ZodError"])),
+          evidenceRead(
+            await under(["ZodError", "TestingLibraryElementError", "ZodError"]),
+          ),
+          evidenceRead(
+            await under([
+              "TestingLibraryElementError",
+              "ZodError",
+              "ConvexError",
+            ]),
+          ),
+          evidenceRead(await under(["TestingLibraryElementError"])),
+        ];
+      });
+      const unchanged = { evidence: { freshness: "current" }, verified: 1 };
+      const changed = {
+        evidence: { freshness: "stale", staleCauses: ["definition-changed"] },
+        verified: 0,
+      };
+      expect(read).toStrictEqual([unchanged, unchanged, changed, changed]);
+    });
+
+    it("D4023: a member that cannot be used is the empty set, so a detection stored while no name was declared still reads current under a list refused for holding Error beside a usable name, and the refusal counts in the total", async () => {
+      const read = await inTempDir(async (root) => {
+        const under = await detectedDeclaring(root, ONE_DEFINITION, undefined);
+        const answer = await under(["TestingLibraryElementError", "Error"]);
+        return { ...evidenceRead(answer), total: answer.counts.total };
+      });
+      expect(read).toStrictEqual({
+        evidence: { freshness: "current" },
+        verified: 1,
+        total: 2,
+      });
+    });
+
+    it("D4024: a path's counts cover only the definitions in it, so of two verified definitions, one in each workspace, a workspace's answer counts one definition, one detection and one verified, and leaves none unlisted", async () => {
+      const read = await inTempDir(async (root) => {
+        const under = await detectedDeclaring(
+          root,
+          { latest: ONE_DEFINITION.latest, files: ONE_IN_EACH_WORKSPACE },
+          undefined,
+          settled({
+            [WORKSPACE_A]: { ok: true, digest: DIGEST.digest },
+            [WORKSPACE_B]: { ok: true, digest: DIGEST.digest },
+          }),
+        );
+        const answer = await under(undefined, join(root, WORKSPACE_B));
+        return {
+          ids: answer.definitions.map((definition) => definition.id),
+          total: answer.counts.total,
+          states: nonZero(answer.counts.states),
+          freshness: nonZero(answer.counts.freshness),
+          verified: answer.counts.verified,
+          notListed: nonZero(answer.definitionsNotListed),
+        };
+      });
+      expect(read).toStrictEqual({
+        ids: ["D2"],
+        total: 1,
+        states: { detected: 1 },
+        freshness: { current: 1 },
+        verified: 1,
+        notListed: {},
+      });
+    });
+
+    it("D4025: the worktree's standings give the names rt-test.json declares, the definition file problems, and every definition with its standing, whatever workspace its test lies in", async () => {
+      const read = await inTempDir(async (root) => {
+        const { latest } = ONE_DEFINITION;
+        answered(
+          await defectsOver(
+            root,
+            latest,
+            { ...ONE_IN_EACH_WORKSPACE, "broken.json": "not json" },
+            undefined,
+            declaring(["TestingLibraryElementError"]),
+          ),
+        );
+        const worktree = answered(
+          await worktreeStandings({
+            consumerRoot: root,
+            stateDirectory: join(root, ".rt-test"),
+            signal: new AbortController().signal,
+            moment: () => ({
+              results: latest,
+              view: { ...IDLE, consumerRoot: root },
+              inputs: UNSETTLED,
+            }),
+          }),
+        );
+        return {
+          names: worktree.assertionErrors,
+          problems: worktree.invalidEntries.map(
+            ({ kind, path }) => `${kind} ${path}`,
+          ),
+          definitions: worktree.definitions.map((definition) => definition.id),
+          standings: worktree.standings.map(({ definition, state }) => [
+            definition.id,
+            state,
+          ]),
+        };
+      });
+      expect(read).toStrictEqual({
+        names: ["TestingLibraryElementError"],
+        problems: ["not-json defects/broken.json"],
+        definitions: ["D1", "D2"],
+        standings: [
+          ["D1", "never-verified"],
+          ["D2", "never-verified"],
+        ],
+      });
+    });
+
+    it("D4026: the answer takes the daemon's moment only once each mutation's file is read, so a mutation file rewritten as the moment is taken is not the one its anchor is read from", async () => {
+      const state = await inTempDir(async (root) => {
+        const answer = answered(
+          await defectsOver(
+            root,
+            () => {
+              writeFileSync(
+                join(root, A_SOURCE),
+                "export function a() {\n  return 3;\n}\n",
+              );
+              return ONE_DEFINITION.latest;
+            },
+            ONE_DEFINITION.files,
+          ),
+        );
+        return answer.definitions[0]?.state;
+      });
+      expect(state).toBe("never-verified");
+    });
+
+    it("D4027: with no discovery stored the answer is the no-answer saying so, whatever rt-test.json and the definition files hold", async () => {
+      const answer = await inTempDir((root) =>
+        defectsOver(
+          root,
+          results(undefined),
+          { ...ONE_DEFINITION.files, "broken.json": "not json" },
+          undefined,
+          declaring(["Error"]),
+        ).catch((error: unknown) => ({ thrown: String(error) })),
+      );
+      expect(answer).toStrictEqual({
+        noAnswer: expect.stringMatching(
+          /^the daemon serving .* has stored no discovery for this worktree; /,
+        ),
+      });
+    });
+
+    it("D4029: the worktree's standings digest each definition under the consumer root the caller gave, so a detection bound under that root reads current through the answer", async () => {
+      const read = await inTempDir(async (root) => {
+        const under = await detectedDeclaring(root, ONE_DEFINITION, undefined);
+        return evidenceRead(await under(undefined));
+      });
+      expect(read).toStrictEqual({
+        evidence: { freshness: "current" },
+        verified: 1,
+      });
     });
   },
 );

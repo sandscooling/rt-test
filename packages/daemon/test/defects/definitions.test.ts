@@ -620,6 +620,289 @@ describe(
   },
 );
 
+/** An `rt-test.json` declaring `names` as its assertion error names, with a `defects` member only when `patterns` is given. */
+function settingsDeclaring(names: unknown, patterns?: unknown): string {
+  return JSON.stringify({ defects: patterns, assertionErrors: names });
+}
+
+/** The names a read declares, beside its outline. */
+function declared(read: DefinitionFiles) {
+  return { names: read.assertionErrors, ...outline(read) };
+}
+
+/** The names a read declares, beside each invalid entry whole. */
+function namesAndEntries(read: DefinitionFiles) {
+  return { names: read.assertionErrors, entries: read.invalidEntries };
+}
+
+/** The invalid entry a problem in `rt-test.json` makes, its reason matching `reason`. */
+function settingsProblem(reason: RegExp) {
+  return {
+    kind: "settings-unusable",
+    path: SETTINGS,
+    reason: expect.stringMatching(reason) as unknown,
+  };
+}
+
+describe(
+  "the assertion error names rt-test.json declares",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4006: the names rt-test.json declares are read beside the definition files its defects member names", async () => {
+      const read = await inTempDir(async (dir) =>
+        declared(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(
+              ["TestingLibraryElementError", "ZodError"],
+              ["defects/*.json"],
+            ),
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: ["TestingLibraryElementError", "ZodError"],
+        definitions: [`${DEFINITION_FILE}#0`],
+        entries: [],
+      });
+    });
+
+    it("D4007: the names are read anew each time the definition files are read, so a list that changed or left rt-test.json since the read before is not declared, and a consumer with no rt-test.json declares none", async () => {
+      const names = await inTempDir(async (dir) => {
+        const reads: (readonly string[])[] = [];
+        for (const text of [
+          settingsDeclaring(["TestingLibraryElementError"]),
+          settingsDeclaring(["ZodError"]),
+          JSON.stringify({ nonInputs: ["docs/**"] }),
+        ]) {
+          const read = await definitionFilesIn(dir, { [SETTINGS]: text });
+          reads.push(read.assertionErrors);
+        }
+        const bare = await definitionFilesIn(join(dir, "bare"), {});
+        return [...reads, bare.assertionErrors];
+      });
+      expect(names).toStrictEqual([
+        ["TestingLibraryElementError"],
+        ["ZodError"],
+        [],
+        [],
+      ]);
+    });
+
+    it("D4008: a list of exactly 256 names declares every one of them", async () => {
+      const names = Array.from({ length: 256 }, (_, index) => `Thrown${index}`);
+      const read = await inTempDir(async (dir) =>
+        namesAndEntries(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(names),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({ names, entries: [] });
+    });
+
+    it("D4009: a list of 257 names declares none and is one invalid entry at rt-test.json saying how many it holds past the 256 allowed", async () => {
+      const names = Array.from({ length: 257 }, (_, index) => `Thrown${index}`);
+      const read = await inTempDir(async (dir) =>
+        namesAndEntries(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(names),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: [],
+        entries: [
+          settingsProblem(
+            /^rt-test\.json declares no assertion error names: .*\b257 names\b.*\b256\b/,
+          ),
+        ],
+      });
+    });
+
+    it("D4010: an assertionErrors member that is not an array of strings declares no names and is one invalid entry at rt-test.json saying so", async () => {
+      const read = await inTempDir(async (dir) =>
+        namesAndEntries(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring("TestingLibraryElementError"),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: [],
+        entries: [
+          settingsProblem(
+            /^rt-test\.json declares no assertion error names: .*\bassertionErrors\b.*not an array of strings/,
+          ),
+        ],
+      });
+    });
+
+    it("D4011: a list holding an empty name declares no names and is one invalid entry naming the empty name", async () => {
+      const read = await inTempDir(async (dir) =>
+        namesAndEntries(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(["TestingLibraryElementError", ""]),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: [],
+        entries: [
+          settingsProblem(
+            /^rt-test\.json declares no assertion error names: .*"".*\bempty\b/,
+          ),
+        ],
+      });
+    });
+
+    it("D4012: a list holding the name Error declares no names and is one invalid entry saying an error must carry a name of its own to be declared", async () => {
+      const read = await inTempDir(async (dir) =>
+        namesAndEntries(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring([
+              "TestingLibraryElementError",
+              "Error",
+            ]),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: [],
+        entries: [
+          settingsProblem(
+            /^rt-test\.json declares no assertion error names: .*"Error".*an error must carry a name of its own to be declared/,
+          ),
+        ],
+      });
+    });
+
+    it("D4013: a problem in each member is two invalid entries, the defects member's before the names'", async () => {
+      const read = await inTempDir(async (dir) =>
+        namesAndEntries(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(["Error"], ["/defects/*.json"]),
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: [],
+        entries: [
+          settingsProblem(/^rt-test\.json names no definition files: /),
+          settingsProblem(/^rt-test\.json declares no assertion error names: /),
+        ],
+      });
+    });
+
+    it("D4014: a problem in the names leaves every definition file read", async () => {
+      const read = await inTempDir(async (dir) =>
+        declared(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(["Error"], ["defects/*.json"]),
+            "defects/a.json": definitionFile(definition("D1")),
+            "defects/b.json": definitionFile(
+              definition("D2"),
+              definition("D3"),
+            ),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: [],
+        definitions: [
+          "defects/a.json#0",
+          "defects/b.json#0",
+          "defects/b.json#1",
+        ],
+        entries: ["settings-unusable rt-test.json"],
+      });
+    });
+
+    it("D4015: a problem in the names comes before every invalid entry the walk makes", async () => {
+      const read = await inTempDir(async (dir) =>
+        outline(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(
+              ["Error"],
+              ["defects/*.json", "gone/*.json"],
+            ),
+            "defects/a.json": NOT_JSON,
+          }),
+        ),
+      );
+      expect(read.entries).toStrictEqual([
+        "settings-unusable rt-test.json",
+        "pattern-matched-nothing rt-test.json",
+        "not-json defects/a.json",
+      ]);
+    });
+
+    it("D4016: a problem in the defects member leaves the declared names read", async () => {
+      const read = await inTempDir(async (dir) =>
+        declared(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(
+              ["TestingLibraryElementError"],
+              ["/defects/*.json"],
+            ),
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        names: ["TestingLibraryElementError"],
+        definitions: [],
+        entries: ["settings-unusable rt-test.json"],
+      });
+    });
+
+    it("D4017: an rt-test.json that cannot be read at all, as not JSON or not an object, is one invalid entry, never one for each member, and declares no names", async () => {
+      const reads = await inTempDir(async (dir) => [
+        namesAndEntries(
+          await definitionFilesIn(join(dir, "a"), {
+            [SETTINGS]:
+              '{ "assertionErrors": ["TestingLibraryElementError"], "defects": [',
+          }),
+        ),
+        namesAndEntries(
+          await definitionFilesIn(join(dir, "b"), {
+            [SETTINGS]: JSON.stringify(["TestingLibraryElementError"]),
+          }),
+        ),
+      ]);
+      const oneEntry = {
+        names: [],
+        entries: [
+          settingsProblem(/^rt-test\.json names no definition files: /),
+        ],
+      };
+      expect(reads).toStrictEqual([oneEntry, oneEntry]);
+    });
+
+    it("D4028: one read of rt-test.json gives the patterns and the names", async () => {
+      const reads = await inTempDir(async (dir) => {
+        const asked = vi.spyOn(scripted.failing, "get");
+        try {
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settingsDeclaring(
+              ["TestingLibraryElementError"],
+              ["defects/*.json"],
+            ),
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          });
+          const settingsPath = resolve(dir, CONSUMER, SETTINGS);
+          return asked.mock.calls.filter(([path]) => path === settingsPath)
+            .length;
+        } finally {
+          asked.mockRestore();
+        }
+      });
+      expect(reads).toBe(1);
+    });
+  },
+);
+
 /** Checks each of `values` as a definition at its position in `file`. */
 function checked(
   values: readonly unknown[],
@@ -1128,6 +1411,7 @@ async function standingsIn(
   );
   return defectStandings(definitions, {
     consumerRoot: join(dir, CONSUMER),
+    assertionErrors: [],
     evidence: { evidence: [], evidenceRefusals: [] },
     discovery: discoveryOf(tests),
     discoveryCurrent: true,
@@ -1288,6 +1572,68 @@ describe("a definition's digest", () => {
       first: "string",
       same: true,
     });
+  });
+});
+
+/** The digests of two definitions under each list of declared names, each list under a consumer root of its own. */
+function digestsDeclaring(
+  lists: readonly (readonly string[])[],
+): Promise<(string | undefined)[][]> {
+  return inTempDir((dir) =>
+    Promise.all(
+      lists.map(async (assertionErrors, index) => {
+        const standings = await standingsIn(join(dir, `case-${index}`), {
+          values: [definition("D1"), definition("D2")],
+          facts: { assertionErrors },
+        });
+        return standings.map((standing) => standing.definitionDigest);
+      }),
+    ),
+  );
+}
+
+describe("a definition's digest under the declared assertion error names", () => {
+  it("D4018: a list that gains or loses a name gives every definition another digest", async () => {
+    const [base = [], ...changed] = await digestsDeclaring([
+      ["TestingLibraryElementError", "ZodError"],
+      ["TestingLibraryElementError", "ZodError", "ConvexError"],
+      ["TestingLibraryElementError"],
+      [],
+    ]);
+    expect(
+      changed.map((digests) =>
+        digests.map(
+          (digest, index) =>
+            typeof digest === "string" && digest !== base[index],
+        ),
+      ),
+    ).toStrictEqual([
+      [true, true],
+      [true, true],
+      [true, true],
+    ]);
+  });
+
+  it("D4019: the same names in another order give every definition the same digest", async () => {
+    const [base = [], reordered = []] = await digestsDeclaring([
+      ["TestingLibraryElementError", "ZodError"],
+      ["ZodError", "TestingLibraryElementError"],
+    ]);
+    expect({
+      digests: base.map((digest) => typeof digest),
+      same: reordered.map((digest, index) => digest === base[index]),
+    }).toStrictEqual({ digests: ["string", "string"], same: [true, true] });
+  });
+
+  it("D4020: a list with one name repeated gives every definition the same digest", async () => {
+    const [base = [], repeated = []] = await digestsDeclaring([
+      ["TestingLibraryElementError", "ZodError"],
+      ["TestingLibraryElementError", "ZodError", "TestingLibraryElementError"],
+    ]);
+    expect({
+      digests: base.map((digest) => typeof digest),
+      same: repeated.map((digest, index) => digest === base[index]),
+    }).toStrictEqual({ digests: ["string", "string"], same: [true, true] });
   });
 });
 
