@@ -65,7 +65,14 @@ export type GuardedParse =
       /** Read inside the guard, since the parser builds it on first access and that can throw. */
       readonly program: ParseResult["program"];
     }
-  | { readonly ok: false; readonly reason: string };
+  | {
+      readonly ok: false;
+      readonly reason: string;
+      /** UTF-16 offset in the text where the parser's first reported error starts, when it located one. */
+      readonly offset?: number;
+      /** The bracket nesting that refused the text before any parse. */
+      readonly nesting?: number;
+    };
 
 /** Reads and parses one source file; executes nothing, and a file with any parse error yields no specifier. */
 export function readSourceImports(file: string): SourceImports {
@@ -106,6 +113,7 @@ export function parseGuarded(
     return {
       ok: false,
       reason: `it nests brackets ${depth} deep, past the ${MAX_BRACKET_DEPTH} the parser is given`,
+      nesting: depth,
     };
   }
   let result: ParseResult;
@@ -122,8 +130,14 @@ export function parseGuarded(
         reason: result.errors
           .map(({ message }) => message)
           .join(ERROR_SEPARATOR),
+        ...firstErrorOffset(result),
       }
     : { ok: true, result, program };
+}
+
+function firstErrorOffset(result: ParseResult): { readonly offset?: number } {
+  const offset = result.errors[0]?.labels[0]?.start;
+  return offset === undefined ? {} : { offset };
 }
 
 /** Every bracket counts, those in strings and comments included, since the text is not parsed yet. */
@@ -166,7 +180,7 @@ function specifiersOf(result: ParseResult): FoundSpecifier[] {
 }
 
 /** JSX is accepted in every JavaScript extension, and `.cjs` keeps CommonJS's top-level `return`. */
-function parserOptions(file: string): ParserOptions {
+export function parserOptions(file: string): ParserOptions {
   const extension = extname(file);
   if (extension === COMMONJS_JSX_EXTENSION) {
     return { lang: "jsx", sourceType: "commonjs", preserveParens: false };

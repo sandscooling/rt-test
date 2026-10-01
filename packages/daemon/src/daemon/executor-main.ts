@@ -1,3 +1,4 @@
+import type { FalsificationJob } from "../falsify/experiment-record.js";
 import type { DependencyInformation } from "../selection/selection-types.js";
 import { discoverTests } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
@@ -15,6 +16,8 @@ import { endOwnTree } from "./process-tree.js";
 
 const STOP_REASON = "the daemon is stopping";
 const DISCONNECTED_REASON = "the executor lost its channel to the daemon";
+const UNSENDABLE_REPLY_REASON =
+  "the job's reply could not be sent to the daemon";
 
 let current: AbortController | undefined;
 let disconnected = false;
@@ -47,7 +50,19 @@ async function runJob(request: ExecutorJob): Promise<void> {
   }
   current = undefined;
   if (disconnected) endOwnTree();
-  process.send?.(reply);
+  sendReply(reply);
+}
+
+/** The channel carries JSON, so a reply holding a value JSON cannot carry fails the job instead of sending nothing. */
+function sendReply(reply: ExecutorReply): void {
+  try {
+    process.send?.(reply);
+  } catch (error) {
+    process.send?.({
+      type: "job-failed",
+      error: `${UNSENDABLE_REPLY_REASON}: ${errorText(error)}`,
+    } satisfies ExecutorReply);
+  }
 }
 
 async function answer(
@@ -70,7 +85,23 @@ async function answer(
         type: "dependencies-built",
         dependencies: await buildDependencies(request),
       };
+    case "falsify":
+      return { type: "falsified", job: await falsify(request, signal) };
   }
+}
+
+/** Loaded here alone, as the dependency build loads it, so the parser's native binding stays out of every other job. */
+async function falsify(
+  request: Extract<ExecutorJob, { type: "falsify" }>,
+  signal: AbortSignal,
+): Promise<FalsificationJob> {
+  const { falsifyWorkspace } = await import("../falsify/falsify-workspace.js");
+  return falsifyWorkspace(
+    request.workspace,
+    request.configFile,
+    request.experiments,
+    signal,
+  );
 }
 
 /** Loaded here alone, so the parser's native binding stays out of every discovery and run process. */
