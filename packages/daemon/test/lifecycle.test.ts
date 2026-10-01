@@ -11,6 +11,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { readingWait, STANDING } from "../src/daemon/canary-gate.js";
 import { DependencyBuilds } from "../src/daemon/dependency-builds.js";
 import {
   ABORT_PURPOSE,
@@ -19,13 +20,21 @@ import {
 } from "../src/daemon/executor.js";
 import { JOB_TIME_BOUND_MS } from "../src/daemon/falsification.js";
 import { MAX_JOB_DEFINITIONS } from "../src/daemon/falsification-plan.js";
-import { DaemonLifecycle } from "../src/daemon/lifecycle.js";
+import {
+  DaemonLifecycle,
+  type LifecycleParts,
+} from "../src/daemon/lifecycle.js";
 import {
   PROTOCOL_VERSION,
   type DaemonActivity,
   type DaemonIdentity,
   type UnstoredJob,
 } from "../src/daemon/protocol.js";
+import {
+  CANARY_READING,
+  NO_READING_KIND,
+  type CanaryReading,
+} from "../src/falsify/canary-set.js";
 import {
   FALSIFIER_VERSION,
   type DefectExperiment,
@@ -293,6 +302,15 @@ class FirstReadFailingStore extends RecordingStore {
   }
 }
 
+type CanaryGateStandIn = LifecycleParts["canaryGate"];
+
+/** A gate that holds a confirmed reading of every install, so each workspace's falsification job is sent. */
+const CONFIRMING_GATE: CanaryGateStandIn = {
+  standing: () => ({ state: STANDING.confirmed }),
+  take: () =>
+    Promise.reject(new Error("a gate that confirms every install takes none")),
+};
+
 interface Daemon {
   readonly lifecycle: DaemonLifecycle;
   readonly executor: ScriptedExecutor;
@@ -323,6 +341,7 @@ function daemon(
   inputs: StandInInputs = new StandInInputs(),
   builds: ScriptedBuilds = new ScriptedBuilds(),
   quietWindowMs: number = NO_QUIET_WINDOW_MS,
+  canaryGate: CanaryGateStandIn = CONFIRMING_GATE,
 ): Daemon {
   const log = memoryLog();
   const endpointCloses = { count: 0 };
@@ -333,6 +352,7 @@ function daemon(
     store,
     log,
     executor: executor as unknown as Executor,
+    canaryGate,
     buildExecutor: builds as unknown as Executor,
     inputs,
     quietWindowMs,
@@ -486,6 +506,7 @@ async function declaredModuleStart(
     executor: new EditingExecutor(found, async () => {
       held = await during(module, handled);
     }) as unknown as Executor,
+    canaryGate: CONFIRMING_GATE,
     buildExecutor: failingBuilds(),
     inputs: new InputTracker({
       consumerRoot: root,
@@ -569,6 +590,7 @@ async function idleStart(dir: string): Promise<IdleStart> {
         workspace: { path: ".", directory: root },
       }),
     }) as unknown as Executor,
+    canaryGate: CONFIRMING_GATE,
     buildExecutor: failingBuilds(),
     inputs: new InputTracker({
       consumerRoot: root,
@@ -4996,6 +5018,88 @@ class FalsifyingExecutor extends ScriptedExecutor {
   }
 }
 
+type InstallStanding = ReturnType<CanaryGateStandIn["standing"]>;
+type UnreadInstall = Parameters<CanaryGateStandIn["take"]>[0];
+type VitestInstall = UnreadInstall["install"];
+
+/** The install a scripted gate says a workspace resolves unless its case says another; no test reads either directory. */
+const INSTALL: VitestInstall = {
+  directory: "/installs/vitest-5.0.1",
+  version: "5.0.1",
+};
+const OTHER_INSTALL: VitestInstall = {
+  directory: "/installs/vitest-4.1.11",
+  version: "4.1.11",
+};
+
+interface GateScript {
+  /** The install each workspace resolves, or what the gate says of one that resolves no supported Vitest; `INSTALL` when absent. */
+  readonly resolves?: (workspacePath: string) => VitestInstall | string;
+  /** What each canary job reads, given its index from 0, or `HELD`; confirmed when absent. */
+  readonly readings?: (call: number) => CanaryReading | typeof HELD;
+}
+
+function confirmedReading(install: VitestInstall): CanaryReading {
+  return { status: CANARY_READING.confirmed, vitestVersion: install.version };
+}
+
+/**
+ * A stand-in for the canary gate that takes no reading: each canary job reads what the case scripts, or stays in
+ * progress until the test ends it. As the gate does, it keeps a reading that is confirmed or disagreed by install and
+ * nothing of a no reading, and words what it keeps through the gate's own wording.
+ */
+class ScriptedGate implements CanaryGateStandIn {
+  /** The workspace each standing was asked about, in call order. */
+  readonly asked: string[] = [];
+  /** The workspace each canary job was taken for, in call order. */
+  readonly canaryJobs: string[] = [];
+  readonly #script: GateScript;
+  readonly #kept = new Map<string, CanaryReading>();
+  #held: Deferred<CanaryReading> | undefined;
+
+  constructor(script: GateScript = {}) {
+    this.#script = script;
+  }
+
+  standing(entry: VitestWorkspace): InstallStanding {
+    this.asked.push(entry.path);
+    const resolved = this.#script.resolves?.(entry.path) ?? INSTALL;
+    if (typeof resolved === "string") {
+      return { state: STANDING.waits, what: resolved };
+    }
+    const kept = this.#kept.get(resolved.directory);
+    if (kept === undefined) {
+      return { state: STANDING.unread, workspace: entry, install: resolved };
+    }
+    const wait = readingWait(resolved, kept);
+    return wait === undefined
+      ? { state: STANDING.confirmed }
+      : { state: STANDING.waits, ...wait };
+  }
+
+  async take({ workspace: entry, install }: UnreadInstall) {
+    const call = this.canaryJobs.length;
+    this.canaryJobs.push(entry.path);
+    const scripted = this.#script.readings?.(call) ?? confirmedReading(install);
+    const reading = scripted === HELD ? await this.#hold() : scripted;
+    if (reading.status !== CANARY_READING.none) {
+      this.#kept.set(install.directory, reading);
+    }
+    return reading;
+  }
+
+  #hold(): Promise<CanaryReading> {
+    this.#held = new Deferred<CanaryReading>();
+    return this.#held.promise;
+  }
+
+  /** Ends the canary job in progress with `reading`, as its executor's reply does. */
+  end(reading: CanaryReading): void {
+    this.#held?.resolve(reading);
+    this.#held = undefined;
+  }
+}
+
 /** An experiment that ran in a job whose restored baseline left no record, so its judgement has no verdict. */
 const NO_VERDICT: ExperimentFacts = {
   baseline: baseline(),
@@ -5189,6 +5293,8 @@ interface FalsifyingCase extends JobScript {
   /** The confirmed start; one confirming every workspace when absent. */
   readonly start?: ConfirmedStart;
   readonly quietWindowMs?: number;
+  /** The canary gate; one that holds a confirmed reading of every install when absent. */
+  readonly gate?: ScriptedGate;
 }
 
 interface Falsifying extends Daemon {
@@ -5295,12 +5401,14 @@ function falsifying<T>(
       given.inputs ?? new StandInInputs(),
       new ScriptedBuilds(),
       given.quietWindowMs ?? NO_QUIET_WINDOW_MS,
+      given.gate,
     );
     started.lifecycle.begin();
     try {
       return await body({ ...started, executor, root });
     } finally {
       executor.end(TEST_ENDED);
+      given.gate?.end(INTERRUPTED_READING);
       started.lifecycle.stop();
       await started.lifecycle.stopped();
     }
@@ -6613,6 +6721,605 @@ describe(
       expect(entries).toStrictEqual([
         "falsification: none of the waiting definitions is taken at input revision 1: waiting 3, of which in a workspace that gets no further falsification job until the input revision changes 2, and given no further experiment at this revision 1",
       ]);
+    });
+  },
+);
+
+/** No reading, as a canary job whose executor's process died gives it. */
+const NO_READING: CanaryReading = {
+  status: CANARY_READING.none,
+  kind: NO_READING_KIND.noReply,
+  detail: EXECUTOR_DIED,
+};
+/** No reading, as a canary job an abort ended gives it. */
+const INTERRUPTED_READING: CanaryReading = {
+  status: CANARY_READING.none,
+  kind: NO_READING_KIND.interrupted,
+};
+const DISAGREED_CANARY = "in-test-site";
+/** A reading under `INSTALL` in which one canary read survived where unclear, as no assertion, is named for it. */
+const DISAGREED: CanaryReading = {
+  status: CANARY_READING.disagreed,
+  vitestVersion: INSTALL.version,
+  canaries: [
+    {
+      id: DISAGREED_CANARY,
+      read: { verdict: "survived" },
+      named: { verdict: "unclear", reason: "not-an-assertion" },
+    },
+  ],
+};
+/** More canaries than a reason names, each named at a length at which the ones it names pass what an answer keeps. */
+const MANY_DISAGREED: CanaryReading = {
+  status: CANARY_READING.disagreed,
+  vitestVersion: INSTALL.version,
+  canaries: indexes(24).map((index) => ({
+    id: `a-canary-with-a-long-name-${index}`,
+    read: { verdict: "unclear", reason: "not-an-assertion" },
+    named: { verdict: "invalid-experiment", reason: "hook-not-passed" },
+  })),
+};
+/** What a refused workspace's entry says ends its refusal. */
+const ANOTHER_INSTALL_ENDS = "another Vitest install";
+/** How the log begins the entry of a mark made for workspace `a`. */
+const MARK_OF_A = "the falsification of a waits";
+/** What a gate says of a workspace that resolves no supported Vitest, as a scripted gate hands it over. */
+const NO_SUPPORTED_VITEST =
+  "its job was not sent, since its workspace resolves no supported Vitest (Vitest 3.2.4, supported 4.1.x || 5.x): Vitest 3.2.4 is outside the supported range";
+
+/** Until `count` canary jobs have been taken; whether they were. */
+function canaryJobsTaken(gate: ScriptedGate, count = 1): Promise<boolean> {
+  return reached(() => gate.canaryJobs.length >= count);
+}
+
+function marksOfA(started: Falsifying): number {
+  return started.log.entries.filter((entry) => entry.startsWith(MARK_OF_A))
+    .length;
+}
+
+function markedWorkspaces(started: Falsifying): (string | undefined)[] {
+  return falsificationEntries(started).map(
+    ({ workspacePath }) => workspacePath,
+  );
+}
+
+/**
+ * What a refusal's reason holds of what it has to say, and in what order: the Vitest version, the falsifier version,
+ * the canary that disagreed with what it read and what is named for it, then what ends the refusal.
+ */
+function refusalSays(reason: string): unknown {
+  const fragments = [
+    `Vitest ${INSTALL.version}`,
+    `falsifier version ${FALSIFIER_VERSION}`,
+    DISAGREED_CANARY,
+    "survived",
+    "unclear",
+    "not-an-assertion",
+    ANOTHER_INSTALL_ENDS,
+    "restart",
+  ];
+  const places = fragments.map((fragment) => reason.indexOf(fragment));
+  return {
+    missing: fragments.filter((_, index) => (places[index] ?? -1) < 0),
+    inThatOrder: places.every(
+      (place, index) => index === 0 || place > (places[index - 1] ?? -1),
+    ),
+    saysTheRevisionEndsIt: reason.includes(WORKSPACE_WAIT_ENDS),
+  };
+}
+
+const WHOLE_REFUSAL = {
+  missing: [],
+  inThatOrder: true,
+  saysTheRevisionEndsIt: false,
+};
+
+/** Inputs that run `atClose` once, as the next window on the tracker closes, as a change or a stop that lands then does. */
+class ClosingInputs extends StandInInputs {
+  atClose: (() => void) | undefined;
+
+  override async endJob(
+    mark: Parameters<StandInInputs["endJob"]>[0],
+  ): Promise<JobVerdict> {
+    const verdict = await super.endJob(mark);
+    const { atClose } = this;
+    this.atClose = undefined;
+    atClose?.();
+    return verdict;
+  }
+}
+
+describe(
+  "a falsification job waits for its install's canary reading",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4166: a workspace whose Vitest install is unread is sent no falsification job while the look's canary job runs, and its own job once the reading is confirmed", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const order = await falsifying({ gate }, async (started) => {
+        await reached(
+          () => gate.canaryJobs.length > 0 || started.executor.jobs.length > 0,
+        );
+        const whileReading = {
+          canaryJobs: [...gate.canaryJobs],
+          jobs: jobIds(started),
+        };
+        gate.end(confirmedReading(INSTALL));
+        await idled(started);
+        return {
+          whileReading,
+          after: { canaryJobs: [...gate.canaryJobs], jobs: jobIds(started) },
+        };
+      });
+      expect(order).toStrictEqual({
+        whileReading: { canaryJobs: ["a"], jobs: [] },
+        after: { canaryJobs: ["a"], jobs: [["A0"]] },
+      });
+    });
+
+    it("D4167: once a canary job has confirmed its install, the scheduler plans again, so the workspace's own job follows with no change of the inputs", async () => {
+      const gate = new ScriptedGate();
+      const outcome = await falsifying({ gate }, async (started) => ({
+        idled: await idled(started),
+        canaryJobs: [...gate.canaryJobs],
+        jobs: jobIds(started),
+      }));
+      expect(outcome).toStrictEqual({
+        idled: true,
+        canaryJobs: ["a"],
+        jobs: [["A0"]],
+      });
+    });
+
+    it("D4168: no canary job is taken for a workspace the confirmed start no longer holds, though its install is unread", async () => {
+      const gate = new ScriptedGate();
+      const store = new RecordingStore();
+      store.seedDiscovery(discovery(discoveredIn("a", [TEST_MODULE])), {
+        kind: "digest",
+        digest: DISCOVERY_DIGEST,
+      });
+      store.seedRun(ranWorkspace("a"), { kind: "digest", digest: "a-digest" });
+      const outcome = await falsifying(
+        { gate, store, start: confirmed() },
+        async (started) => ({
+          idled: await idled(started),
+          canaryJobs: [...gate.canaryJobs],
+          saysTheStartDoesNotHoldIt: falsificationEntries(started).map(
+            ({ reason }) =>
+              reason.includes(
+                "the confirmed start does not hold the workspace",
+              ),
+          ),
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        idled: true,
+        canaryJobs: [],
+        saysTheStartDoesNotHoldIt: [true],
+      });
+    });
+
+    it("D4169: a change of the input revision that lands while a look closes its window leaves that look without a canary job, so the one taken is planned at the new revision and marks there", async () => {
+      const inputs = new ClosingInputs();
+      const armed = { once: false };
+      const gate = new ScriptedGate({
+        resolves: () => {
+          if (!armed.once) inputs.atClose = () => inputs.moveRevision();
+          armed.once = true;
+          return INSTALL;
+        },
+        readings: (call) =>
+          call === 0 ? NO_READING : confirmedReading(INSTALL),
+      });
+      const outcome = await falsifying({ gate, inputs }, async (started) => ({
+        idled: await idled(started),
+        canaryJobs: [...gate.canaryJobs],
+        marked: markedWorkspaces(started),
+      }));
+      expect(outcome).toStrictEqual({
+        idled: true,
+        canaryJobs: ["a"],
+        marked: ["a"],
+      });
+    });
+
+    it("D4170: a stop that lands while a look closes its window leaves that look without a canary job", async () => {
+      const inputs = new ClosingInputs();
+      const stop: { now?: () => void } = {};
+      const gate = new ScriptedGate({
+        resolves: () => {
+          inputs.atClose = stop.now;
+          return INSTALL;
+        },
+      });
+      const outcome = await falsifying({ gate, inputs }, async (started) => {
+        stop.now = () => started.lifecycle.stop();
+        const asked = await reached(() => gate.asked.length > 0);
+        await started.lifecycle.stopped();
+        return { asked, canaryJobs: [...gate.canaryJobs] };
+      });
+      expect(outcome).toStrictEqual({ asked: true, canaryJobs: [] });
+    });
+  },
+);
+
+describe(
+  "a workspace whose install's canary reading disagreed",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4171: a refused workspace is sent no falsification job at that input revision or the next, where it is marked again from the kept reading with no canary job, while a workspace on a confirmed install is falsified", async () => {
+      const gate = new ScriptedGate({
+        resolves: (path) => (path === "a" ? INSTALL : OTHER_INSTALL),
+        readings: (call) =>
+          call === 0 ? DISAGREED : confirmedReading(OTHER_INSTALL),
+      });
+      const outcome = await falsifying(
+        { tests: { a: 1, b: 1 }, gate },
+        async (started) => {
+          await idled(started);
+          const marked = markedWorkspaces(started);
+          started.inputs.moveRevision();
+          const onceTheRevisionMoved = markedWorkspaces(started);
+          await idled(started, 2);
+          return {
+            canaryJobs: [...gate.canaryJobs],
+            jobs: started.executor.jobs.map((job) => ({
+              workspacePath: job.workspacePath,
+              ids: job.experiments.map(({ defectId }) => defectId),
+            })),
+            stored: storedVerdicts(started),
+            marked,
+            onceTheRevisionMoved,
+            atTheNextLook: markedWorkspaces(started),
+          };
+        },
+      );
+      expect(outcome).toStrictEqual({
+        canaryJobs: ["a", "b"],
+        jobs: [{ workspacePath: "b", ids: ["B0"] }],
+        stored: { B0: "detected" },
+        marked: ["a"],
+        onceTheRevisionMoved: [],
+        atTheNextLook: ["a"],
+      });
+    });
+
+    it("D4172: the reason of a workspace the look refused on its own canary job names the Vitest version, the falsifier version and the canary with what it read and what is named, then what ends the refusal, which no change of the input revision does", async () => {
+      const gate = new ScriptedGate({ readings: () => DISAGREED });
+      const says = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        return refusalSays(falsificationEntries(started)[0]?.reason ?? "");
+      });
+      expect(says).toStrictEqual(WHOLE_REFUSAL);
+    });
+
+    it("D4173: at a later input revision, the reason made from the kept reading still says what ends the refusal, and not that a change of the input revision does", async () => {
+      const gate = new ScriptedGate({ readings: () => DISAGREED });
+      const says = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        started.inputs.moveRevision();
+        await idled(started, 2);
+        return refusalSays(falsificationEntries(started)[0]?.reason ?? "");
+      });
+      expect(says).toStrictEqual(WHOLE_REFUSAL);
+    });
+
+    it("D4174: a refusal that names more canaries than an answer keeps leaves what ends it inside the 1,000 characters of the answer, on one line, and says how much more the log holds", async () => {
+      const gate = new ScriptedGate({ readings: () => MANY_DISAGREED });
+      const says = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        const answer = started.lifecycle.summary();
+        const jobs = "noAnswer" in answer ? [] : answer.unstoredJobs;
+        const text =
+          jobs.find((job) => job.kind === "falsification")?.reason ?? "";
+        return {
+          lines: text.split("\n").length,
+          namesTheFirstCanary: text.includes("a-canary-with-a-long-name-0 ("),
+          saysTheLogHoldsMore: text.includes(
+            "more characters are in the daemon log)",
+          ),
+          refusalEndsBy:
+            text.includes(ANOTHER_INSTALL_ENDS) &&
+            text.indexOf(ANOTHER_INSTALL_ENDS) + ANOTHER_INSTALL_ENDS.length <=
+              1000,
+        };
+      });
+      expect(says).toStrictEqual({
+        lines: 1,
+        namesTheFirstCanary: true,
+        saysTheLogHoldsMore: true,
+        refusalEndsBy: true,
+      });
+    });
+
+    it("D4175: a canary job that a change of the input revision ended marks no workspace at the revision that passed, and the canaries run again at the new one", async () => {
+      const gate = new ScriptedGate({
+        readings: (call) => (call === 0 ? HELD : confirmedReading(INSTALL)),
+      });
+      const outcome = await falsifying({ gate }, async (started) => {
+        await canaryJobsTaken(gate);
+        started.inputs.moveRevision();
+        await flush();
+        gate.end(NO_READING);
+        await idled(started);
+        return {
+          marks: marksOfA(started),
+          canaryJobs: [...gate.canaryJobs],
+          jobs: jobIds(started),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        marks: 0,
+        canaryJobs: ["a", "a"],
+        jobs: [["A0"]],
+      });
+    });
+
+    it("D4176: a canary job that a stop ended marks no workspace", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const outcome = await falsifying({ gate }, async (started) => {
+        const taken = await canaryJobsTaken(gate);
+        started.lifecycle.stop();
+        gate.end(NO_READING);
+        await started.lifecycle.stopped();
+        return { taken, entries: falsificationEntries(started) };
+      });
+      expect(outcome).toStrictEqual({ taken: true, entries: [] });
+    });
+  },
+);
+
+describe(
+  "a canary job that gave no reading, and a workspace with no supported Vitest",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4177: a workspace whose canary job gave no reading is sent no job and marked until the input revision changes, its entry naming the Vitest version and what happened, and the canaries run again at the next revision", async () => {
+      const gate = new ScriptedGate({ readings: () => NO_READING });
+      const outcome = await falsifying({ gate }, async (started) => {
+        await reached(
+          () =>
+            started.log.entries.includes(IDLE_ENTRY) ||
+            gate.canaryJobs.length > 1,
+        );
+        const atOneRevision = gate.canaryJobs.length;
+        const [entry] = falsificationEntries(started);
+        started.inputs.moveRevision();
+        await canaryJobsTaken(gate, atOneRevision + 1);
+        return {
+          canaryJobsAtOneRevision: atOneRevision,
+          jobs: started.executor.jobs.length,
+          workspacePath: entry?.workspacePath,
+          kind: entry?.kind,
+          missing: [
+            `Vitest ${INSTALL.version}`,
+            EXECUTOR_DIED,
+            WORKSPACE_WAIT_ENDS,
+          ].filter((fragment) => entry?.reason.includes(fragment) !== true),
+          canaryJobsOnceTheRevisionMoved: gate.canaryJobs.length,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        canaryJobsAtOneRevision: 1,
+        jobs: 0,
+        workspacePath: "a",
+        kind: "falsification",
+        missing: [],
+        canaryJobsOnceTheRevisionMoved: 2,
+      });
+    });
+
+    it("D4178: a workspace that resolves no supported Vitest is sent no job and taken no canary job, and its entry holds what the gate said and that a change of the input revision ends the wait", async () => {
+      const gate = new ScriptedGate({ resolves: () => NO_SUPPORTED_VITEST });
+      const outcome = await falsifying({ gate }, async (started) => {
+        const idledOnce = await idled(started);
+        const [entry] = falsificationEntries(started);
+        return {
+          idled: idledOnce,
+          canaryJobs: [...gate.canaryJobs],
+          jobs: started.executor.jobs.length,
+          workspacePath: entry?.workspacePath,
+          kind: entry?.kind,
+          missing: [NO_SUPPORTED_VITEST, WORKSPACE_WAIT_ENDS].filter(
+            (fragment) => entry?.reason.includes(fragment) !== true,
+          ),
+        };
+      });
+      expect(outcome).toStrictEqual({
+        idled: true,
+        canaryJobs: [],
+        jobs: 0,
+        workspacePath: "a",
+        kind: "falsification",
+        missing: [],
+      });
+    });
+
+    it("D4179: a change of the input revision while a canary job runs aborts the job as an interruption", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const outcome = await falsifying({ gate }, async (started) => {
+        const taken = await canaryJobsTaken(gate);
+        started.inputs.moveRevision();
+        await flush();
+        return { taken, purposes: [...started.executor.purposes] };
+      });
+      expect(outcome).toStrictEqual({
+        taken: true,
+        purposes: [ABORT_PURPOSE.interruption],
+      });
+    });
+
+    it("D4180: a canary job the time bound ended that gave no reading marks its workspace in the bound's words, with what happened and what ends the wait", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const outcome = await underFakeClock(() =>
+        falsifying({ gate }, async (started) => {
+          await canaryJobsTaken(gate);
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          const purposes = [...started.executor.purposes];
+          gate.end(NO_READING);
+          await idled(started);
+          const [entry] = falsificationEntries(started);
+          return {
+            purposes,
+            canaryJobs: gate.canaryJobs.length,
+            missing: ["time bound", EXECUTOR_DIED, WORKSPACE_WAIT_ENDS].filter(
+              (fragment) => entry?.reason.includes(fragment) !== true,
+            ),
+          };
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        purposes: [ABORT_PURPOSE.interruption],
+        canaryJobs: 1,
+        missing: [],
+      });
+    });
+
+    it("D4181: once a canary job has returned, its time bound aborts nothing, whatever job follows it", async () => {
+      const gate = new ScriptedGate();
+      const outcome = await underFakeClock(() =>
+        falsifying({ gate }, async (started) => {
+          const idledOnce = await idled(started);
+          await vi.advanceTimersByTimeAsync(JOB_TIME_BOUND_MS);
+          return {
+            idled: idledOnce,
+            canaryJobs: [...gate.canaryJobs],
+            jobs: jobIds(started),
+            aborts: started.executor.aborts,
+          };
+        }),
+      );
+      expect(outcome).toStrictEqual({
+        idled: true,
+        canaryJobs: ["a"],
+        jobs: [["A0"]],
+        aborts: 0,
+      });
+    });
+  },
+);
+
+describe(
+  "what the tracker, status and answers hold of a canary job",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4182: while a canary job runs, no window is open on the tracker, so a change it records then is an edit as one in idle time is", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const windows = await falsifying({ gate }, async (started) => {
+        const taken = await canaryJobsTaken(gate);
+        return {
+          taken,
+          open: started.inputs.jobsBegun - started.inputs.jobsEnded,
+        };
+      });
+      expect(windows).toStrictEqual({ taken: true, open: 0 });
+    });
+
+    it("D4183: while a canary job runs, the activity reads falsifying, with the workspace the look picked and 0 definitions, however many the workspace has waiting", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const activity = await falsifying(
+        { tests: { a: 2 }, gate },
+        async (started) => {
+          await canaryJobsTaken(gate);
+          return started.lifecycle.status().activity;
+        },
+      );
+      expect(activity).toStrictEqual({
+        state: "falsifying",
+        workspacePath: "a",
+        definitions: 0,
+      });
+    });
+
+    it("D4184: while a canary job runs, a summary reads the activity falsifying beside its workspace's execution state idle, and the job has stored no run, no discovery and no evidence", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const read = await falsifying({ gate }, async (started) => {
+        await canaryJobsTaken(gate);
+        const answer = started.lifecycle.summary();
+        return "noAnswer" in answer
+          ? answer
+          : {
+              activity: answer.activity.state,
+              execution: answer.schedule.workspaces,
+              runs: started.store.runs.length,
+              discoveries: started.store.discoveries.length,
+              evidenceWrites: started.store.evidenceWrites.length,
+            };
+      });
+      expect(read).toStrictEqual({
+        activity: "falsifying",
+        execution: [{ workspacePath: "a", state: "idle" }],
+        runs: 1,
+        discoveries: 1,
+        evidenceWrites: 0,
+      });
+    });
+  },
+);
+
+/** How many jobs the log names as started falsification jobs. */
+function startEntries(started: Falsifying): number {
+  return started.log.entries.filter((entry) =>
+    entry.startsWith("falsification started"),
+  ).length;
+}
+
+describe(
+  "what an entry and the log say of a workspace the gate left waiting",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4201: a canary job that gave no reading while no time bound was reached is marked with what happened, and not in the bound's words", async () => {
+      const gate = new ScriptedGate({ readings: () => NO_READING });
+      const says = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        const reason = falsificationEntries(started)[0]?.reason ?? "";
+        return {
+          whatHappened: reason.includes(EXECUTOR_DIED),
+          theBound: reason.includes("time bound"),
+        };
+      });
+      expect(says).toStrictEqual({ whatHappened: true, theBound: false });
+    });
+
+    it("D4202: the log's entry for a refused workspace's mark says what ends the refusal, and not that a change of the input revision does", async () => {
+      const gate = new ScriptedGate({ readings: () => DISAGREED });
+      const logged = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        return started.log.entries
+          .filter((entry) => entry.startsWith(MARK_OF_A))
+          .map((entry) => ({
+            saysWhatEndsTheRefusal: entry.includes(ANOTHER_INSTALL_ENDS),
+            saysTheRevisionEndsIt: entry.includes(WORKSPACE_WAIT_ENDS),
+          }));
+      });
+      expect(logged).toStrictEqual([
+        { saysWhatEndsTheRefusal: true, saysTheRevisionEndsIt: false },
+      ]);
+    });
+
+    it("D4204: the log names no falsification job as started for a workspace while its canary job runs, once the look refused it, or when a later look refuses it from the kept reading", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const outcome = await falsifying({ gate }, async (started) => {
+        const taken = await canaryJobsTaken(gate);
+        const whileTheCanariesRun = startEntries(started);
+        gate.end(DISAGREED);
+        await idled(started);
+        const onceRefused = startEntries(started);
+        started.inputs.moveRevision();
+        await idled(started, 2);
+        return {
+          taken,
+          whileTheCanariesRun,
+          onceRefused,
+          refusedAgainAtTheNextRevision: startEntries(started),
+          jobs: started.executor.jobs.length,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        taken: true,
+        whileTheCanariesRun: 0,
+        onceRefused: 0,
+        refusedAgainAtTheNextRevision: 0,
+        jobs: 0,
+      });
     });
   },
 );

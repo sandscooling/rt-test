@@ -28,7 +28,7 @@ import { Changes, type ChangesMoment } from "./changes.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
 import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
-import { Falsification } from "./falsification.js";
+import { Falsification, type FalsificationParts } from "./falsification.js";
 import {
   DISCOVERY_STOPPED_REASON,
   discoverySummary,
@@ -69,6 +69,8 @@ export interface LifecycleParts {
   readonly store: RtTestStore;
   readonly log: DaemonLog;
   readonly executor: Executor;
+  /** Its canary jobs run on `executor`, so a stop's abort of that executor reaches one. */
+  readonly canaryGate: FalsificationParts["canaryGate"];
   /** Takes the dependency builds, so a build never waits behind a run. */
   readonly buildExecutor: Executor;
   /** Started with the scheduler and stopped before the store closes. */
@@ -86,7 +88,9 @@ export interface LifecycleParts {
  * input events seen before it are read, and a run once the dependency build at that revision has ended or none can
  * begin. A discovery is stored under the input fingerprint it started from, or not fingerprinted when its inputs
  * moved while it ran; a run is judged by its workspace's inputs alone, and interrupted with nothing stored once a
- * change inside them makes it worthless. While nothing is due, it falsifies the waiting defect definitions.
+ * change inside them makes it worthless. While nothing is due, it falsifies the waiting defect definitions of each
+ * workspace whose Vitest install the canary gate holds a confirmed reading of, and takes a canary job first for an
+ * install the gate holds no reading of.
  */
 export class DaemonLifecycle implements DaemonHandlers {
   readonly identity: DaemonIdentity;

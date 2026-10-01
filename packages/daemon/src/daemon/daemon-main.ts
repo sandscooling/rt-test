@@ -1,11 +1,13 @@
 import { join, resolve } from "node:path";
 import type { Socket } from "node:net";
+import { BUNDLED_CANARY_DIRECTORY } from "../falsify/canary-set.js";
 import { takeStartEnvironment } from "../inputs/environment-digest.js";
 import { InputTracker } from "../inputs/input-tracker.js";
 import { consumerIdentity } from "../store/consumer-identity.js";
 import { openStore, type RtTestStore } from "../store/open-store.js";
 import type { StoreScope } from "../store/stored-records.js";
 import { errorText } from "../vitest/error-text.js";
+import { CanaryGate } from "./canary-gate.js";
 import { DaemonLog, daemonLogFile, roleLog } from "./daemon-log.js";
 import { createDaemonKey, type DaemonKey } from "./endpoint-proof.js";
 import { identityHash, listenOnEndpoint, type Listening } from "./endpoint.js";
@@ -114,6 +116,7 @@ async function serve(
   const held = await holdStore(listening, scope, directory);
   if (!held.ok) return refuse(log, held.reason);
   const { key, lock, store } = held;
+  const executor = new Executor(log, startEnvironment);
   const lifecycle = new DaemonLifecycle({
     identity: {
       pid: process.pid,
@@ -127,7 +130,13 @@ async function serve(
     start: request.start,
     store,
     log,
-    executor: new Executor(log, startEnvironment),
+    executor,
+    canaryGate: new CanaryGate({
+      falsify: (...job) => executor.falsify(...job),
+      stateDirectory: directory,
+      log,
+      canaryDirectory: BUNDLED_CANARY_DIRECTORY,
+    }),
     buildExecutor: new Executor(
       roleLog(log, BUILD_EXECUTOR_ROLE),
       startEnvironment,
