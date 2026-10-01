@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -21,6 +22,7 @@ import {
   verifyInSandboxes,
   type PoolResult,
 } from "../../../scripts/lib/defects/pool.mjs";
+import { PROGRESS_MARKER } from "../../../scripts/lib/defects/progress-reporter.mjs";
 import {
   EXIT_ENTRY,
   readExitRecord,
@@ -269,8 +271,10 @@ export const STAND_IN = fileURLToPath(
 );
 
 export interface StandInScript {
+  readonly stderr?: readonly string[];
   readonly lines?: readonly string[];
-  readonly repeat?: { readonly line: string; readonly forMs: number };
+  /** A line written every beat until the test releases the run, so the test decides when it stops. */
+  readonly repeat?: string;
   readonly children?: readonly (readonly string[])[];
   readonly childStdio?: "ignore" | "inherit";
   readonly finish?: boolean;
@@ -279,9 +283,20 @@ export interface StandInScript {
 export interface StandInRun {
   /** `read` when the runner returned the report, otherwise the runner's error. */
   readonly outcome: Promise<string>;
-  /** The ids of the idle children the stand-in started, once it has started them. */
+  /** The ids of the idle children the stand-in started: none until it has recorded them. */
   readonly children: () => number[];
+  /** Lets a stand-in that repeats a line write it once more and go on to its finish. */
+  readonly release: () => void;
 }
+
+/** The stdout line the verifier's progress reporter writes for `event`. */
+export const progress = (event: object): string =>
+  `${PROGRESS_MARKER}${JSON.stringify(event)}`;
+
+export const collected = progress({
+  event: "collected",
+  module: "calc.test.ts",
+});
 
 /** Runs the stand-in under the defect verifier's runner in `dir`, stopping it after `idleWindowMs` without progress. */
 export function runStandIn(
@@ -295,9 +310,13 @@ export function runStandIn(
     () => "read",
     (error: Error) => error.message,
   );
+  const recorded = join(dir, "children.json");
   const children = () =>
-    JSON.parse(readFileSync(join(dir, "children.json"), "utf8")) as number[];
-  return { outcome, children };
+    existsSync(recorded)
+      ? (JSON.parse(readFileSync(recorded, "utf8")) as number[])
+      : [];
+  const release = () => writeFileSync(join(dir, "released"), "");
+  return { outcome, children, release };
 }
 
 export function inSandboxes(

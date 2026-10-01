@@ -16,21 +16,17 @@ import {
   type AssertionResult,
   type RunResult,
 } from "../../../scripts/lib/defects/vitest.mjs";
-import { endsWithin } from "../processes.js";
-import {
-  endOwnedProcesses,
-  recordsInside,
-  type ProcessRecord,
-} from "../run-cleanup.mjs";
+import { endOwnedProcesses } from "../run-cleanup.mjs";
 import { PROCESS_SCENARIO } from "../timeouts.js";
 import {
   CALC_TEST,
   catalogOf,
   cleanEnd,
+  collected,
   OTHER_TEST,
+  progress,
   runStandIn,
   withScratch,
-  type StandInScript,
 } from "./harness.js";
 
 const SANDBOX = join("scratch", "sandbox-0");
@@ -86,57 +82,10 @@ const ARGS = {
   report: "report.json",
 };
 
-/** Short enough that a stalled stand-in is stopped at once, long enough for it to start. */
-const STALL_WINDOW_MS = 2000;
-/** Several times the stand-in's 100 ms beat, so a run that keeps beating is never stopped on a loaded machine. */
-const LIVE_WINDOW_MS = 2000;
-/** How long an ended process may take to go on a loaded machine. */
-const STOP_WAIT_MS = 15_000;
-/** How long a process that must be spared is watched for an end that should never come. */
-const SPARE_WAIT_MS = 2000;
-/** How long a stopped run may take to fail on a loaded machine, kept under the test's budget. */
-const SETTLE_WAIT_MS = 10_000;
-
-const progress = (event: object) =>
-  `${PROGRESS_MARKER}${JSON.stringify(event)}`;
-const collected = progress({ event: "collected", module: "calc.test.ts" });
-const startedCalc = progress({
-  event: "started",
-  test: "calc > D1",
-  timeout: 5000,
-});
 const startedAndFinished = (timeout: number) => [
   progress({ event: "started", test: "slow > D9", timeout }),
   progress({ event: "finished", test: "slow > D9" }),
 ];
-
-/**
- * Runs a stand-in that starts `script`'s children, reports one line and hangs, so the runner stops it; then hands
- * `observe` the record of each child still running, which lies inside the scratch folder, and ends whichever still
- * run. A child with no record has already ended.
- */
-function afterStall<T>(
-  script: StandInScript,
-  observe: (children: ProcessRecord[]) => Promise<T>,
-): Promise<T> {
-  return withScratch(async (dir) => {
-    const run = runStandIn(
-      dir,
-      { ...script, lines: [startedCalc] },
-      STALL_WINDOW_MS,
-    );
-    await run.outcome;
-    const children = run.children();
-    try {
-      if (children.length !== script.children?.length) {
-        throw new Error("the stand-in did not start its children");
-      }
-      return await observe(recordsInside([dir], children));
-    } finally {
-      endOwnedProcesses([dir], children);
-    }
-  });
-}
 
 /**
  * Runs the entry script `source` writes, in `dir`, for a report path under the runner, stopping it after
@@ -159,12 +108,9 @@ function runEntryIn(
 }
 
 /** Runs the entry script `source` writes under the runner; `read`, or the runner's error. */
-function runEntry(
-  source: (report: string) => string,
-  idleWindowMs?: number,
-): Promise<string> {
+function runEntry(source: (report: string) => string): Promise<string> {
   return withScratch((dir) =>
-    runEntryIn(dir, source, idleWindowMs).then(
+    runEntryIn(dir, source).then(
       () => "read",
       (error: Error) => error.message,
     ),
@@ -200,7 +146,10 @@ const tailOf = (message: string) =>
 const REAL_FIXTURES = fileURLToPath(
   new URL("../../fixtures/defects-runner/vitest/", import.meta.url),
 );
-/** Under the test's budget, so a real run that hangs fails through the runner's verdict, not the test's timeout. */
+/**
+ * The idle window of a run on the real clock, where it only bounds a hang: long enough for a loaded machine to start
+ * the run, and under the test's budget, so a run that hangs is stopped by the runner before the test times out.
+ */
 const REAL_WINDOW_MS = 20_000;
 
 interface RealRun {
@@ -260,6 +209,9 @@ const asDetection =
     detectionProblem(run, sandbox, fixtureDefect(test));
 
 const bareRejection = 'Promise.reject(new Error("bare boom"));\n';
+
+/** Calls `process.exit(3)`, and ends with another code at once, below the exit witness, should that call return. */
+const exitsWithThree = "process.exit(3);\nprocess.reallyExit(4);\n";
 
 /** Node's own crash on an unhandled rejection: exit status 1, and the error on stderr. */
 const NODE_REJECTION_CRASH = /; exit status 1, .*; stderr: .*Error: bare boom/s;
@@ -499,17 +451,6 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     expect(tailOf(outcome)).toBe(lines.join("\n"));
   });
 
-  it("D1980: quotes a stalled run's stderr and stdout tail in its stop failure", async () => {
-    const outcome = await runEntry(
-      () =>
-        `process.stderr.write("hung here\\n");\nprocess.stdout.write("said before hanging\\n");\nsetInterval(() => {}, 1000);\n`,
-      STALL_WINDOW_MS,
-    );
-    expect(outcome).toMatch(
-      /made no progress.*; stderr: hung here\n; stdout tail: said before hanging$/s,
-    );
-  });
-
   it("D2056: hands back a run's whole stderr with a valid report", async () => {
     const { stderr } = await validRunOutput();
     expect(stderr).toBe("warned here\n");
@@ -604,154 +545,13 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     );
   });
 
-  it("D1701: never stops a run that keeps reporting progress, however long it runs past the idle window", async () => {
-    const outcome = await withScratch(
-      (dir) =>
-        runStandIn(
-          dir,
-          {
-            repeat: { line: collected, forMs: 5 * LIVE_WINDOW_MS },
-            finish: true,
-          },
-          LIVE_WINDOW_MS,
-        ).outcome,
-    );
-    expect(outcome).toBe("read");
-  });
-
-  it("D1702: stops a run whose only output is not a reporter line, naming the running test and the last progress", async () => {
-    const outcome = await withScratch(
-      (dir) =>
-        runStandIn(
-          dir,
-          {
-            lines: [startedCalc],
-            repeat: { line: "plain output", forMs: 4 * STALL_WINDOW_MS },
-            finish: true,
-          },
-          STALL_WINDOW_MS,
-        ).outcome,
-    );
-    expect(outcome).toMatch(
-      /no progress .*still running: calc > D1; last progress: started calc > D1/,
-    );
-  });
-
-  it("D1703: stops a run whose only output is a malformed reporter line", async () => {
-    const outcome = await withScratch(
-      (dir) =>
-        runStandIn(
-          dir,
-          {
-            lines: [startedCalc],
-            repeat: {
-              line: `${PROGRESS_MARKER}{"event":`,
-              forMs: 4 * STALL_WINDOW_MS,
-            },
-            finish: true,
-          },
-          STALL_WINDOW_MS,
-        ).outcome,
-    );
-    expect(outcome).toMatch(/made no progress/);
-  });
-
-  it("D1782: stops a run whose only output is a reporter line naming no known event", async () => {
-    const outcome = await withScratch(
-      (dir) =>
-        runStandIn(
-          dir,
-          {
-            lines: [startedCalc],
-            repeat: {
-              line: progress({ event: "unknown", test: "calc > D1" }),
-              forMs: 4 * STALL_WINDOW_MS,
-            },
-            finish: true,
-          },
-          STALL_WINDOW_MS,
-        ).outcome,
-    );
-    expect(outcome).toMatch(/made no progress/);
-  });
-
-  it("D1783: ends a stopped run's worker that holds the main process's output open", async () => {
-    const ended = await afterStall(
-      { children: [[]], childStdio: "inherit" },
-      (workers) => endsWithin(workers, STOP_WAIT_MS),
-    );
-    expect(ended).toBe(true);
-  });
-
-  it("D2472: fails a stalled run whose main process exited before the stop, saying its workers could not be told apart", async () => {
-    const outcome = await withScratch(async (dir) => {
-      const run = runStandIn(
-        dir,
-        {
-          lines: [startedCalc],
-          children: [[]],
-          childStdio: "inherit",
-          finish: true,
-        },
-        STALL_WINDOW_MS,
-      );
-      try {
-        return await run.outcome;
-      } finally {
-        endOwnedProcesses([dir], run.children());
-      }
-    });
-    expect(outcome).toMatch(
-      /its main process had exited before the stop, so its workers could not be told from other processes/,
-    );
-  });
-
-  it("D2494: fails, rather than waiting on its output, a stalled run whose main process exited before the stop", async () => {
-    const settled = await withScratch(async (dir) => {
-      const run = runStandIn(
-        dir,
-        {
-          lines: [startedCalc],
-          children: [[]],
-          childStdio: "inherit",
-          finish: true,
-        },
-        STALL_WINDOW_MS,
-      );
-      try {
-        return await Promise.race([
-          run.outcome.then(() => true),
-          delay(STALL_WINDOW_MS + SETTLE_WAIT_MS).then(() => false),
-        ]);
-      } finally {
-        endOwnedProcesses([dir], run.children());
-      }
-    });
-    expect(settled).toBe(true);
-  });
-
-  it("D1704: ends a stopped run's pool workers, which outlive its main process", async () => {
-    const ended = await afterStall({ children: [[]] }, (workers) =>
-      endsWithin(workers, STOP_WAIT_MS),
-    );
-    expect(ended).toBe(true);
-  });
-
-  it("D1705: spares a stopped run's watchdog, named by its command line, so it can clean up after the run", async () => {
-    const ended = await afterStall(
-      { children: [["run-watchdog.mjs"]] },
-      (watchdogs) => endsWithin(watchdogs, SPARE_WAIT_MS),
-    );
-    expect(ended).toBe(false);
-  });
-
   it("D1708: fails a run holding a test whose timeout exceeds the longest allowed, naming it and the constant to raise", async () => {
     const outcome = await withScratch(
       (dir) =>
         runStandIn(
           dir,
           { lines: startedAndFinished(120_001), finish: true },
-          LIVE_WINDOW_MS,
+          REAL_WINDOW_MS,
         ).outcome,
     );
     expect(outcome).toMatch(
@@ -765,7 +565,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
         runStandIn(
           dir,
           { lines: startedAndFinished(120_000), finish: true },
-          LIVE_WINDOW_MS,
+          REAL_WINDOW_MS,
         ).outcome,
     );
     expect(outcome).toBe("read");
@@ -779,7 +579,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
     });
     const outcome = await withScratch(
       (dir) =>
-        runStandIn(dir, { lines: [limits], finish: true }, LIVE_WINDOW_MS)
+        runStandIn(dir, { lines: [limits], finish: true }, REAL_WINDOW_MS)
           .outcome,
     );
     expect(outcome).toMatch(/the hooks of project slow-hooks \(120001 ms\)/);
@@ -1001,10 +801,7 @@ describe("the Vitest runner", PROCESS_SCENARIO, () => {
   });
 
   it("D2182: records a process.exit call with its caller, then exits with its code", async () => {
-    const outcome = await runEntry(
-      () => "process.exit(3);\nsetInterval(() => {}, 1000);\n",
-      STALL_WINDOW_MS,
-    );
+    const outcome = await runEntry(() => exitsWithThree);
     expect(outcome).toMatch(
       /; exit status 3, .*; the Vitest process recorded \(1\) a process\.exit\(3\) call from .+, then exited with code 3; /s,
     );

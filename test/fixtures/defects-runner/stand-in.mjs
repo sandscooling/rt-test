@@ -1,15 +1,16 @@
 // Stands in for Vitest's entry under the defect verifier's runner. It reads its script from `stand-in.json` in the
-// `--root` directory: `lines` to write to stdout at once, a `repeat` line to write every REPEAT_MS for `forMs`,
-// `children` to start detached (each an argument list for an idle Node process, so the command line can name what the
-// test needs, followed by the root, which ties the child to the test), `childStdio` for them ("ignore" unless
-// "inherit", which holds the runner's pipes open), and `finish`, which writes an empty report and exits; otherwise it
-// hangs until it is ended.
+// `--root` directory: `stderr` and `lines` to write to stderr and stdout at once, a `repeat` line to write every
+// REPEAT_MS until the test writes `released` in the root, `children` to start detached (each an argument list for an
+// idle Node process, so the command line can name what the test needs, followed by the root, which ties the child to
+// the test), `childStdio` for them ("ignore" unless "inherit", which holds the runner's pipes open), and `finish`,
+// which writes an empty report and exits; otherwise it hangs until it is ended.
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const REPEAT_MS = 100;
+const RELEASED = "released";
 const IDLE_SCRIPT = "setInterval(() => {}, 1000);";
 const EMPTY_REPORT = { numPassedTests: 0, numFailedTests: 0, testResults: [] };
 
@@ -30,6 +31,7 @@ const children = (script.children ?? []).map((extra) => {
 });
 writeFileSync(join(root, "children.json"), JSON.stringify(children));
 
+for (const line of script.stderr ?? []) process.stderr.write(`${line}\n`);
 for (const line of script.lines ?? []) process.stdout.write(`${line}\n`);
 
 function finish() {
@@ -43,10 +45,9 @@ function finish() {
 
 if (script.repeat === undefined) finish();
 else {
-  const until = Date.now() + script.repeat.forMs;
   const beat = setInterval(() => {
-    process.stdout.write(`${script.repeat.line}\n`);
-    if (Date.now() < until) return;
+    process.stdout.write(`${script.repeat}\n`);
+    if (!existsSync(join(root, RELEASED))) return;
     clearInterval(beat);
     finish();
   }, REPEAT_MS);
