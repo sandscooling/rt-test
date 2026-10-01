@@ -192,6 +192,14 @@ _Avoid_: classification, message match
 A falsification verdict bound to its test, mutation, inputs, and configuration.
 _Avoid_: proof, kill record
 
+**Evidence freshness**:
+Whether a defect's evidence still describes its definition, its mutation's file, its workspace's inputs and the versions it was produced under.
+_Avoid_: evidence staleness, validity
+
+**Definition digest**:
+A digest of a defect definition's id, test identity and mutation, to which its evidence is bound.
+_Avoid_: definition hash
+
 **Survivor**:
 A mutation its intended test did not reject.
 _Avoid_: live mutant
