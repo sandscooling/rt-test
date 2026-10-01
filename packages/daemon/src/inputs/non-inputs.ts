@@ -258,7 +258,7 @@ function unusable(why: string): NonInputsDeclaration {
 }
 
 /** How one list member of `rt-test.json` is checked, and the words its refusal uses. */
-interface ListMember {
+export interface ListMember {
   readonly member: string;
   readonly max: number;
   /** The plural and singular nouns for an item. */
@@ -291,7 +291,10 @@ function declarationProblem(value: unknown): string | undefined {
 }
 
 /** A member the file does not have is no problem; one it has must be an array of strings, each usable. */
-function listProblem(value: object, rule: ListMember): string | undefined {
+export function listProblem(
+  value: object,
+  rule: ListMember,
+): string | undefined {
   const list = objectField(value, rule.member);
   if (list === undefined) return undefined;
   if (!isStringArray(list)) {
