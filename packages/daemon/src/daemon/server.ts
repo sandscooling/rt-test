@@ -8,10 +8,12 @@ import type {
   WaitAnswer,
 } from "../query/answer.js";
 import type { ChangesAnswer } from "../query/changes-answer.js";
+import type { DefectsAnswer } from "../query/defects-answer.js";
 import { errorText } from "../vitest/error-text.js";
 import type { DaemonLog } from "./daemon-log.js";
 import {
   CHANGES_TYPE,
+  DEFECTS_TYPE,
   encodeLine,
   ERROR_TYPE,
   HELLO_TYPE,
@@ -40,6 +42,7 @@ import {
   type ChangesResponse,
   type DaemonIdentity,
   type DecodedLine,
+  type DefectsResponse,
   type ErrorResponse,
   type ProtocolMessage,
   type HelloResponse,
@@ -54,6 +57,7 @@ import {
   editedPaths,
   error,
   namedPaths,
+  optionalPath,
   valueShape,
 } from "./request-fields.js";
 
@@ -81,6 +85,7 @@ export interface ChangesQuery {
 /** What a too-large answer's error asks for instead: fewer files for a wait or a changes query, a narrower path for the others. */
 const NARROWER_REQUEST = {
   path: "ask status for a narrower path",
+  defectsPath: "ask defects for a narrower path",
   files: "wait on fewer files",
   changedFiles: "ask for the changes of fewer files",
 } as const;
@@ -103,6 +108,14 @@ export interface DaemonHandlers {
   wait(query: WaitQuery, signal: AbortSignal): QueryAnswer<WaitAnswer>;
   /** Reads only: starts no job and never waits; answers what changed for the files' covering tests since a cursor. */
   changes(query: ChangesQuery, signal: AbortSignal): QueryAnswer<ChangesAnswer>;
+  /**
+   * Reads only: starts no job and loads no consumer module; answers each defect definition's state and the gaps at or
+   * under `path`, absolute, or in the whole worktree when it is undefined.
+   */
+  defects(
+    path: string | undefined,
+    signal: AbortSignal,
+  ): QueryAnswer<DefectsAnswer>;
   /** Begins the stop, or joins the one under way. */
   stop(): void;
   isStopping(): boolean;
@@ -370,6 +383,7 @@ type VersionedAnswer =
   | PathStatusResponse
   | WaitResponse
   | ChangesResponse
+  | DefectsResponse
   | ErrorResponse;
 
 function versionedAnswer(
@@ -400,6 +414,9 @@ function versionedAnswer(
   }
   if (message["type"] === CHANGES_TYPE) {
     return changesResponse(message, handlers, signal);
+  }
+  if (message["type"] === DEFECTS_TYPE) {
+    return defectsResponse(message, handlers, signal);
   }
   return error(
     UNKNOWN_REQUEST_CODE,
@@ -468,6 +485,18 @@ function changesResponse(
   return queryResponse(CHANGES_TYPE, () => handlers.changes(query, signal));
 }
 
+function defectsResponse(
+  message: ProtocolMessage,
+  handlers: DaemonHandlers,
+  signal: AbortSignal,
+): Queried<DefectsResponse> | Promise<Queried<DefectsResponse>> {
+  const scope = optionalPath(message, DEFECTS_TYPE);
+  if (!("path" in scope)) return scope;
+  return queryResponse(DEFECTS_TYPE, () =>
+    handlers.defects(scope.path, signal),
+  );
+}
+
 type Typed<T extends string, A> = A & { type: T; protocolVersion: number };
 type Queried<R> = R | ErrorResponse;
 
@@ -514,6 +543,7 @@ function checkedAnswer<T extends string, A extends object>(
 function narrowerRequest(type: string): string {
   if (type === WAIT_TYPE) return NARROWER_REQUEST.files;
   if (type === CHANGES_TYPE) return NARROWER_REQUEST.changedFiles;
+  if (type === DEFECTS_TYPE) return NARROWER_REQUEST.defectsPath;
   return NARROWER_REQUEST.path;
 }
 

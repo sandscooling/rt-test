@@ -21,6 +21,8 @@ C117. **Fingerprint every input that can change a result**: A new input kind (co
 
 C118. **Invalidate defect evidence with its inputs**: A defect evidence record binds the test, the mutation, the relevant inputs and the execution configuration, and a change to any of them makes the evidence stale.
 
+C173. **Take a query's facts after its last await**: A query that awaits before it answers reads the store, the daemon's view and the inputs only once its last awaited read has ended, and resolves from them without awaiting again. FAIL on an answer that spreads facts read before an await.
+
 ## Independent dimensions
 
 C119. **Store each state dimension separately**: Outcome, freshness, execution state, defect evidence and evidence freshness are separate fields; no value encodes two of them, such as a "stale-pass" outcome.

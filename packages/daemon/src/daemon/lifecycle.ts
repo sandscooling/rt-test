@@ -10,6 +10,7 @@ import type {
   WaitAnswer,
 } from "../query/answer.js";
 import type { ChangesAnswer } from "../query/changes-answer.js";
+import { defectsAnswer, type DefectsAnswer } from "../query/defects-answer.js";
 import { resolveCallerPath } from "../query/caller-paths.js";
 import { pathStatusAnswer, withoutFingerprints } from "../query/path-status.js";
 import { summaryAnswer, type DaemonView } from "../query/summary.js";
@@ -38,11 +39,7 @@ import {
   threwOutcome,
   UnstoredJobs,
 } from "./job-endings.js";
-import type {
-  DaemonActivity,
-  DaemonIdentity,
-  UnstoredJob,
-} from "./protocol.js";
+import type { DaemonActivity, DaemonIdentity } from "./protocol.js";
 import { RefusalNotes } from "./refusal-notes.js";
 import {
   changedWhileRunning,
@@ -168,11 +165,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       });
   }
 
-  status(): {
-    activity: DaemonActivity;
-    stopping: boolean;
-    unstoredJobs: readonly UnstoredJob[];
-  } {
+  status(): ReturnType<DaemonHandlers["status"]> {
     return {
       activity: this.#activity,
       stopping: this.isStopping(),
@@ -218,6 +211,20 @@ export class DaemonLifecycle implements DaemonHandlers {
     signal: AbortSignal,
   ): Promise<ChangesAnswer | NoAnswer | RefusedQuery> {
     return this.#changes.answer(query, signal);
+  }
+
+  /** Hands over the moment as a call, since the answer takes it only once its file reads have ended. */
+  defects(
+    path: string | undefined,
+    signal: AbortSignal,
+  ): Promise<DefectsAnswer | NoAnswer> {
+    return defectsAnswer({
+      path,
+      consumerRoot: this.identity.consumerRoot,
+      stateDirectory: this.identity.stateDirectory,
+      signal,
+      moment: () => this.#moment(),
+    });
   }
 
   /** The latest stored results, the daemon's view, and the inputs narrowed for them with the narrowing at their revision. */

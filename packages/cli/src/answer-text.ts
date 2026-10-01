@@ -44,11 +44,16 @@ import {
   type WaitResponse,
   type WorkspaceExecution,
   type ChangesResponse,
+  type DefectsResponse,
 } from "@rt-test/daemon/client";
 import { oneLine } from "./output.js";
 
 type Answer =
-  SummaryResponse | PathStatusResponse | WaitResponse | ChangesResponse;
+  | SummaryResponse
+  | PathStatusResponse
+  | WaitResponse
+  | ChangesResponse
+  | DefectsResponse;
 type CoverageState = WaitResponse["coverage"]["state"];
 type ModuleLocation = Pick<
   NamedFailure,

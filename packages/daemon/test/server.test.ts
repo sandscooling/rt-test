@@ -16,6 +16,7 @@ import type {
   PathStatusAnswer,
   SummaryAnswer,
 } from "../src/query/answer.js";
+import type { DefectsAnswer } from "../src/query/defects-answer.js";
 import {
   CLOSE_GRACE_MS,
   connectionServer,
@@ -89,6 +90,7 @@ function handlers(
     pathStatus: () => NO_STAND_IN_ANSWER,
     wait: () => NO_STAND_IN_ANSWER,
     changes: () => NO_STAND_IN_ANSWER,
+    defects: () => NO_STAND_IN_ANSWER,
     ...queries,
     stop: () => stop.abort(),
     isStopping: () => stop.signal.aborted,
@@ -1467,5 +1469,80 @@ describe("an empty list of edited files", () => {
     expect(
       await editedAnswered(changesRequest([WAITED_FILE], { edited: [] })),
     ).toStrictEqual({ kinds: [REACHED], edited: [[]] });
+  });
+});
+
+/** A defects request, with `more` beside its type. */
+function defectsRequest(more: object = {}): object {
+  return { type: "defects", protocolVersion: PROTOCOL_VERSION, ...more };
+}
+
+/**
+ * Sends each request after a hello to a server whose defects query answers with `answer` and records the path it was
+ * given, and resolves with each answer line and each path.
+ */
+async function defectsAsked(
+  answer: ReturnType<DaemonHandlers["defects"]>,
+  ...requests: object[]
+): Promise<{
+  lines: Awaited<ReturnType<RawConnection["next"]>>[];
+  paths: (string | undefined)[];
+}> {
+  const paths: (string | undefined)[] = [];
+  const server = connectionServer(
+    {
+      ...handlers(false),
+      defects: (path) => {
+        paths.push(path);
+        return answer;
+      },
+    },
+    memoryLog(),
+    NO_PROOF,
+  );
+  const lines = await withTestEndpoint(server.onConnection, (endpoint) =>
+    withConnection(endpoint, async (connection) => {
+      connection.send(linesOf(HELLO, ...requests));
+      const answers: Awaited<ReturnType<RawConnection["next"]>>[] = [];
+      for (let index = 0; index <= requests.length; index += 1) {
+        answers.push(await connection.next());
+      }
+      return answers;
+    }),
+  );
+  return { lines: lines.slice(1), paths };
+}
+
+describe("a defects request", () => {
+  it("D3700: one whose path is present but not absolute is refused as invalid and never reaches the query, while one with no path or an absolute path reaches it", async () => {
+    const { lines, paths } = await defectsAsked(
+      NO_STAND_IN_ANSWER,
+      defectsRequest({ path: "src" }),
+      defectsRequest({ path: 7 }),
+      defectsRequest(),
+      defectsRequest({ path: WAITED_FILE }),
+    );
+    expect({
+      kinds: lines.map((line) => kindOf(line)),
+      paths,
+    }).toStrictEqual({
+      kinds: [INVALID, INVALID, REACHED, REACHED],
+      paths: [undefined, WAITED_FILE],
+    });
+  });
+
+  it("D3701: an answer past the line limit is refused, asking defects for a narrower path", async () => {
+    const tooLarge = {
+      pad: "x".repeat(2 * 1024 * 1024),
+    } as unknown as DefectsAnswer;
+    const { lines } = await defectsAsked(tooLarge, defectsRequest());
+    expect(lines).toStrictEqual([
+      {
+        type: "error",
+        protocolVersion: PROTOCOL_VERSION,
+        code: "nothing-to-answer",
+        message: expect.stringMatching(/ask defects for a narrower path/),
+      },
+    ]);
   });
 });

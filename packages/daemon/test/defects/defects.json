@@ -1,0 +1,352 @@
+[
+  {
+    "id": "D3654",
+    "defect": "A consumer with no rt-test.json gets an invalid entry, so every consumer that declares no definitions has verified withheld for good.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (settings.state === \"absent\") return { patterns: [] };",
+    "new": "  if (settings.state === \"absent\") return { entry: settingsEntry(\"it is absent\") };"
+  },
+  {
+    "id": "D3655",
+    "defect": "An rt-test.json that cannot be parsed reads as declaring no definition files, so its definitions silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    return { entry: settingsEntry(settings.entry.reason) };",
+    "new": "    return { patterns: [] };"
+  },
+  {
+    "id": "D3656",
+    "defect": "A defects pattern the grammar refuses is walked as written, matches nothing, and its definition files silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    const problem = patternProblem(pattern);",
+    "new": "    const problem = undefined;"
+  },
+  {
+    "id": "D3657",
+    "defect": "A file two patterns match is read once per pattern, so each of its definitions repeats its own id and reads invalid.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (entry.isFile()) walk.files.push(relativePath(segments));",
+    "new": "  if (entry.isFile()) walk.files.push(...matching.map(() => relativePath(segments)));"
+  },
+  {
+    "id": "D3658",
+    "defect": "A matched file that is not JSON stops the reading, so the definitions of the files after it silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    if (\"entry\" in read) walk.invalidEntries.push(read.entry);",
+    "new": "    if (\"entry\" in read) { walk.invalidEntries.push(read.entry); break; }"
+  },
+  {
+    "id": "D3659",
+    "defect": "A parse failure's reason carries the parser's message, which quotes the definition file's text.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "        reason: `it is not valid JSON${positionText(error)}`,",
+    "new": "        reason: `it is not valid JSON: ${errorText(error)}`,"
+  },
+  {
+    "id": "D3660",
+    "defect": "A parse failure's reason drops the position the parser gives, so the author cannot find the broken spot.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  const found = JSON_POSITION.exec(errorText(error));",
+    "new": "  const found = JSON_POSITION.exec(\"\");"
+  },
+  {
+    "id": "D3661",
+    "defect": "A matched file with no defects array reads as holding no definitions, so it silently leaves the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (!Array.isArray(defects)) {",
+    "new": "  if (!Array.isArray(defects)) return { definitions: [] };\n  if (false) {"
+  },
+  {
+    "id": "D3662",
+    "defect": "A link a pattern matches is skipped without an invalid entry, so a definition file reached through it silently leaves the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (matching.length > 0) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3663",
+    "defect": "A directory link below which a pattern could match is skipped without an entry naming it, so the author is never told which link hides the definition files.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (below.length === 0) return;",
+    "new": "  return;"
+  },
+  {
+    "id": "D3664",
+    "defect": "The walk enters node_modules, so every workspace package link there is an invalid entry and a Bun or pnpm consumer has verified withheld for good.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    SKIPPED_DIRECTORIES.includes(name) ||",
+    "new": "    false ||"
+  },
+  {
+    "id": "D3665",
+    "defect": "A directory the walk cannot list reads as empty, so the definition files in it silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    if (!isMissing(error)) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D3666",
+    "defect": "A directory past the depth bound is skipped without an invalid entry, so the definition files below it silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (segments.length > MAX_WALK_DEPTH) {",
+    "new": "  if (segments.length > MAX_WALK_DEPTH) return undefined;\n  if (false) {"
+  },
+  {
+    "id": "D3667",
+    "defect": "A matched file that cannot be read reads as gone, so its definitions silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    if (isMissing(error)) return ABSENT;",
+    "new": "    return ABSENT;"
+  },
+  {
+    "id": "D3668",
+    "defect": "The walk ignores git's ignored paths, so a definition-like file in build output is read and its definitions or problems join the answer.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (!listing.ok) return;",
+    "new": "  return;"
+  },
+  {
+    "id": "D3669",
+    "defect": "An entry under a directory git listed as holding only ignored entries is read without asking git, so an ignored file created after the listing is read.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  if (repository === undefined || entries.length === 0) return;",
+    "new": "  return;"
+  },
+  {
+    "id": "D3670",
+    "defect": "A definition with no required text passes as valid.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  for (const member of [MEMBER.defect, MEMBER.required]) {",
+    "new": "  for (const member of [MEMBER.defect]) {"
+  },
+  {
+    "id": "D3671",
+    "defect": "An empty id is taken as usable, so a definition no answer can name passes as valid.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  const usableId = typeof id === \"string\" && id !== \"\" ? id : undefined;",
+    "new": "  const usableId = typeof id === \"string\" ? id : undefined;"
+  },
+  {
+    "id": "D3672",
+    "defect": "A mutation with an empty old passes as valid, so a definition that can never apply reads anchor missing rather than invalid.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  if (mutation.old === \"\") problems.push(\"its mutation's old text is empty\");",
+    "new": "  if (false) problems.push(\"its mutation's old text is empty\");"
+  },
+  {
+    "id": "D3673",
+    "defect": "A mutation whose old equals its new passes as valid, so a definition that changes nothing can be credited as detected.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  else if (withLfBreaks(mutation.old) === withLfBreaks(mutation.new)) {",
+    "new": "  else if (false) {"
+  },
+  {
+    "id": "D3674",
+    "defect": "A mutation differing only in LF against CRLF passes as changing something, though the matcher writes the file's own line ending and changes nothing.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  else if (withLfBreaks(mutation.old) === withLfBreaks(mutation.new)) {",
+    "new": "  else if (mutation.old === mutation.new) {"
+  },
+  {
+    "id": "D3675",
+    "defect": "A mutation file spelled with .. segments that climb out of the consumer root passes as inside it.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  if (climbsOut(normal, POSIX_SEPARATOR)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3676",
+    "defect": "A mutation file reached through a link to a path outside the consumer root passes as inside it.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  if (leadsOutside(root, spelled.path, path)) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3677",
+    "defect": "Only the later definitions carrying a repeated id are invalid, so the first keeps the id and evidence keyed by it can be credited to the wrong definition.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "    if (group === undefined || group.length === 1) return definition;",
+    "new": "    if (group === undefined || group.length === 1 || group[0] === definition) return definition;"
+  },
+  {
+    "id": "D3678",
+    "defect": "A test module spelled with backslashes keeps them, so a Windows author's src\\a.test.ts never resolves to the discovered src/a.test.ts.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  const slashed = spelling.split(WINDOWS_SEPARATOR).join(POSIX_SEPARATOR);",
+    "new": "  const slashed = spelling;"
+  },
+  {
+    "id": "D3679",
+    "defect": "A not-discovered reason says the discovery lists the module whether or not it does.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  const listing = index.modules.has(modulePath)",
+    "new": "  const listing = true"
+  },
+  {
+    "id": "D3680",
+    "defect": "A not-discovered reason never says the discovery is not current, so a test added since reads as settled not discovered.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  const currency = index.current",
+    "new": "  const currency = true"
+  },
+  {
+    "id": "D3681",
+    "defect": "A definition naming several same-named tests resolves to the first, so another test's detection could be credited to it.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (only !== undefined && matches.length === 1) return { test: only };",
+    "new": "  if (only !== undefined) return { test: only };"
+  },
+  {
+    "id": "D3682",
+    "defect": "A definition's occurrence is ignored, so a definition naming one of two same-named tests stays ambiguous.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "    (test.occurrence === undefined || identity.occurrence === test.occurrence)",
+    "new": "    true"
+  },
+  {
+    "id": "D3683",
+    "defect": "A definition's project is ignored, so a definition naming a test in one of two projects stays ambiguous.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "    (test.project === undefined || identity.projectName === test.project) &&",
+    "new": "    true &&"
+  },
+  {
+    "id": "D3684",
+    "defect": "An ambiguity no field of the format can resolve is reported as one a field resolves, so the author is told to give a field that cannot help.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (fields.length > 0) {",
+    "new": "  if (true) {"
+  },
+  {
+    "id": "D3685",
+    "defect": "A definition invalid under the format checks resolves no test, so the test it names reads as a gap.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "    resolution !== undefined && \"test\" in resolution",
+    "new": "    definition.problems.length === 0 && resolution !== undefined && \"test\" in resolution"
+  },
+  {
+    "id": "D3686",
+    "defect": "A definition whose test resolves is judged by its anchor alone, so one invalid for a repeated id reads anchor missing rather than invalid.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (problems.length > 0 || resolved === undefined) {",
+    "new": "  if (resolved === undefined) {"
+  },
+  {
+    "id": "D3687",
+    "defect": "The anchor is counted by exact text, so a multi-line old reads anchor missing in a CRLF checkout of the same file.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  const count = countAnchor(content.text, mutation.old);",
+    "new": "  const count = content.text.split(mutation.old).length - 1;"
+  },
+  {
+    "id": "D3688",
+    "defect": "An old occurring more than once reads never verified, though the mutation cannot say which occurrence to change.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (count === ANCHOR_OCCURRENCES_WANTED) return undefined;",
+    "new": "  if (count >= ANCHOR_OCCURRENCES_WANTED) return undefined;"
+  },
+  {
+    "id": "D3689",
+    "defect": "The anchor count lets occurrences overlap, so an old falsification finds once reads anchor missing.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  const count = countAnchor(content.text, mutation.old);",
+    "new": "  const count = [...content.text.matchAll(new RegExp(`(?=${mutation.old})`, \"g\"))].length;"
+  },
+  {
+    "id": "D3690",
+    "defect": "A mutation file that cannot be read reads as empty, so its reason gives a count of 0 rather than the read failure.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "    return { unreadable: errorText(error) };",
+    "new": "    return { text: \"\" };"
+  },
+  {
+    "id": "D3711",
+    "defect": "A usable pattern that matches no entry makes no invalid entry, so a mistyped pattern or a renamed folder drops its definition files from the total silently.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  walk.invalidEntries.push(...unmatchedPatterns(walk));",
+    "new": "  walk.invalidEntries.push();"
+  },
+  {
+    "id": "D3712",
+    "defect": "A directory link whose target cannot be checked is skipped without an invalid entry.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    return isMissing(error)\n",
+    "new": "    return true\n"
+  },
+  {
+    "id": "D3714",
+    "defect": "A valid, resolved definition whose anchor was never read reads never verified.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "const UNREAD_ANCHOR: AnchorRead = { missing: ANCHOR_NOT_READ };",
+    "new": "const UNREAD_ANCHOR: AnchorRead = { missing: undefined };"
+  },
+  {
+    "id": "D3715",
+    "defect": "The real-path verdict of the first mutation file checked is reused for every other file, so a file reached through a link outside the root passes as inside it.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  const known = root.leadsOutside.get(spelled);",
+    "new": "  const known = [...root.leadsOutside.values()][0];"
+  },
+  {
+    "id": "D3716",
+    "defect": "The position in a parse failure's reason is taken from the text of the file that the parser quotes.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  / JSON at position (\\d+)(?: \\(line (\\d+) column (\\d+)\\))?$/;",
+    "new": "  /at position (\\d+)(?: \\(line (\\d+) column (\\d+)\\))?/;"
+  },
+  {
+    "id": "D3717",
+    "defect": "A directory segment of a pattern is compared as text, so a pattern with a wildcard directory segment enters no directory and its definition files are never read.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    if (wanted === undefined || !matchesSegment(wanted, name)) return false;",
+    "new": "    if (wanted === undefined || wanted !== name) return false;"
+  },
+  {
+    "id": "D3718",
+    "defect": "An rt-test.json that is a link reads as absent, so it declares no definition files and its definitions silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    case PRESENCE.link:",
+    "new": "    case PRESENCE.link:\n      return ABSENT;"
+  },
+  {
+    "id": "D3719",
+    "defect": "An rt-test.json that is a directory reads as absent, so it declares no definition files.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    case PRESENCE.other:",
+    "new": "    case PRESENCE.other:\n      return ABSENT;"
+  },
+  {
+    "id": "D3720",
+    "defect": "An rt-test.json whose top level is not an object reads as declaring no definition files.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    return { entry: settingsEntry(\"its top level is not a JSON object\") };",
+    "new": "    return { patterns: [] };"
+  },
+  {
+    "id": "D3726",
+    "defect": "A test whose name is a string passes the format check, so it resolves to the test its characters spell.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "    isStringArray(name) && name.length > 0",
+    "new": "    (isStringArray(name) || typeof name === \"string\") && name.length > 0"
+  },
+  {
+    "id": "D3727",
+    "defect": "A mutation with no new text is not reported invalid: its kind check is gone, and checking the definition throws, failing the whole query.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "    typeof replacement === \"string\"",
+    "new": "    true"
+  },
+  {
+    "id": "D3728",
+    "defect": "An old that no longer occurs in its file reads never verified.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (count === ANCHOR_OCCURRENCES_WANTED) return undefined;",
+    "new": "  if (count <= ANCHOR_OCCURRENCES_WANTED) return undefined;"
+  },
+  {
+    "id": "D3731",
+    "defect": "The anchor is judged before the definition's problems, so a definition whose test is not discovered and whose anchor is also gone reads anchor missing.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (problems.length > 0 || resolved === undefined) {",
+    "new": "  if ((problems.length > 0 || resolved === undefined) && anchors.get(definition)?.missing === undefined) {"
+  }
+]

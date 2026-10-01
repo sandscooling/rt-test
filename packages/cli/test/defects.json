@@ -1272,5 +1272,47 @@
     "file": "packages/cli/src/commands/hook.ts",
     "old": "  const edited = paths.filter((path) => batchFiles.has(path));",
     "new": "  const edited = [...batchFiles];"
+  },
+  {
+    "id": "D3702",
+    "defect": "The path argument is sent as typed, so a relative path reaches the daemon, which refuses it.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "            : absolutePath(io, pathArgument);",
+    "new": "            : pathArgument;"
+  },
+  {
+    "id": "D3703",
+    "defect": "A second path is silently dropped, so the answer covers only the first while the caller believes it covers both.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "  if (positionals.length > MAX_PATH_POSITIONALS) {",
+    "new": "  if (false) {"
+  },
+  {
+    "id": "D3704",
+    "defect": "An anchor-missing definition is left out of the text, so the author never sees why it cannot run.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "  (state) => state !== DEFECT_STATE.neverVerified,",
+    "new": "  (state) => state === DEFECT_STATE.invalidDefinition,"
+  },
+  {
+    "id": "D3705",
+    "defect": "The --json document carries none of the answer's fields, so an agent reading it sees no counts, definitions or gaps.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "        return output.succeed(answerFields(answer), defectsText(answer));",
+    "new": "        return output.succeed({}, defectsText(answer));"
+  },
+  {
+    "id": "D3729",
+    "defect": "The command leaves out the line saying how many invalid and anchor-missing definitions the answer did not list, so a 500-entry list reads as the whole.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "    ...(unlisted.length === 0",
+    "new": "    ...(true"
+  },
+  {
+    "id": "D3730",
+    "defect": "The command prints each state's count from the definitions listed, not from the answer's counts.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "    ...defectCountLines(answer.counts),",
+    "new": "    ...defectCountLines({ ...answer.counts, states: Object.fromEntries(DEFECT_STATES.map((state) => [state, answer.definitions.filter((definition) => definition.state === state).length])) as DefectCounts[\"states\"] }),"
   }
 ]
