@@ -240,6 +240,8 @@ D1754 through D1756, D1761, D1774 through D1779, D2442, D2474, D2496 and D2542, 
 
 Every other `defects.json` under the root `test/` holds legacy records for the repository's tooling, whose mutated files lie outside `packages/`. No new tooling record is written, and a tooling fix that breaks one deletes it (`_agent-docs/crew.md` § Gates). Ids stay unique across the repository, which `bun run check:defects` enforces. The orchestrator allocates each lane a range of defect ids so parallel lanes never pick the same one. Each test has one assertion, so a targeted assertion failure has a clear scope.
 
+The runner's own stall tests (`test/scripts/defects/runner-stop.test.ts`) never let a real clock decide a stall. Each runs the runner's `setTimeout` and `clearTimeout` on a fake clock, taps the process the runner spawns through the `node:child_process` mock, and advances the clock only after the tap shows the event its claim needs: the first progress line, the output, a later line, or the exit. The stand-in (`test/fixtures/defects-runner/stand-in.mjs`) repeats a line until the test writes `released`, so no duration of its own decides when it stops. A runner test in which the idle window only bounds a hang passes the 20 s `REAL_WINDOW_MS`. The waits poll through `holdsWithin`, which imports `setTimeout` from `node:timers/promises` by name, and a named import of a Node builtin stays real under the fake clock.
+
 ## Bootstrap falsification
 
 ### Snapshot, sandboxes and links
