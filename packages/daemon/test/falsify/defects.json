@@ -50,59 +50,59 @@
   },
   {
     "id": "D3611",
-    "defect": "The probe is placed at the whole replaced text rather than the part that changed, so it fires where the changed code never ran.",
+    "defect": "The probe is placed for the whole replaced text rather than the part that changed, so it stands before the first statement replaced and fires on a run that returned before the changed one.",
     "file": "packages/daemon/src/falsify/reach-probe.ts",
-    "old": "  return { start: offset + prefix, end: offset + written.length - suffix };",
-    "new": "  return { start: offset, end: offset + written.length };"
+    "old": "  const start = offset + prefix;",
+    "new": "  const start = offset;"
   },
   {
     "id": "D3612",
-    "defect": "A call's callee takes a probe, so a method called through the wrap loses its receiver and the probe changes what the module does.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "  [\"CallExpression.arguments\", always],",
-    "new": "  [\"CallExpression.arguments\", always],\n  [\"CallExpression.callee\", always],"
+    "defect": "A module's top-level statement list takes no probe statement, so a change in a statement there has no probe site and its experiment never runs.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  [PROGRAM, BODY_FIELD],\n",
+    "new": ""
   },
   {
     "id": "D3613",
-    "defect": "A change under a TypeScript value wrapper is judged at the wrapper's operand slot, so it gets no probe site and its experiment never runs.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "  const position = outermostWrapper(slot);",
-    "new": "  const position = slot;"
+    "defect": "A declaration is read as ambient because it can carry `declare`, not because it does, so a change of types alone outside any ambient declaration has no probe site and its experiment never runs.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    node.declare === true ||",
+    "new": "    \"declare\" in node ||"
   },
   {
     "id": "D3614",
-    "defect": "A block's statement list takes no probe statement, so a replaced statement in a function body gets no probe site.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "  \"BlockStatement.body\",\n  \"StaticBlock.body\",",
-    "new": "  \"StaticBlock.body\","
+    "defect": "A block's statements are not taken for a statement list, so a replaced statement in a function body is wrapped in a block of its own rather than probed by a statement before it, and a changed declaration there gets no probe site.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  [BLOCK, BODY_FIELD],\n",
+    "new": ""
   },
   {
     "id": "D3615",
-    "defect": "A hoisted function declaration takes a probe statement before it, which fires when the module loads, marking every test reached though the function never ran.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "  \"FunctionDeclaration\",\n  \"ImportDeclaration\",",
-    "new": "  \"ImportDeclaration\","
+    "defect": "A change in a function's header is probed before the function where it is declared, which fires when the module loads, marking every test reached though the function never ran.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  if (body !== undefined) return bodyHead(node, body);\n",
+    "new": ""
   },
   {
     "id": "D3616",
-    "defect": "A `typeof` operand is wrapped, so `typeof` of an undeclared name throws a ReferenceError and the probe fails a test.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "const VALUE_BLIND_UNARY = new Set([\"typeof\", \"delete\"]);",
-    "new": "const VALUE_BLIND_UNARY = new Set([\"delete\"]);"
+    "defect": "The probe calls the recorder unguarded, so in a worker where the reach setup file defined none the probed step throws and fails a test the mutation did not.",
+    "file": "packages/daemon/src/falsify/reach-names.ts",
+    "old": "export const REACH_PROBE_CALL = `globalThis.${REACH_RECORDER}?.()`;",
+    "new": "export const REACH_PROBE_CALL = `globalThis.${REACH_RECORDER}()`;"
   },
   {
     "id": "D3617",
-    "defect": "A link of an optional chain is wrapped, ending the chain there, so a short circuit that returned undefined now throws a TypeError.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "    if (holder.node.type === CHAIN) return false;",
-    "new": "    if (holder.node.type === CHAIN) return true;"
+    "defect": "An expression body's comma expression is written without its parentheses, so an arrow passed as an argument returns the probe's value and its body is read as the next argument, and the probed text does other than the mutated text.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "const WRAP_OPENING = `(${REACH_PROBE_CALL}, `;\nconst WRAP_CLOSING = \")\";",
+    "new": "const WRAP_OPENING = `${REACH_PROBE_CALL}, `;\nconst WRAP_CLOSING = \"\";"
   },
   {
     "id": "D3618",
-    "defect": "A wrap that opens a statement after a line with no semicolon is written bare, so it parses as a call of the previous line's value.",
-    "file": "packages/daemon/src/falsify/reach-probe.ts",
-    "old": "  const opener = opensStatement(path) ? STATEMENT_OPENER : \"\";",
-    "new": "  const opener = \"\";"
+    "defect": "A probe that ends a statement list is written with no semicolon before it, so after a statement written without one it joins that statement into text the parser rejects, and the change has no probe site.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "const CLOSING_PROBE_STATEMENT = `;${REACH_PROBE_CALL};`;",
+    "new": "const CLOSING_PROBE_STATEMENT = `${REACH_PROBE_CALL};`;"
   },
   {
     "id": "D3619",
@@ -114,8 +114,8 @@
   {
     "id": "D3620",
     "defect": "Code inside an ambient declaration takes a probe, so a change there reads as a site that can run though its code never does.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "  if (slot.path.some(({ node }) => isAmbient(node))) return undefined;",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  if (path.some(({ node }) => isAmbient(node))) return noStep(path);\n",
     "new": ""
   },
   {
@@ -365,24 +365,24 @@
   },
   {
     "id": "D3736",
-    "defect": "A changed arrow function is wrapped where it is defined, so the probe fires when the module loads and marks tests that never called the function.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "  \"FunctionExpression\",\n  \"ArrowFunctionExpression\",",
-    "new": "  \"FunctionExpression\","
+    "defect": "A changed arrow function's expression body takes no probe, so the probe stands before the statement that defines the arrow, fires when the module loads and marks tests that never called the function.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "      ? wrapped(body, roleOf(fn, BODY_FIELD))",
+    "new": "      ? undefined"
   },
   {
     "id": "D3737",
-    "defect": "A `delete` operand is wrapped, so the property is never deleted and the probe changes what the module does.",
-    "file": "packages/daemon/src/falsify/probe-slots.ts",
-    "old": "const VALUE_BLIND_UNARY = new Set([\"typeof\", \"delete\"]);",
-    "new": "const VALUE_BLIND_UNARY = new Set([\"typeof\"]);"
+    "defect": "A statement made a block is closed at the end of its own first branch, so an `else` that belonged to it binds to the `if` around it and the probed text takes another branch than the mutated text.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "      { offset: node.end, text: BLOCK_CLOSING },",
+    "new": "      { offset: isSyntaxNode(node.consequent) ? node.consequent.end : node.end, text: BLOCK_CLOSING },"
   },
   {
     "id": "D3738",
     "defect": "A probe the parser rejects is served, so the mutated module fails to load in its experiment instead of being recorded with no probe site before any run.",
     "file": "packages/daemon/src/falsify/reach-probe.ts",
-    "old": "  if (probed === undefined || !parses(fileName, probed)) {",
-    "new": "  if (probed === undefined) {"
+    "old": "  if (!parses(fileName, probed)) {",
+    "new": "  if (false) {"
   },
   {
     "id": "D3739",
@@ -908,5 +908,173 @@
     "file": "packages/daemon/src/falsify/falsify-workspace.ts",
     "old": "    return { read: true, text, digest: wholeDigest(text) };",
     "new": "    return { read: true, text, digest: wholeDigest(text.replaceAll(String.fromCharCode(13), \"\")) };"
+  },
+  {
+    "id": "D3966",
+    "defect": "A static block's statements are not taken for a statement list, so a change inside one is probed before the class that holds it rather than by a statement just before the changed one, and a run in which the block threw before that statement reads as having reached it.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  [STATIC_BLOCK, BODY_FIELD],\n",
+    "new": ""
+  },
+  {
+    "id": "D3967",
+    "defect": "A `case`'s statements are not taken for a statement list, so a changed declaration inside a case is probed before the `switch`, and a test that entered another case reads as having reached it.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  [SWITCH_CASE, CONSEQUENT_FIELD],\n",
+    "new": ""
+  },
+  {
+    "id": "D3968",
+    "defect": "A statement's place in its list is ignored and the probe stands at the head of the list, so a test that left the function at an earlier guard reads as having reached the changed statement.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    return listPoint(holder, field, membersOf(holder, field).indexOf(node));",
+    "new": "    return listPoint(holder, field, 0);"
+  },
+  {
+    "id": "D3969",
+    "defect": "A statement removed after a guard is probed before the guard, which ends where the removal starts, so a test that returned at the guard reads as having reached the removed statement.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  const touched = members.findIndex((member) => member.end > span.start);",
+    "new": "  const touched = members.findIndex((member) => member.end >= span.start);"
+  },
+  {
+    "id": "D3970",
+    "defect": "A list's removed last statement is probed before the statement that now ends the list, so a test that returned at that statement reads as having reached the removed one.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    touched === -1 ? members.length : touched,",
+    "new": "    touched === -1 ? members.length - 1 : touched,"
+  },
+  {
+    "id": "D3971",
+    "defect": "A probe at the head of a function's body is written before its directive prologue, so each directive becomes a plain string and the probed function no longer runs in the mode it declared.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  const at = Math.max(index, prologue === -1 ? members.length : prologue);",
+    "new": "  const at = index;"
+  },
+  {
+    "id": "D3972",
+    "defect": "A statement standing alone as a branch is not made a block, so a one-line guard's changed statement is probed before the `if`, and a test that skipped the guard reads as having reached it.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return standsAlone(node, holder) ? asBlock(node, role) : undefined;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D3973",
+    "defect": "A labelled loop is made a block under its label, so a `continue` to that label no longer names a loop and the probed module fails to load.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return isStatement(node) && isStatement(holder);"
+  },
+  {
+    "id": "D3974",
+    "defect": "A class field's initializer takes no probe of its own, so its change is probed before the class, fires when the class is defined and marks tests that never made an instance.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  if (FIELD_OWNERS.has(holder.type) && field === INITIALIZER_FIELD) {\n    return wrapped(node, role);\n  }\n",
+    "new": ""
+  },
+  {
+    "id": "D3975",
+    "defect": "Removed text is not located in the unmutated text, so the removed tail of an arrow's body is probed at the statement that defines the arrow, and a test that never called the arrow reads as having reached it.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "  const start = Math.min(held?.start ?? written.start, written.start);",
+    "new": "  const start = written.start;"
+  },
+  {
+    "id": "D3976",
+    "defect": "A removal that begins at a function's first character is probed outside the function that stands there afterwards, so `async` removed from a callback is probed before the call that passes it and fires though the callback never ran.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "    held !== undefined && !held.inList && held.start === written.start;",
+    "new": "    false;"
+  },
+  {
+    "id": "D3977",
+    "defect": "A removal that begins at a statement of a list is probed inside what stands there afterwards, so a statement removed just before a function declaration is probed in that function's body, and a test that ran the removed statement's step reads as not having reached it.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "held !== undefined && !held.inList && held.start === written.start",
+    "new": "held !== undefined && held.start === written.start"
+  },
+  {
+    "id": "D3978",
+    "defect": "A change to a `case`'s label is probed before the case's first statement, inside the case, so a test the new label no longer lets in reads as not having reached the change.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    (first === undefined || span.start < first.start)",
+    "new": "    false"
+  },
+  {
+    "id": "D3979",
+    "defect": "A namespace's statements take a probe statement, so a change inside a namespace of types alone writes a value into it, and the module no longer compiles beside a constant of the same name.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  [SWITCH_CASE, CONSEQUENT_FIELD],\n]);",
+    "new": "  [SWITCH_CASE, CONSEQUENT_FIELD],\n  [\"TSModuleBlock\", BODY_FIELD],\n]);"
+  },
+  {
+    "id": "D3980",
+    "defect": "A function with no body is read as one with a body, so placing a probe for a changed overload signature throws rather than standing before the signature.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return Array.isArray(node.params) && isSyntaxNode(body) ? body : undefined;",
+    "new": "  return Array.isArray(node.params) ? (body as SyntaxNode) : undefined;"
+  },
+  {
+    "id": "D3981",
+    "defect": "A module the mutation leaves with no statement takes a probe at its end, where a comment on the last line swallows it, so the experiment runs and reads the change as not reached.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    ? owner.end - CLOSING_BRACE_LENGTH\n    : undefined;",
+    "new": "    ? owner.end - CLOSING_BRACE_LENGTH\n    : owner.end;"
+  },
+  {
+    "id": "D3982",
+    "defect": "A probe that stands after removed text reports its position in the mutated text, so the site names a line of the consumer's file that holds another statement.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "  return offset - (written.end - removed.end);",
+    "new": "  return offset;"
+  },
+  {
+    "id": "D3983",
+    "defect": "A probe that stands inside added text reports a position counted back from it by the length of the change, so the site names a place before the change that holds neither it nor the probe.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "  if (offset < written.end) return written.start;\n",
+    "new": ""
+  },
+  {
+    "id": "D3984",
+    "defect": "Neither a node nor what holds it is asked to be a statement, so any node not under a label is made a block where it stands, and a change inside a JSX attribute is rewritten into text the parser rejects and has no probe site.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return holder.type !== LABELED;"
+  },
+  {
+    "id": "D3985",
+    "defect": "An emptied block takes no probe, so a mutation that removes a function's only statement has no probe site and its experiment never runs.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "const BRACED_LISTS = new Set([BLOCK, STATIC_BLOCK]);",
+    "new": "const BRACED_LISTS = new Set([STATIC_BLOCK]);"
+  },
+  {
+    "id": "D3986",
+    "defect": "A statement that stands directly in a namespace is read as one standing alone as a branch and made a block inside the namespace, so a namespace's statement is probed inside it while its declarations are probed before it.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return isStatement(node) && holder.type !== LABELED;"
+  },
+  {
+    "id": "D3987",
+    "defect": "An expression a statement holds, as an `if` holds its condition, is made a block, so a change in a guard's condition is rewritten into text the parser rejects and has no probe site.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return isStatement(holder) && holder.type !== LABELED;"
+  },
+  {
+    "id": "D3988",
+    "defect": "A `case` with no statement is read as a list with a place in it, so a label replaced on a fall-through `case` has no probe site and its experiment never runs, where the change belongs to the step around the `switch`.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    (first === undefined || span.start < first.start)",
+    "new": "    (first !== undefined && span.start < first.start)"
+  },
+  {
+    "id": "D3989",
+    "defect": "The point where a statement ends is read as inside that statement, so a `break` removed from the end of a `case` is probed inside the case, where a change after a case's last statement belongs to the step around the `switch`.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return startsBefore && span.start < node.end;",
+    "new": "  return startsBefore && span.start <= node.end;"
   }
 ]

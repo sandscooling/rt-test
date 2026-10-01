@@ -5,19 +5,20 @@ import {
 } from "../selection/source-imports.js";
 import { replaceAnchor } from "./anchor-match.js";
 import {
-  CHAIN,
   isSyntaxNode,
-  PLACEMENT,
-  placementAt,
-  roleOf,
-  type PathStep,
-  type Placement,
-  type Slot,
+  stepAt,
+  withProbe,
+  type Span,
+  type Step,
+  type StepChoice,
   type SyntaxNode,
-} from "./probe-slots.js";
-import { REACH_PROBE_CALL } from "./reach-names.js";
+} from "./probe-step.js";
 
-/** 1-based line and 1-based column (UTF-16 code units) in the text the function was given, before the mutation. */
+/**
+ * Where the probe stands: 1-based line and 1-based column (UTF-16 code units) in the text the function was given,
+ * before the mutation, with the kind of the node it stands on. A probe that stands inside written text reports where
+ * the change starts.
+ */
 export interface ProbeSite {
   readonly line: number;
   readonly column: number;
@@ -25,7 +26,11 @@ export interface ProbeSite {
 }
 
 export type NoProbeSite =
-  /** The smallest node enclosing the changed text sits where a probe would alter what the module does. `role` names the parent's node type and the field holding the node, such as "CallExpression.callee". */
+  /**
+   * Nothing runs where the change sits, or the parser rejects the text with the probe written in. line and column
+   * locate the start of the change. `role` names the parent's node type and the field holding the node, such as
+   * "TSModuleBlock.body", or "root" for the program.
+   */
   | {
       readonly kind: "position";
       readonly line: number;
@@ -51,9 +56,12 @@ export type ProbedMutation =
   | { readonly status: "anchor-count"; readonly count: number }
   | { readonly status: "no-probe-site"; readonly reason: NoProbeSite };
 
-interface Span {
-  readonly start: number;
-  readonly end: number;
+/** The characters a mutation changed, less what the replaced and the written text share at their ends. */
+interface Change {
+  /** In the unmutated text. Empty when the mutation only added text. */
+  readonly removed: Span;
+  /** In the mutated text, starting where `removed` starts. Empty when the mutation only removed text. */
+  readonly written: Span;
 }
 
 interface TextPosition {
@@ -64,16 +72,10 @@ interface TextPosition {
 type ParseFailure = Extract<GuardedParse, { ok: false }>;
 
 const LINE_BREAK = "\n";
-const CHAIN_BODY = "expression";
-const EXPRESSION_STATEMENT = "ExpressionStatement";
-const ROOT_ROLE = "root";
-/** Keeps a wrap that opens a statement from being read as a call of the previous line's value. */
-const STATEMENT_OPENER = "void 0, ";
-const PROBE_STATEMENT = `${REACH_PROBE_CALL}; `;
 
 /**
- * Applies a mutation to a file's text in memory and places a reach probe at the smallest node enclosing the changed
- * text, where the probe firing means the changed code began executing. Inserts no line break.
+ * Applies a mutation to a file's text in memory and places a reach probe at the start of the step that holds the
+ * change, so the probe firing means execution reached that step. Inserts no line break.
  */
 export function mutateWithProbe(
   fileName: string,
@@ -89,33 +91,35 @@ export function mutateWithProbe(
   const mutated = replaced.text;
   const parsed = parseGuarded(fileName, mutated, parserOptions(fileName));
   if (!parsed.ok) return noProbeSite(unparsed(mutated, parsed));
-  const span = changedSpan(
+  const change = changeOf(
     text.slice(match.start, match.end),
     mutated.slice(match.start, replacementEnd),
     match.start,
   );
-  const path = probedPath(enclosingPath(syntaxRoot(parsed.program), span));
-  const node = lastNode(path);
-  const slot = slotOf(path);
-  const placement = slot === undefined ? undefined : placementAt(slot);
-  const probed =
-    placement === undefined ? undefined : withProbe(mutated, path, placement);
-  if (probed === undefined || !parses(fileName, probed)) {
-    return noProbeSite({
-      kind: "position",
-      ...positionOf(text, node.start),
-      nodeKind: node.type,
-      role: slot === undefined ? ROOT_ROLE : roleOf(slot.parent, slot.field),
-    });
+  const choice = stepOfChange(
+    syntaxRoot(parsed.program),
+    change,
+    removedStep(fileName, text, change),
+  );
+  const changeStart = positionOf(text, change.written.start);
+  if (!choice.found) {
+    const { nodeKind, role } = choice;
+    return noProbeSite({ kind: "position", ...changeStart, nodeKind, role });
+  }
+  const { step } = choice;
+  const { nodeKind, role } = step;
+  const probed = withProbe(mutated, step);
+  if (!parses(fileName, probed)) {
+    return noProbeSite({ kind: "position", ...changeStart, nodeKind, role });
   }
   return {
     status: "mutated",
     text: probed,
-    site: { ...positionOf(text, node.start), nodeKind: node.type },
+    site: { ...positionOf(text, siteOffset(step, change)), nodeKind },
   };
 }
 
-/** A probe the parser rejects, such as one in a position only a type checker forbids, has no site. */
+/** A probe the parser rejects has no site, since the module would fail to load in the experiment. */
 function parses(fileName: string, text: string): boolean {
   return parseGuarded(fileName, text, parserOptions(fileName)).ok;
 }
@@ -134,8 +138,8 @@ function unparsed(mutated: string, failure: ParseFailure): NoProbeSite {
   };
 }
 
-/** The written replacement, less the longest prefix and then the longest suffix it shares with the text it replaced. */
-function changedSpan(replaced: string, written: string, offset: number): Span {
+/** Trims the longest prefix the replaced and the written text share, and then the longest suffix. */
+function changeOf(replaced: string, written: string, offset: number): Change {
   const shortest = Math.min(replaced.length, written.length);
   let prefix = 0;
   while (prefix < shortest && replaced[prefix] === written[prefix]) {
@@ -149,7 +153,48 @@ function changedSpan(replaced: string, written: string, offset: number): Span {
   ) {
     suffix += 1;
   }
-  return { start: offset + prefix, end: offset + written.length - suffix };
+  const start = offset + prefix;
+  return {
+    removed: { start, end: offset + replaced.length - suffix },
+    written: { start, end: offset + written.length - suffix },
+  };
+}
+
+/** Removed text has no extent in the mutated text, so the step that held it is found in the unmutated text. */
+function removedStep(
+  fileName: string,
+  text: string,
+  { removed }: Change,
+): Step | undefined {
+  if (removed.start === removed.end) return undefined;
+  const parsed = parseGuarded(fileName, text, parserOptions(fileName));
+  if (!parsed.ok) return undefined;
+  const choice = stepAt(syntaxRoot(parsed.program), removed, false);
+  return choice.found ? choice.step : undefined;
+}
+
+/**
+ * The step of the mutated text that holds the written text and the start of the step that held the removed text; the
+ * text before a change is the same in both texts, so that start is an offset of both. Where the removed text began a
+ * step entered at its first character, such as a function, what stands there now holds the change.
+ */
+function stepOfChange(
+  root: SyntaxNode,
+  { written }: Change,
+  held: Step | undefined,
+): StepChoice {
+  const start = Math.min(held?.start ?? written.start, written.start);
+  const opensNode =
+    held !== undefined && !held.inList && held.start === written.start;
+  return stepAt(root, { start, end: written.end }, opensNode);
+}
+
+/** Where the probe stands, as an offset of the unmutated text. */
+function siteOffset(step: Step, { removed, written }: Change): number {
+  const [{ offset }] = step.insertions;
+  if (offset <= written.start) return offset;
+  if (offset < written.end) return written.start;
+  return offset - (written.end - removed.end);
 }
 
 function syntaxRoot(program: unknown): SyntaxNode {
@@ -159,74 +204,6 @@ function syntaxRoot(program: unknown): SyntaxNode {
   return program;
 }
 
-/** Descends one child at a time, since siblings never overlap, so the path ends at the deepest enclosing node. */
-function enclosingPath(root: SyntaxNode, span: Span): PathStep[] {
-  const path: PathStep[] = [{ node: root, field: "" }];
-  for (;;) {
-    const next = enclosingChild(lastNode(path), span);
-    if (next === undefined) return path;
-    path.push(next);
-  }
-}
-
-function enclosingChild(node: SyntaxNode, span: Span): PathStep | undefined {
-  for (const [field, value] of Object.entries(node)) {
-    const children: unknown[] = Array.isArray(value) ? value : [value];
-    const child = children.find(
-      (candidate) => isSyntaxNode(candidate) && encloses(candidate, span),
-    );
-    if (isSyntaxNode(child)) return { node: child, field };
-  }
-  return undefined;
-}
-
-/** An empty span, a deletion, is enclosed only by a node it falls strictly inside. */
-function encloses(node: SyntaxNode, span: Span): boolean {
-  if (span.start === span.end) {
-    return node.start < span.start && span.start < node.end;
-  }
-  return node.start <= span.start && span.end <= node.end;
-}
-
-/** A chain's body spans the same text as the chain, so the chain's position is the one a wrap would take. */
-function probedPath(path: PathStep[]): PathStep[] {
-  const holder = path[path.length - 2];
-  const isChainBody =
-    holder?.node.type === CHAIN && lastStep(path).field === CHAIN_BODY;
-  return isChainBody ? path.slice(0, -1) : path;
-}
-
-function slotOf(path: readonly PathStep[]): Slot | undefined {
-  const holder = path[path.length - 2];
-  if (holder === undefined) return undefined;
-  const { node, field } = lastStep(path);
-  return { node, field, parent: holder.node, path };
-}
-
-function withProbe(
-  mutated: string,
-  path: readonly PathStep[],
-  placement: Placement,
-): string {
-  const node = lastNode(path);
-  const before = mutated.slice(0, node.start);
-  if (placement === PLACEMENT.statement) {
-    return before + PROBE_STATEMENT + mutated.slice(node.start);
-  }
-  const opener = opensStatement(path) ? STATEMENT_OPENER : "";
-  const wrapped = `(${REACH_PROBE_CALL}, ${mutated.slice(node.start, node.end)})`;
-  return before + opener + wrapped + mutated.slice(node.end);
-}
-
-/** The node is the first token of its nearest enclosing expression statement. */
-function opensStatement(path: readonly PathStep[]): boolean {
-  const node = lastNode(path);
-  const statement = path.findLast(
-    (step) => step.node !== node && step.node.type === EXPRESSION_STATEMENT,
-  );
-  return statement?.node.start === node.start;
-}
-
 function positionOf(text: string, offset: number): TextPosition {
   const before = text.slice(0, offset);
   const lineStart = before.lastIndexOf(LINE_BREAK) + 1;
@@ -234,14 +211,4 @@ function positionOf(text: string, offset: number): TextPosition {
     line: before.split(LINE_BREAK).length,
     column: offset - lineStart + 1,
   };
-}
-
-function lastStep(path: readonly PathStep[]): PathStep {
-  const step = path[path.length - 1];
-  if (step === undefined) throw new Error("an enclosing path is never empty");
-  return step;
-}
-
-function lastNode(path: readonly PathStep[]): SyntaxNode {
-  return lastStep(path).node;
 }
