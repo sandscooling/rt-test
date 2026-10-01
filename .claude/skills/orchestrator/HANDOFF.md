@@ -13,7 +13,7 @@
 - the wake list of queued dispatches
 - each question put to the owner and not yet answered: the question, where it was asked, and which lane waits on it
 - each background run or session you started: where its output lands, and what you will do with it
-- **How I have been deciding**: the few principles behind your answers to the crew and the owner, each with a pointer to the doc, ruling or ticket record it rests on. Keep it current as you decide, since it becomes the handoff message's section of that name, and it is the reasoning a handoff otherwise loses.
+- **How I have been deciding**: the few principles behind your answers to the crew and the owner, each with a pointer to the doc, ruling or ticket record it rests on. Keep it current as you decide, since it becomes the handoff message's section of that name, and it is the reasoning a handoff otherwise loses. An entry that rests on an owner ruling quotes the owner's sentence and marks the rest as your reading, since a successor applies whatever stands here as the owner's.
 
 **The doc is never a parking lot.** A defect, a debt item, or a wrong fact you find is fixed now by a lane you dispatch, or put to the owner now as a decision; its entry is then that lane or that question, and it leaves when the lane lands or the owner answers. A ticket's status is read from `{cfg.sprint_status}`; the order across lanes is the priority section.
 
