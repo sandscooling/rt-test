@@ -24,7 +24,7 @@ Scope: turn each experiment record into the facts ADR-0008 names (the intended t
 
 ## Ticket 3.4: Defect evidence
 
-Scope: store each verdict with its facts in the local store, bound to the definition's digest, the workspace's input fingerprint, the Vitest version and the falsifier version, keep it across a restart as unconfirmed until reconciliation, and extend `rt-test defects` and the summary with each defect's evidence state, its freshness, and the verified, eligible and total counts. Strip source text (code frames, and mutated text above all) from every error message in an experiment record before storing it (C147, NFR6); 3.2's record keeps messages raw. Requirements: FR12, FR15, FR22.
+Scope: store each verdict with its facts in the local store, bound to the definition's digest, the workspace's input fingerprint, the Vitest version and the falsifier version, keep it across a restart as unconfirmed until reconciliation, and extend `rt-test defects` and the summary with each defect's evidence state, its freshness, and the verified, eligible and total counts. Strip source text (code frames, and mutated text above all) from every error message in an experiment record before storing it (C147, NFR6); 3.2's record keeps messages raw. Its evidence states join 3.1's bound and order on listed definitions (500, a target), problems first: survived, invalid experiment and unclear ahead of detected (orchestrator, 19:13 on 2026-09-30). Requirements: FR12, FR15, FR22.
 
 ## Ticket 3.5: Schedule falsification
 
