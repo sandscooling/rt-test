@@ -11492,5 +11492,12 @@
     "file": "packages/daemon/src/daemon/falsification.ts",
     "old": "const MAX_HAPPENED_CHARACTERS = 400;",
     "new": "const MAX_HAPPENED_CHARACTERS = 750;"
+  },
+  {
+    "id": "D4115",
+    "defect": "The resolution gives the path the workspace reaches Vitest by, a link's own path, in place of the package's real directory, so two workspaces that link one install read as two installs.",
+    "file": "packages/daemon/src/vitest/load-vitest.ts",
+    "old": "      directory: dirname(manifestPath),",
+    "new": "      directory: join(directory, \"node_modules\", \"vitest\"),"
   }
 ]

@@ -1,3 +1,5 @@
+import { mkdirSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveWorkspaceVitest } from "../src/vitest/load-vitest.js";
 import {
@@ -92,5 +94,26 @@ describe("resolving a workspace's Vitest", () => {
         }),
       ),
     ).toMatchObject({ supported: false, version: "5.0.1" });
+  });
+
+  it("D4115: a workspace that reaches its Vitest through a directory link resolves the package's real directory, beside its version", async () => {
+    const { resolved, install } = await inTempDir((dir) => {
+      const store = join(dir, "store");
+      fakeVitest(store, "5.0.1");
+      const install = join(store, "node_modules", "vitest");
+      const workspace = join(dir, "workspace");
+      mkdirSync(join(workspace, "node_modules"), { recursive: true });
+      symlinkSync(
+        install,
+        join(workspace, "node_modules", "vitest"),
+        "junction",
+      );
+      return { resolved: resolveWorkspaceVitest(workspace), install };
+    });
+    expect(resolved).toMatchObject({
+      supported: true,
+      directory: install,
+      version: "5.0.1",
+    });
   });
 });

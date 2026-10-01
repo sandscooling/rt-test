@@ -48,7 +48,7 @@ Acceptance: an agent's proposed defect is verified against the current tests lik
 
 ## M6: Precision and public consumer release
 
-Add validated function-level refinements and optional observed per-test execution edges; measure instrumentation overhead and document unsupported cases. Package a consumer CLI and programmatic API, validate fresh installation in npm, pnpm, and Bun projects, document compatibility, and add agent-facing query examples. Benchmark Windows, Linux, and macOS. Add clean CI comparison and release checks.
+Add validated function-level refinements and optional observed per-test execution edges; measure instrumentation overhead and document unsupported cases. Package a consumer CLI and programmatic API, validate fresh installation in npm, pnpm, and Bun projects, document compatibility, and add agent-facing query examples. Benchmark Windows, Linux, and macOS. Add clean CI comparison and release checks. When a release gives `packages/daemon/package.json` a `files` member, it lists `canaries`: a canary reading reads the bundled set from the package, and without it every reading is no reading.
 
 Acceptance: a user can install into a supported project, explicitly start it, query current evidence, stop it, and uninstall without modifying their tests or leaving a process running. Remove `private: true` and publish only after explicit release authorization.
 
