@@ -30,14 +30,21 @@ import {
 
 const DEFECTS_MEMBER = "defects";
 /** Every entry the walk reaches is tested against every pattern, so this bounds that work. */
-export const MAX_DEFECT_PATTERNS = 256;
+const MAX_DEFECT_PATTERNS = 256;
 const MISSING_CODES = ["ENOENT", "ENOTDIR"];
-/** The numbers V8 gives for where a parse failed, when it gives any; the rest of its message quotes the text. */
-const JSON_POSITION = /at position (\d+)(?: \(line (\d+) column (\d+)\))?/;
+/**
+ * The numbers V8 ends its message with for where a parse failed, when it gives any. Its message may quote the file's
+ * text before them, so only the end is read.
+ */
+const JSON_POSITION =
+  / JSON at position (\d+)(?: \(line (\d+) column (\d+)\))?$/;
 const PATTERN_SEPARATOR = ", ";
+const LINKS_TO_DIRECTORY =
+  "it links to a directory, which the walk never enters";
 
-export const INVALID_ENTRY = {
+const INVALID_ENTRY = {
   settingsUnusable: "settings-unusable",
+  patternMatchedNothing: "pattern-matched-nothing",
   depthBoundPassed: "depth-bound-passed",
   directoryLink: "directory-link",
   directoryNotListed: "directory-not-listed",
@@ -89,6 +96,8 @@ interface Walk {
   readonly stateDirectory: string;
   readonly signal: AbortSignal;
   readonly files: string[];
+  /** Each pattern some entry the walk met matches. */
+  readonly matched: Set<Pattern>;
   readonly invalidEntries: InvalidEntry[];
 }
 
@@ -129,9 +138,11 @@ export async function readDefinitionFiles(
     stateDirectory: resolve(stateDirectory),
     signal,
     files: [],
+    matched: new Set(),
     invalidEntries: [],
   };
   await walkRoot(walk);
+  walk.invalidEntries.push(...unmatchedPatterns(walk));
   const definitions: DefinitionSource[] = [];
   for (const file of walk.files) {
     signal.throwIfAborted();
@@ -214,6 +225,20 @@ async function walkRoot(walk: Walk): Promise<void> {
       if (directory !== undefined) pending.push(directory);
     }
   }
+}
+
+/**
+ * One entry for each pattern no entry the walk met matches: a mistyped pattern or a renamed folder would otherwise
+ * drop every definition file it named from the total with no entry.
+ */
+function unmatchedPatterns(walk: Walk): InvalidEntry[] {
+  return walk.patterns
+    .filter((pattern) => !walk.matched.has(pattern))
+    .map((pattern) => ({
+      kind: INVALID_ENTRY.patternMatchedNothing,
+      path: NON_INPUTS_FILE,
+      reason: `the pattern ${JSON.stringify(pattern.text)} matches no file, so no definition file it was written to name is read; the walk skips node_modules, .git, the state directory and what git ignores`,
+    }));
 }
 
 /** Outside a git repository, or when git fails, nothing is skipped as ignored. */
@@ -299,6 +324,7 @@ async function visitEntry(
   const below = walk.patterns.filter((pattern) =>
     matchesBelow(pattern.segments, segments),
   );
+  for (const pattern of matching) walk.matched.add(pattern);
   if (entry.isSymbolicLink()) {
     await visitLink(walk, path, segments, matching, below);
     return undefined;
@@ -328,13 +354,14 @@ async function visitLink(
     );
     return;
   }
-  if (below.length > 0 && (await isDirectoryTarget(path))) {
-    walk.invalidEntries.push({
-      kind: INVALID_ENTRY.directoryLink,
-      path: relativePath(segments),
-      reason: `it links to a directory, which the walk never enters, so the definition files ${patternsText(below)} may match below it are not read; narrow the pattern or move the files`,
-    });
-  }
+  if (below.length === 0) return;
+  const problem = await directoryLinkProblem(path);
+  if (problem === undefined) return;
+  walk.invalidEntries.push({
+    kind: INVALID_ENTRY.directoryLink,
+    path: relativePath(segments),
+    reason: `${problem}, so the definition files ${patternsText(below)} may match below it are not read; narrow the pattern or move the files`,
+  });
 }
 
 function belowDirectory(
@@ -355,12 +382,17 @@ function belowDirectory(
   return { directory: path, segments };
 }
 
-/** A link whose target cannot be read is not a directory. */
-async function isDirectoryTarget(path: string): Promise<boolean> {
+/**
+ * Why a link is reported: it leads to a directory, or its target cannot be checked, which may hide one. A link to a
+ * file or to nothing is not reported.
+ */
+async function directoryLinkProblem(path: string): Promise<string | undefined> {
   try {
-    return (await stat(path)).isDirectory();
-  } catch {
-    return false;
+    return (await stat(path)).isDirectory() ? LINKS_TO_DIRECTORY : undefined;
+  } catch (error) {
+    return isMissing(error)
+      ? undefined
+      : `it is a link whose target cannot be checked (${errorText(error)}), and the walk never follows a link`;
   }
 }
 

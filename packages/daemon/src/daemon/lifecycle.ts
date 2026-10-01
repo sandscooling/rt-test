@@ -213,19 +213,17 @@ export class DaemonLifecycle implements DaemonHandlers {
     return this.#changes.answer(query, signal);
   }
 
-  /** Reads the store before the definition files, so no read reaches a store a stop has closed meanwhile. */
+  /** Hands over the moment as a call, since the answer takes it only once its file reads have ended. */
   defects(
     path: string | undefined,
     signal: AbortSignal,
   ): Promise<DefectsAnswer | NoAnswer> {
-    const results = this.#latestResults();
     return defectsAnswer({
       path,
-      results,
-      daemon: this.#view(),
-      inputs: this.#queryInputs(results),
+      consumerRoot: this.identity.consumerRoot,
       stateDirectory: this.identity.stateDirectory,
       signal,
+      moment: () => this.#moment(),
     });
   }
 

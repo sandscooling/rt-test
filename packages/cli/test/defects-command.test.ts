@@ -247,3 +247,60 @@ describe("the answer to a defects query", () => {
     });
   });
 });
+
+/** An answer of 50 definitions that lists two of them, so its counts and its lists differ. */
+const PAST_THE_BOUND = defectsResponse({
+  counts: {
+    total: 50,
+    states: {
+      "invalid-definition": 7,
+      "anchor-missing": 3,
+      "never-verified": 40,
+    },
+    invalidEntries: 0,
+  },
+  definitions: [
+    listedDefinition("D1", "invalid-definition", "its test is not discovered"),
+    listedDefinition(
+      "D2",
+      "anchor-missing",
+      "its mutation's old text occurs 0 times in src/a.ts, not once",
+    ),
+  ],
+  definitionsNotListed: {
+    "invalid-definition": 6,
+    "anchor-missing": 2,
+    "never-verified": 40,
+  },
+  testsInScope: 9,
+  gaps: 4,
+  gapModules: [{ module: "src/b.test.ts", gaps: 4 }],
+});
+
+describe("an answer that lists fewer definitions than it counts", () => {
+  it("D3729: the text says how many invalid and anchor-missing definitions the answer did not list", async () => {
+    const run = await runDefects([], PAST_THE_BOUND);
+    expect(
+      run.stdout
+        .split("\n")
+        .filter((line) =>
+          /\b6 invalid-definition\b.*\b2 anchor-missing\b.*not listed/.test(
+            line,
+          ),
+        ).length,
+    ).toBe(1);
+  });
+
+  it("D3730: the text gives each state's count from the answer's counts, never from the definitions it lists, and the tests in scope with their gaps", async () => {
+    const run = await runDefects([], PAST_THE_BOUND);
+    const lines = run.stdout.split("\n");
+    const printed = (pattern: RegExp) =>
+      lines.filter((line) => pattern.test(line)).length;
+    expect({
+      states: printed(
+        /invalid-definition 7\b.*anchor-missing 3\b.*never-verified 40\b/,
+      ),
+      tests: printed(/^Tests in scope: 9\b.*\b4\b.*gaps/),
+    }).toStrictEqual({ states: 1, tests: 1 });
+  });
+});

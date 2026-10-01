@@ -341,44 +341,20 @@ export function matchesPath(
   return matchesSequence(pattern, path, GLOBSTAR, matchesSegment);
 }
 
-/** Whether the pattern could match a path below the directory `directory` names, a segment or more deeper. */
+/**
+ * Whether the pattern could match a path below the directory `directory` names, a segment or more deeper. From a
+ * `**` on it can match at any depth, so only the segments before the first one can rule a directory out.
+ */
 export function matchesBelow(
   pattern: readonly string[],
   directory: readonly string[],
 ): boolean {
-  const reached = new Set<number>([0]);
-  for (const name of directory) {
-    const next = new Set<number>();
-    for (const index of withGlobstarSkips(pattern, reached)) {
-      const wanted = pattern[index];
-      if (wanted === GLOBSTAR) next.add(index);
-      else if (wanted !== undefined && matchesSegment(wanted, name)) {
-        next.add(index + 1);
-      }
-    }
-    if (next.size === 0) return false;
-    reached.clear();
-    for (const index of next) reached.add(index);
+  for (const [index, name] of directory.entries()) {
+    const wanted = pattern[index];
+    if (wanted === GLOBSTAR) return true;
+    if (wanted === undefined || !matchesSegment(wanted, name)) return false;
   }
-  return [...withGlobstarSkips(pattern, reached)].some(
-    (index) => index < pattern.length,
-  );
-}
-
-/** Each pattern position reached, and each one past the `**` runs it stands on, which may match no segment. */
-function withGlobstarSkips(
-  pattern: readonly string[],
-  reached: ReadonlySet<number>,
-): Set<number> {
-  const all = new Set<number>();
-  for (let index of reached) {
-    all.add(index);
-    while (pattern[index] === GLOBSTAR) {
-      index += 1;
-      all.add(index);
-    }
-  }
-  return all;
+  return directory.length < pattern.length;
 }
 
 /** `*` stands for any run of characters within the segment and `?` for one, a leading dot included. */

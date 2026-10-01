@@ -1,9 +1,9 @@
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { IgnoredListing } from "../../src/selection/git-ignored.js";
 
-/** Each absolute path whose `opendir` or `readFile` fails with its code, and a listing answered in place of git's. */
+/** Each absolute path whose `opendir`, `readFile` or `stat` fails with its code, and a listing answered in place of git's. */
 const scripted = vi.hoisted(() => ({
   failing: new Map<string, string>(),
   listing: undefined as IgnoredListing | undefined,
@@ -32,6 +32,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         ? actual.readFile(target, options)
         : Promise.reject(error);
     }) as typeof actual.readFile,
+    stat: ((target, options) => {
+      const error = failure(target);
+      return error === undefined
+        ? actual.stat(target, options)
+        : Promise.reject(error);
+    }) as typeof actual.stat,
   };
 });
 
@@ -56,6 +62,7 @@ import {
   type CheckedDefinition,
 } from "../../src/defects/definitions.js";
 import {
+  readAnchors,
   resolveDefinitions,
   type ResolvedDefinition,
 } from "../../src/defects/resolve-definitions.js";
@@ -64,7 +71,12 @@ import type {
   TestDiscovery,
 } from "../../src/vitest/discover-tests.js";
 import { DAEMON_TEST_TIMEOUT_MS } from "../daemon-harness.js";
-import { fixtureRepository, HAND_BUILT_ROOT, inTempDir } from "../harness.js";
+import {
+  fixtureRepository,
+  HAND_BUILT_ROOT,
+  inTempDir,
+  settle,
+} from "../harness.js";
 
 /** Files by their path relative to a root, `/`-separated, with their text. */
 type Tree = Readonly<Record<string, string>>;
@@ -148,7 +160,7 @@ function outline(read: DefinitionFiles): {
   };
 }
 
-/** Runs `body` while `opendir` and `readFile` of each of `paths` fail with `code`. */
+/** Runs `body` while `opendir`, `readFile` and `stat` of each of `paths` fail with `code`. */
 async function withFailing<T>(
   paths: readonly string[],
   code: string,
@@ -319,7 +331,7 @@ describe(
       });
     });
 
-    it("D3663: a directory link below which a pattern could match is one invalid entry naming it, and nothing under it is read", async () => {
+    it("D3663: a directory link below which a pattern could match is an invalid entry naming it, nothing under it is read, and its pattern, matching nothing else, is one too", async () => {
       const read = await inTempDir(async (dir) => {
         linkDirectory(dir, `${CONSUMER}/defects/shared`, OUTSIDE);
         writeTree(join(dir, OUTSIDE), {
@@ -333,7 +345,10 @@ describe(
       });
       expect(read).toStrictEqual({
         definitions: [],
-        entries: ["directory-link defects/shared"],
+        entries: [
+          "directory-link defects/shared",
+          "pattern-matched-nothing rt-test.json",
+        ],
       });
     });
 
@@ -379,7 +394,7 @@ describe(
       });
     });
 
-    it("D3666: a directory more than 40 levels below the root, below which a pattern could match, is one invalid entry naming it", async () => {
+    it("D3666: a directory more than 40 levels below the root, below which a pattern could match, is an invalid entry naming it, and its pattern, matching nothing else, is one too", async () => {
       const read = await inTempDir(async (dir) =>
         outline(
           await definitionFilesIn(dir, {
@@ -390,7 +405,10 @@ describe(
       );
       expect(read).toStrictEqual({
         definitions: [],
-        entries: [`depth-bound-passed ${nested(41)}`],
+        entries: [
+          `depth-bound-passed ${nested(41)}`,
+          "pattern-matched-nothing rt-test.json",
+        ],
       });
     });
 
@@ -459,6 +477,125 @@ describe(
       expect(read).toStrictEqual({
         definitions: ["defects/kept.defects.json#0"],
         entries: [],
+      });
+    });
+
+    it("D3711: a usable pattern that matches no entry is one invalid entry at rt-test.json naming it, and a pattern that matches a file is none", async () => {
+      const read = await inTempDir((dir) =>
+        definitionFilesIn(dir, {
+          [SETTINGS]: settings(["defect/*.json", "defects/*.json"]),
+          "defects/a.json": definitionFile(definition("D1")),
+        }),
+      );
+      expect({
+        definitions: outline(read).definitions,
+        entries: read.invalidEntries.map(({ kind, path, reason }) => ({
+          kind,
+          path,
+          namesPattern: reason.includes('"defect/*.json"'),
+        })),
+      }).toStrictEqual({
+        definitions: ["defects/a.json#0"],
+        entries: [
+          {
+            kind: "pattern-matched-nothing",
+            path: "rt-test.json",
+            namesPattern: true,
+          },
+        ],
+      });
+    });
+
+    it("D3712: a link below which a pattern could match, whose target cannot be checked, is an invalid entry naming it, while a link to nothing is none", async () => {
+      const read = await inTempDir((dir) => {
+        linkDirectory(dir, `${CONSUMER}/defects/unchecked`, OUTSIDE);
+        linkDirectory(dir, `${CONSUMER}/defects/dangling`, "gone");
+        rmdirSync(join(dir, "gone"));
+        return withFailing(
+          [join(dir, CONSUMER, "defects", "unchecked")],
+          "EACCES",
+          async () =>
+            outline(
+              await definitionFilesIn(dir, {
+                [SETTINGS]: settings(["defects/**/*.defects.json"]),
+                "defects/a.defects.json": definitionFile(definition("D1")),
+              }),
+            ),
+        );
+      });
+      expect(read).toStrictEqual({
+        definitions: ["defects/a.defects.json#0"],
+        entries: ["directory-link defects/unchecked"],
+      });
+    });
+
+    it("D3716: a parse failure's reason gives no position when the only position is in the file text the parser quotes", async () => {
+      const read = await inTempDir((dir) =>
+        definitionFilesIn(dir, {
+          [SETTINGS]: settings(["defects/*.json"]),
+          "defects/a.json": "[at position 7]",
+        }),
+      );
+      expect(read.invalidEntries[0]?.reason).toBe("it is not valid JSON");
+    });
+
+    it("D3717: a pattern with a wildcard directory segment reads the definition files below the directories it matches", async () => {
+      const read = await inTempDir(async (dir) =>
+        outline(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: settings(["packages/*/defects/*.json"]),
+            "packages/a/defects/x.json": definitionFile(definition("D1")),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        definitions: ["packages/a/defects/x.json#0"],
+        entries: [],
+      });
+    });
+
+    it("D3718: an rt-test.json that is a link is one invalid entry, never read as absent", async () => {
+      const read = await inTempDir(async (dir) => {
+        linkDirectory(dir, `${CONSUMER}/${SETTINGS}`, OUTSIDE);
+        return outline(
+          await definitionFilesIn(dir, {
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          }),
+        );
+      });
+      expect(read).toStrictEqual({
+        definitions: [],
+        entries: ["settings-unusable rt-test.json"],
+      });
+    });
+
+    it("D3719: an rt-test.json that is a directory is one invalid entry, never read as absent", async () => {
+      const read = await inTempDir(async (dir) =>
+        outline(
+          await definitionFilesIn(dir, {
+            [`${SETTINGS}/inside.json`]: settings(["defects/*.json"]),
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        definitions: [],
+        entries: ["settings-unusable rt-test.json"],
+      });
+    });
+
+    it("D3720: an rt-test.json whose top level is not an object is one invalid entry, never read as declaring nothing", async () => {
+      const read = await inTempDir(async (dir) =>
+        outline(
+          await definitionFilesIn(dir, {
+            [SETTINGS]: JSON.stringify(["defects/*.json"]),
+            [DEFINITION_FILE]: definitionFile(definition("D1")),
+          }),
+        ),
+      );
+      expect(read).toStrictEqual({
+        definitions: [],
+        entries: ["settings-unusable rt-test.json"],
       });
     });
   },
@@ -540,11 +677,11 @@ describe("checking each definition", () => {
     ).toStrictEqual([
       {
         mutationPath: undefined,
-        problems: [expect.stringMatching(/outside the consumer root/)],
+        problems: [expect.stringMatching(/lies outside the consumer root/)],
       },
       {
         mutationPath: undefined,
-        problems: [expect.stringMatching(/outside the consumer root/)],
+        problems: [expect.stringMatching(/lies outside the consumer root/)],
       },
     ]);
   });
@@ -588,6 +725,42 @@ describe("checking each definition", () => {
     expect(
       definitions.map((definition) => definition.modulePath),
     ).toStrictEqual([TEST_MODULE, TEST_MODULE, TEST_MODULE]);
+  });
+
+  it("D3715: each mutation file is judged by its own real path, so one reached through a link outside the root is invalid after one inside it", async () => {
+    const problems = await inTempDir((dir) => {
+      linkDirectory(dir, `${CONSUMER}/linked`, OUTSIDE);
+      writeTree(join(dir, OUTSIDE), { "a.ts": SOURCE_TEXT });
+      writeTree(join(dir, CONSUMER), { [SOURCE]: SOURCE_TEXT });
+      return checked(
+        [
+          definition("D1"),
+          definition("D2", { mutation: { file: "linked/a.ts" } }),
+        ],
+        join(dir, CONSUMER),
+      ).map((definition) => definition.problems);
+    });
+    expect(problems).toStrictEqual([
+      [],
+      [expect.stringMatching(/resolves through a link to a path outside/)],
+    ]);
+  });
+
+  it("D3726: a test whose name is a string, not a list of names, is invalid", () => {
+    expect(problemsOf(definition("D1", { test: { name: "t" } }))).toStrictEqual(
+      [[expect.stringMatching(/\bname\b/)]],
+    );
+  });
+
+  it("D3727: a mutation with no new text is reported invalid, naming it, never thrown on", () => {
+    const whole = definition("D1");
+    const { new: _new, ...withoutNew } = whole["mutation"] as Record<
+      string,
+      unknown
+    >;
+    expect(
+      settle(() => problemsOf({ ...whole, mutation: withoutNew })),
+    ).toStrictEqual([[expect.stringMatching(/\bnew\b/)]]);
   });
 });
 
@@ -644,11 +817,13 @@ async function resolvedIn(
 ): Promise<ResolvedDefinition[]> {
   const root = join(dir, CONSUMER);
   writeTree(root, options.files ?? { [SOURCE]: SOURCE_TEXT });
+  const definitions = checked(values, root);
+  const anchors = await readAnchors(definitions, new AbortController().signal);
   return resolveDefinitions(
-    checked(values, root),
+    definitions,
+    anchors,
     discoveryOf(tests),
     options.current ?? true,
-    new AbortController().signal,
   );
 }
 
@@ -852,5 +1027,45 @@ describe("resolving each definition's test and reading its anchor", () => {
         /^its mutation's file src\/gone\.ts cannot be read: /,
       ),
     });
+  });
+
+  it("D3714: a valid, resolved definition whose anchor was never read reads anchor missing, never as never verified", () => {
+    const [only] = resolveDefinitions(
+      checked([definition("D1")]),
+      new Map(),
+      discoveryOf([TEST_T]),
+      true,
+    );
+    expect(only?.state).toBe("anchor-missing");
+  });
+
+  it("D3728: an old that no longer occurs in its file reads anchor missing, the reason giving a count of 0", async () => {
+    const [only] = await inTempDir((dir) =>
+      resolvedIn(
+        dir,
+        [definition("D1", { mutation: { old: "return 3;" } })],
+        [TEST_T],
+      ),
+    );
+    expect({ state: only?.state, reason: only?.reason }).toStrictEqual({
+      state: "anchor-missing",
+      reason: expect.stringMatching(/\b0 times\b/),
+    });
+  });
+
+  it("D3731: a definition whose test is not discovered and whose anchor is also gone reads invalid, never anchor missing", async () => {
+    const [only] = await inTempDir((dir) =>
+      resolvedIn(
+        dir,
+        [
+          definition("D1", {
+            test: { name: ["missing"] },
+            mutation: { old: "return 3;" },
+          }),
+        ],
+        [TEST_T],
+      ),
+    );
+    expect(only?.state).toBe("invalid-definition");
   });
 });

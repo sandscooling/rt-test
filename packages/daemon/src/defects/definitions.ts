@@ -73,16 +73,25 @@ type RootRelative =
   | { readonly ok: true; readonly path: string }
   | { readonly ok: false; readonly problem: string };
 
+/** The consumer root as given and by its real path, and whether each mutation path checked so far leads outside it. */
+interface ConsumerRoot {
+  readonly given: string;
+  readonly real: string;
+  readonly leadsOutside: Map<string, boolean>;
+}
+
 /** Checks each definition alone, then marks every definition whose id another one repeats. */
 export function checkDefinitions(
   sources: readonly DefinitionSource[],
   consumerRoot: string,
 ): CheckedDefinition[] {
-  const root = realPath(consumerRoot);
-  const realRoot = root.ok ? root.path : consumerRoot;
-  const checked = sources.map((source) =>
-    checkDefinition(source, consumerRoot, realRoot),
-  );
+  const real = realPath(consumerRoot);
+  const root: ConsumerRoot = {
+    given: consumerRoot,
+    real: real.ok ? real.path : consumerRoot,
+    leadsOutside: new Map(),
+  };
+  const checked = sources.map((source) => checkDefinition(source, root));
   return withRepeatedIds(checked);
 }
 
@@ -93,8 +102,7 @@ function definitionName(file: string, position: number): string {
 
 function checkDefinition(
   source: DefinitionSource,
-  consumerRoot: string,
-  realRoot: string,
+  root: ConsumerRoot,
 ): CheckedDefinition {
   const { file, position, value } = source;
   const base = { file, position };
@@ -124,12 +132,7 @@ function checkDefinition(
     objectField(value, MEMBER.mutation),
     problems,
   );
-  const mutationPath = mutationFilePath(
-    mutation,
-    consumerRoot,
-    realRoot,
-    problems,
-  );
+  const mutationPath = mutationFilePath(mutation, root, problems);
   return {
     ...base,
     id: usableId,
@@ -242,8 +245,7 @@ function withLfBreaks(text: string): string {
  */
 function mutationFilePath(
   mutation: DefinitionMutation | undefined,
-  consumerRoot: string,
-  realRoot: string,
+  root: ConsumerRoot,
   problems: string[],
 ): string | undefined {
   if (mutation === undefined) return undefined;
@@ -254,15 +256,28 @@ function mutationFilePath(
     );
     return undefined;
   }
-  const path = join(consumerRoot, spelled.path);
-  const real = realPath(path);
-  if (real.ok && !liesInside(realRoot, real.path)) {
+  const path = join(root.given, spelled.path);
+  if (leadsOutside(root, spelled.path, path)) {
     problems.push(
       `its mutation's file ${JSON.stringify(mutation.file)} resolves through a link to a path outside the consumer root`,
     );
     return undefined;
   }
   return path;
+}
+
+/** Resolves each path once, however many definitions name it, since the resolution is synchronous. */
+function leadsOutside(
+  root: ConsumerRoot,
+  spelled: string,
+  path: string,
+): boolean {
+  const known = root.leadsOutside.get(spelled);
+  if (known !== undefined) return known;
+  const real = realPath(path);
+  const outside = real.ok && !liesInside(root.real, real.path);
+  root.leadsOutside.set(spelled, outside);
+  return outside;
 }
 
 /** Separators normalized to `/` and `.` and `..` segments resolved, so every spelling of one file is one path. */

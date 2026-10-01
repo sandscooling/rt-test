@@ -15,12 +15,12 @@ them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review 
 
 Every criterion holds on Windows and on Linux. "Now" means when the daemon answers the query.
 
-- [x] AC1: The definition files are the regular files under the consumer root that a root-relative pattern in `rt-test.json`'s `defects` member matches, in the pattern grammar `nonInputs` uses. With no `rt-test.json`, or one with no `defects` member, there are no definitions and no problem. A `defects` member that is not an array of usable patterns or holds more patterns than its named bound, an `rt-test.json` that cannot be read or parsed, a pattern whose walk passes its depth bound or meets a directory link below which it could match, a directory the walk would enter but cannot list, and each matched entry that is not a regular file, cannot be read, is not JSON, or holds no `defects` array, each count as one invalid entry in the total, with a reason that names the problem and never quotes the file's text, and add no definitions; a file two patterns match is one file; the other files' definitions are still read. Reading them starts no job and loads no consumer module. (FR12, FR24)
+- [x] AC1: The definition files are the regular files under the consumer root that a root-relative pattern in `rt-test.json`'s `defects` member matches, in the pattern grammar `nonInputs` uses. With no `rt-test.json`, or one with no `defects` member, there are no definitions and no problem. A `defects` member that is not an array of usable patterns or holds more patterns than its named bound, an `rt-test.json` that cannot be read or parsed, a usable pattern that matches no entry the walk meets, a pattern whose walk passes its depth bound or meets a directory link below which it could match (a link whose target cannot be checked included), a directory the walk would enter but cannot list, and each matched entry that is not a regular file, cannot be read, is not JSON, or holds no `defects` array, each count as one invalid entry in the total, with a reason that names the problem and never quotes a definition file's text (it may name a pattern of `rt-test.json`), and add no definitions; a file two patterns match is one file; the other files' definitions are still read. Reading them starts no job and loads no consumer module. (FR12, FR24)
 - [x] AC2: A definition is invalid, with a reason that names the problem and never quotes its `old` or `new` text, when it lacks a field the definition format requires or holds one of the wrong kind (the format is in Dev Notes, Q2), its `old` is empty, its `old` equals its `new`, its mutation's file lies outside the consumer root (by its spelling or by its real path), or its `id` repeats: every definition carrying a repeated `id` is invalid, each naming the other definitions' files. A definition missing a usable `id` is named by its file and its position in that file. (FR24)
 - [x] AC3: A definition's test resolves to the one test in the latest stored discovery whose module lies at the definition's root-relative module path (its separators normalized to `/` and resolved against the root, so `src\a.test.ts` and `./src/a.test.ts` name `src/a.test.ts`) and whose name path equals the definition's name path (each enclosing suite's name, then the test's, an `it.each` arm by its reported title), narrowed by its project and its occurrence when the definition gives them. No such test makes the definition invalid as not discovered, the reason saying whether the discovery lists that module at all and whether that discovery is current; more than one makes it invalid as ambiguous, the reason naming how many tests match and the field that would tell them apart, or that no field of the format does (two Vitest workspaces collecting the same module under one project name). A definition whose `test` is well-formed resolves whatever its other AC2 problems, so the test it names is never a gap (AC5). (FR12, FR24)
 - [x] AC4: A definition not invalid under AC2 or AC3 reads anchor missing when its `old` does not occur exactly once in its mutation's file as that file is now, counted as falsification counts it (a newline in `old` matching an LF or a CRLF in the file, occurrences never overlapping), the reason giving the count, or that the file cannot be read and why; otherwise it reads never verified. No definition reads verified, since this ticket stores no evidence. (FR13)
 - [x] AC5: Every test in the latest stored discovery that no definition's test resolves to is a gap, whatever that definition's other state. (FR14)
-- [x] AC6: The daemon answers a `defects` query, for the whole worktree or for a file or folder inside the consumer root, with each definition in scope (its id, its definition file, its test as written and, once resolved, its test identity, marked duplicate when the discovery marks it so, its mutation's file, its state and, when invalid or anchor missing, its reason) up to a named bound, invalid first, then anchor missing, then never verified, with how many of each state it did not list; each invalid entry AC1 counts, listed whole; the count of each state and the total, and the gaps in scope, with the count of tests in scope and a gap count for every test module holding a gap. It lists gap tests by module up to a named bound and says how many it did not list. It carries the facts every answer carries, starts no job and no test, and refuses or cannot answer in the cases a summary or path status does, with the reason. A definition is in scope when its test's module path lies at or under the path, and a test when its module does; an invalid entry of AC1, and a definition naming no usable module path, lie in every scope. (FR22)
+- [x] AC6: The daemon answers a `defects` query, for the whole worktree or for a file or folder inside the consumer root, with each definition in scope (its id, its definition file, its test as written and, once resolved, its test identity, marked duplicate when the discovery marks it so, its mutation's file, its state and, when invalid or anchor missing, its reason) up to a named bound, invalid first, then anchor missing, then never verified, with how many of each state it did not list; each invalid entry AC1 counts, listed whole; the count of each state and the total, and the gaps in scope, with the count of tests in scope and a gap count for every test module holding a gap. It lists gap tests by module up to a named bound and says how many it did not list. It carries the facts every answer carries, starts no job and no test, and refuses or cannot answer in the cases a summary or path status does, with the reason. A definition whose test's module the latest discovery lists is in scope when that module lies at or under the path, and a test when its module does; an invalid entry of AC1, and a definition naming no usable module path or a module the latest discovery does not list, lie in every scope. (FR22)
 - [x] AC7: `rt-test defects [path] [--root <dir>] [--json]` prints the answer's counts, each invalid entry AC1 counts and each definition that is invalid or anchor missing, with its reason, and the gap counts, never a single pass or fail; under `--json` it gives one versioned JSON document on stdout. It loads no Vitest module, consumer config or test file, and a daemon that predates the query is named as needing a restart. (FR22)
 
 ## Unverified Assumptions
@@ -157,6 +157,11 @@ Asked 2026-09-30 19:12, from dev's sanity check; decided by the orchestrator at 
 - F2, bounding the listed definitions: accepted. This repository's catalogs, which 3.8 converts, hold about 2,480 records at about 550 bytes each as listed, about 1.36 MB at the root and 1.05 MB for `packages/daemon` (dev's measurement), past the 1 MiB line limit. The answer lists definitions in scope up to 500 (a target), ordered invalid, then anchor missing, then never verified, with the number not listed per state; every state's count and the total stay complete; AC1's invalid entries are listed whole; a path lists the rest. 3.4's evidence states join this bound and order, problems first (survived, invalid experiment and unclear ahead of detected).
 - F1, F3 and F4 were confirmed by this session as authoring misses within the rulings: the reader parses JSON itself with a reason that copies no text from V8's message; the `defects` member is bounded at 256 patterns as `nonInputs` is; a directory the walk would enter but cannot list is an invalid entry.
 
+Asked 2026-09-30 20:39, from the review (threadId 479dd53a-c3c1-4425-a3f6-759564e954ca); decided by the orchestrator at 20:40.
+
+- Q-A, a usable pattern that matches nothing: accepted. Each usable pattern that matches no entry the walk meets is one invalid entry at `rt-test.json`, kind `pattern-matched-nothing`, naming the pattern. A mistyped pattern or a renamed folder otherwise drops every definition file it named from the denominator with no entry, which is false verification; an author who lists a pattern before its files exist removes it or adds the file.
+- Q-B, the scope of a definition whose test does not resolve: a third answer, neither of the two the review offered. A definition whose test's module matches no module the latest discovery lists lies in every scope, as one naming no usable module does; only a definition whose module is discovered is scoped by that module. A path that cannot be placed escapes the scope its author meant on every platform (a miscased spelling on Windows, a mistyped folder on Linux), so a scoped answer, and 3.4's scoped verified, would be computed over a smaller set. It costs an invalid definition appearing in every scoped answer until it is fixed.
+
 #### Built after 3.2's matcher lands
 
 3.1's dev starts only once 3.2's build is on `main`, since AC4 counts anchors with 3.2's matcher, and after 2.7b lands, since 3.1 is written against 2.7b's `protocol.ts`, `server.ts`, `request-fields.ts`, `lifecycle.ts` and `query-client.ts`. An empty `old` never reaches the matcher: AC2 makes it invalid first, so `countAnchor`'s 0 for an empty anchor is never read as anchor missing.
@@ -165,7 +170,7 @@ Asked 2026-09-30 19:12, from dev's sanity check; decided by the orchestrator at 
 
 The grill's remaining seed turned on no preference the rulings left open, so this session decided it (2026-09-30 18:20), changing no ruled answer: the design decisions above on regular files, invalid over anchor missing, the answer's text and the duplicate mark, and these:
 
-- An invalid entry of AC1 lies in every scope, since the tests of the definitions it holds are unknown; a definition whose test does not resolve is scoped by the module path it names.
+- An invalid entry of AC1 lies in every scope, since the tests of the definitions it holds are unknown; a definition whose module the latest discovery lists is scoped by that module, and one whose module it does not list lies in every scope (orchestrator ruling Q-B).
 - A walk past its depth bound is an invalid entry naming the pattern, never a partial list (C28).
 - A test two Vitest workspaces collect under one project name and one name path cannot be told apart by the format's fields; the definition stays invalid as ambiguous and says so (review F7), a known limit that withholds verified and never credits a detection.
 
@@ -303,7 +308,7 @@ Questions to the orchestrator: at 19:41 on 2026-09-30, whether the first proof c
 - D3660: A parse failure's reason drops the position the parser gives. (AC1)
 - D3661: A matched file with no `defects` array reads as holding no definitions. (AC1)
 - D3662: A link a pattern matches is skipped without an invalid entry. (AC1)
-- D3663: A directory link below which a pattern could match is skipped without an invalid entry. (AC1)
+- D3663: A directory link below which a pattern could match is skipped without an entry naming it. (AC1)
 - D3664: The walk enters `node_modules`, so every package link there is an invalid entry. (AC1)
 - D3665: A directory the walk cannot list reads as empty. (AC1)
 - D3666: A directory past the depth bound is skipped without an invalid entry. (AC1)
@@ -326,7 +331,7 @@ Questions to the orchestrator: at 19:41 on 2026-09-30, whether the first proof c
 - D3683: A definition's `project` is ignored. (AC3)
 - D3684: An ambiguity no field of the format can resolve is reported as one a field resolves. (AC3)
 - D3685: A definition invalid under the format checks resolves no test, so the test it names reads as a gap. (AC3, AC5)
-- D3686: A definition whose test resolves is judged by its anchor alone, so one invalid for a repeated id reads never verified. (AC4)
+- D3686: A definition whose test resolves is judged by its anchor alone, so one invalid for a repeated id reads anchor missing rather than invalid. (AC4)
 - D3687: The anchor is counted by exact text, so a multi-line `old` reads anchor missing in a CRLF file. (AC4)
 - D3688: An `old` occurring more than once reads never verified; the reason gives the count and not the text. (AC4)
 - D3689: The anchor count lets occurrences overlap. (AC4)
@@ -350,6 +355,34 @@ Questions to the orchestrator: at 19:41 on 2026-09-30, whether the first proof c
 - D3707: A defects query waits only the connection's default bound. (AC6)
 - D3708: The lifecycle drops the caller's path, so a query for one folder is answered for the whole worktree. (AC6)
 
+Added for the review's gap rows (round of 20:46 on 2026-09-30; ids D3710 to D3734, allocated by the orchestrator at 20:46, all used). D3711, D3712, D3714 to D3720, D3726 to D3728 and D3731 are in `definitions.test.ts`; D3710, D3713, D3721 to D3725 and D3732 to D3734 in `query.test.ts`; D3729 and D3730 in `defects-command.test.ts`. The same round repaired `resolvedIn` and `defectsOver` for the fix round's signatures, pinned the `pattern-matched-nothing` entry in D3663 and D3666, re-anchored D3663, D3676, D3692 and D3693, changed D3707's mutation to drop the whole bound argument, gave D3698's fixture a definition lying in every scope, and narrowed D3675's pattern to "lies outside the consumer root".
+
+- D3710: The answer takes the daemon's moment before it reads the definition files and the anchors, so a discovery stored during the reads is answered with the earlier facts as current. (AC6)
+- D3711: A usable pattern that matches no entry makes no invalid entry. (AC1, ruling Q-A)
+- D3712: A directory link whose target cannot be checked is skipped without an invalid entry. (AC1)
+- D3713: A definition whose module the latest discovery does not list is scoped by the path it spells. (AC6, ruling Q-B)
+- D3714: A valid, resolved definition whose anchor was never read reads never verified. (AC4)
+- D3715: The real-path verdict of the first mutation file checked is reused for every other file. (AC2)
+- D3716: The position in a parse failure's reason is taken from the file text the parser quotes. (AC1)
+- D3717: A pattern's directory segment is compared as text, so a wildcard directory segment enters no directory. (AC1)
+- D3718: An `rt-test.json` that is a link reads as absent. (AC1)
+- D3719: An `rt-test.json` that is a directory reads as absent. (AC1)
+- D3720: An `rt-test.json` whose top level is not an object reads as declaring no definition files. (AC1)
+- D3721: The answer tells the resolver the discovery is current whatever its freshness. (AC3)
+- D3722: A listed definition's reason is not cut. (AC6)
+- D3723: A listed definition file problem's reason is not cut. (AC6)
+- D3724: A scope holding no test gets nothing-to-answer though a definition file problem lies in it. (AC6)
+- D3725: A scope holding no test gets nothing-to-answer though a definition lying in every scope lies in it. (AC6)
+- D3726: A test whose `name` is a string passes the format check. (AC2)
+- D3727: A mutation with no `new` is not reported invalid; with its kind check gone, checking the definition throws. (AC2)
+- D3728: An `old` that no longer occurs in its file reads never verified. (AC4)
+- D3729: The command leaves out the line saying how many invalid and anchor-missing definitions the answer did not list. (AC7)
+- D3730: The command prints each state's count from the definitions listed, not from the answer's counts. (AC7)
+- D3731: The anchor is judged before the definition's problems, so a definition whose test is not discovered and whose anchor is also gone reads anchor missing. (AC4)
+- D3732: Anchor-missing definitions are listed after never-verified ones. (AC6)
+- D3733: A listed definition's resolved test carries no duplicate mark. (AC6)
+- D3734: The answer carries none of the facts every answer carries. (AC6)
+
 #### Deliberately Untested
 
 - `packages/daemon/src/defects/definition-files.ts`: the 256-pattern bound, the depth bound's at-limit side, the state directory skip, and a directory link below which no pattern could match each fail closed (an extra invalid entry, never a smaller denominator) at a point no realistic consumer reaches, so they are recorded here by the owner ruling of 03:25. A `defects` member that is not an array: every mutation removing its check crashes the read as a failed query, never a silent drop, so no assertion can prove it. A file a pattern such as `**/*.json` matches includes `rt-test.json` itself, whose `defects` strings then read as invalid definitions; fail-closed and reported to the orchestrator.
@@ -361,9 +394,93 @@ Questions to the orchestrator: at 19:41 on 2026-09-30, whether the first proof c
 
 ### Review Record
 
+Review session: threadId 479dd53a-c3c1-4425-a3f6-759564e954ca
+
+Reviewed 2026-09-30 from 20:23, `git diff main wt/2` at f1db3e40: five fresh-eyes batches, a doc-verify pass and the checklist pass. No assumptions agent ran, since the new modules import no package under `node_modules`; the one runtime claim, V8's `JSON.parse` message, was probed on Node 24.19.0.
+
+#### Fixes applied (20:41 to 20:43, production files only)
+
+- `query/defects-answer.ts`, `defects/resolve-definitions.ts`, `daemon/lifecycle.ts` (HIGH): the answer took the store, the view and the inputs before awaiting the definition file walk and the anchor reads, so an edit or a newly stored discovery during the reads was answered as discovery freshness current. The reads come first now: `readAnchors` reads each valid definition's anchor, then `defectsAnswer` takes the moment the lifecycle hands it as a call and `resolveDefinitions`, now synchronous, resolves without awaiting again. A valid, resolved definition with no anchor read reads anchor missing.
+- `query/defects-answer.ts`, `defects/resolve-definitions.ts`: a definition whose module the latest discovery does not list lies in every scope (ruling Q-B); `ResolvedDefinition.discoveredModule` carries the module when it is listed.
+- `defects/definition-files.ts`: a usable pattern that matches no entry is one `pattern-matched-nothing` entry (ruling Q-A); a directory link whose target cannot be checked, for any reason but its being missing, is a `directory-link` entry rather than nothing (C30); the parse-position expression reads only the end of V8's message, which quotes the file's text before it; `MAX_DEFECT_PATTERNS` and `INVALID_ENTRY` are no longer exported (C59).
+- `query/defects-answer.ts`: `MAX_LISTED_DEFINITIONS` and `MAX_LISTED_GAP_TESTS` are no longer exported (C59); `scopeOf` returns `CallerPathResolution` (C14).
+- `inputs/non-inputs.ts`: `matchesBelow` is the linear form. The set machinery it replaces changed no result (400,000 random trials, 0 disagreements) and no test could cover it.
+- `defects/definitions.ts`: one real-path resolution per mutation path, not per definition. 2,480 synchronous calls took 160 ms (Windows 11, Node 24.19.0, warm, this repository's files), blocking the event loop on every query.
+
+#### Known limits recorded by the review (owner ruling of 03:25: not fixed)
+
+- A mutation file spelled in the wrong letter case is read on Windows and missing on Linux, so the same definition reads never verified on one host and anchor missing on the other. It fails closed on Linux.
+- N definitions sharing one id each get a reason naming the N-1 others before it is cut, so the text built grows with the square of N.
+- A test in a module on another Windows drive, or above the consumer root, can be named by no definition, so it is a gap for good.
+- A definition naming a test in a module that failed to collect reads invalid as not discovered, the reason saying the discovery lists the module and not that it failed to collect; the answer carries no not-discovered entries, so a failed module's tests are neither counted nor named in it.
+- A scoped query still reads every valid definition's mutation file; 3.5 decides what is cached.
+- An untracked definition file git ignores, by a machine-local rule included, is never read; its pattern is an invalid entry only when nothing else matches it.
+- The every-scope lists (invalid entries, and now definitions whose module is not discovered) are unbounded, so enough of them pass the line limit, where a narrower path cannot help; it fails loudly.
+- `countAnchor` builds a regular expression from the whole `old`. Measured in 3.2's review on Node 24.19 (orchestrator, 20:48 on 2026-09-30): a 100,000 character `old` matches in 11 ms, and a 1,000,000 character one throws a `SyntaxError` whose message quotes the pattern, which fails the whole `defects` query with `old` in its error text, against AC2. No realistic definition holds an `old` that large. The fix, if it ever matters, is a size bound on `old` in this ticket's validation (`checkedMutation` in `defects/definitions.ts`); `falsify/anchor-match.ts` stays as it is.
+
+Ticket 3.2 has no check of its own for an empty `old` or an `old` equal to `new`: it relies on AC2 rejecting both, so D3672, D3673 and D3674 stay proven whenever `defects/definitions.ts` changes (orchestrator, 20:48 on 2026-09-30).
+
+#### Tech debt (triaged once the change is committed)
+
+- Duplication: `memberProblem` in `packages/daemon/src/defects/definition-files.ts` repeats `listProblem` in `packages/daemon/src/inputs/non-inputs.ts` check for check and word for word, where a third `ListMember` rule would serve.
+- Duplication: `pathPositional` in `packages/cli/src/commands/defects.ts` repeats `optionalRoot` in `packages/cli/src/command.ts` but for the name it passes, and the command's query-and-report body is the third copy of the one in `packages/cli/src/commands/status.ts` and `packages/cli/src/commands/file-query.ts`.
+- Duplication: `gapLists` in `packages/daemon/src/query/defects-answer.ts` groups standings by test file as `fileCounts` in `packages/daemon/src/query/path-status.ts` does.
+- Duplication: `withLfBreaks` in `packages/daemon/src/defects/definitions.ts` repeats the private `toLf` of `packages/daemon/src/falsify/anchor-match.ts` (ticket 3.2's file), and its `WINDOWS_SEPARATOR` is the fourth private copy beside `selection/alias-specifiers.ts`, `selection/extends-lookup.ts` and `selection/specifier-edges.ts`.
+- Structure: `DEFECT_STATE` and `DEFECT_STATES` reach the CLI from `defects/resolve-definitions.ts` through `packages/daemon/src/client.ts`, so the CLI process loads the resolver, the anchor matcher and `node:fs/promises` for two constants. It loads no Vitest module.
+- Pre-existing: the path-status refusal in `packages/daemon/src/daemon/server.ts` (`pathStatusResponse`) and `namedPaths` in `packages/daemon/src/daemon/request-fields.ts` echo the refused value, where `optionalPath` gives its shape, so a path near the line limit makes a refusal the client discards; the absolute-path check is written in both files.
+- Pre-existing: `DaemonHandlers.summary` in `packages/daemon/src/daemon/server.ts` declares a signal the lifecycle's `summary()` does not take.
+- Pre-existing, shared by `status`, `changes` and `defects`: a repeated `--root` keeps the last value silently, and an empty path reads "The path path is empty." through `nonEmptyPath` in `packages/cli/src/command.ts`.
+- Cosmetic: `rt-test defects` prints "of which 1 are definition file problems" for a count of one.
+
+#### Validation of the final tree (Windows 11, Node 24.19.0, 2026-09-30)
+
+- File size and lint: `bun x oxlint` over the six fixed production files and the three edited test files, exit 0, 21:09. `lifecycle.ts` holds 498 code lines, `definition-files.ts` 452, `non-inputs.ts` 328.
+- Typecheck: `bun run --filter @rt-test/daemon typecheck` and `bun run --filter rt-test typecheck`, each exit 0, 21:09.
+- Suite, scoped from the fix round's six production files: `bun x vitest related <the six> --run` through the run lease, 40 of 149 test files, 2,158 tests passed, exit 0, 21:11 to 21:16.
+- Named defects, run by the tests session on this tree: `node scripts/verify-defects.mjs --edited` through the lease, 283 of 283 detected, exit 0, on Windows 20:54 to 21:04 and on Linux (WSL, Node 24.19.0) 21:04 to 21:08. The 283 hold D3710 to D3734, the repaired records and all 170 records mutating the six fixed files, D3672 to D3674 among them.
+- Citations: `node scripts/check-line-citations.mjs`, clean over 9 changed files, 21:09. `check-sprint-keys` and `check-requirement-markers`, each exit 0, 21:10.
+
 #### Test Coverage Gaps
 
-None.
+Every row below was worked by the tests session by 21:08 on 2026-09-30 (D3710 to D3734 added; D3707, D3698 and D3675 tightened). None was refuted and none is open.
+
+Broken by the fix round, to repair first:
+
+- `packages/daemon/test/defects/definitions.test.ts`, helper `resolvedIn`: `resolveDefinitions` is synchronous and takes `(definitions, anchors, discovery, discoveryCurrent)`; the anchors come from `await readAnchors(definitions, signal)`. D3679 to D3690 fail through it. Re-anchor every record of theirs whose `old` moved.
+- `packages/daemon/test/query.test.ts`, helper `defectsOver`: `DefectsQuery` is `{ path, consumerRoot, stateDirectory, signal, moment }`, `moment` returning `{ results, view, inputs }`.
+- D3663 and D3666 assert one invalid entry and now get two: their pattern matches no entry, so it is a `pattern-matched-nothing` entry as well (ruling Q-A). Pin the new behavior.
+- Every record mutating `definition-files.ts`, `definitions.ts`, `resolve-definitions.ts`, `defects-answer.ts`, `lifecycle.ts` or `non-inputs.ts` is re-proved, by `--edited`.
+
+Defects the fix round makes possible, each owed its own named test:
+
+- HIGH, `packages/daemon/src/query/defects-answer.ts`. Defect: "The defects answer takes the daemon's moment before it reads the definition files and the anchors, so an input change or a newly stored discovery during the reads is answered with the earlier facts as current." Expected: a `moment` that is called only once the file reads have ended, shown by a moment whose results differ before and after a read the test holds open, or by the order of a recorded read and the recorded call.
+- HIGH, `packages/daemon/src/defects/definition-files.ts`. Defect: "A usable pattern that matches no entry makes no invalid entry, so a mistyped pattern or a renamed folder drops its definition files from the total silently." Expected: `defects: ["defect/*.json"]` over a tree holding `defects/a.json` gives one `pattern-matched-nothing` entry at `rt-test.json` whose reason names the pattern, and a pattern that matches a file gives none.
+- MEDIUM, `packages/daemon/src/defects/definition-files.ts`. Defect: "A directory link whose target cannot be checked is skipped without an invalid entry." Expected: `stat` failing with EACCES on a link below which a pattern could match gives one `directory-link` entry; a link whose target is missing gives none.
+- MEDIUM, `packages/daemon/src/query/defects-answer.ts`. Defect: "A definition whose module the latest discovery does not list is scoped by the path it spells, so a scoped answer leaves it out of its total." Expected: a definition naming an undiscovered module is counted and listed in the answer for an unrelated path, and one naming a discovered module elsewhere is not.
+- LOW, `packages/daemon/src/defects/resolve-definitions.ts`. Defect: "A valid, resolved definition whose anchor was never read reads never verified." Expected: `resolveDefinitions` over an empty anchor map reads it anchor missing.
+- LOW, `packages/daemon/src/defects/definitions.ts`. Defect: "The real-path verdict of the first mutation file checked is reused for every other file." Expected: two definitions, the first naming a file inside the root and the second one reached through a link outside it; the second is invalid.
+- LOW, `packages/daemon/src/defects/definition-files.ts`. Defect: "The position in a parse failure's reason is taken from the text of the file that V8 quotes." Expected: a file whose whole text is `[at position 7]` reads "it is not valid JSON" with no position.
+
+Defects in the change as built that no test catches:
+
+- HIGH, `packages/daemon/src/inputs/non-inputs.ts` `matchesBelow`. Defect: "A directory segment of a pattern is compared as text, so a pattern with a wildcard directory segment, such as `packages/*/defects/*.json`, enters no directory and its definition files are dropped with no entry." Expected: that pattern reads `packages/a/defects/x.json`. No test reaches `matchesBelow` with a wildcard outside the file segment.
+- MEDIUM, `packages/daemon/src/defects/definition-files.ts`. Defect: "An `rt-test.json` that is a directory or a link, or whose top level is not an object, reads as declaring no definition files." Expected: each gives one `settings-unusable` entry. Only the unparseable file is tested (D3655).
+- MEDIUM, `packages/daemon/src/query/defects-answer.ts`. Defect: "The answer tells the resolver the discovery is current whatever its freshness, so a not-discovered reason never says the discovery is not current." Every `defectsOver` call passes unsettled inputs and none asserts a reason.
+- MEDIUM, `packages/daemon/src/query/defects-answer.ts`. Defect: "A listed reason is not cut, so the bounded lists no longer bound the answer's size." Expected: a reason over 1,000 characters is listed cut with its omitted count, for a definition and for an invalid entry (C170).
+- MEDIUM, `packages/daemon/src/query/defects-answer.ts`. Defect: "A scope holding no test gets nothing-to-answer though a definition file problem, or a definition lying in every scope, lies in it." D3693 and D3694 both use a scope that also holds a test.
+- MEDIUM, `packages/daemon/src/defects/definitions.ts`. Defect: "A test whose `name` is a string, or a mutation with no `new`, passes the format check." A string name resolves to the one-character test it spells and reads never verified. AC2's wrong-kind clause is proved only for `id`, `defect` and `required`.
+- MEDIUM, `packages/daemon/src/defects/resolve-definitions.ts`. Defect: "An `old` that no longer occurs in its file reads never verified." It is caught only in passing by D3695, whose record names an ordering defect.
+- MEDIUM, `packages/cli/src/commands/defects.ts`. Defect: "The command leaves out the line saying how many invalid and anchor-missing definitions the answer did not list, so a 500-entry list reads as the whole." Every fixture sets `definitionsNotListed` to zeros.
+- MEDIUM, `packages/cli/src/commands/defects.ts`. Defect: "The command prints each state's count from the definitions listed, not from the answer's counts." D3704 asserts neither the States line nor the Tests in scope line, and its fixture's counts equal its lists' lengths.
+- LOW, `packages/daemon/src/defects/resolve-definitions.ts`. Defect: "The anchor is judged before the definition's problems, so an invalid definition whose anchor is also gone reads anchor missing." No test has a definition with both.
+- LOW, `packages/daemon/src/query/defects-answer.ts`. Defect: "Anchor-missing definitions are listed after never-verified ones." D3695's 500 listed are all invalid.
+- LOW, `packages/daemon/src/query/defects-answer.ts`. Defect: "A listed definition carries no resolved test identity or duplicate mark, and the answer none of the facts every answer carries." No test reads `resolvedTest`, `duplicate` or a context member of a defects answer.
+
+Records whose proof does not show their named defect:
+
+- D3707, `packages/daemon/test/defects.json`: its mutation leaves `query(target, request, { })`, so the bound is `NaN` and the request throws before it is sent; the mutant never "waits only the connection's default bound". Mutate the whole bound argument away and re-prove.
+- D3698, `packages/daemon/test/defects.json`: under its mutation the answer is still a nothing-to-answer ("at or under undefined"), so the test separates two wordings, not refused from answered. Give the fixture something that lies in every scope, so the mutant answers, or reword the record's defect.
+- D3675, `packages/daemon/test/defects/definitions.test.ts`: its pattern `/outside the consumer root/` matches the real-path reason too, so its mutation survives on a host where `<file system root>/outside.ts` exists. Match "lies outside the consumer root".
 
 ### Completion Notes
 

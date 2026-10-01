@@ -64,10 +64,10 @@
   },
   {
     "id": "D3663",
-    "defect": "A directory link below which a pattern could match is skipped without an invalid entry, so the definition files under it silently leave the denominator.",
+    "defect": "A directory link below which a pattern could match is skipped without an entry naming it, so the author is never told which link hides the definition files.",
     "file": "packages/daemon/src/defects/definition-files.ts",
-    "old": "  if (below.length > 0 && (await isDirectoryTarget(path))) {",
-    "new": "  if (false) {"
+    "old": "  if (below.length === 0) return;",
+    "new": "  return;"
   },
   {
     "id": "D3664",
@@ -157,7 +157,7 @@
     "id": "D3676",
     "defect": "A mutation file reached through a link to a path outside the consumer root passes as inside it.",
     "file": "packages/daemon/src/defects/definitions.ts",
-    "old": "  if (real.ok && !liesInside(realRoot, real.path)) {",
+    "old": "  if (leadsOutside(root, spelled.path, path)) {",
     "new": "  if (false) {"
   },
   {
@@ -225,7 +225,7 @@
   },
   {
     "id": "D3686",
-    "defect": "A definition whose test resolves is judged by its anchor alone, so one invalid for a repeated id reads never verified.",
+    "defect": "A definition whose test resolves is judged by its anchor alone, so one invalid for a repeated id reads anchor missing rather than invalid.",
     "file": "packages/daemon/src/defects/resolve-definitions.ts",
     "old": "  if (problems.length > 0 || resolved === undefined) {",
     "new": "  if (resolved === undefined) {"
@@ -257,5 +257,96 @@
     "file": "packages/daemon/src/defects/resolve-definitions.ts",
     "old": "    return { unreadable: errorText(error) };",
     "new": "    return { text: \"\" };"
+  },
+  {
+    "id": "D3711",
+    "defect": "A usable pattern that matches no entry makes no invalid entry, so a mistyped pattern or a renamed folder drops its definition files from the total silently.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  walk.invalidEntries.push(...unmatchedPatterns(walk));",
+    "new": "  walk.invalidEntries.push();"
+  },
+  {
+    "id": "D3712",
+    "defect": "A directory link whose target cannot be checked is skipped without an invalid entry.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    return isMissing(error)\n",
+    "new": "    return true\n"
+  },
+  {
+    "id": "D3714",
+    "defect": "A valid, resolved definition whose anchor was never read reads never verified.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "const UNREAD_ANCHOR: AnchorRead = { missing: ANCHOR_NOT_READ };",
+    "new": "const UNREAD_ANCHOR: AnchorRead = { missing: undefined };"
+  },
+  {
+    "id": "D3715",
+    "defect": "The real-path verdict of the first mutation file checked is reused for every other file, so a file reached through a link outside the root passes as inside it.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "  const known = root.leadsOutside.get(spelled);",
+    "new": "  const known = [...root.leadsOutside.values()][0];"
+  },
+  {
+    "id": "D3716",
+    "defect": "The position in a parse failure's reason is taken from the text of the file that the parser quotes.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "  / JSON at position (\\d+)(?: \\(line (\\d+) column (\\d+)\\))?$/;",
+    "new": "  /at position (\\d+)(?: \\(line (\\d+) column (\\d+)\\))?/;"
+  },
+  {
+    "id": "D3717",
+    "defect": "A directory segment of a pattern is compared as text, so a pattern with a wildcard directory segment enters no directory and its definition files are never read.",
+    "file": "packages/daemon/src/inputs/non-inputs.ts",
+    "old": "    if (wanted === undefined || !matchesSegment(wanted, name)) return false;",
+    "new": "    if (wanted === undefined || wanted !== name) return false;"
+  },
+  {
+    "id": "D3718",
+    "defect": "An rt-test.json that is a link reads as absent, so it declares no definition files and its definitions silently leave the denominator.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    case PRESENCE.link:",
+    "new": "    case PRESENCE.link:\n      return ABSENT;"
+  },
+  {
+    "id": "D3719",
+    "defect": "An rt-test.json that is a directory reads as absent, so it declares no definition files.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    case PRESENCE.other:",
+    "new": "    case PRESENCE.other:\n      return ABSENT;"
+  },
+  {
+    "id": "D3720",
+    "defect": "An rt-test.json whose top level is not an object reads as declaring no definition files.",
+    "file": "packages/daemon/src/defects/definition-files.ts",
+    "old": "    return { entry: settingsEntry(\"its top level is not a JSON object\") };",
+    "new": "    return { patterns: [] };"
+  },
+  {
+    "id": "D3726",
+    "defect": "A test whose name is a string passes the format check, so it resolves to the test its characters spell.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "    isStringArray(name) && name.length > 0",
+    "new": "    (isStringArray(name) || typeof name === \"string\") && name.length > 0"
+  },
+  {
+    "id": "D3727",
+    "defect": "A mutation with no new text is not reported invalid: its kind check is gone, and checking the definition throws, failing the whole query.",
+    "file": "packages/daemon/src/defects/definitions.ts",
+    "old": "    typeof replacement === \"string\"",
+    "new": "    true"
+  },
+  {
+    "id": "D3728",
+    "defect": "An old that no longer occurs in its file reads never verified.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (count === ANCHOR_OCCURRENCES_WANTED) return undefined;",
+    "new": "  if (count <= ANCHOR_OCCURRENCES_WANTED) return undefined;"
+  },
+  {
+    "id": "D3731",
+    "defect": "The anchor is judged before the definition's problems, so a definition whose test is not discovered and whose anchor is also gone reads anchor missing.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (problems.length > 0 || resolved === undefined) {",
+    "new": "  if ((problems.length > 0 || resolved === undefined) && anchors.get(definition)?.missing === undefined) {"
   }
 ]

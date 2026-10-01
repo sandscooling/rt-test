@@ -9,12 +9,12 @@ import {
 } from "../defects/definitions.js";
 import {
   DEFECT_STATES,
+  readAnchors,
   resolveDefinitions,
   type DefectState,
   type ResolvedDefinition,
 } from "../defects/resolve-definitions.js";
-import type { CurrentInputs } from "../inputs/input-tracker.js";
-import type { LatestResults } from "../store/open-store.js";
+import type { WaitMoment } from "../daemon/waits.js";
 import { ROOT_PATH } from "../vitest/find-workspaces.js";
 import {
   CURRENT,
@@ -22,18 +22,21 @@ import {
   type CutReason,
   type NoAnswer,
 } from "./answer.js";
-import { resolveCallerPath, type CallerPath } from "./caller-paths.js";
+import {
+  resolveCallerPath,
+  type CallerPathResolution,
+} from "./caller-paths.js";
 import { liesAtOrUnder, testFile } from "./path-status.js";
-import { cutReason, queryBasis, type DaemonView } from "./summary.js";
+import { cutReason, queryBasis } from "./summary.js";
 import type { TestStanding } from "./test-states.js";
 
 /**
  * A target until measured: how many definitions an answer lists, so the part of an answer that grows with a
  * consumer's catalog stays well under the protocol's line limit.
  */
-export const MAX_LISTED_DEFINITIONS = 500;
+const MAX_LISTED_DEFINITIONS = 500;
 /** A target until measured: how many gap tests an answer lists, so the part that grows with a consumer's tests does too. */
-export const MAX_LISTED_GAP_TESTS = 1_000;
+const MAX_LISTED_GAP_TESTS = 1_000;
 
 /** A discovered test as an answer names it. */
 export interface NamedTest {
@@ -109,35 +112,41 @@ export interface DefectsAnswer extends AnswerContext {
 export interface DefectsQuery {
   /** Absolute; the whole worktree when undefined. */
   readonly path: string | undefined;
-  readonly results: LatestResults;
-  readonly daemon: DaemonView;
-  readonly inputs: CurrentInputs;
+  readonly consumerRoot: string;
   readonly stateDirectory: string;
   readonly signal: AbortSignal;
+  /** The latest stored results, the daemon's view and the inputs, read when it is called. */
+  readonly moment: () => WaitMoment;
 }
 
 /**
- * Reads the definition files as they are now, resolves each definition against the latest stored discovery, and
- * answers for the definitions and tests at or under the path; it starts no job.
+ * Reads the definition files and each mutation's file as they are now, then takes the daemon's moment and resolves
+ * each definition against the latest stored discovery without awaiting again, so the facts the answer carries are
+ * those that hold when it answers. It answers for the definitions and tests at or under the path, and starts no job.
+ * Once the signal aborts nobody waits for the answer and a stop may have closed the store, so it reads no moment.
  */
 export async function defectsAnswer(
   query: DefectsQuery,
 ): Promise<DefectsAnswer | NoAnswer> {
-  const { daemon } = query;
-  const scope = scopeOf(query.path, daemon.consumerRoot);
+  const { consumerRoot, signal } = query;
+  const scope = scopeOf(query.path, consumerRoot);
   if (!scope.ok) return { noAnswer: scope.reason };
-  const basis = queryBasis(query.results, daemon, query.inputs);
-  if ("noAnswer" in basis) return basis;
   const files = await readDefinitionFiles(
-    daemon.consumerRoot,
+    consumerRoot,
     query.stateDirectory,
-    query.signal,
+    signal,
   );
-  const resolved = await resolveDefinitions(
-    checkDefinitions(files.definitions, daemon.consumerRoot),
+  const checked = checkDefinitions(files.definitions, consumerRoot);
+  const anchors = await readAnchors(checked, signal);
+  signal.throwIfAborted();
+  const { results, view, inputs } = query.moment();
+  const basis = queryBasis(results, view, inputs);
+  if ("noAnswer" in basis) return basis;
+  const resolved = resolveDefinitions(
+    checked,
+    anchors,
     basis.discovery.discovery,
     basis.context.discovery.freshness === CURRENT,
-    query.signal,
   );
   const definitions = resolved.filter((definition) =>
     inScope(definition, scope.path),
@@ -189,18 +198,21 @@ export async function defectsAnswer(
 function scopeOf(
   path: string | undefined,
   consumerRoot: string,
-): ({ readonly ok: true } & CallerPath) | { ok: false; reason: string } {
+): CallerPathResolution {
   if (path === undefined) {
     return { ok: true, given: consumerRoot, path: ROOT_PATH };
   }
   return resolveCallerPath(path, consumerRoot);
 }
 
-/** A definition naming no usable module lies in every scope, since the test it means is unknown. */
+/**
+ * A definition whose module the latest discovery does not list, or that names no usable one, lies in every scope:
+ * a misspelled module path places it nowhere, so no scope could otherwise count it.
+ */
 function inScope(definition: ResolvedDefinition, scope: string): boolean {
   return (
-    definition.modulePath === undefined ||
-    liesAtOrUnder(definition.modulePath, scope)
+    definition.discoveredModule === undefined ||
+    liesAtOrUnder(definition.discoveredModule, scope)
   );
 }
 

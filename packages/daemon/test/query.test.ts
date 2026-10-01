@@ -2522,21 +2522,32 @@ function defectDefinition(
   };
 }
 
+interface DefectsSetup {
+  /** The inputs the daemon's moment carries; unsettled when absent. */
+  readonly inputs?: CurrentInputs;
+  /** Patterns `rt-test.json` names beside `defects/*.json`. */
+  readonly morePatterns?: readonly string[];
+}
+
 /**
  * Writes `A_SOURCE`, and with any definition files an `rt-test.json` naming `defects/*.json` and those files, under
- * `root`, then answers `defects` over `latest` as the daemon does, for the absolute `path` or the whole worktree.
+ * `root`, then answers `defects` as the daemon does, for the absolute `path` or the whole worktree. The moment it
+ * hands over reads `latest` when it is called.
  */
 function defectsOver(
   root: string,
-  latest: LatestResults,
+  latest: LatestResults | (() => LatestResults),
   files: DefinitionFilesTree = {},
   path?: string,
+  setup: DefectsSetup = {},
 ): Promise<DefectsAnswer | NoAnswer> {
   const written: Record<string, string> = {
     [A_SOURCE]: "export function a() {\n  return 1;\n}\n",
   };
   if (Object.keys(files).length > 0) {
-    written["rt-test.json"] = JSON.stringify({ defects: ["defects/*.json"] });
+    written["rt-test.json"] = JSON.stringify({
+      defects: ["defects/*.json", ...(setup.morePatterns ?? [])],
+    });
   }
   for (const [name, definitions] of Object.entries(files)) {
     written[`defects/${name}`] =
@@ -2550,11 +2561,14 @@ function defectsOver(
   }
   return defectsAnswer({
     path,
-    results: latest,
-    daemon: { ...IDLE, consumerRoot: root },
-    inputs: UNSETTLED,
+    consumerRoot: root,
     stateDirectory: join(root, ".rt-test"),
     signal: new AbortController().signal,
+    moment: () => ({
+      results: typeof latest === "function" ? latest() : latest,
+      view: { ...IDLE, consumerRoot: root },
+      inputs: setup.inputs ?? UNSETTLED,
+    }),
   });
 }
 
@@ -2714,6 +2728,186 @@ describe(
         },
       });
     });
+
+    it("D3713: a definition whose module the latest discovery does not list lies in every scope, while one whose module is discovered elsewhere is left out", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one"),
+            {
+              "a.json": [
+                defectDefinition("D1", "x", "packages/zzz/src/a.test.ts"),
+                defectDefinition("D2", "one"),
+              ],
+            },
+            join(root, WORKSPACE_B),
+          ),
+        ),
+      );
+      expect({
+        total: answer.counts.total,
+        ids: answer.definitions.map((definition) => definition.id),
+      }).toStrictEqual({ total: 1, ids: ["D1"] });
+    });
+
+    it("D3721: a not-discovered reason says the discovery is not current when the daemon's moment reads it stale, and not when it reads it current", async () => {
+      const latest = results(
+        storedDiscovery(
+          [discoveredWorkspace(WORKSPACE_A, [discovered("one")])],
+          [],
+          VITEST_ADAPTER_VERSION,
+          DIGEST,
+        ),
+      );
+      const files = { "a.json": [defectDefinition("D1", "missing")] };
+      const reasons = await inTempDir(async (root) => {
+        const stale = answered(
+          await defectsOver(join(root, "a"), latest, files, undefined, {
+            inputs: settled({}),
+          }),
+        );
+        const current = answered(
+          await defectsOver(join(root, "b"), latest, files, undefined, {
+            inputs: settled({}, { ok: true, digest: DIGEST.digest }),
+          }),
+        );
+        return [stale, current].map((answer) =>
+          /not current/.test(answer.definitions[0]?.reason?.reason ?? ""),
+        );
+      });
+      expect(reasons).toStrictEqual([true, false]);
+    });
+
+    it("D3722: a listed definition's reason over 1000 characters is cut to 1000, with the rest counted", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(root, discoveryOfAAndB("one"), {
+            "a.json": [defectDefinition("D1", "x".repeat(2000))],
+          }),
+        ),
+      );
+      const reason = answer.definitions[0]?.reason;
+      expect({
+        characters: Array.from(reason?.reason ?? "").length,
+        restCounted: (reason?.omittedCharacters ?? 0) > 0,
+      }).toStrictEqual({ characters: 1000, restCounted: true });
+    });
+
+    it("D3723: a listed definition file problem's reason over 1000 characters is cut to 1000, with the rest counted", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one"),
+            { "a.json": [defectDefinition("D1", "one")] },
+            undefined,
+            { morePatterns: [`${"x".repeat(2000)}/*.json`] },
+          ),
+        ),
+      );
+      const [entry] = answer.invalidEntries;
+      expect({
+        characters: Array.from(entry?.reason ?? "").length,
+        restCounted: (entry?.omittedCharacters ?? 0) > 0,
+      }).toStrictEqual({ characters: 1000, restCounted: true });
+    });
+
+    it("D3724: a path holding no test is still answered when a definition file problem lies in it, as one lies in every scope", async () => {
+      const answer = await inTempDir((root) => {
+        mkdirSync(join(root, "docs"));
+        return defectsOver(
+          root,
+          discoveryOfAAndB("one"),
+          { "broken.json": "not json" },
+          join(root, "docs"),
+        );
+      });
+      expect(
+        "noAnswer" in answer
+          ? answer
+          : {
+              testsInScope: answer.testsInScope,
+              invalidEntries: answer.counts.invalidEntries,
+            },
+      ).toStrictEqual({ testsInScope: 0, invalidEntries: 1 });
+    });
+
+    it("D3725: a path holding no test is still answered when a definition lying in every scope lies in it", async () => {
+      const answer = await inTempDir((root) => {
+        mkdirSync(join(root, "docs"));
+        return defectsOver(
+          root,
+          discoveryOfAAndB("one"),
+          { "a.json": [defectDefinition("D9", "x", "")] },
+          join(root, "docs"),
+        );
+      });
+      expect(
+        "noAnswer" in answer
+          ? answer
+          : { testsInScope: answer.testsInScope, total: answer.counts.total },
+      ).toStrictEqual({ testsInScope: 0, total: 1 });
+    });
+
+    it("D3732: definitions are listed invalid first, then anchor missing, then never verified, whatever their order in the file", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(root, discoveryOfAAndB("one", "two"), {
+            "a.json": [
+              defectDefinition("D1", "one"),
+              defectDefinition("D2", "two", A_MODULE, "absent();"),
+              defectDefinition("D3", "missing"),
+            ],
+          }),
+        ),
+      );
+      expect(
+        answer.definitions.map(({ id, state }) => [id, state]),
+      ).toStrictEqual([
+        ["D3", "invalid-definition"],
+        ["D2", "anchor-missing"],
+        ["D1", "never-verified"],
+      ]);
+    });
+
+    it("D3733: a listed definition carries the identity of the test it resolves to and that test's duplicate mark", async () => {
+      const first = discovered("one", { isDuplicate: true });
+      const second = {
+        ...first,
+        identity: { ...first.identity, occurrence: 1 },
+      };
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            results(
+              storedDiscovery([
+                discoveredWorkspace(WORKSPACE_A, [first, second]),
+              ]),
+            ),
+            {
+              "a.json": [
+                {
+                  ...defectDefinition("D1", "one"),
+                  test: { module: A_MODULE, name: ["one"], occurrence: 1 },
+                },
+              ],
+            },
+          ),
+        ),
+      );
+      expect(answer.definitions[0]?.resolvedTest).toStrictEqual({
+        identity: {
+          workspacePath: WORKSPACE_A,
+          projectName: PROJECT,
+          modulePath: MODULE,
+          namePath: ["one"],
+          occurrence: 1,
+        },
+        duplicate: true,
+      });
+    });
   },
 );
 
@@ -2761,21 +2955,25 @@ describe("the defects answer's gap listing and refusals", () => {
     ]);
   });
 
-  it("D3698: a path outside the consumer root is refused with the reason naming it", async () => {
-    const answer = await inTempDir((root) =>
-      defectsOver(
-        join(root, "consumer"),
-        discoveryOfAAndB("one"),
-        {},
-        join(root, "elsewhere"),
-      ),
-    );
-    expect(answer).toStrictEqual({
-      noAnswer: expect.stringMatching(
-        /elsewhere lies outside the consumer root/,
-      ),
-    });
-  });
+  it(
+    "D3698: a path outside the consumer root is refused with the reason naming it, though a definition lying in every scope would give it something to answer",
+    async () => {
+      const answer = await inTempDir((root) =>
+        defectsOver(
+          join(root, "consumer"),
+          discoveryOfAAndB("one"),
+          { "a.json": [defectDefinition("D9", "x", "")] },
+          join(root, "elsewhere"),
+        ),
+      );
+      expect(answer).toStrictEqual({
+        noAnswer: expect.stringMatching(
+          /elsewhere lies outside the consumer root/,
+        ),
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
 
   it("D3699: a path holding no test, no definition and no definition file problem has nothing to answer", async () => {
     const answer = await inTempDir((root) => {
@@ -2786,6 +2984,39 @@ describe("the defects answer's gap listing and refusals", () => {
       noAnswer: expect.stringMatching(
         /^no discovered test, no defect definition and no problem reading the definition files lies at or under /,
       ),
+    });
+  });
+
+  it("D3710: the answer takes the daemon's moment only once its file reads have ended, so a discovery stored during them is the one it answers from", async () => {
+    const answer = answered(
+      await inTempDir((root) => {
+        let latest = discoveryOfAAndB("one");
+        const pending = defectsOver(root, () => latest);
+        latest = discoveryOfAAndB("one", "two");
+        return pending;
+      }),
+    );
+    expect(answer.testsInScope).toBe(3);
+  });
+
+  it("D3734: the answer carries the facts every answer carries: the consumer root, the inputs, the activity and the jobs that stored nothing", async () => {
+    const [answer, root] = await inTempDir(
+      async (dir) =>
+        [
+          answered(await defectsOver(dir, discoveryOfAAndB("one"))),
+          dir,
+        ] as const,
+    );
+    expect({
+      consumerRoot: answer.consumerRoot,
+      inputs: answer.inputs,
+      activity: answer.activity,
+      unstoredJobs: answer.unstoredJobs,
+    }).toStrictEqual({
+      consumerRoot: root,
+      inputs: UNSETTLED.facts,
+      activity: { state: "idle" },
+      unstoredJobs: [],
     });
   });
 });

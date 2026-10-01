@@ -27,12 +27,25 @@ const PROBLEM_SEPARATOR = "; ";
 const FIELD_SEPARATOR = " and ";
 const LIST_SEPARATOR = ", ";
 const ANCHOR_OCCURRENCES_WANTED = 1;
+const ANCHOR_NOT_READ = "its mutation's file was not read";
 const FIELD = { project: "project", occurrence: "occurrence" } as const;
+
+/** What reading one definition's anchor found: why it is missing, or nothing when its `old` occurs exactly once. */
+interface AnchorRead {
+  readonly missing: string | undefined;
+}
+
+/** The anchor read of each definition no check found a problem in. */
+export type AnchorReads = ReadonlyMap<CheckedDefinition, AnchorRead>;
+
+const UNREAD_ANCHOR: AnchorRead = { missing: ANCHOR_NOT_READ };
 
 /** A checked definition with its test resolved and its one state. */
 export interface ResolvedDefinition extends CheckedDefinition {
   /** The one discovered test its well-formed test names, whatever its other problems; undefined when none. */
   readonly resolved: DiscoveredTest | undefined;
+  /** Its test's module when the latest discovery lists that module; without one no scope can place it. */
+  readonly discoveredModule: string | undefined;
   readonly state: DefectState;
   /** Why it is invalid or its anchor is missing; absent for never verified. */
   readonly reason?: string;
@@ -53,31 +66,50 @@ type TestResolution =
 type FileText = { readonly text: string } | { readonly unreadable: string };
 
 /**
- * Resolves each definition's test against the latest stored discovery, then reads the anchor of each definition that
- * is valid and resolved in its mutation's file as it is now, reading each file once and one at a time, so a large
- * catalog never holds more than one file open.
+ * Reads the anchor of each definition no check found a problem in, in its mutation's file as it is now, reading each
+ * file once and one at a time, so a large catalog never holds more than one file open. It reads no discovery, so a
+ * caller can take the discovery once these reads have ended.
  */
-export async function resolveDefinitions(
+export async function readAnchors(
   definitions: readonly CheckedDefinition[],
-  discovery: TestDiscovery,
-  discoveryCurrent: boolean,
   signal: AbortSignal,
-): Promise<ResolvedDefinition[]> {
-  const index = discoveryIndex(discovery, discoveryCurrent);
+): Promise<AnchorReads> {
   const files = new Map<string, FileText>();
-  const resolvedDefinitions: ResolvedDefinition[] = [];
+  const anchors = new Map<CheckedDefinition, AnchorRead>();
   for (const definition of definitions) {
     signal.throwIfAborted();
-    resolvedDefinitions.push(await resolveDefinition(definition, index, files));
+    if (definition.problems.length > 0) continue;
+    anchors.set(definition, {
+      missing: await anchorProblem(definition, files),
+    });
   }
-  return resolvedDefinitions;
+  return anchors;
 }
 
-async function resolveDefinition(
+/** Resolves each definition's test against the latest stored discovery and gives it its one state, reading no file. */
+export function resolveDefinitions(
+  definitions: readonly CheckedDefinition[],
+  anchors: AnchorReads,
+  discovery: TestDiscovery,
+  discoveryCurrent: boolean,
+): ResolvedDefinition[] {
+  const index = discoveryIndex(discovery, discoveryCurrent);
+  return definitions.map((definition) =>
+    resolveDefinition(definition, index, anchors),
+  );
+}
+
+/** A valid, resolved definition whose anchor was not read reads anchor missing, never as never verified. */
+function resolveDefinition(
   definition: CheckedDefinition,
   index: DiscoveryIndex,
-  files: Map<string, FileText>,
-): Promise<ResolvedDefinition> {
+  anchors: AnchorReads,
+): ResolvedDefinition {
+  const { modulePath } = definition;
+  const discoveredModule =
+    modulePath !== undefined && index.modules.has(modulePath)
+      ? modulePath
+      : undefined;
   const resolution = resolveTest(definition, index);
   const resolved =
     resolution !== undefined && "test" in resolution
@@ -91,16 +123,23 @@ async function resolveDefinition(
     return {
       ...definition,
       resolved,
+      discoveredModule,
       state: DEFECT_STATE.invalidDefinition,
       reason: problems.join(PROBLEM_SEPARATOR),
     };
   }
-  const missing = await anchorProblem(definition, files);
+  const { missing } = anchors.get(definition) ?? UNREAD_ANCHOR;
   return missing === undefined
-    ? { ...definition, resolved, state: DEFECT_STATE.neverVerified }
+    ? {
+        ...definition,
+        resolved,
+        discoveredModule,
+        state: DEFECT_STATE.neverVerified,
+      }
     : {
         ...definition,
         resolved,
+        discoveredModule,
         state: DEFECT_STATE.anchorMissing,
         reason: missing,
       };
@@ -214,7 +253,9 @@ async function anchorProblem(
   files: Map<string, FileText>,
 ): Promise<string | undefined> {
   const { mutation, mutationPath } = definition;
-  if (mutation === undefined || mutationPath === undefined) return undefined;
+  if (mutation === undefined || mutationPath === undefined) {
+    return ANCHOR_NOT_READ;
+  }
   let content = files.get(mutationPath);
   if (content === undefined) {
     content = await readMutationFile(mutationPath);
