@@ -23,7 +23,7 @@ import {
   absolutePath,
   JSON_OPTION,
   nonEmptyPath,
-  UsageError,
+  optionalPositional,
   type Command,
 } from "../command.js";
 import { oneLine, reported } from "../output.js";
@@ -33,7 +33,6 @@ const OPTIONS = {
   ...JSON_OPTION,
   root: { type: "string" },
 } as const;
-const MAX_PATH_POSITIONALS = 1;
 const NONE = "none";
 const INVALID_ENTRIES_HEADING = "Definition file problems:";
 const NOT_RUNNABLE_HEADING = "Definitions that cannot run:";
@@ -53,7 +52,7 @@ export const defectsCommand: Command = {
       strict: true,
       allowPositionals: true,
     });
-    const pathArgument = pathPositional(positionals);
+    const pathArgument = optionalPositional(positionals, "path");
     const rootArgument = nonEmptyPath(values.root, "--root");
     return (io) =>
       reported(io, NAME, values.json === true, async (output) => {
@@ -75,16 +74,6 @@ export const defectsCommand: Command = {
       });
   },
 };
-
-/** The one optional `path` positional. */
-function pathPositional(positionals: string[]): string | undefined {
-  if (positionals.length > MAX_PATH_POSITIONALS) {
-    throw new UsageError(
-      `Unexpected argument: ${positionals.slice(MAX_PATH_POSITIONALS).join(" ")}`,
-    );
-  }
-  return nonEmptyPath(positionals[0], "path");
-}
 
 function defectsText(answer: DefectsResponse): string {
   return joinLines([

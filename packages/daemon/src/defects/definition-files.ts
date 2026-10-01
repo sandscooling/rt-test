@@ -1,14 +1,16 @@
 import type { Dirent } from "node:fs";
 import { opendir, readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { isRecord, isStringArray } from "../json-guards.js";
+import { isRecord } from "../json-guards.js";
 import {
+  listProblem,
   matchesBelow,
   matchesPath,
   NON_INPUTS_FILE,
   patternProblem,
   presence,
   PRESENCE,
+  type ListMember,
 } from "../inputs/non-inputs.js";
 import {
   readCheckedIgnored,
@@ -31,6 +33,13 @@ import {
 const DEFECTS_MEMBER = "defects";
 /** Every entry the walk reaches is tested against every pattern, so this bounds that work. */
 const MAX_DEFECT_PATTERNS = 256;
+const DEFECTS_RULE: ListMember = {
+  member: DEFECTS_MEMBER,
+  max: MAX_DEFECT_PATTERNS,
+  items: "patterns",
+  item: "pattern",
+  problem: patternProblem,
+};
 const MISSING_CODES = ["ENOENT", "ENOTDIR"];
 /**
  * The numbers V8 ends its message with for where a parse failed, when it gives any. Its message may quote the file's
@@ -167,32 +176,16 @@ async function declaredPatterns(
   if (!isRecord(settings.value)) {
     return { entry: settingsEntry("its top level is not a JSON object") };
   }
+  const problem = listProblem(settings.value, DEFECTS_RULE);
+  if (problem !== undefined) return { entry: settingsEntry(problem) };
   const member = objectField(settings.value, DEFECTS_MEMBER);
   if (member === undefined) return { patterns: [] };
-  const problem = memberProblem(member);
-  if (problem !== undefined) return { entry: settingsEntry(problem) };
   return {
     patterns: (member as string[]).map((text) => ({
       text,
       segments: text.split(POSIX_SEPARATOR),
     })),
   };
-}
-
-function memberProblem(member: unknown): string | undefined {
-  if (!isStringArray(member)) {
-    return `its ${DEFECTS_MEMBER} member is not an array of strings`;
-  }
-  if (member.length > MAX_DEFECT_PATTERNS) {
-    return `its ${DEFECTS_MEMBER} member holds ${member.length} patterns, more than the ${MAX_DEFECT_PATTERNS} allowed`;
-  }
-  for (const pattern of member) {
-    const problem = patternProblem(pattern);
-    if (problem !== undefined) {
-      return `the pattern ${JSON.stringify(pattern)} ${problem}`;
-    }
-  }
-  return undefined;
 }
 
 function settingsEntry(problem: string): InvalidEntry {
