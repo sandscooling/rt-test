@@ -38,6 +38,8 @@ export type ExecutorRequest =
       readonly workspace: VitestWorkspace;
       readonly configFile: string;
       readonly experiments: readonly DefectExperiment[];
+      /** Error names that count as assertions, matched exactly, beside the forms Vitest marks itself. */
+      readonly assertionErrors: readonly string[];
     }
   | { readonly type: "abort" };
 

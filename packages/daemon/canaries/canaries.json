@@ -1,0 +1,355 @@
+{
+  "projectName": "canaries",
+  "assertionErrors": ["CanaryAssertionError"],
+  "canaries": [
+    {
+      "id": "body-expect",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "fails an expect"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"body\"",
+        "new": "\"body!\""
+      },
+      "judgement": {
+        "verdict": "detected"
+      }
+    },
+    {
+      "id": "extended-matcher",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "fails an extended matcher"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"matcher\"",
+        "new": "\"matcher!\""
+      },
+      "judgement": {
+        "verdict": "detected"
+      }
+    },
+    {
+      "id": "declared-error-name",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "throws an error of a declared name"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"declared\"",
+        "new": "\"declared!\""
+      },
+      "judgement": {
+        "verdict": "detected"
+      }
+    },
+    {
+      "id": "load-time-site",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["module load", "reads what a module built while it loaded"]
+      },
+      "mutation": {
+        "file": "src/loaded.mjs",
+        "old": "n + 10",
+        "new": "n + 11"
+      },
+      "judgement": {
+        "verdict": "detected"
+      }
+    },
+    {
+      "id": "returned-cleanup-assertion",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": [
+          "returned cleanup",
+          "is checked by a cleanup its setup returned"
+        ]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"cleanup\"",
+        "new": "\"cleanup!\""
+      },
+      "judgement": {
+        "verdict": "detected"
+      }
+    },
+    {
+      "id": "survivor",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "passes whatever the site returns"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"survivor\"",
+        "new": "\"survivor!\""
+      },
+      "judgement": {
+        "verdict": "survived"
+      }
+    },
+    {
+      "id": "before-each-assertion",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["before each", "runs after a checked setup"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"before-each\"",
+        "new": "\"before-each!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "hook-not-passed"
+      }
+    },
+    {
+      "id": "after-each-throw",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["after each", "runs before a checked teardown"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"after-each\"",
+        "new": "\"after-each!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "hook-not-passed"
+      }
+    },
+    {
+      "id": "before-all-throw",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["before all", "runs after a checked suite setup"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"before-all\"",
+        "new": "\"before-all!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "suite-error"
+      }
+    },
+    {
+      "id": "module-load-throw",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["module load", "runs once the subject module has loaded"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "requireLoadable(true)",
+        "new": "requireLoadable(false)"
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "module-failed"
+      }
+    },
+    {
+      "id": "unparsed-mutation",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "checks a value whose mutation does not parse"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"unparsed\"",
+        "new": "\"unparsed\" (("
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "no-probe-site"
+      }
+    },
+    {
+      "id": "site-not-called",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "passes without calling the site"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"uncalled\"",
+        "new": "\"uncalled!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "site-not-executed"
+      }
+    },
+    {
+      "id": "site-called-by-another-test",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "reads the value another test stored"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"shared\"",
+        "new": "\"shared!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "site-not-executed"
+      }
+    },
+    {
+      "id": "module-never-loaded",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "passes without loading the module"]
+      },
+      "mutation": {
+        "file": "src/loaded.mjs",
+        "old": "n + 10",
+        "new": "n + 11"
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "site-not-executed"
+      }
+    },
+    {
+      "id": "concurrent-site",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["together", "first"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"concurrent\"",
+        "new": "\"concurrent!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "reach-unknown"
+      }
+    },
+    {
+      "id": "type-error",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "throws a type error"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"type-error\"",
+        "new": "undefined"
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "not-an-assertion"
+      }
+    },
+    {
+      "id": "timeout",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "times out"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"timeout\"",
+        "new": "\"timeout!\""
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "not-an-assertion"
+      }
+    },
+    {
+      "id": "assertion-count",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "counts its assertions"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "[\"count\"]",
+        "new": "[]"
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "not-an-assertion"
+      }
+    },
+    {
+      "id": "snapshot-mismatch",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "matches an inline snapshot"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"snapshot\"",
+        "new": "\"snapshot!\""
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "not-an-assertion"
+      }
+    },
+    {
+      "id": "undeclared-error-name",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "throws an error of an undeclared name"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"undeclared\"",
+        "new": "\"undeclared!\""
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "not-an-assertion"
+      }
+    },
+    {
+      "id": "leaked-rejection",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "fails beside a leaked rejection"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"leak\"",
+        "new": "\"leak!\""
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "unhandled-error"
+      }
+    },
+    {
+      "id": "mixed-error-kinds",
+      "test": {
+        "modulePath": "body.canary.mjs",
+        "namePath": ["body", "fails with an assertion and another error"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"mixed\"",
+        "new": "\"mixed!\""
+      },
+      "judgement": {
+        "verdict": "unclear",
+        "reason": "not-an-assertion"
+      }
+    }
+  ]
+}

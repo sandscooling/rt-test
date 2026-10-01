@@ -1,11 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { TestIdentity, TestModuleLocation } from "@rt-test/core";
-import type {
-  Reporter,
-  TestModule,
-  TestRunEndReason,
-  TestSpecification,
-} from "vitest/node";
+import type { TestModule, TestSpecification } from "vitest/node";
 import { errorText } from "../vitest/error-text.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import { RunInterruption } from "../vitest/run-interruption.js";
@@ -19,16 +14,19 @@ import {
   FALSIFIER_VERSION,
   recordRun,
   testResultIn,
+  type ConfirmingRun,
   type DefectExperiment,
   type ExperimentNotRun,
   type ExperimentRecord,
   type FalsificationJob,
   type JobRuns,
+  type JudgedJobFacts,
   type RunOutcome,
   type RunRecord,
   type SessionJobFacts,
   type UnrecordedRun,
 } from "./experiment-record.js";
+import { PASSED } from "./fact-types.js";
 import {
   MutationTransform,
   onDiskModuleCaches,
@@ -36,6 +34,9 @@ import {
   type MutationLoad,
 } from "./mutation-transform.js";
 import { mutateWithProbe } from "./reach-probe.js";
+import { experimentFacts, experimentRunFacts } from "./run-facts.js";
+import { RunRelay } from "./run-relay.js";
+import { isWouldBeDetection, judge } from "./verdict.js";
 
 /** An experiment whose file, anchor and probe site checked out when the job started, with its test's module. */
 interface PlannedExperiment {
@@ -59,6 +60,7 @@ type RunStep =
   | { readonly kind: "interrupted" };
 
 type EndedStep = Exclude<RunStep, { kind: "interrupted" }>;
+type RanStep = Extract<RunStep, { kind: "ran" }>;
 
 /** A mutated file's text as the job read it when it started, or why it could not be read. */
 type FileText =
@@ -70,18 +72,19 @@ const INTERRUPTED_STEP: RunStep = { kind: "interrupted" };
 const BASELINE_NOT_RUN: ExperimentNotRun = { kind: "baseline-not-run" };
 const NO_MODULE: ExperimentNotRun = { kind: "no-module" };
 const NOT_REPORTED = "not-reported";
-const PASSED = "passed";
 
 /**
  * Runs one workspace's defect experiments in one Vitest instance: the baseline over the intended tests' modules, each
- * experiment over its test's whole module with its own mutation alone applied in memory, then the restored baseline.
- * It executes project code, so call it only for a started, trusted project. An abort ends the job at the run in
- * progress, and the record holds only the runs that finished.
+ * experiment over its test's whole module with its own mutation alone applied in memory, twice when its run would be
+ * a detection, then the restored baseline. It executes project code, so call it only for a started, trusted project.
+ * An error named in `assertionErrors` counts as an assertion. An abort ends the job at the run in progress, and the
+ * record holds only the runs that finished.
  */
 export function falsifyWorkspace(
   workspace: VitestWorkspace,
   confirmedConfigFile: string,
   experiments: readonly DefectExperiment[],
+  assertionErrors: readonly string[],
   signal: AbortSignal,
 ): Promise<FalsificationJob> {
   return queueSessionJob(async () => {
@@ -93,55 +96,52 @@ export function falsifyWorkspace(
       workspace,
       confirmedConfigFile,
       [relay],
-      (session) => falsifySession(session, experiments, relay, signal),
+      (session) =>
+        falsifySession(session, experiments, assertionErrors, relay, signal),
     );
     if (result.status === "not-confirmed") {
       return { ...result, workspace, reason: CONFIG_NOT_CONFIRMED_REASON };
     }
     if (result.status !== "loaded") return { ...result, workspace };
     const { value, status: _loaded, ...loaded } = result;
-    return { ...loaded, ...value, workspace };
+    const judged = judgedJob(
+      value,
+      experiments,
+      assertionErrors,
+      loaded.closeError,
+    );
+    return { ...loaded, ...judged, workspace };
   });
 }
 
 /**
- * An instance's reporters are fixed at load, so this one forwards each run's events to that run's interruption, and
- * collects the modules Vitest queued during it.
+ * Judges each experiment of a job that ran. The session has closed the instance by now, so the host thread's
+ * rejections have joined the job's unhandled errors and its close error is known.
  */
-class RunRelay implements Reporter {
-  #current: RunInterruption | undefined;
-  #queued: TestModule[] = [];
-
-  start(interruption: RunInterruption): void {
-    this.#current = interruption;
-    this.#queued = [];
-  }
-
-  /** The modules queued since `start`; one queued after this joins no run's list. */
-  end(): readonly TestModule[] {
-    this.#current = undefined;
-    const queued = this.#queued;
-    this.#queued = [];
-    return queued;
-  }
-
-  onTestModuleQueued(testModule: TestModule): void {
-    this.#queued.push(testModule);
-    this.#current?.onTestModuleQueued();
-  }
-
-  onTestRunEnd(
-    testModules: readonly TestModule[],
-    unhandledErrors: readonly unknown[],
-    reason: TestRunEndReason,
-  ): void {
-    this.#current?.onTestRunEnd(testModules, unhandledErrors, reason);
-  }
+function judgedJob(
+  job: SessionJobFacts,
+  experiments: readonly DefectExperiment[],
+  assertionErrors: readonly string[],
+  closeError: string | undefined,
+): JudgedJobFacts {
+  if (job.status !== "ran") return job;
+  const end = {
+    unhandledErrors: job.unhandledErrors,
+    ...(closeError === undefined ? {} : { closeError }),
+  };
+  const judgements = experimentFacts(
+    job,
+    end,
+    experiments,
+    assertionErrors,
+  ).map(({ defectId, facts }) => ({ ...judge(facts), defectId, facts }));
+  return { ...job, judgements };
 }
 
 async function falsifySession(
   session: WorkspaceSession,
   experiments: readonly DefectExperiment[],
+  assertionErrors: readonly string[],
   relay: RunRelay,
   signal: AbortSignal,
 ): Promise<SessionJobFacts> {
@@ -164,7 +164,13 @@ async function falsifySession(
       refusal: { kind: "not-prepared", error: errorText(error) },
     };
   }
-  const runs = new FalsificationRuns(session, transform, relay, signal);
+  const runs = new FalsificationRuns(
+    session,
+    transform,
+    assertionErrors,
+    relay,
+    signal,
+  );
   return { ...loaded, status: "ran", ...(await runs.all(experiments)) };
 }
 
@@ -172,6 +178,7 @@ async function falsifySession(
 class FalsificationRuns {
   readonly #session: WorkspaceSession;
   readonly #transform: MutationTransform;
+  readonly #assertionErrors: readonly string[];
   readonly #relay: RunRelay;
   readonly #signal: AbortSignal;
   /** Each specification's module located once, however many experiments name a test in it. */
@@ -184,11 +191,13 @@ class FalsificationRuns {
   constructor(
     session: WorkspaceSession,
     transform: MutationTransform,
+    assertionErrors: readonly string[],
     relay: RunRelay,
     signal: AbortSignal,
   ) {
     this.#session = session;
     this.#transform = transform;
+    this.#assertionErrors = assertionErrors;
     this.#relay = relay;
     this.#signal = signal;
     this.#located = session.specifications.map((specification) => ({
@@ -236,10 +245,10 @@ class FalsificationRuns {
     };
   }
 
-  /** Callable again for the same experiment in the same instance, as a confirming run needs. */
-  async experiment(plan: PlannedExperiment): Promise<ExperimentRecord> {
-    const { experiment, specification } = plan;
-    const step = await this.#run([specification], experiment.mutation);
+  /** Runs the experiment, and at once a second time when its run would be a detection, before any other run. */
+  async #experiment(plan: PlannedExperiment): Promise<ExperimentRecord> {
+    const { experiment } = plan;
+    const step = await this.#mutatedRun(plan);
     switch (step.kind) {
       case "interrupted":
         return notRun(experiment, INTERRUPTED);
@@ -248,14 +257,34 @@ class FalsificationRuns {
           kind: "run-unrecorded",
           run: step.unrecorded,
         });
-      case "ran":
-        return {
+      case "ran": {
+        const record = {
           defectId: experiment.defectId,
           status: "ran",
           run: step.record,
           mutation: step.loads,
-        };
+        } as const;
+        if (!this.#wouldDetect(experiment, step)) return record;
+        const confirming = confirmingRun(await this.#mutatedRun(plan));
+        return { ...record, confirming };
+      }
     }
+  }
+
+  /** One run of the experiment's test module with its mutation alone active, behind the guard and the abort check. */
+  #mutatedRun(plan: PlannedExperiment): Promise<RunStep> {
+    return this.#run([plan.specification], plan.experiment.mutation);
+  }
+
+  #wouldDetect(experiment: DefectExperiment, step: RanStep): boolean {
+    return isWouldBeDetection(
+      experimentRunFacts(
+        step.record,
+        step.loads,
+        experiment.test,
+        this.#assertionErrors,
+      ),
+    );
   }
 
   /** Records each experiment decided before any run, and returns the rest in order. */
@@ -315,8 +344,7 @@ class FalsificationRuns {
         : await this.#experimentAfter(baseline, plan);
       records.set(plan.experiment, record);
       anyRan ||= record.status === "ran";
-      interrupted ||=
-        record.status === "not-run" && record.reason.kind === "interrupted";
+      interrupted ||= wasInterrupted(record);
     }
     return { interrupted, anyRan };
   }
@@ -341,17 +369,19 @@ class FalsificationRuns {
         state: result.state,
       });
     }
-    return this.experiment(plan);
+    return this.#experiment(plan);
   }
 
   /**
-   * Invalidates the mutated files and whatever the guard finds stale, then starts the run with no await after the
-   * abort check, so an abort that came first starts nothing. A run the job's own abort interrupted leaves no result.
+   * Checks the abort, then invalidates the mutated files and whatever the guard finds stale and starts the run, with
+   * no await in between, so an abort that came first starts nothing and reads interrupted whatever the guard would
+   * find. A run the job's own abort interrupted leaves no result.
    */
   async #run(
     specifications: readonly TestSpecification[],
     mutation?: Mutation,
   ): Promise<RunStep> {
+    if (this.#signal.aborted) return INTERRUPTED_STEP;
     const invalidated = [mutation?.file, this.#lastMutated].filter(
       (file): file is string => file !== undefined,
     );
@@ -359,7 +389,6 @@ class FalsificationRuns {
     if (stale.length > 0) {
       return unrecorded({ kind: "stale-modules", modules: stale });
     }
-    if (this.#signal.aborted) return INTERRUPTED_STEP;
     const interruption = new RunInterruption(this.#signal);
     this.#relay.start(interruption);
     if (mutation !== undefined) {
@@ -452,6 +481,24 @@ function uniqueSpecifications(
 
 function unrecorded(run: UnrecordedRun): RunStep {
   return { kind: "unrecorded", unrecorded: run };
+}
+
+function confirmingRun(step: RunStep): ConfirmingRun {
+  switch (step.kind) {
+    case "ran":
+      return { status: "ran", run: step.record, mutation: step.loads };
+    case "unrecorded":
+      return { status: "unrecorded", run: step.unrecorded };
+    case "interrupted":
+      return { status: "interrupted" };
+  }
+}
+
+/** An abort ended the experiment's first run or its confirming run, so the job starts no further run. */
+function wasInterrupted(record: ExperimentRecord): boolean {
+  return record.status === "ran"
+    ? record.confirming?.status === "interrupted"
+    : record.reason.kind === "interrupted";
 }
 
 function outcomeOf(step: EndedStep): RunOutcome {
