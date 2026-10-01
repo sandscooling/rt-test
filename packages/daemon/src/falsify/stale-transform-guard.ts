@@ -52,8 +52,9 @@ export class StaleTransformGuard {
   }
 
   /**
-   * Invalidates every module of `files`, and every module cached from text other than its file's text now or from
-   * text the guard never saw. Returns the modules that still would be served from such text.
+   * Invalidates every module of `files`, cached or still being transformed, and every module cached from text other
+   * than its file's text now or from text the guard never saw. Returns the modules that still would be served from
+   * such text.
    */
   freshen(files: readonly string[]): StaleModule[] {
     const reads = new FileReads();
@@ -61,7 +62,10 @@ export class StaleTransformGuard {
     for (const [environment, inputs] of this.#inputs) {
       const graph = environment.moduleGraph;
       for (const module of graph.idToModuleMap.values()) {
-        if (mustInvalidate(module, inputs, targets, reads)) {
+        if (
+          isOfFiles(module, targets, reads) ||
+          mustInvalidate(module, inputs, targets, reads)
+        ) {
           graph.invalidateModule(module);
         }
       }
@@ -163,13 +167,24 @@ function mustInvalidate(
   reads: FileReads,
 ): boolean {
   if (cachedResult(module) === undefined) return false;
+  if (isOfFiles(module, targets, reads)) return true;
   const { id, file } = module;
-  if (file !== null && targets.size > 0 && targets.has(reads.key(file))) {
-    return true;
-  }
   if (id === null || file === null || isVirtual(id)) return false;
   const recorded = inputs.get(id);
   return recorded === undefined || recorded !== reads.digest(file);
+}
+
+/**
+ * A module of a file named. Invalidating one that has no cached result yet makes Vite discard a transform of it that
+ * began earlier and is still running, which would otherwise be cached once the guard had looked.
+ */
+function isOfFiles(
+  module: ModuleNode,
+  targets: ReadonlySet<string>,
+  reads: FileReads,
+): boolean {
+  const { file } = module;
+  return file !== null && targets.size > 0 && targets.has(reads.key(file));
 }
 
 /**

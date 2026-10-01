@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { TestIdentity, TestModuleLocation } from "@rt-test/core";
 import type {
   Reporter,
   TestModule,
@@ -40,6 +41,11 @@ import { mutateWithProbe } from "./reach-probe.js";
 interface PlannedExperiment {
   readonly experiment: DefectExperiment;
   readonly specification: TestSpecification;
+}
+
+interface LocatedSpecification {
+  readonly specification: TestSpecification;
+  readonly location: TestModuleLocation;
 }
 
 type RunStep =
@@ -111,10 +117,12 @@ class RunRelay implements Reporter {
     this.#queued = [];
   }
 
-  /** The modules queued since `start`. */
+  /** The modules queued since `start`; one queued after this joins no run's list. */
   end(): readonly TestModule[] {
     this.#current = undefined;
-    return this.#queued;
+    const queued = this.#queued;
+    this.#queued = [];
+    return queued;
   }
 
   onTestModuleQueued(testModule: TestModule): void {
@@ -166,6 +174,8 @@ class FalsificationRuns {
   readonly #transform: MutationTransform;
   readonly #relay: RunRelay;
   readonly #signal: AbortSignal;
+  /** Each specification's module located once, however many experiments name a test in it. */
+  readonly #located: readonly LocatedSpecification[];
   /** Each mutated file read once, when the job starts, however many experiments mutate it. */
   readonly #texts = new Map<string, FileText>();
   /** The file the last experiment mutated, invalidated before every later run whatever the guard finds. */
@@ -181,6 +191,13 @@ class FalsificationRuns {
     this.#transform = transform;
     this.#relay = relay;
     this.#signal = signal;
+    this.#located = session.specifications.map((specification) => ({
+      specification,
+      location: session.locate(
+        specification.project.name,
+        specification.moduleId,
+      ),
+    }));
   }
 
   async all(experiments: readonly DefectExperiment[]): Promise<JobRuns> {
@@ -267,12 +284,12 @@ class FalsificationRuns {
       this.#textOf(experiment.mutation.file),
     );
     if (reason !== undefined) return { reason };
-    const specification = this.#session.specifications.find((candidate) =>
-      holdsTest(this.#session, candidate, experiment),
+    const located = this.#located.find(({ location }) =>
+      holdsTest(location, experiment.test),
     );
-    return specification === undefined
+    return located === undefined
       ? { reason: NO_MODULE }
-      : { experiment, specification };
+      : { experiment, specification: located.specification };
   }
 
   #textOf(file: string): FileText {
@@ -417,15 +434,9 @@ function startCheck(
 }
 
 function holdsTest(
-  session: WorkspaceSession,
-  specification: TestSpecification,
-  experiment: DefectExperiment,
+  location: TestModuleLocation,
+  identity: TestIdentity,
 ): boolean {
-  const location = session.locate(
-    specification.project.name,
-    specification.moduleId,
-  );
-  const identity = experiment.test;
   return (
     location.workspacePath === identity.workspacePath &&
     location.projectName === identity.projectName &&

@@ -49,3 +49,9 @@ describe("replacing a mutation's anchor", () => {
     );
   });
 });
+
+describe("an empty anchor", () => {
+  it("D3740: an empty anchor occurs nowhere, rather than at every position of the text", () => {
+    expect(countAnchor("abc", "")).toBe(0);
+  });
+});

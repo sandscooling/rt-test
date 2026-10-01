@@ -355,5 +355,82 @@
     "file": "packages/daemon/src/falsify/stale-transform-guard.ts",
     "old": "    module.transformResult ?? (typeof state === \"object\" ? state : undefined)",
     "new": "    module.transformResult ?? undefined"
+  },
+  {
+    "id": "D3735",
+    "defect": "A module of the mutated file whose transform is still running, so it holds no cached result, is not invalidated, and the mutated transform is cached after the guard has looked and served to the next run.",
+    "file": "packages/daemon/src/falsify/stale-transform-guard.ts",
+    "old": "          isOfFiles(module, targets, reads) ||\n          mustInvalidate(module, inputs, targets, reads)",
+    "new": "          mustInvalidate(module, inputs, targets, reads)"
+  },
+  {
+    "id": "D3736",
+    "defect": "A changed arrow function is wrapped where it is defined, so the probe fires when the module loads and marks tests that never called the function.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "  \"FunctionExpression\",\n  \"ArrowFunctionExpression\",",
+    "new": "  \"FunctionExpression\","
+  },
+  {
+    "id": "D3737",
+    "defect": "A `delete` operand is wrapped, so the property is never deleted and the probe changes what the module does.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "const VALUE_BLIND_UNARY = new Set([\"typeof\", \"delete\"]);",
+    "new": "const VALUE_BLIND_UNARY = new Set([\"typeof\"]);"
+  },
+  {
+    "id": "D3738",
+    "defect": "A probe the parser rejects is served, so the mutated module fails to load in its experiment instead of being recorded with no probe site before any run.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "  if (probed === undefined || !parses(fileName, probed)) {",
+    "new": "  if (probed === undefined) {"
+  },
+  {
+    "id": "D3739",
+    "defect": "In a CRLF file the end of the replacement is measured from its LF length, so a multi-line replacement's changed span stops short and its probe is refused or placed for less than the change.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "    replacementEnd: match.start + written.length,",
+    "new": "    replacementEnd: match.start + replacement.length,"
+  },
+  {
+    "id": "D3740",
+    "defect": "An empty anchor is counted at every position of the text, so on an empty file it counts once and a replacement is applied.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "  if (anchor === \"\") return 0;",
+    "new": ""
+  },
+  {
+    "id": "D3741",
+    "defect": "An abort during the baseline leaves the planned experiments with no record, so the reply does not say they were interrupted.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "      markAll(records, planned, INTERRUPTED);",
+    "new": ""
+  },
+  {
+    "id": "D3742",
+    "defect": "An abort that arrived before the job's turn is ignored, so the job still loads the workspace's config and runs its code.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    if (signal.aborted) {",
+    "new": "    if (false) {"
+  },
+  {
+    "id": "D3743",
+    "defect": "An error raised in the executor's own process is recorded without its name and message.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  for (const [key, value] of Object.entries({ name, message, stack })) {",
+    "new": "  for (const [key, value] of Object.entries({ stack })) {"
+  },
+  {
+    "id": "D3744",
+    "defect": "A nested suite's errors are recorded under its own name alone, so the judge cannot tell which suite failed.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "    namePath.unshift(parent.name);",
+    "new": ""
+  },
+  {
+    "id": "D3745",
+    "defect": "Only a test's own suite is checked for a firing outside the test, so a site an outer suite's beforeAll executed is not credited to the tests of a suite nested in it.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "  for (let suite = test.suite; suite !== undefined; suite = suite.suite) {",
+    "new": "  for (let suite = test.suite; suite !== undefined; suite = undefined) {"
   }
 ]

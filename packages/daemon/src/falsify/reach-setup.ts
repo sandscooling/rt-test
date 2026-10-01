@@ -1,5 +1,5 @@
 /**
- * A setup file RT Test puts first in every project of a falsification run. It defines the recorder each reach probe
+ * A setup file RT Test puts first in every project a falsification job loads. It defines the recorder each reach probe
  * calls and marks, on each test's metadata, whether the probe fired during that test or outside it. It imports no
  * package, since it runs in the consumer's worker, where a package name resolves to the consumer's install.
  */
@@ -26,7 +26,6 @@ type EachHook = (context: HookContext) => void;
 
 interface VitestIndex {
   readonly beforeEach: (hook: EachHook) => void;
-  readonly afterEach: (hook: EachHook) => void;
 }
 
 interface VitestWorker {
@@ -110,6 +109,7 @@ globals[REACH_RECORDER] = () => {
   }
 };
 
+/* Vitest runs a test's finished hooks after its `afterEach` hooks and teardown, whatever any of them threw. */
 index.beforeEach(({ task, onTestFinished }) => {
   merge(task, OBSERVED);
   running.add(task);
@@ -117,9 +117,4 @@ index.beforeEach(({ task, onTestFinished }) => {
   if (firedOutsideAround(task)) {
     merge(task, OUTSIDE_TEST);
   }
-});
-
-/* A throwing consumer `afterEach` skips this one, and a dynamic `ctx.skip()` skips `onTestFinished`, so both end the test. */
-index.afterEach(({ task }) => {
-  running.delete(task);
 });

@@ -18,6 +18,12 @@ describe("prepared", () => {
   it("reads the prepared value", () => {
     expect(value).toBe(4);
   });
+
+  describe("deeper", () => {
+    it("reads it from a nested suite", () => {
+      expect(value).toBe(4);
+    });
+  });
 });
 
 describe("unprepared", () => {
@@ -36,4 +42,14 @@ describe("broken setup", () => {
   });
 
   it("never starts", () => {});
+});
+
+describe("outer", () => {
+  describe("inner broken", () => {
+    beforeAll(() => {
+      throw new Error("inner boom");
+    });
+
+    it("never starts inside", () => {});
+  });
 });

@@ -159,3 +159,80 @@ describe("placing a reach probe at the mutated site", () => {
     });
   });
 });
+
+describe("positions a probe would alter or the parser rejects", () => {
+  it("D3736: a changed arrow function has no probe site, since a wrap fires where the function is defined, not when it is called", () => {
+    expect(
+      mutateWithProbe(
+        JS,
+        "const f = (a, b) => a + b;\n",
+        "(a, b) => a + b",
+        "(a) => a",
+      ),
+    ).toEqual({
+      status: "no-probe-site",
+      reason: {
+        kind: "position",
+        line: 1,
+        column: 11,
+        nodeKind: "ArrowFunctionExpression",
+        role: "VariableDeclarator.init",
+      },
+    });
+  });
+
+  it("D3737: a change to a `delete` operand has no probe site, since deleting a wrapped value deletes nothing", () => {
+    expect(
+      mutateWithProbe(
+        JS,
+        "function f(a, c) {\n  delete a.b;\n}\n",
+        "delete a.b",
+        "delete c.d",
+      ),
+    ).toEqual({
+      status: "no-probe-site",
+      reason: {
+        kind: "position",
+        line: 2,
+        column: 10,
+        nodeKind: "MemberExpression",
+        role: "UnaryExpression.argument",
+      },
+    });
+  });
+
+  it("D3738: a probe the parser rejects, in a literal type, leaves no probe site rather than a module that fails to load", () => {
+    expect(
+      mutateWithProbe(
+        TS,
+        "type N = -1;\nexport const n: N = -1;\n",
+        "type N = -1",
+        "type N = -2",
+      ),
+    ).toEqual({
+      status: "no-probe-site",
+      reason: {
+        kind: "position",
+        line: 1,
+        column: 11,
+        nodeKind: "Literal",
+        role: "UnaryExpression.argument",
+      },
+    });
+  });
+
+  it("D3739: in a CRLF file, a three-line replacement that changes only its first line is probed at that line's changed node", () => {
+    expect(
+      mutateWithProbe(
+        JS,
+        "function f(a, b) {\r\n  const x = a + b;\r\n  const y = 1;\r\n  return x + y;\r\n}\r\n",
+        "  const x = a + b;\n  const y = 1;\n  return x + y;",
+        "  const x = a - b;\n  const y = 1;\n  return x + y;",
+      ),
+    ).toEqual({
+      status: "mutated",
+      text: "function f(a, b) {\r\n  const x = (globalThis.__rtTestReach?.(), a - b);\r\n  const y = 1;\r\n  return x + y;\r\n}\r\n",
+      site: { line: 2, column: 13, nodeKind: "BinaryExpression" },
+    });
+  });
+});

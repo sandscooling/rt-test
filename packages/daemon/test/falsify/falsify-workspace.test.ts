@@ -10,19 +10,23 @@ import {
 import { join, relative } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { describe, expect, it } from "vitest";
-import type {
-  DefectExperiment,
-  ExperimentRecord,
-  FalsificationJob,
-  RecordedRunTest,
-  RunRecord,
+import type { Vitest } from "vitest/node";
+import {
+  recordRun,
+  type DefectExperiment,
+  type ExperimentRecord,
+  type FalsificationJob,
+  type RecordedRunTest,
+  type RunRecord,
 } from "../../src/falsify/experiment-record.js";
 import { falsifyWorkspace } from "../../src/falsify/falsify-workspace.js";
+import { StaleTransformGuard } from "../../src/falsify/stale-transform-guard.js";
 import { chosenConfigFile } from "../../src/vitest/confirmed-start.js";
 import type { VitestWorkspace } from "../../src/vitest/find-workspaces.js";
 import { DAEMON_TEST_TIMEOUT_MS } from "../daemon-harness.js";
 import {
   copyFixture,
+  HAND_BUILT_ROOT,
   inTempDir,
   linkVitest,
   RUN_HOOK,
@@ -42,8 +46,8 @@ const MATH_MODULE = "src/math.mjs";
 const LOADED_TEST_MODULE = "test/loaded.test.mjs";
 /** What the test appends to that test module while the `add` experiment runs. */
 const ADDED_TEST = 'it("was added mid-job", () => {});\n';
-/** The math module's second transform is the `add` experiment's: the baseline's is its first. */
-const ADD_EXPERIMENT_TRANSFORM = 2;
+/** The fixture's config reports a transformed module whose text holds a reach probe under this prefix. */
+const MUTATED_EVENT = "mutated:";
 /** The reach probe's call, which only a mutated module's text holds. */
 const PROBE_CALL = "globalThis.__rtTestReach?.()";
 const TEMP_VARIABLES = ["TMPDIR", "TMP", "TEMP"] as const;
@@ -274,7 +278,11 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
       edits.set(path, text);
       writeFileSync(join(real, path), text);
     };
-    let mathTransforms = 0;
+    /** The math module is first served mutated in the `add` experiment, the first to mutate it. */
+    const mathFirstMutated = (event: string): boolean =>
+      !edits.has(LOADED_TEST_MODULE) &&
+      event.startsWith(MUTATED_EVENT) &&
+      event.endsWith(`/${MATH_MODULE}`);
     runHooks()[RUN_HOOK] = (event) => {
       for (const file of filesHolding(temp, PROBE_CALL)) {
         mutatedTempFiles.add(file);
@@ -282,14 +290,11 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
       if (!edits.has(LABEL_MODULE) && event.endsWith(`/${LABEL_MODULE}`)) {
         edit(LABEL_MODULE, EDITED_LABEL);
       }
-      if (event.endsWith(`/${MATH_MODULE}`)) {
-        mathTransforms += 1;
-        if (mathTransforms === ADD_EXPERIMENT_TRANSFORM) {
-          edit(
-            LOADED_TEST_MODULE,
-            readFileSync(join(real, LOADED_TEST_MODULE), "utf8") + ADDED_TEST,
-          );
-        }
+      if (mathFirstMutated(event)) {
+        edit(
+          LOADED_TEST_MODULE,
+          readFileSync(join(real, LOADED_TEST_MODULE), "utf8") + ADDED_TEST,
+        );
       }
       return undefined;
     };
@@ -520,6 +525,23 @@ describe("which tests reached the mutated site", () => {
   );
 
   it(
+    "D3745: a site executed in an outer suite's beforeAll marks a test of a suite nested in it as reached outside the test",
+    async () => {
+      expect(
+        await onBothLines((fixture) =>
+          reachIn(
+            fixture,
+            "prepare",
+            "test/suite.test.mjs",
+            "reads it from a nested suite",
+          ),
+        ),
+      ).toEqual([{ executed: "outside-test" }, { executed: "outside-test" }]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "D3627: a test the reach recorder never observed, since its suite's beforeAll failed, reads reach unknown, never not executed",
     async () => {
       expect(
@@ -722,9 +744,12 @@ describe("the facts a run records", () => {
   );
 
   it(
-    "D3640: a module's record keeps each suite's errors under that suite's name path",
+    "D3640: a module's record keeps the errors of each suite whose beforeAll failed",
     async () => {
-      const suites = [[["broken setup"], ["setup boom"]]];
+      const suites = [
+        ["broken setup", ["setup boom"]],
+        ["inner broken", ["inner boom"]],
+      ];
       expect(
         await onBothLines(
           (fixture) =>
@@ -732,7 +757,7 @@ describe("the facts a run records", () => {
               baselineRun(fixture),
               "test/suite.test.mjs",
             )?.suiteErrors.map((suite) => [
-              suite.namePath,
+              suite.namePath.at(-1),
               suite.errors.map((error) => error["message"]),
             ]) ?? MISSING,
         ),
@@ -740,6 +765,42 @@ describe("the facts a run records", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3744: a nested suite's errors are recorded under its whole name path, its enclosing suite's name first",
+    async () => {
+      const namePath = ["outer", "inner broken"];
+      expect(
+        await onBothLines(
+          (fixture) =>
+            moduleIn(
+              baselineRun(fixture),
+              "test/suite.test.mjs",
+            )?.suiteErrors.find(
+              (suite) => suite.namePath.at(-1) === "inner broken",
+            )?.namePath ?? MISSING,
+        ),
+      ).toEqual([namePath, namePath]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it("D3743: an error raised in the executor's own process, such as a worker that exited, keeps its name and message", () => {
+    const run = recordRun({
+      execution: "completed",
+      forceStopped: false,
+      specifications: [],
+      testModules: [],
+      queued: [],
+      unhandledErrors: [new Error("worker exited")],
+      locate: () => {
+        throw new Error("a run with no specification locates no module");
+      },
+    });
+    expect(
+      run.unhandledErrors.map((error) => [error["name"], error["message"]]),
+    ).toEqual([["Error", "worker exited"]]);
+  });
 
   it(
     "D3641: a run's unhandled errors are recorded with the fields Vitest serialized, not reduced to text",
@@ -899,6 +960,58 @@ describe("no mutated text on disk", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+});
+
+describe("a job aborted before its turn", () => {
+  it(
+    "D3742: a job whose signal is already aborted loads nothing and answers interrupted before load",
+    async () => {
+      const answered = await inTempDir(async (dir) => {
+        copyFixture(FIXTURE, dir);
+        linkVitest(dir, "vitest");
+        const workspace: VitestWorkspace = { path: ".", directory: dir };
+        const job = await falsifyWorkspace(
+          workspace,
+          chosenConfigFile(workspace) ?? "",
+          experiments(dir),
+          AbortSignal.abort(),
+        );
+        return { job, workspace };
+      });
+      expect(answered.job).toEqual({
+        status: "interrupted-before-load",
+        workspace: answered.workspace,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the stale-transform guard before a run", () => {
+  it("D3735: a module of the mutated file that has no cached result yet is invalidated, so a transform of it still running is discarded", () => {
+    const file = slashed(join(HAND_BUILT_ROOT, MATH_MODULE));
+    /** A module node as Vite holds it while its first transform runs: known by id and file, with no result. */
+    const transforming = { id: file, file, transformResult: null };
+    const invalidated: unknown[] = [];
+    const environment = {
+      name: "ssr",
+      pluginContainer: { transform: () => undefined },
+      moduleGraph: {
+        idToModuleMap: new Map([[file, transforming]]),
+        invalidateModule: (module: unknown) => {
+          invalidated.push(module);
+        },
+      },
+    };
+    const instance = {
+      vite: { environments: { ssr: environment } },
+      projects: [],
+    } as unknown as Vitest;
+    StaleTransformGuard.install(instance, (code) => code).freshen([
+      join(HAND_BUILT_ROOT, MATH_MODULE),
+    ]);
+    expect(invalidated).toEqual([transforming]);
+  });
 });
 
 /** A job with no experiments over the fixture's module-cache workspace, as its status and any refusal. */

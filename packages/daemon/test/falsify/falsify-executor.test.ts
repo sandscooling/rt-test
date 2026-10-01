@@ -18,6 +18,10 @@ const TEST_MODULE = "a.test.mjs";
 const CRASH_FILE = "crash";
 /** The hold directory a mutation of the fixture's test module points its first test at, so only the experiment holds. */
 const EXPERIMENT_HOLD = "hold-point-2";
+/** The hold directory the fixture's first test holds on as written, so the baseline holds. */
+const BASELINE_HOLD = "hold-point";
+/** How a reply that holds no baseline reads in `runsKept`. */
+const NO_RUN = "none";
 
 const SECOND: TestIdentity = {
   workspacePath: ".",
@@ -128,32 +132,9 @@ describe("a falsification job in the executor", () => {
         (root) => [
           mutating(root, "held", '"./hold-point"', `"./${EXPERIMENT_HOLD}"`),
         ],
-        async (root, executor, job) => {
-          const hold = join(root, EXPERIMENT_HOLD);
-          mkdirSync(hold);
-          await waitUntil(() => existsSync(join(hold, "holding")), job);
-          executor.abort();
-          writeFileSync(join(hold, "release"), "");
-        },
+        abortedWhileHeldAt(EXPERIMENT_HOLD),
       );
-      const job =
-        outcome.ended && outcome.value.status === "ran"
-          ? outcome.value
-          : undefined;
-      expect(
-        job === undefined
-          ? outcome
-          : {
-              interrupted: job.interrupted,
-              baseline: job.baseline?.ran,
-              experiments: job.experiments.map((record) =>
-                record.status === "ran"
-                  ? [record.defectId, record.status]
-                  : [record.defectId, record.status, record.reason.kind],
-              ),
-              restored: job.restoredBaseline !== undefined,
-            },
-      ).toEqual({
+      expect(runsKept(outcome)).toEqual({
         interrupted: true,
         baseline: true,
         experiments: [["held", "not-run", "interrupted"]],
@@ -162,4 +143,55 @@ describe("a falsification job in the executor", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3741: an abort during the baseline ends the job there, and its reply holds no baseline and each planned experiment as interrupted",
+    async () => {
+      const outcome = await falsifiedThroughExecutor(
+        (root) => [
+          mutating(root, "planned", "const POLL_MS = 5;", "const POLL_MS = 6;"),
+        ],
+        abortedWhileHeldAt(BASELINE_HOLD),
+      );
+      expect(runsKept(outcome)).toEqual({
+        interrupted: true,
+        baseline: NO_RUN,
+        experiments: [["planned", "not-run", "interrupted"]],
+        restored: false,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
 });
+
+/**
+ * Creates the hold directory, waits until the fixture's first test holds on it, aborts the job, and releases the
+ * test, as `stoppedWhileHeld` does for a run.
+ */
+function abortedWhileHeldAt(
+  holdDirectory: string,
+): (root: string, executor: Executor, job: Promise<unknown>) => Promise<void> {
+  return async (root, executor, job) => {
+    const hold = join(root, holdDirectory);
+    mkdirSync(hold);
+    await waitUntil(() => existsSync(join(hold, "holding")), job);
+    executor.abort();
+    writeFileSync(join(hold, "release"), "");
+  };
+}
+
+/** Which runs an ended job's reply holds; a job that did not end with runs as its whole outcome. */
+function runsKept(outcome: JobOutcome<FalsificationJob>): unknown {
+  if (!outcome.ended || outcome.value.status !== "ran") return outcome;
+  const job = outcome.value;
+  return {
+    interrupted: job.interrupted,
+    baseline: job.baseline?.ran ?? NO_RUN,
+    experiments: job.experiments.map((record) =>
+      record.status === "ran"
+        ? [record.defectId, record.status]
+        : [record.defectId, record.status, record.reason.kind],
+    ),
+    restored: job.restoredBaseline !== undefined,
+  };
+}

@@ -1,10 +1,16 @@
 const RUN_HOOK = Symbol.for("rt-test.fixture.run-hook");
 
-// Reports each module Vite transforms to the host test, which edits a source file or looks at the temp directory then.
+const REACH_RECORDER = "globalThis.__rtTestReach";
+
+// Reports each module Vite transforms to the host test, which edits a source file or looks at the temp directory then,
+// and reports again a module whose text holds a reach probe, which only an experiment's mutated module does.
 const reportTransforms = {
   name: "rt-test-report-transforms",
-  transform(_code, id) {
+  transform(code, id) {
     globalThis[RUN_HOOK]?.(`transform:${id}`);
+    if (code.includes(REACH_RECORDER)) {
+      globalThis[RUN_HOOK]?.(`mutated:${id}`);
+    }
   },
 };
 
