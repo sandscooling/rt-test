@@ -30,7 +30,7 @@ Scope: turn each experiment record into the facts ADR-0008 names (the intended t
 
 Scope: each experiment record of a falsification job's reply carries a digest of its mutation file's text as the job read it when it started, absent only when the file could not be read, and `FALSIFIER_VERSION` rises for it, so that 3.4 can bind evidence to the text that was mutated. Requirements: FR15. Ticket file: [3-3b-mutation-file-digest](../tickets/3-3b-mutation-file-digest.md)
 
-3.3b was cut from 3.4 on 2026-10-01 (orchestrator, 00:09). The orchestrator ruled at 23:45 on 2026-09-30 that evidence is also bound to the mutation file's text, since a file the consumer declares a non-input is in no input fingerprint; that added four files to 3.4 and took it to 33 estimated, past the 30-file limit. The record's member has no reader until 3.4 lands, as 3.2's record had none.
+3.3b was cut from 3.4 on 2026-10-01 (orchestrator, 00:09). The orchestrator ruled at 23:45 on 2026-09-30 that evidence is also bound to the mutation file's text, since a source file the consumer declares a non-input is in no input fingerprint; that added four files to 3.4 and took it to 33 estimated, past the 30-file limit. The record's member has no reader until 3.4 lands, as 3.2's record had none.
 
 ## Ticket 3.4: Defect evidence
 
@@ -38,7 +38,7 @@ Scope: store each verdict with its facts in the local store, one record for each
 
 ## Ticket 3.4b: Defect counts in the summary
 
-Scope: the `summary` answer and `rt-test summary` carry the worktree's defect counts (each state, each evidence freshness, and the verified, eligible and total counts) from the same computation as a `defects` answer for the whole worktree, taking the daemon's facts only once the definition files and each mutation's file are read. Requirements: FR5, FR22.
+Scope: the `summary` answer and `rt-test summary` carry the worktree's defect counts (each state, each evidence freshness, and the verified, eligible and total counts) from the same computation as a `defects` answer for the whole worktree, taking the daemon's facts only once the definition files and each mutation's file are read. Requirements: FR5.
 
 3.4 was split on 2026-09-30 (orchestrator, 23:45). As scoped it measured about 32 raw files, 42 estimated, past the 30-file limit. The cut falls between the two answers: 3.4 stores evidence and answers it through `rt-test defects`, and 3.4b puts the same counts in the summary. The summary reads no file today and answers synchronously; with defect counts it reads the definition files first, so `summary()` in `daemon/lifecycle.ts` (498 of its 500 code lines) changes, and every summary walks the definition files unless the daemon keeps them between queries, which 3.5 decides. So 3.4b builds after 3.5 and never beside it, and takes its counts from the standings function 3.4 creates, without a second computation.
 
