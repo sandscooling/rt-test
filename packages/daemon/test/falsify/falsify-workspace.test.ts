@@ -23,6 +23,7 @@ import {
 } from "../../src/falsify/experiment-record.js";
 import { falsifyWorkspace } from "../../src/falsify/falsify-workspace.js";
 import { StaleTransformGuard } from "../../src/falsify/stale-transform-guard.js";
+import { wholeDigest } from "../../src/inputs/input-inventory.js";
 import { chosenConfigFile } from "../../src/vitest/confirmed-start.js";
 import type { VitestWorkspace } from "../../src/vitest/find-workspaces.js";
 import { DAEMON_TEST_TIMEOUT_MS, withEnvironment } from "../daemon-harness.js";
@@ -32,6 +33,7 @@ import {
   inConsumerCopy,
   inTempDir,
   linkVitest,
+  REPO,
   RUN_HOOK,
   runHooks,
   slashed,
@@ -75,6 +77,19 @@ const MUTATED_EVENT = "mutated:";
 /** The reach probe's call, which only a mutated module's text holds. */
 const PROBE_CALL = "globalThis.__rtTestReach?.()";
 const TEMP_VARIABLES = ["TMPDIR", "TMP", "TEMP"] as const;
+/** The fixture as committed, which is what every job's copy holds when the job starts. */
+const FIXTURE_SOURCE = join(REPO, "test/fixtures/daemon", FIXTURE);
+/** A module the test writes into a copy of the fixture before a job starts, so the test chooses its exact text. */
+const WRITTEN_MODULE = "src/written.mjs";
+const BYTE_ORDER_MARK = "﻿";
+/** The experiments of the shared job that mutate the math module and are decided without a run, with each one's reason. */
+const DECIDED_WITH_TEXT: Readonly<Record<string, string>> = {
+  failing: "baseline-not-passed",
+  "alone-a": "baseline-not-passed",
+  "no-module": "no-module",
+  twice: "anchor-count",
+  "no-probe": "no-probe-site",
+};
 
 interface FalsifiedFixture {
   readonly job: FalsificationJob;
@@ -435,6 +450,15 @@ function stateIn(
   name: string,
 ): unknown {
   return testIn(run, modulePath, name)?.state ?? MISSING;
+}
+
+/** What `wholeDigest` gives a fixture module's text read whole as UTF-8, as a query reads the file. */
+function startDigest(modulePath: string): string {
+  return wholeDigest(readFileSync(join(FIXTURE_SOURCE, modulePath), "utf8"));
+}
+
+function digestCarried(fixture: FalsifiedFixture, defectId: string): unknown {
+  return experimentOf(fixture, defectId)?.mutationFileDigest ?? MISSING;
 }
 
 function mutationLoads(fixture: FalsifiedFixture, defectId: string): unknown {
@@ -905,10 +929,12 @@ describe("the facts a run records", () => {
 });
 
 describe("experiments decided without running", () => {
+  /** Each experiment read through this mutates the math module, whose text the job read. */
   const notRun = (reason: unknown): unknown => ({
     defectId: expect.any(String),
     status: "not-run",
     reason,
+    mutationFileDigest: startDigest(MATH_MODULE),
   });
 
   it(
@@ -999,6 +1025,96 @@ describe("experiments decided without running", () => {
       expect(
         await onBothLines((fixture) => experimentOf(fixture, "no-probe")),
       ).toEqual([expected, expected]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the digest of its mutation file's text a record carries", () => {
+  it(
+    "D3870: an experiment that ran carries what wholeDigest gives its mutation file's text",
+    async () => {
+      const digest = startDigest(MATH_MODULE);
+      expect(
+        await onBothLines((fixture) => digestCarried(fixture, "add")),
+      ).toEqual([digest, digest]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3871: an experiment decided without a run, its file's text in hand, carries that text's digest whatever the reason",
+    async () => {
+      const digest = startDigest(MATH_MODULE);
+      const decided = Object.fromEntries(
+        Object.entries(DECIDED_WITH_TEXT).map(([defectId, reason]) => [
+          defectId,
+          [reason, digest],
+        ]),
+      );
+      const read = (fixture: FalsifiedFixture): unknown =>
+        Object.fromEntries(
+          Object.keys(DECIDED_WITH_TEXT).map((defectId) => {
+            const record = experimentOf(fixture, defectId);
+            return [
+              defectId,
+              record?.status === "not-run"
+                ? [record.reason.kind, record.mutationFileDigest ?? MISSING]
+                : (record ?? MISSING),
+            ];
+          }),
+        );
+      expect(await onBothLines(read)).toEqual([decided, decided]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3872: an experiment whose mutation file could not be read carries no digest",
+    async () => {
+      expect(
+        await onBothLines((fixture) => {
+          const record = experimentOf(fixture, "unreadable");
+          return record === undefined
+            ? MISSING
+            : "mutationFileDigest" in record;
+        }),
+      ).toEqual([false, false]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3873: a mutation file edited on disk after the job read it carries the digest of the text the job read, not of the edited text",
+    async () => {
+      const digest = startDigest(LABEL_MODULE);
+      expect(
+        await onBothLines((fixture) => digestCarried(fixture, "label")),
+      ).toEqual([digest, digest]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3874: a mutation file that starts with a byte order mark carries the digest of its text with the mark kept",
+    async () => {
+      const text = `${BYTE_ORDER_MARK}export const sum = 1 + 2;\n`;
+      const digest = wholeDigest(text);
+      expect(
+        await onEachLine(digestCarriedOver(text), (carried) => carried),
+      ).toEqual([digest, digest]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3875: a mutation file with CRLF line endings carries the digest of its text with those line endings kept",
+    async () => {
+      const text = "export const sum = 1 + 2;\r\nexport const two = 2;\r\n";
+      const digest = wholeDigest(text);
+      expect(
+        await onEachLine(digestCarriedOver(text), (carried) => carried),
+      ).toEqual([digest, digest]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1179,13 +1295,13 @@ describe("the judgement each experiment reads", () => {
   );
 
   it(
-    "D3782: a job's reply reads falsifier version 2, above the version whose records held no confirming run and no judgement",
+    "D3782: a job's reply reads falsifier version 3, above the version whose records held no mutation file digest",
     async () => {
       expect(
         await onBothLines(
           (fixture) => ranJob(fixture.job)?.falsifierVersion ?? MISSING,
         ),
-      ).toEqual([2, 2]);
+      ).toEqual([3, 3]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1296,6 +1412,36 @@ function moduleCacheJob(install: VitestInstall): Promise<FalsificationJob> {
       NEVER_ABORTED,
     );
   });
+}
+
+/**
+ * The digest carried by the one experiment of a job over a copy of the fixture whose written module holds `text`. The
+ * experiment names a test in no module, so the job decides it from the text it read and runs nothing. A reply that
+ * holds no such digest is returned whole.
+ */
+function digestCarriedOver(
+  text: string,
+): (install: VitestInstall) => Promise<unknown> {
+  return (install) =>
+    inConsumerCopy(FIXTURE, install, async (root) => {
+      const file = join(root, WRITTEN_MODULE);
+      writeFileSync(file, text);
+      const workspace: VitestWorkspace = { path: ".", directory: root };
+      const job = await falsifyWorkspace(
+        workspace,
+        chosenConfigFile(workspace) ?? "",
+        [
+          {
+            defectId: "written",
+            test: unitTest("test/absent.test.mjs", ["adds"]),
+            mutation: { file, old: "1 + 2", new: "1 - 2" },
+          },
+        ],
+        NO_DECLARED_NAMES,
+        NEVER_ABORTED,
+      );
+      return ranJob(job)?.experiments[0]?.mutationFileDigest ?? job;
+    });
 }
 
 /** A job as its status and any refusal. */

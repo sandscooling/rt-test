@@ -85,7 +85,7 @@ The orchestrator's ruling at 23:45 on 2026-09-30, on ticket 3.4's question F9: "
 
 #### Design decisions (scope of analysis: the record's member and its digest; storing it and comparing it are ticket 3.4's and unanalyzed here)
 
-- **The digest is of the text read when the job started.** `FalsificationRuns` reads each mutated file once, in `#textOf`, before any run, and plans every experiment from that text. A file edited later in the job is served from its new text at the next run (a known limit `docs/architecture.md` § Falsification jobs records); its record still carries the digest of the start text, so ticket 3.4's query reads the evidence stale for as long as the edit stands, the safe direction. A file edited during the job and restored to the same text before the query reads current though a run was served other text. For a file in the workspace's inputs, ticket 3.5 stores nothing, since it decides moved inputs from the change events during the job; for a declared non-input no event comes. That case is a known limit, decided by the orchestrator at 00:20 on 2026-10-01: a declared non-input file a defect mutates, edited and restored byte for byte inside one job's run, reads current. It needs a consumer's false declaration, and the wider hole of that declaration is already a recorded limit until M3's file-level dependencies.
+- **The digest is of the text read when the job started.** `FalsificationRuns` reads each mutated file once, in `#textOf`, before any run, and plans every experiment from that text. A file edited later in the job is served from its new text at the next run (a known limit `docs/architecture.md` § Falsification jobs records); its record still carries the digest of the start text, so ticket 3.4's query reads the evidence stale for as long as the edit stands, the safe direction. A file edited during the job and restored to the same text before the query reads current though a run was served other text. For a file in the workspace's inputs, ticket 3.5 stores nothing, since it decides moved inputs from the change events during the job; for a declared non-input no event comes. That case is a known limit, decided by the orchestrator at 02:20 on 2026-10-01: "a declared non-input file a defect mutates, edited while a job runs and restored to the same text before the query, reads current though a run was served other text." It covers the restore inside the job and the restore after it. It needs a consumer's false declaration, and the standing hole of that declaration for any other file is a recorded limit until M3's file-level dependencies. The fix weighed and refused: comparing the text each run was served with the start digest and giving the experiment no verdict when they differ.
 - **What ticket 3.3 built is ticket 3.3 as landed on `main` at 45f92eb6,** its review's fix included: a recorded test (`RecordedRunTest`) and its facts (`TestFacts`) carry an optional `repeats`, present only when above zero, and a judgement can read invalid experiment with the reason `test-repeated`. AC1's "nothing else of the reply differs" covers them, so a recorded test's `repeats`, each judgement and each judgement's facts read after this ticket as they do at that commit.
 - **Every record whose file was read carries it.** A verdict can come from a run or from a reason decided with the text in hand (no probe site, no module, baseline did not pass), and ticket 3.4 refuses to store a verdict whose record has no digest. Only the unreadable file leaves none, and that reason reads no verdict. No record is built before its file is read: `FalsificationRuns.all` plans every experiment first, through `#planAll`, synchronously and whatever the abort signal says, and `#plan` reads the file before anything else; a job aborted before its workspace loads reads `interrupted-before-load` and holds no record at all.
 - **One digest function on both sides.** The job digests the string `readFileSync(file, "utf8")` returns, and ticket 3.4's query the string `readFile(path, "utf8")` returns in `readMutationFile`; both keep a byte order mark. `wholeDigest` over the string gives equal digests for an unedited file; a second function on either side would have to be kept equal to it by hand (C8).
@@ -100,7 +100,11 @@ One review agent read the ticket and its bound rules at 00:12 on 2026-10-01 and 
 
 Asked at 00:17 on 2026-10-01, with the handoff; decided by the orchestrator at 00:20.
 
-- A declared non-input file a defect mutates, edited and restored byte for byte inside one job's run: a known limit, as the first design decision records it. Ticket 3.4 names it under its Known limits.
+- A declared non-input file a defect mutates, edited and restored byte for byte inside one job's run: a known limit. The ruling of 02:20 below widens its wording.
+
+Asked by the dev at 02:19 on 2026-10-01 (Completion Notes § Change request candidates); decided by the orchestrator at 02:20, amending the wording of the 00:20 ruling.
+
+- The limit as worded at 00:20 left out a file edited inside the job and restored after it. Ruling: the known limit is "a declared non-input file a defect mutates, edited while a job runs and restored to the same text before the query, reads current though a run was served other text." It covers the restore inside the job and the restore after it. The reason is unchanged: it needs a consumer's false declaration, and the standing hole of that declaration for any other file is a recorded limit until M3. The fix weighed and refused: comparing the text each run was served with the start digest and giving the experiment no verdict when they differ. The first design decision and ticket 3.4's Known limits carry this wording. No criterion changed.
 
 Asked by the orchestrator at 01:57 on 2026-10-01, once ticket 3.3 had merged at 45f92eb6; amended by the author at 02:06.
 
@@ -208,15 +212,29 @@ None.
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId f081927f-fb38-484a-aaf1-5bf32055d3dc
+
+All tests are in `packages/daemon/test/falsify/falsify-workspace.test.ts`, with their records in `packages/daemon/test/falsify/defects.json`. Proof, by id through the run lease, over 6a7a3332 with those two files as edited: 60 of 60 detected on Windows (02:28 to 02:32 on 2026-10-01) and 60 of 60 on Linux under Node 24.19.0 (ended 02:34), baseline green before and after on each. The 60 are the 6 new records, the 29 anchored in `falsify/experiment-record.ts` and `falsify/falsify-workspace.ts`, and every other record whose test is in the edited test file.
 
 #### Named Defects
 
-None.
+- D3870: The record of an experiment that ran carries no digest of its mutation file's text, so a detection has nothing to bind to and cannot be stored as evidence. (AC1)
+- D3871: The record of an experiment decided without a run carries no digest though the job read its file, so a verdict such as invalid experiment for no probe site or no module has nothing to bind to and cannot be stored. Read over `baseline-not-passed` (failed and not reported), `no-module`, `anchor-count` and `no-probe-site`, each with its reason beside the digest. (AC1)
+- D3872: The record of an experiment whose mutation file could not be read carries a digest, so it reads as bound to a text the job never read. (AC1)
+- D3873: The digest is taken from the mutation file as it reads when the job's records are collected, so a file edited mid-job carries the digest of the edited text, and evidence planned from the old text reads current. Read on the label module, which the test rewrites while the baseline runs. (AC1, AC2)
+- D3874: The digest is taken of the text with its byte order mark dropped, so a file that starts with one never digests as a query reads it and its evidence reads stale forever. (AC2)
+- D3875: The digest is taken of the text with its carriage returns dropped, so a file with CRLF line endings never digests as a query reads it and its evidence reads stale forever. The test writes the CRLF text itself, so the host's line endings decide nothing. (AC2)
+- D3782, repaired: The falsifier version is not raised, so evidence recorded before an experiment record held its mutation file's digest is kept as current. Its test expects 3 and its record mutates 3 to 2. The defect it named before, a version left at 1, is still rejected by this test, which expects 3. (AC1)
+- D3642, D3643, D3644, D3646 and D3647, repaired with their records unchanged: each compares a whole not-run record, which now holds four members, the fourth the math module's digest. They pin that this ticket adds no other member to a not-run record. (AC1, AC2)
+
+Each expected digest is what `wholeDigest` gives the text read whole as UTF-8, the call ticket 3.4's query makes: the fixture's module as committed, or the literal text the test wrote. D3870, D3871 and the five repaired tests read experiments that all mutate the math module and expect one digest, so a digest that varies with anything but the text fails them, and an exact 64-character value leaves no room for a part of the text.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/falsify/falsify-workspace.ts`, the not-run reasons `interrupted`, `baseline-not-run` and `run-unrecorded`: each reads no verdict, so ticket 3.4 stores nothing for them and a missing digest there can neither report stale evidence as current nor refuse good evidence. The digest is set in the one place every return of `all` collects its records through, which D3870 and D3871 pin for both statuses.
+- `packages/daemon/src/daemon/executor-main.ts` and `executor.ts`: the reply crosses the executor's channel whole, as JSON, and no branch there reads a record's members, so no defect is nameable for the digest. `falsify-executor.test.ts` passes unedited.
+- A digest of the file's bytes in place of its text read as UTF-8: the two are equal for every file that is valid UTF-8, a byte order mark included, so no mutation is observable short of an invalid encoding no realistic consumer's source holds.
+- A declared non-input file a defect mutates, edited while a job runs and restored to the same text before the query: the known limit the orchestrator ruled at 02:20 on 2026-10-01.
 
 ### Review Record
 
@@ -243,6 +261,7 @@ Dev, 02:18 on 2026-10-01, in Tree 1 on `wt/1` over e473c80b.
 #### Change request candidates
 
 - A fork, not a defect in this ticket's code, sent to the orchestrator at 02:19 on 2026-10-01. The ruling of 00:20 names the known limit as a declared non-input file "edited and restored byte for byte inside one job's run". The first design decision above states the case wider: "restored to the same text before the query". The gap is a file edited inside the job and restored after it: its run was served the edited text, its record carries the start text's digest, and once the file is restored the evidence reads current. It needs the same false declaration as the ruled case, since ticket 3.5 stores nothing for a file in the workspace's inputs that moved during the job. Recommendation: keep it as the same known limit and word ticket 3.4's Known limits as "restored before the query". Closing it instead means comparing the text a run was served with the start digest and storing nothing when they differ, which changes shipped behavior and edits `falsify/stale-transform-guard.ts` or `falsify/mutation-transform.ts`, outside this ticket's files.
+  - Decided by the orchestrator at 02:20 on 2026-10-01: a known limit, worded as wide as the case, with no source change. "A declared non-input file a defect mutates, edited while a job runs and restored to the same text before the query, reads current though a run was served other text." It needs a consumer's false declaration, and under that declaration an edit to any other declared file the test reads already stales nothing until M3's file-level dependencies. Comparing the text each run was served with the start digest is refused for this ticket and recorded as the way to close it if M3 does not. The ticket's author writes the wording into the design decision and into ticket 3.4's Known limits.
 
 ### File List
 
