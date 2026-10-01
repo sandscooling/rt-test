@@ -104,14 +104,14 @@ function placeSet(
   }
 }
 
-/** Makes a directory under a name no other reading, daemon or worktree shares, and gives its real path. */
+/** Makes a directory beneath the state directory's real path, under a name no other reading, daemon or worktree shares. */
 function makeOwnDirectory(stateDirectory: string): string {
   const directory = join(
     realpathSync.native(stateDirectory),
     `${PLACED_PREFIX}${randomUUID()}`,
   );
   mkdirSync(directory);
-  return realpathSync.native(directory);
+  return directory;
 }
 
 async function readJob(
@@ -141,9 +141,9 @@ async function readJob(
 }
 
 /**
- * Removes the directory a reading placed, given by the real path it was placed at, and nothing else: a path that
- * now resolves elsewhere is left alone. The link to the install goes first, by a call that cannot recurse, so the
- * recursive removal walks a tree that holds no link, since some Node lines' removal can follow one on Windows.
+ * Removes the directory a reading placed, given by the path it was built at, and nothing else: a path that now
+ * resolves elsewhere is left alone. The link to the install goes first, by a call that cannot recurse, so the
+ * recursive removal meets no link the reading made, since some Node lines' removal can follow one on Windows.
  */
 function removePlaced(log: DaemonLog, placed: string): void {
   let directory: string;

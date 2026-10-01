@@ -1335,5 +1335,12 @@
     "file": "packages/daemon/src/daemon/canary-reading.ts",
     "old": "    if (isMissing(error)) return true;\n",
     "new": ""
+  },
+  {
+    "id": "D4148",
+    "defect": "The reading's directory is built beneath the state directory's path as given, not its real path, so from a state directory reached through a directory link the removal's real-path check never matches and every reading leaves its directory and a log entry.",
+    "file": "packages/daemon/src/daemon/canary-reading.ts",
+    "old": "    realpathSync.native(stateDirectory),",
+    "new": "    stateDirectory,"
   }
 ]

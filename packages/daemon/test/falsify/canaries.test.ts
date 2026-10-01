@@ -1402,4 +1402,17 @@ describe("where a canary reading's files lie, and what it leaves", () => {
     }));
     expect({ left, log }).toEqual({ left: [KEPT_STATE_FILE], log: [] });
   });
+
+  it("D4148: a reading whose state directory is given through a directory link leaves that state directory holding what it held, and logs nothing", async () => {
+    const { reading, left, log } = await taken((place) => {
+      const link = join(place.dir, "state-link");
+      symlinkSync(place.stateDirectory, link, "junction");
+      return { stateDirectory: link };
+    });
+    expect({ reading, left, log }).toEqual({
+      reading: noReading("no-reply", EXECUTOR_DIED),
+      left: [KEPT_STATE_FILE],
+      log: [],
+    });
+  });
 });
