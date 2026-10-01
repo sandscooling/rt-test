@@ -7254,3 +7254,72 @@ describe(
     });
   },
 );
+
+/** How many jobs the log names as started falsification jobs. */
+function startEntries(started: Falsifying): number {
+  return started.log.entries.filter((entry) =>
+    entry.startsWith("falsification started"),
+  ).length;
+}
+
+describe(
+  "what an entry and the log say of a workspace the gate left waiting",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4201: a canary job that gave no reading while no time bound was reached is marked with what happened, and not in the bound's words", async () => {
+      const gate = new ScriptedGate({ readings: () => NO_READING });
+      const says = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        const reason = falsificationEntries(started)[0]?.reason ?? "";
+        return {
+          whatHappened: reason.includes(EXECUTOR_DIED),
+          theBound: reason.includes("time bound"),
+        };
+      });
+      expect(says).toStrictEqual({ whatHappened: true, theBound: false });
+    });
+
+    it("D4202: the log's entry for a refused workspace's mark says what ends the refusal, and not that a change of the input revision does", async () => {
+      const gate = new ScriptedGate({ readings: () => DISAGREED });
+      const logged = await falsifying({ gate }, async (started) => {
+        await idled(started);
+        return started.log.entries
+          .filter((entry) => entry.startsWith(MARK_OF_A))
+          .map((entry) => ({
+            saysWhatEndsTheRefusal: entry.includes(ANOTHER_INSTALL_ENDS),
+            saysTheRevisionEndsIt: entry.includes(WORKSPACE_WAIT_ENDS),
+          }));
+      });
+      expect(logged).toStrictEqual([
+        { saysWhatEndsTheRefusal: true, saysTheRevisionEndsIt: false },
+      ]);
+    });
+
+    it("D4204: the log names no falsification job as started for a workspace while its canary job runs, once the look refused it, or when a later look refuses it from the kept reading", async () => {
+      const gate = new ScriptedGate({ readings: () => HELD });
+      const outcome = await falsifying({ gate }, async (started) => {
+        const taken = await canaryJobsTaken(gate);
+        const whileTheCanariesRun = startEntries(started);
+        gate.end(DISAGREED);
+        await idled(started);
+        const onceRefused = startEntries(started);
+        started.inputs.moveRevision();
+        await idled(started, 2);
+        return {
+          taken,
+          whileTheCanariesRun,
+          onceRefused,
+          refusedAgainAtTheNextRevision: startEntries(started),
+          jobs: started.executor.jobs.length,
+        };
+      });
+      expect(outcome).toStrictEqual({
+        taken: true,
+        whileTheCanariesRun: 0,
+        onceRefused: 0,
+        refusedAgainAtTheNextRevision: 0,
+        jobs: 0,
+      });
+    });
+  },
+);

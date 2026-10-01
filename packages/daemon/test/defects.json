@@ -11653,5 +11653,26 @@
     "file": "packages/daemon/src/vitest/load-vitest.ts",
     "old": "    if (isFile(manifest)) return realpathSync(manifest);",
     "new": "    return realpathSync(manifest);"
+  },
+  {
+    "id": "D4201",
+    "defect": "A canary job that gave no reading for another cause than the time bound is marked in the bound's words, so its entry says the time bound of 10 minutes ended a job that its executor's death ended.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "        reading.status === CANARY_READING.none &&\n        watch.asked() === ENDING.bound;",
+    "new": "        reading.status === CANARY_READING.none;"
+  },
+  {
+    "id": "D4202",
+    "defect": "The log's entry for a refused workspace says the input revision's ending, so the log says a change of the input revision ends a refusal that only another Vitest install or a restart of the daemon ends.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      `the falsification of ${job.workspacePath} waits: ${what}, ${ends}`,",
+    "new": "      `the falsification of ${job.workspacePath} waits: ${what}, ${WORKSPACE_WAIT}`,"
+  },
+  {
+    "id": "D4204",
+    "defect": "The gate is asked after the start entry is logged, so the log says a falsification job started for a workspace that was refused or whose canary job was taken in its place.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "    const standing = canaryGate.standing(entry.workspace);\n    if (standing.state === STANDING.unread) return { job, unread: standing };\n    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }\n    const [first] = definitions;\n    log.entry(\n      `falsification started: ${workspacePath}, definitions ${definitions.length}${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}`,\n    );",
+    "new": "    const [first] = definitions;\n    log.entry(\n      `falsification started: ${workspacePath}, definitions ${definitions.length}${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}`,\n    );\n    const standing = canaryGate.standing(entry.workspace);\n    if (standing.state === STANDING.unread) return { job, unread: standing };\n    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }"
   }
 ]

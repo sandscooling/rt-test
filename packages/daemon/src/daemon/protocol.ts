@@ -150,7 +150,7 @@ export type DaemonActivity =
   | {
       readonly state: "falsifying";
       readonly workspacePath: string;
-      /** How many definitions the falsification job in progress holds. */
+      /** How many definitions the falsification job in progress holds; 0 while a canary job runs. */
       readonly definitions: number;
     }
   | { readonly state: "idle" };

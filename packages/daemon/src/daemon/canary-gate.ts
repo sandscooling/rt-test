@@ -143,7 +143,7 @@ function installKey({ directory, version }: VitestInstall): string {
   return JSON.stringify([directory, version]);
 }
 
-/** How a canary job ended, with every canary that disagreed, since an answer names only the first of them. */
+/** How a canary job ended, with every canary that disagreed, since an answer names only as many as its bound holds. */
 function endText(reading: CanaryReading): string {
   switch (reading.status) {
     case CANARY_READING.confirmed:

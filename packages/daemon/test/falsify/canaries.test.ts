@@ -1808,3 +1808,26 @@ describe("what the log says of a canary job", () => {
     ]);
   });
 });
+
+describe("what a refusal says of a canary that read a reason and no verdict", () => {
+  it("D4203: a canary whose reply held a reason alone is named with that reason and the judgement named for it, and with no undefined where its verdict would be", async () => {
+    const { what } = await gated(
+      {
+        named: [namedCanary("first-canary", { verdict: "detected" })],
+        falsify: replying(ranReply([["first-canary", READ_INTERRUPTED]])),
+      },
+      async (at) => {
+        await takeUnread(at);
+        return waitOf(at, at.workspace);
+      },
+    );
+    expect({
+      namesWhatItReadAndWhatIsNamed: holdsInOrder(what, [
+        "first-canary",
+        "interrupted",
+        "detected",
+      ]),
+      saysUndefined: what.includes("undefined"),
+    }).toEqual({ namesWhatItReadAndWhatIsNamed: true, saysUndefined: false });
+  });
+});

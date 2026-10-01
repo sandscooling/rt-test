@@ -1433,5 +1433,12 @@
     "file": "packages/daemon/src/daemon/canary-gate.ts",
     "old": "  const detail = \"detail\" in reading ? `: ${reading.detail}` : \"\";",
     "new": "  const detail = \"\";"
+  },
+  {
+    "id": "D4203",
+    "defect": "A refusal says `undefined` for a canary that read a reason and no verdict, so its entry and the log name a judgement no canary read.",
+    "file": "packages/daemon/src/daemon/canary-gate.ts",
+    "old": "  const given = verdict ?? NO_VERDICT;",
+    "new": "  const given = String(verdict);"
   }
 ]
