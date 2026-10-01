@@ -222,8 +222,8 @@ function experiments(root: string): DefectExperiment[] {
       "no-probe",
       unitTest("test/math.test.mjs", ["math", "adds"]),
       "src/math.mjs",
-      "function add(",
-      "function sum(",
+      readFileSync(math, "utf8"),
+      "",
     ),
     {
       defectId: "lib",
@@ -471,8 +471,17 @@ const PROBED_ADD = {
   applied: true,
   probe: {
     placed: true,
-    site: { line: 2, column: 10, nodeKind: "BinaryExpression" },
+    site: { line: 2, column: 3, nodeKind: "ReturnStatement" },
   },
+};
+
+/** Where the `no-probe` experiment's change starts: it removes its module's whole text, leaving no statement to probe. */
+const EMPTIED_MODULE_SITE = {
+  kind: "position",
+  line: 1,
+  column: 1,
+  nodeKind: "Program",
+  role: "root",
 };
 
 describe("a falsification job's mutation", () => {
@@ -1015,13 +1024,7 @@ describe("experiments decided without running", () => {
     async () => {
       const expected = notRun({
         kind: "no-probe-site",
-        site: {
-          kind: "position",
-          line: 1,
-          column: 17,
-          nodeKind: "Identifier",
-          role: "FunctionDeclaration.id",
-        },
+        site: EMPTIED_MODULE_SITE,
       });
       expect(
         await onBothLines((fixture) => experimentOf(fixture, "no-probe")),
@@ -1260,15 +1263,7 @@ describe("the judgement each experiment reads", () => {
         "no-probe": {
           verdict: "invalid-experiment",
           reason: "no-probe-site",
-          detail: {
-            site: {
-              kind: "position",
-              line: 1,
-              column: 17,
-              nodeKind: "Identifier",
-              role: "FunctionDeclaration.id",
-            },
-          },
+          detail: { site: EMPTIED_MODULE_SITE },
         },
         "no-module": { verdict: "invalid-experiment", reason: "no-module" },
       };

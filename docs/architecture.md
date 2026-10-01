@@ -134,6 +134,7 @@ Known limits, each making an experiment invalid rather than detected unless it s
 - a step reached only in an `afterAll` reads not executed;
 - reach is of the step, so a test that reaches the step without evaluating its changed part, as one that stops at `a` in `a && b` with `b` changed, reads as having reached it, and reads survived unless it fails an assertion by chance in the experiment and in its confirming run;
 - a mutation that changes several statements is probed before the first of them;
+- a method's name, `async`, `static` and accessor kind sit outside its function, so a change to one of them is probed where its class or object literal is defined, and a test that never called the method reads as having reached it;
 - a changed parameter default or pattern that throws ends the call before the probe at the body's head, and a parameter's decorator runs when its class is defined, so each reads not executed;
 - a class decorated before `export` has no probe site for a change in its decorators or its members' names, since no statement can stand between a decorator and `export`;
 - a module that binds a name `globalThis` of its own makes the probe throw or record nothing;
