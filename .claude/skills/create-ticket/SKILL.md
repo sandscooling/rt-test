@@ -171,8 +171,9 @@ so a stale-prose site lands in the count before the owner answers against it. Fi
 breaks by grepping the observable the tests read, never only the test blocks whose subject you changed.
 Show the owner both the raw and the estimated count.
 
-- **Estimated files above 10**: report both counts and say the implementation will be delegated to
-  implementer agents. A report, not a question.
+- **Estimated files above 10**: report both counts, and name each group of tasks whose files no other task
+  touches and whether an order binds the groups. `dev-ticket` Step 5b decides from that whether the
+  implementation is delegated, so write no Dev Note saying it will be. A report, not a question.
 - **Estimated files above 25, up to 30**: report both counts and name the behavior or contract a split would
   cut in two. A report, not a question; with no such behavior, treat it as the next case.
 - **Estimated files above 30, or code units above 15**: name which limit was crossed and ask via
