@@ -61,6 +61,11 @@ import {
   projectFacts,
 } from "./harness.js";
 import { narrowingSelecting } from "./round-fixtures.js";
+import {
+  defectsAnswer,
+  type DefectsAnswer,
+} from "../src/query/defects-answer.js";
+import { DAEMON_TEST_TIMEOUT_MS } from "./daemon-harness.js";
 
 type RanRun = Extract<WorkspaceRun, { status: "ran" }>;
 type DiscoveredWorkspace = Extract<
@@ -2493,5 +2498,294 @@ describe("a wait's answer", () => {
       },
       { modulePath: crashedModule, state: "module-crashed", firstError: null },
     ]);
+  });
+});
+
+/** Definition files as the answer reads them: `defects/<name>` with the definitions listed, or with raw text. */
+type DefinitionFilesTree = Readonly<
+  Record<string, readonly unknown[] | string>
+>;
+
+/** A definition naming the test `name` in `module`, whose mutation replaces `return 1;` in `A_SOURCE`. */
+function defectDefinition(
+  id: unknown,
+  name: string,
+  module: string = A_MODULE,
+  old = "return 1;",
+): Record<string, unknown> {
+  return {
+    id,
+    defect: "a returns 2",
+    required: "a returns 1",
+    test: { module, name: [name] },
+    mutation: { file: A_SOURCE, old, new: "return 2;" },
+  };
+}
+
+/**
+ * Writes `A_SOURCE`, and with any definition files an `rt-test.json` naming `defects/*.json` and those files, under
+ * `root`, then answers `defects` over `latest` as the daemon does, for the absolute `path` or the whole worktree.
+ */
+function defectsOver(
+  root: string,
+  latest: LatestResults,
+  files: DefinitionFilesTree = {},
+  path?: string,
+): Promise<DefectsAnswer | NoAnswer> {
+  const written: Record<string, string> = {
+    [A_SOURCE]: "export function a() {\n  return 1;\n}\n",
+  };
+  if (Object.keys(files).length > 0) {
+    written["rt-test.json"] = JSON.stringify({ defects: ["defects/*.json"] });
+  }
+  for (const [name, definitions] of Object.entries(files)) {
+    written[`defects/${name}`] =
+      typeof definitions === "string"
+        ? definitions
+        : JSON.stringify({ defects: definitions });
+  }
+  for (const [file, text] of Object.entries(written)) {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), text);
+  }
+  return defectsAnswer({
+    path,
+    results: latest,
+    daemon: { ...IDLE, consumerRoot: root },
+    inputs: UNSETTLED,
+    stateDirectory: join(root, ".rt-test"),
+    signal: new AbortController().signal,
+  });
+}
+
+/** A stored discovery of the tests named in `A_MODULE` and of the test `d` in `B_MODULE`. */
+function discoveryOfAAndB(...names: readonly string[]): LatestResults {
+  return results(
+    storedDiscovery([
+      discoveredWorkspace(
+        WORKSPACE_A,
+        names.map((name) => discovered(name)),
+      ),
+      discoveredWorkspace(WORKSPACE_B, [
+        discovered("d", { workspacePath: WORKSPACE_B }),
+      ]),
+    ]),
+  );
+}
+
+describe(
+  "the defects answer's gaps and scope",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D3691: a test only invalid definitions name is covered, never a gap, while a test no definition names is one", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one", "two", "three"),
+            {
+              "a.json": [
+                defectDefinition("D1", "one"),
+                defectDefinition("D1", "one"),
+                defectDefinition(7, "two"),
+              ],
+            },
+            join(root, WORKSPACE_A),
+          ),
+        ),
+      );
+      expect({
+        gaps: answer.gaps,
+        gapTests: answer.gapTests.map(({ module, tests }) => ({
+          module,
+          names: tests.map((test) => test.identity.namePath),
+        })),
+      }).toStrictEqual({
+        gaps: 1,
+        gapTests: [{ module: A_MODULE, names: [["three"]] }],
+      });
+    });
+
+    it("D3692: a path leaves out each definition whose test's module lies outside it, and each test outside it", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one"),
+            {
+              "a.json": [
+                defectDefinition("D1", "one"),
+                defectDefinition("D2", "d", B_MODULE),
+              ],
+            },
+            join(root, WORKSPACE_A),
+          ),
+        ),
+      );
+      expect({
+        total: answer.counts.total,
+        ids: answer.definitions.map((definition) => definition.id),
+        testsInScope: answer.testsInScope,
+      }).toStrictEqual({ total: 1, ids: ["D1"], testsInScope: 1 });
+    });
+
+    it("D3693: a definition naming no usable module lies in every scope", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one"),
+            {
+              "a.json": [
+                defectDefinition("D1", "one"),
+                defectDefinition("D9", "x", ""),
+              ],
+            },
+            join(root, WORKSPACE_B),
+          ),
+        ),
+      );
+      expect(
+        answer.definitions.map(({ id, state }) => ({ id, state })),
+      ).toStrictEqual([{ id: "D9", state: "invalid-definition" }]);
+    });
+
+    it("D3694: a definition file problem counts in the total and is listed whole in every scope", async () => {
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(
+            root,
+            discoveryOfAAndB("one"),
+            {
+              "a.json": [defectDefinition("D1", "one")],
+              "broken.json": "not json",
+            },
+            join(root, WORKSPACE_B),
+          ),
+        ),
+      );
+      expect({
+        total: answer.counts.total,
+        invalidEntries: answer.counts.invalidEntries,
+        listed: answer.invalidEntries.map(
+          ({ kind, path }) => `${kind} ${path}`,
+        ),
+      }).toStrictEqual({
+        total: 1,
+        invalidEntries: 1,
+        listed: ["not-json defects/broken.json"],
+      });
+    });
+
+    it("D3695: of 503 definitions it lists 500, invalid ones first, with how many of each state it left out and every count complete", async () => {
+      const invalid = Array.from({ length: 501 }, (_, index) =>
+        defectDefinition(`D${index + 100}`, `missing ${index}`),
+      );
+      const answer = answered(
+        await inTempDir((root) =>
+          defectsOver(root, discoveryOfAAndB("one", "two"), {
+            "a.json": [
+              defectDefinition("D1", "one"),
+              defectDefinition("D2", "two", A_MODULE, "absent();"),
+              ...invalid,
+            ],
+          }),
+        ),
+      );
+      expect({
+        listed: answer.definitions.length,
+        listedStates: [
+          ...new Set(answer.definitions.map(({ state }) => state)),
+        ],
+        notListed: answer.definitionsNotListed,
+        states: answer.counts.states,
+      }).toStrictEqual({
+        listed: 500,
+        listedStates: ["invalid-definition"],
+        notListed: {
+          "invalid-definition": 1,
+          "anchor-missing": 1,
+          "never-verified": 1,
+        },
+        states: {
+          "invalid-definition": 501,
+          "anchor-missing": 1,
+          "never-verified": 1,
+        },
+      });
+    });
+  },
+);
+
+/** A stored discovery of 600 tests in `A_MODULE` and 401 in `B_MODULE`, 1001 in all. */
+function thousandAndOneTests(): LatestResults {
+  const named = (count: number, workspacePath: string) =>
+    Array.from({ length: count }, (_, index) =>
+      discovered(`t${index}`, { workspacePath }),
+    );
+  return results(
+    storedDiscovery([
+      discoveredWorkspace(WORKSPACE_A, named(600, WORKSPACE_A)),
+      discoveredWorkspace(WORKSPACE_B, named(401, WORKSPACE_B)),
+    ]),
+  );
+}
+
+describe("the defects answer's gap listing and refusals", () => {
+  it("D3696: of 1001 gap tests it lists 1000 by module and says one was not listed", async () => {
+    const answer = answered(
+      await inTempDir((root) => defectsOver(root, thousandAndOneTests())),
+    );
+    expect({
+      listed: answer.gapTests.map(({ module, tests }) => [
+        module,
+        tests.length,
+      ]),
+      notListed: answer.gapTestsNotListed,
+    }).toStrictEqual({
+      listed: [
+        [A_MODULE, 600],
+        [B_MODULE, 400],
+      ],
+      notListed: 1,
+    });
+  });
+
+  it("D3697: every module holding a gap has its whole gap count, the tests past the listing's bound included", async () => {
+    const answer = answered(
+      await inTempDir((root) => defectsOver(root, thousandAndOneTests())),
+    );
+    expect(answer.gapModules).toStrictEqual([
+      { module: A_MODULE, gaps: 600 },
+      { module: B_MODULE, gaps: 401 },
+    ]);
+  });
+
+  it("D3698: a path outside the consumer root is refused with the reason naming it", async () => {
+    const answer = await inTempDir((root) =>
+      defectsOver(
+        join(root, "consumer"),
+        discoveryOfAAndB("one"),
+        {},
+        join(root, "elsewhere"),
+      ),
+    );
+    expect(answer).toStrictEqual({
+      noAnswer: expect.stringMatching(
+        /elsewhere lies outside the consumer root/,
+      ),
+    });
+  });
+
+  it("D3699: a path holding no test, no definition and no definition file problem has nothing to answer", async () => {
+    const answer = await inTempDir((root) => {
+      mkdirSync(join(root, "docs"));
+      return defectsOver(root, discoveryOfAAndB("one"), {}, join(root, "docs"));
+    });
+    expect(answer).toStrictEqual({
+      noAnswer: expect.stringMatching(
+        /^no discovered test, no defect definition and no problem reading the definition files lies at or under /,
+      ),
+    });
   });
 });

@@ -19,9 +19,9 @@ Every criterion holds on Windows and on Linux. "Now" means when the daemon answe
 - [x] AC2: A definition is invalid, with a reason that names the problem and never quotes its `old` or `new` text, when it lacks a field the definition format requires or holds one of the wrong kind (the format is in Dev Notes, Q2), its `old` is empty, its `old` equals its `new`, its mutation's file lies outside the consumer root (by its spelling or by its real path), or its `id` repeats: every definition carrying a repeated `id` is invalid, each naming the other definitions' files. A definition missing a usable `id` is named by its file and its position in that file. (FR24)
 - [x] AC3: A definition's test resolves to the one test in the latest stored discovery whose module lies at the definition's root-relative module path (its separators normalized to `/` and resolved against the root, so `src\a.test.ts` and `./src/a.test.ts` name `src/a.test.ts`) and whose name path equals the definition's name path (each enclosing suite's name, then the test's, an `it.each` arm by its reported title), narrowed by its project and its occurrence when the definition gives them. No such test makes the definition invalid as not discovered, the reason saying whether the discovery lists that module at all and whether that discovery is current; more than one makes it invalid as ambiguous, the reason naming how many tests match and the field that would tell them apart, or that no field of the format does (two Vitest workspaces collecting the same module under one project name). A definition whose `test` is well-formed resolves whatever its other AC2 problems, so the test it names is never a gap (AC5). (FR12, FR24)
 - [x] AC4: A definition not invalid under AC2 or AC3 reads anchor missing when its `old` does not occur exactly once in its mutation's file as that file is now, counted as falsification counts it (a newline in `old` matching an LF or a CRLF in the file, occurrences never overlapping), the reason giving the count, or that the file cannot be read and why; otherwise it reads never verified. No definition reads verified, since this ticket stores no evidence. (FR13)
-- [ ] AC5: Every test in the latest stored discovery that no definition's test resolves to is a gap, whatever that definition's other state. (FR14)
-- [ ] AC6: The daemon answers a `defects` query, for the whole worktree or for a file or folder inside the consumer root, with each definition in scope (its id, its definition file, its test as written and, once resolved, its test identity, marked duplicate when the discovery marks it so, its mutation's file, its state and, when invalid or anchor missing, its reason) up to a named bound, invalid first, then anchor missing, then never verified, with how many of each state it did not list; each invalid entry AC1 counts, listed whole; the count of each state and the total, and the gaps in scope, with the count of tests in scope and a gap count for every test module holding a gap. It lists gap tests by module up to a named bound and says how many it did not list. It carries the facts every answer carries, starts no job and no test, and refuses or cannot answer in the cases a summary or path status does, with the reason. A definition is in scope when its test's module path lies at or under the path, and a test when its module does; an invalid entry of AC1, and a definition naming no usable module path, lie in every scope. (FR22)
-- [ ] AC7: `rt-test defects [path] [--root <dir>] [--json]` prints the answer's counts, each invalid entry AC1 counts and each definition that is invalid or anchor missing, with its reason, and the gap counts, never a single pass or fail; under `--json` it gives one versioned JSON document on stdout. It loads no Vitest module, consumer config or test file, and a daemon that predates the query is named as needing a restart. (FR22)
+- [x] AC5: Every test in the latest stored discovery that no definition's test resolves to is a gap, whatever that definition's other state. (FR14)
+- [x] AC6: The daemon answers a `defects` query, for the whole worktree or for a file or folder inside the consumer root, with each definition in scope (its id, its definition file, its test as written and, once resolved, its test identity, marked duplicate when the discovery marks it so, its mutation's file, its state and, when invalid or anchor missing, its reason) up to a named bound, invalid first, then anchor missing, then never verified, with how many of each state it did not list; each invalid entry AC1 counts, listed whole; the count of each state and the total, and the gaps in scope, with the count of tests in scope and a gap count for every test module holding a gap. It lists gap tests by module up to a named bound and says how many it did not list. It carries the facts every answer carries, starts no job and no test, and refuses or cannot answer in the cases a summary or path status does, with the reason. A definition is in scope when its test's module path lies at or under the path, and a test when its module does; an invalid entry of AC1, and a definition naming no usable module path, lie in every scope. (FR22)
+- [x] AC7: `rt-test defects [path] [--root <dir>] [--json]` prints the answer's counts, each invalid entry AC1 counts and each definition that is invalid or anchor missing, with its reason, and the gap counts, never a single pass or fail; under `--json` it gives one versioned JSON document on stdout. It loads no Vitest module, consumer config or test file, and a daemon that predates the query is named as needing a restart. (FR22)
 
 ## Unverified Assumptions
 
@@ -286,15 +286,78 @@ Dev session: threadId ac751c9d-939a-4129-b96e-82cdc1c3a316
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 83fea6d2-e99b-4b0d-a196-77cecc2c9b5d
+
+Test files: `packages/daemon/test/defects/definitions.test.ts` (new, records in `packages/daemon/test/defects/defects.json`) holds D3654 to D3690; `packages/daemon/test/query.test.ts` D3691 to D3699; `packages/daemon/test/server.test.ts` D3700 and D3701; `packages/daemon/test/daemon.test.ts` D3706 and D3707; `packages/daemon/test/lifecycle.test.ts` D3708 (records in `packages/daemon/test/defects.json`); `packages/cli/test/defects-command.test.ts` (new) D3702 to D3705 (records in `packages/cli/test/defects.json`). `server.test.ts`'s `DaemonHandlers` stand-in gained `defects`. D2214 and D2217 are re-anchored to the new `presence` body, each keeping its defect.
+
+Questions to the orchestrator: at 19:41 on 2026-09-30, whether the first proof covers the 242 records mutating the 15 production files the build edited, the dispatch having said 16; answered by the orchestrator at 19:41: all 242, with no narrowing by which lines moved. At 19:46, a request for 5 more defect ids; the orchestrator added D3704 to D3708 at 19:46.
 
 #### Named Defects
 
-None.
+- D3654: A consumer with no `rt-test.json`, or one with no `defects` member, gets an invalid entry. (AC1)
+- D3655: An `rt-test.json` that cannot be parsed reads as declaring no definition files, so its definitions leave the denominator. (AC1)
+- D3656: A `defects` pattern the grammar refuses is walked as written and matches nothing. (AC1)
+- D3657: A file two patterns match is read once per pattern. (AC1)
+- D3658: A matched file that is not JSON stops the reading, so the files after it are dropped. (AC1)
+- D3659: A parse failure's reason carries the parser's message, which quotes the file's text. (AC1)
+- D3660: A parse failure's reason drops the position the parser gives. (AC1)
+- D3661: A matched file with no `defects` array reads as holding no definitions. (AC1)
+- D3662: A link a pattern matches is skipped without an invalid entry. (AC1)
+- D3663: A directory link below which a pattern could match is skipped without an invalid entry. (AC1)
+- D3664: The walk enters `node_modules`, so every package link there is an invalid entry. (AC1)
+- D3665: A directory the walk cannot list reads as empty. (AC1)
+- D3666: A directory past the depth bound is skipped without an invalid entry. (AC1)
+- D3667: A matched file that cannot be read reads as gone. (AC1)
+- D3668: The walk ignores git's ignored paths, so a definition-like file in build output is read. (AC1)
+- D3669: An entry under a directory git listed as holding only ignored entries is read without asking git. (AC1)
+- D3670: A definition with no `required` text passes as valid. (AC2)
+- D3671: An empty `id` is taken as usable. (AC2)
+- D3672: A mutation with an empty `old` passes as valid. (AC2)
+- D3673: A mutation whose `old` equals its `new` passes as valid; the reason quotes neither. (AC2)
+- D3674: A mutation differing only in LF against CRLF passes as changing something. (AC2)
+- D3675: A mutation file spelled to climb out of the consumer root passes as inside it. (AC2)
+- D3676: A mutation file reached through a link to a path outside the consumer root passes as inside it. (AC2)
+- D3677: Only the later definitions carrying a repeated id are invalid, so the first keeps the id. (AC2)
+- D3678: A test module spelled with backslashes keeps them and never resolves. (AC3)
+- D3679: A not-discovered reason says the discovery lists the module whether or not it does. (AC3)
+- D3680: A not-discovered reason never says the discovery is not current. (AC3)
+- D3681: A definition naming several same-named tests resolves to the first. (AC3)
+- D3682: A definition's `occurrence` is ignored. (AC3)
+- D3683: A definition's `project` is ignored. (AC3)
+- D3684: An ambiguity no field of the format can resolve is reported as one a field resolves. (AC3)
+- D3685: A definition invalid under the format checks resolves no test, so the test it names reads as a gap. (AC3, AC5)
+- D3686: A definition whose test resolves is judged by its anchor alone, so one invalid for a repeated id reads never verified. (AC4)
+- D3687: The anchor is counted by exact text, so a multi-line `old` reads anchor missing in a CRLF file. (AC4)
+- D3688: An `old` occurring more than once reads never verified; the reason gives the count and not the text. (AC4)
+- D3689: The anchor count lets occurrences overlap. (AC4)
+- D3690: A mutation file that cannot be read reads as empty, so its reason gives a count rather than the read failure. (AC4)
+- D3691: A test only an invalid definition names counts as a gap. (AC5)
+- D3692: A path scopes no definition, so an answer for one folder counts definitions whose tests lie elsewhere. (AC6)
+- D3693: A definition naming no usable module lies in no scope. (AC6)
+- D3694: A definition file problem is left out of the total. (AC6)
+- D3695: Listed definitions are ordered by file alone, so past the bound of 500 the invalid ones may be left unlisted. (AC6)
+- D3696: Gap tests are listed without a bound. (AC6)
+- D3697: A module's gap count counts only the gap tests the answer listed. (AC6)
+- D3698: A path outside the consumer root is answered for rather than refused. (AC6)
+- D3699: A path holding nothing is answered with zero counts. (AC6)
+- D3700: A defects request's relative path reaches the query. (AC6)
+- D3701: A defects answer past the line limit asks the caller to query status for a narrower path. (AC6)
+- D3702: The CLI sends the path argument as typed, not resolved against the current directory. (AC7)
+- D3703: A second path argument is silently dropped. (AC7)
+- D3704: An anchor-missing definition is left out of the command's text. (AC7)
+- D3705: The `--json` document carries none of the answer's fields. (AC7)
+- D3706: `queryDefects` sends no path. (AC6)
+- D3707: A defects query waits only the connection's default bound. (AC6)
+- D3708: The lifecycle drops the caller's path, so a query for one folder is answered for the whole worktree. (AC6)
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/defects/definition-files.ts`: the 256-pattern bound, the depth bound's at-limit side, the state directory skip, and a directory link below which no pattern could match each fail closed (an extra invalid entry, never a smaller denominator) at a point no realistic consumer reaches, so they are recorded here by the owner ruling of 03:25. A `defects` member that is not an array: every mutation removing its check crashes the read as a failed query, never a silent drop, so no assertion can prove it. A file a pattern such as `**/*.json` matches includes `rt-test.json` itself, whose `defects` strings then read as invalid definitions; fail-closed and reported to the orchestrator.
+- `packages/daemon/src/defects/definitions.ts`: an absolute mutation file; a consumer writes root-relative paths, and the spelling check D3675 pins is the one that can place a mutation outside the root.
+- `packages/daemon/src/query/defects-answer.ts`: no stored discovery is `queryBasis`'s shared refusal, which the summary's tests pin, and removing the pass-through crashes rather than answers. The 500 listing's at-limit side: every count stays complete either way.
+- `packages/daemon/src/query-client.ts`: a daemon that predates the query reads its unknown-request error through the shared `queryErrorReason`, which D1846 pins.
+- `packages/cli/src/commands/defects.ts`: it imports only `@rt-test/daemon/client`, the module graph D1740 pins as loading no Vitest module; its failed-query exit runs through the shared `reported` output, as `status` and `changes` do.
+- `packages/daemon/src/daemon/protocol.ts`, `packages/daemon/src/client.ts`, `packages/cli/src/answer-text.ts`, `packages/daemon/src/query/path-status.ts`: types, exports and a union member only. `packages/cli/src/main.ts`: the registration every `defects-command.test.ts` test runs through.
 
 ### Review Record
 
