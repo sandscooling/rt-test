@@ -16,6 +16,7 @@ import {
 import {
   ASSERTION_MARKER,
   ERROR_KIND,
+  PLAIN_ERROR_NAME,
   type AssertionMarker,
   type BaselineFacts,
   type ConfirmingFacts,
@@ -42,8 +43,10 @@ export interface JobEnd {
 const NAME_FIELD = "name";
 const CONSTRUCTOR_FIELD = "constructor";
 const ASSERTION_ERROR_NAME = "AssertionError";
-/** How Vitest serializes the constructor of the error an `expect.extend` matcher's failure throws. */
-const EXTENDED_MATCHER_CONSTRUCTOR = "Function<JestExtendError>";
+/** How Vitest serializes a function, a class among them: by its name, or as `anonymous` when it has none. */
+const SERIALIZED_FUNCTION = /^Function<(.+)>$/s;
+/** The class of the error Vitest throws for an `expect.extend` matcher's failure. */
+const EXTENDED_MATCHER_CLASS = "JestExtendError";
 /** Where Vitest puts the failed matcher's name on that error. */
 const ERROR_CONTEXT_FIELD = "__vitest_error_context__";
 const ASSERTION_NAME_FIELD = "assertionName";
@@ -309,12 +312,29 @@ function errorFact(
   error: RawError,
   assertionErrors: readonly string[],
 ): ErrorFact {
-  const name = ownField(error, NAME_FIELD);
+  const name = knownName(error);
   const named = typeof name === "string" ? { name } : {};
   const marker = assertionMarker(error, named.name, assertionErrors);
   return marker === undefined
     ? { kind: ERROR_KIND.other, ...named }
     : { kind: ERROR_KIND.assertion, marker, ...named };
+}
+
+/**
+ * The name an error is known by: its own, or its class's when its own is the one every plain error carries. A plain
+ * error's class carries that name too, so it is known by no other.
+ */
+function knownName(error: RawError): string | undefined {
+  const name = ownField(error, NAME_FIELD);
+  if (typeof name !== "string") return undefined;
+  return name === PLAIN_ERROR_NAME ? (className(error) ?? name) : name;
+}
+
+/** The name of the class the error was built from; no class it extends crosses. */
+function className(error: RawError): string | undefined {
+  const serialized = ownField(error, CONSTRUCTOR_FIELD);
+  if (typeof serialized !== "string") return undefined;
+  return SERIALIZED_FUNCTION.exec(serialized)?.[1];
 }
 
 function assertionMarker(
@@ -331,9 +351,7 @@ function assertionMarker(
 }
 
 function isExtendedMatcherFailure(error: RawError): boolean {
-  if (ownField(error, CONSTRUCTOR_FIELD) !== EXTENDED_MATCHER_CONSTRUCTOR) {
-    return false;
-  }
+  if (className(error) !== EXTENDED_MATCHER_CLASS) return false;
   const context = ownField(error, ERROR_CONTEXT_FIELD);
   return isRecord(context) && typeof context[ASSERTION_NAME_FIELD] === "string";
 }

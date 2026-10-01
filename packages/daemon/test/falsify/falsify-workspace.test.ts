@@ -40,6 +40,7 @@ import {
   type VitestInstall,
 } from "../harness.js";
 import {
+  errorFactsOf,
   judgementOf,
   MISSING,
   onEachLine,
@@ -48,6 +49,19 @@ import {
 } from "./job-readings.js";
 
 const FIXTURE = "falsify";
+/** A fixture whose tests each fail by one kind of error once its count module is mutated. */
+const ERROR_KINDS_FIXTURE = "error-kinds";
+/** The one name the error-kinds job is given: the class of the error the fixture's matchers throw from inside. */
+const DECLARED_CLASS = "HtmlElementTypeError";
+/** The error-kinds job's experiments, each named with the test of the fixture's module it intends. */
+const ERROR_KIND_CASES: Readonly<Record<string, string>> = {
+  body: "throws in its body",
+  matcher: "throws inside an extended matcher",
+  "negated-matcher": "throws inside a negated extended matcher",
+  undeclared: "throws an undeclared class's error",
+  plain: "throws a plain error",
+  "matcher-result": "fails an extended matcher's result",
+};
 const MODULE_CACHE_WORKSPACE = "module-cache";
 const NEVER_ABORTED = new AbortController().signal;
 /** The fixture declares no assertion error name, so only the two forms Vitest marks itself are assertions. */
@@ -1291,13 +1305,13 @@ describe("the judgement each experiment reads", () => {
   );
 
   it(
-    "D3782: a job's reply reads falsifier version 3, above the version whose records held no mutation file digest",
+    "D3782: a job's reply reads falsifier version 4, above the version under which an error was called by the name Vitest serialized alone",
     async () => {
       expect(
         await onBothLines(
           (fixture) => ranJob(fixture.job)?.falsifierVersion ?? MISSING,
         ),
-      ).toEqual([3, 3]);
+      ).toEqual([4, 4]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1310,6 +1324,66 @@ describe("the judgement each experiment reads", () => {
         status: "refused",
         judged: false,
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("what an error of the intended test is called", () => {
+  const DETECTED = { verdict: "detected" };
+  const NOT_AN_ASSERTION = { verdict: "unclear", reason: "not-an-assertion" };
+
+  it(
+    "D4035: an error whose own name is Error is called by the class it was built from, in the test's body or inside an extended matcher, plain or negated, so it reads detected once that class is declared, and unclear under its class's name, or under Error for a plain one, otherwise",
+    async () => {
+      const declared = {
+        judgement: DETECTED,
+        errors: [
+          { kind: "assertion", marker: "declared-name", name: DECLARED_CLASS },
+        ],
+      };
+      const other = (name: string): unknown => ({
+        judgement: NOT_AN_ASSERTION,
+        errors: [{ kind: "other", name }],
+      });
+      const read = {
+        body: declared,
+        matcher: declared,
+        "negated-matcher": declared,
+        undeclared: other("Unnamed"),
+        plain: other("Error"),
+      };
+      expect(
+        await onEachLine(
+          errorKindsOn,
+          judgementsAndErrorFacts(Object.keys(read)),
+        ),
+      ).toEqual([read, read]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D4036: the failure of an extended matcher that returns a failing result keeps Vitest's marker and reads detected, called by its class, JestExtendError",
+    async () => {
+      const read = {
+        "matcher-result": {
+          judgement: DETECTED,
+          errors: [
+            {
+              kind: "assertion",
+              marker: "extended-matcher",
+              name: "JestExtendError",
+            },
+          ],
+        },
+      };
+      expect(
+        await onEachLine(
+          errorKindsOn,
+          judgementsAndErrorFacts(Object.keys(read)),
+        ),
+      ).toEqual([read, read]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1438,6 +1512,50 @@ function digestCarriedOver(
       );
       return ranJob(job)?.experiments[0]?.mutationFileDigest ?? job;
     });
+}
+
+const errorKindJobs = new Map<VitestInstall, Promise<FalsificationJob>>();
+
+/**
+ * Falsifies the error-kinds fixture once per Vitest install, with `DECLARED_CLASS` the one declared name. Each test of
+ * the fixture's module is one experiment's intended test, and every experiment mutates the count module they all read.
+ */
+function errorKindsOn(install: VitestInstall): Promise<FalsificationJob> {
+  const cached = errorKindJobs.get(install);
+  if (cached !== undefined) return cached;
+  const job = inConsumerCopy(ERROR_KINDS_FIXTURE, install, (root) => {
+    const workspace: VitestWorkspace = { path: ".", directory: root };
+    return falsifyWorkspace(
+      workspace,
+      chosenConfigFile(workspace) ?? "",
+      Object.entries(ERROR_KIND_CASES).map(([defectId, name]) => ({
+        defectId,
+        test: unitTest("test/kinds.test.mjs", [name]),
+        mutation: {
+          file: join(root, "src/count.mjs"),
+          old: "1 + 1",
+          new: "1 + 2",
+        },
+      })),
+      [DECLARED_CLASS],
+      NEVER_ABORTED,
+    );
+  });
+  errorKindJobs.set(install, job);
+  return job;
+}
+
+/** Each named experiment's judgement, beside the facts of its intended test's errors in its first run. */
+function judgementsAndErrorFacts(
+  ids: readonly string[],
+): (job: FalsificationJob) => unknown {
+  return (job) =>
+    Object.fromEntries(
+      ids.map((id) => [
+        id,
+        { judgement: judgementOf(job, id), errors: errorFactsOf(job, id) },
+      ]),
+    );
 }
 
 /** A job as its status and any refusal. */

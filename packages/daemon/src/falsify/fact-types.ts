@@ -15,22 +15,31 @@ import type { MutationLoad } from "./mutation-transform.js";
 
 export const ERROR_KIND = { assertion: "assertion", other: "other" } as const;
 
+/**
+ * The name an error inherits from `Error` unless it, or a class between it and `Error`, sets another. A plain error's
+ * class has this name too.
+ */
+export const PLAIN_ERROR_NAME = "Error";
+
 export const PASSED = "passed" satisfies RecordedRunTest["state"];
 
 /** What made an error an assertion. */
 export const ASSERTION_MARKER = {
-  /** Vitest serialized it with the name `AssertionError`. */
+  /** It is known by the name `AssertionError`. */
   assertionErrorName: "assertion-error-name",
   /** Vitest marked it as the failure of a matcher `expect.extend` added, with the matcher's name. */
   extendedMatcher: "extended-matcher",
-  /** Its name is one of the assertion error names the job was given. */
+  /** It is known by one of the assertion error names the job was given. */
   declaredName: "declared-name",
 } as const;
 
 export type AssertionMarker =
   (typeof ASSERTION_MARKER)[keyof typeof ASSERTION_MARKER];
 
-/** One error of the intended test; `name` is absent when Vitest serialized none. */
+/**
+ * One error of the intended test. `name` is the name it is known by: its own, or its class's when its own is the plain
+ * error's. It is absent when Vitest serialized no name.
+ */
 export type ErrorFact =
   | {
       readonly kind: typeof ERROR_KIND.assertion;

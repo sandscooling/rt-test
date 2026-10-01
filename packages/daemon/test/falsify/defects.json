@@ -659,10 +659,10 @@
   },
   {
     "id": "D3782",
-    "defect": "The falsifier version is not raised, so evidence recorded before an experiment record held its mutation file's digest is kept as current.",
+    "defect": "The falsifier version is not raised, so evidence recorded while an error was called by the name Vitest serialized alone, never by its class, is kept as current.",
     "file": "packages/daemon/src/falsify/experiment-record.ts",
-    "old": "export const FALSIFIER_VERSION = 3;",
-    "new": "export const FALSIFIER_VERSION = 2;"
+    "old": "export const FALSIFIER_VERSION = 4;",
+    "new": "export const FALSIFIER_VERSION = 3;"
   },
   {
     "id": "D3783",
@@ -1076,5 +1076,40 @@
     "file": "packages/daemon/src/falsify/probe-step.ts",
     "old": "  return startsBefore && span.start < node.end;",
     "new": "  return startsBefore && span.start <= node.end;"
+  },
+  {
+    "id": "D4035",
+    "defect": "The class an error was built from is never read, so an error of a class that sets no name is called Error, is listed under a name no author can declare, and reads unclear whatever is declared.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  return name === PLAIN_ERROR_NAME ? (className(error) ?? name) : name;",
+    "new": "  return name;"
+  },
+  {
+    "id": "D4036",
+    "defect": "An extended matcher's failure is told by its serialized constructor compared whole with its class's name, which never match, so it loses its marker and a matcher's failing result reads unclear.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  if (className(error) !== EXTENDED_MATCHER_CLASS) return false;",
+    "new": "  if (ownField(error, CONSTRUCTOR_FIELD) !== EXTENDED_MATCHER_CLASS) return false;"
+  },
+  {
+    "id": "D4037",
+    "defect": "The class stands in for every name, so an error that carries a name of its own is called by its class: a plain Error given a declared name is called Error and stops counting, and declaring a class counts an error that carries another name.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  return name === PLAIN_ERROR_NAME ? (className(error) ?? name) : name;",
+    "new": "  return className(error) ?? name;"
+  },
+  {
+    "id": "D4038",
+    "defect": "An own constructor field that is not Vitest's serialized function form is taken as a class's name, so an error holding a string of its own there is called by that string and counts when the string is declared.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  return SERIALIZED_FUNCTION.exec(serialized)?.[1];",
+    "new": "  return serialized;"
+  },
+  {
+    "id": "D4039",
+    "defect": "An error Vitest serialized with no name takes its class as its name, so a thrown value that is no error is called by a class and counts when that class is declared.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "  if (typeof name !== \"string\") return undefined;",
+    "new": "  if (typeof name !== \"string\") return className(error);"
   }
 ]
