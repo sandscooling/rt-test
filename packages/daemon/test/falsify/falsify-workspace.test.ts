@@ -10,13 +10,15 @@ import {
 import { join, relative } from "node:path";
 import type { TestIdentity } from "@rt-test/core";
 import { describe, expect, it } from "vitest";
-import type { Vitest } from "vitest/node";
+import type { TestSpecification, Vitest } from "vitest/node";
 import {
   recordRun,
   type DefectExperiment,
   type ExperimentRecord,
   type FalsificationJob,
+  type RawError,
   type RecordedRunTest,
+  type RunOutcome,
   type RunRecord,
 } from "../../src/falsify/experiment-record.js";
 import { falsifyWorkspace } from "../../src/falsify/falsify-workspace.js";
@@ -27,6 +29,7 @@ import { DAEMON_TEST_TIMEOUT_MS } from "../daemon-harness.js";
 import {
   copyFixture,
   HAND_BUILT_ROOT,
+  inConsumerCopy,
   inTempDir,
   linkVitest,
   RUN_HOOK,
@@ -34,14 +37,32 @@ import {
   slashed,
   type VitestInstall,
 } from "../harness.js";
+import {
+  judgementOf,
+  MISSING,
+  onEachLine,
+  ranJob,
+  type RanJob,
+} from "./job-readings.js";
 
 const FIXTURE = "falsify";
 const MODULE_CACHE_WORKSPACE = "module-cache";
 const NEVER_ABORTED = new AbortController().signal;
+/** The fixture declares no assertion error name, so only the two forms Vitest marks itself are assertions. */
+const NO_DECLARED_NAMES: readonly string[] = [];
 /** What the test writes over the label module when Vite first transforms it, while the baseline runs. */
 const EDITED_LABEL = 'export const label = "after";\n';
 const LABEL_MODULE = "src/label.mjs";
 const MATH_MODULE = "src/math.mjs";
+const GREET_MODULE = "src/greet.mjs";
+/** The experiments of the job an abort interrupts, in the order the job runs them. */
+const ABORTED_JOB_EXPERIMENTS: readonly string[] = ["add", "greet", "lib"];
+/** A would-be detection's module is served mutated once in its first run and a second time in its confirming run. */
+const CONFIRMING_SERVE = 2;
+/** The fields of a serialized error that hold message or source text. */
+const ERROR_TEXT_FIELDS = ["message", "stack", "diff"] as const;
+/** How many `/`-separated segments of a module's id name it within the fixture, as `src/math.mjs` does. */
+const FIXTURE_PATH_SEGMENTS = 2;
 /** A test module that imports the math module and that the `add` experiment does not run. */
 const LOADED_TEST_MODULE = "test/loaded.test.mjs";
 /** What the test appends to that test module while the `add` experiment runs. */
@@ -52,14 +73,14 @@ const MUTATED_EVENT = "mutated:";
 const PROBE_CALL = "globalThis.__rtTestReach?.()";
 const TEMP_VARIABLES = ["TMPDIR", "TMP", "TEMP"] as const;
 
-type RanJob = Extract<FalsificationJob, { status: "ran" }>;
-
 interface FalsifiedFixture {
   readonly job: FalsificationJob;
   /** Each file of the consumer's tree the job changed, created or removed, the test's own edit aside. */
   readonly treeChanges: readonly string[];
   /** Each file under the job's temp directory that held a probe's call at any transform while the job ran. */
   readonly mutatedTempFiles: readonly string[];
+  /** The module the root's server served mutated at each run that loaded one, in the order the job ran them. */
+  readonly mutatedServes: readonly string[];
 }
 
 function unitTest(modulePath: string, namePath: string[]): TestIdentity {
@@ -135,6 +156,13 @@ function experiments(root: string): DefectExperiment[] {
       LABEL_MODULE,
       '"before"',
       '"during"',
+    ),
+    experiment(
+      "once",
+      unitTest("test/once.test.mjs", ["flakes once"]),
+      "src/once.mjs",
+      "6 * 7",
+      "6 * 8",
     ),
     experiment(
       "alone-a",
@@ -257,6 +285,7 @@ const jobs = new Map<VitestInstall, Promise<FalsifiedFixture>>();
  * and runs every experiment. The label module is edited as Vite first transforms it, so the runs after the baseline
  * find it changed on disk. A test module that imports the math module is edited while the `add` experiment runs,
  * after the job invalidated the math module for that experiment and before any later run asks for the test module.
+ * The job's temp directory is also where the `once` experiment's test keeps the marker that makes it fail only once.
  */
 function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
   const cached = jobs.get(install);
@@ -272,6 +301,7 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
     mkdirSync(temp);
     const before = treeDigests(real);
     const mutatedTempFiles = new Set<string>();
+    const mutatedServes: string[] = [];
     /** Each file the test itself wrote during the job, with the text it wrote. */
     const edits = new Map<string, string>();
     const edit = (path: string, text: string): void => {
@@ -286,6 +316,9 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
     runHooks()[RUN_HOOK] = (event) => {
       for (const file of filesHolding(temp, PROBE_CALL)) {
         mutatedTempFiles.add(file);
+      }
+      if (event.startsWith(MUTATED_EVENT)) {
+        mutatedServes.push(fixturePathOf(event));
       }
       if (!edits.has(LABEL_MODULE) && event.endsWith(`/${LABEL_MODULE}`)) {
         edit(LABEL_MODULE, EDITED_LABEL);
@@ -305,6 +338,7 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
           workspace,
           chosenConfigFile(workspace) ?? "",
           experiments(root),
+          NO_DECLARED_NAMES,
           NEVER_ABORTED,
         ),
       );
@@ -314,6 +348,7 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
         job: falsified,
         treeChanges: differingPaths(expected, treeDigests(real)),
         mutatedTempFiles: [...mutatedTempFiles],
+        mutatedServes,
       };
     } finally {
       delete runHooks()[RUN_HOOK];
@@ -323,18 +358,16 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
   return job;
 }
 
-/** What `read` finds in the job on Vitest 5, then on Vitest 4.1. */
-async function onBothLines(
-  read: (fixture: FalsifiedFixture) => unknown,
-): Promise<unknown[]> {
-  return [
-    read(await falsifiedOn("vitest")),
-    read(await falsifiedOn("vitest-4")),
-  ];
+/** A module's path within the fixture, from a fixture event that ends with the module's id. */
+function fixturePathOf(event: string): string {
+  return event.split("/").slice(-FIXTURE_PATH_SEGMENTS).join("/");
 }
 
-function ranJob(job: FalsificationJob): RanJob | undefined {
-  return job.status === "ran" ? job : undefined;
+/** What `read` finds in the job on Vitest 5, then on Vitest 4.1. */
+function onBothLines(
+  read: (fixture: FalsifiedFixture) => unknown,
+): Promise<unknown[]> {
+  return onEachLine(falsifiedOn, read);
 }
 
 function experimentOf(
@@ -378,8 +411,6 @@ function testIn(
     (test) => test.identity.namePath.at(-1) === name,
   );
 }
-
-const MISSING = "missing";
 
 function reachIn(
   fixture: FalsifiedFixture,
@@ -818,6 +849,53 @@ describe("the facts a run records", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "D3779: an unhandled error names the one test module its worker was running, not every module of the run",
+    async () => {
+      const named = [["unit:test/suite.test.mjs"]];
+      expect(
+        await onBothLines(
+          (fixture) =>
+            baselineRun(fixture)?.unhandledErrorModules.map((modules) =>
+              modules.map(
+                (module) => `${module.projectName}:${module.modulePath}`,
+              ),
+            ) ?? MISSING,
+        ),
+      ).toEqual([named, named]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it("D3780: an unhandled error stamped with a file two projects run names that file's module under each project", () => {
+    const modulePath = "test/shared.test.mjs";
+    const file = slashed(join(HAND_BUILT_ROOT, modulePath));
+    const specification = (projectName: string): TestSpecification =>
+      ({
+        project: { name: projectName },
+        moduleId: file,
+      }) as unknown as TestSpecification;
+    const run = recordRun({
+      execution: "completed",
+      forceStopped: false,
+      specifications: [specification("node"), specification("browser")],
+      testModules: [],
+      queued: [],
+      unhandledErrors: [{ VITEST_TEST_PATH: file }],
+      locate: (projectName) => ({
+        workspacePath: ".",
+        projectName,
+        modulePath,
+      }),
+    });
+    expect(run.unhandledErrorModules).toEqual([
+      [
+        { projectName: "node", modulePath },
+        { projectName: "browser", modulePath },
+      ],
+    ]);
+  });
 });
 
 describe("experiments decided without running", () => {
@@ -940,7 +1018,7 @@ describe("no mutated text on disk", () => {
   it(
     "D3649: on Vitest 4.1, a workspace whose project sets the on-disk module cache itself runs nothing, naming the project and the setting",
     async () => {
-      expect(await moduleCacheJob("vitest-4")).toEqual({
+      expect(refusalOf(await moduleCacheJob("vitest-4"))).toEqual({
         status: "refused",
         refusal: {
           kind: "module-cache",
@@ -956,7 +1034,9 @@ describe("no mutated text on disk", () => {
   it(
     "D3650: on Vitest 5, a project's deprecated experimental module cache setting, which the session's override turns off, is not refused",
     async () => {
-      expect(await moduleCacheJob("vitest")).toEqual({ status: "ran" });
+      expect(refusalOf(await moduleCacheJob("vitest"))).toEqual({
+        status: "ran",
+      });
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -974,6 +1054,7 @@ describe("a job aborted before its turn", () => {
           workspace,
           chosenConfigFile(workspace) ?? "",
           experiments(dir),
+          NO_DECLARED_NAMES,
           AbortSignal.abort(),
         );
         return { job, workspace };
@@ -982,6 +1063,183 @@ describe("a job aborted before its turn", () => {
         status: "interrupted-before-load",
         workspace: answered.workspace,
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("the judgement each experiment reads", () => {
+  const DETECTED = { verdict: "detected" };
+
+  it(
+    "D3774: a detection stands beside a baseline's unhandled error that names another test module",
+    async () => {
+      expect(
+        await onBothLines((fixture) => judgementOf(fixture.job, "add")),
+      ).toEqual([DETECTED, DETECTED]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3775: an experiment whose test's own module leaked an unhandled error in the baseline reads baseline not clean",
+    async () => {
+      const notClean = {
+        verdict: "invalid-experiment",
+        reason: "baseline-not-clean",
+      };
+      expect(
+        await onBothLines((fixture) => judgementOf(fixture.job, "prepare")),
+      ).toEqual([notClean, notClean]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3776: a would-be detection reads next run unclean when the run started next, another experiment's or the restored baseline, recorded an unhandled error",
+    async () => {
+      const unclean = { verdict: "unclear", reason: "next-run-unclean" };
+      expect(
+        await onBothLines((fixture) =>
+          ["loaded", "lib"].map((defectId) =>
+            judgementOf(fixture.job, defectId),
+          ),
+        ),
+      ).toEqual([
+        [unclean, unclean],
+        [unclean, unclean],
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3777: a would-be detection whose confirming run passed reads unclear, naming what the confirming run alone read",
+    async () => {
+      const differed = {
+        verdict: "unclear",
+        reason: "confirming-run-differed",
+        detail: { confirming: { verdict: "survived" } },
+      };
+      expect(
+        await onBothLines((fixture) => judgementOf(fixture.job, "once")),
+      ).toEqual([differed, differed]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3785: an experiment the job's own check decided before any run has no verdict for an unreadable file or an anchor count, naming the count, and reads invalid experiment for no probe site, naming its position, or no module",
+    async () => {
+      const decided = {
+        unreadable: { reason: "mutation-file-unreadable" },
+        twice: { reason: "anchor-count", detail: { count: 2 } },
+        "no-probe": {
+          verdict: "invalid-experiment",
+          reason: "no-probe-site",
+          detail: {
+            site: {
+              kind: "position",
+              line: 1,
+              column: 17,
+              nodeKind: "Identifier",
+              role: "FunctionDeclaration.id",
+            },
+          },
+        },
+        "no-module": { verdict: "invalid-experiment", reason: "no-module" },
+      };
+      expect(
+        await onBothLines((fixture) =>
+          Object.fromEntries(
+            Object.keys(decided).map((defectId) => [
+              defectId,
+              judgementOf(fixture.job, defectId),
+            ]),
+          ),
+        ),
+      ).toEqual([decided, decided]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3781: a job's judgements, with the facts they rest on, hold no error's message, stack or diff",
+    async () => {
+      expect(await onBothLines(errorTextsInJudgements)).toEqual([[], []]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3782: a job's reply reads falsifier version 2, above the version whose records held no confirming run and no judgement",
+    async () => {
+      expect(
+        await onBothLines(
+          (fixture) => ranJob(fixture.job)?.falsifierVersion ?? MISSING,
+        ),
+      ).toEqual([2, 2]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3783: a job refused before any run carries no judgement",
+    async () => {
+      const job = await moduleCacheJob("vitest-4");
+      expect({ status: job.status, judged: "judgements" in job }).toEqual({
+        status: "refused",
+        judged: false,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+describe("a confirming run", () => {
+  it(
+    "D3778: only an experiment whose run would be a detection runs a second time, at once, before the next experiment's run",
+    async () => {
+      const serves = [
+        "src/math.mjs",
+        "src/math.mjs",
+        "src/loaded.mjs",
+        "src/loaded.mjs",
+        "src/prepare.mjs",
+        "src/scale.mjs",
+        "src/greet.mjs",
+        "src/greet.mjs",
+        "src/once.mjs",
+        "src/once.mjs",
+      ];
+      expect(await onBothLines((fixture) => fixture.mutatedServes)).toEqual([
+        serves,
+        serves,
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3784: an abort during a confirming run ends the job there, so that experiment and each one the job did not finish have no verdict and no restored baseline runs",
+    async () => {
+      const ended = {
+        interrupted: true,
+        experiments: [
+          ["add", "ran", "ran"],
+          ["greet", "ran", "interrupted"],
+          ["lib", "not-run", "interrupted"],
+        ],
+        restored: false,
+        judgements: [
+          { reason: "restored-baseline-unrecorded" },
+          { reason: "confirming-run-unrecorded" },
+          { reason: "interrupted" },
+        ],
+      };
+      expect(
+        await onEachLine(abortedInConfirmingRun, runsAndJudgements),
+      ).toEqual([ended, ended]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1014,23 +1272,139 @@ describe("the stale-transform guard before a run", () => {
   });
 });
 
-/** A job with no experiments over the fixture's module-cache workspace, as its status and any refusal. */
-function moduleCacheJob(install: VitestInstall): Promise<unknown> {
-  return inTempDir(async (dir) => {
+/** A job with no experiments over the fixture's module-cache workspace. */
+function moduleCacheJob(install: VitestInstall): Promise<FalsificationJob> {
+  return inTempDir((dir) => {
     copyFixture(FIXTURE, dir);
     linkVitest(dir, install);
     const workspace: VitestWorkspace = {
       path: MODULE_CACHE_WORKSPACE,
       directory: join(dir, MODULE_CACHE_WORKSPACE),
     };
-    const job = await falsifyWorkspace(
+    return falsifyWorkspace(
       workspace,
       chosenConfigFile(workspace) ?? "",
       [],
+      NO_DECLARED_NAMES,
       NEVER_ABORTED,
     );
-    return job.status === "refused"
-      ? { status: job.status, refusal: job.refusal }
-      : { status: job.status };
   });
+}
+
+/** A job as its status and any refusal. */
+function refusalOf(job: FalsificationJob): unknown {
+  return job.status === "refused"
+    ? { status: job.status, refusal: job.refusal }
+    : { status: job.status };
+}
+
+/**
+ * The fixture's `add`, `greet` and `lib` experiments, in that order, aborted as the greet module is served mutated a
+ * second time, which is during the `greet` experiment's confirming run.
+ */
+function abortedInConfirmingRun(
+  install: VitestInstall,
+): Promise<FalsificationJob> {
+  return inConsumerCopy(FIXTURE, install, async (root) => {
+    const controller = new AbortController();
+    let greetServes = 0;
+    runHooks()[RUN_HOOK] = (event) => {
+      if (
+        event.startsWith(MUTATED_EVENT) &&
+        event.endsWith(`/${GREET_MODULE}`)
+      ) {
+        greetServes += 1;
+        if (greetServes === CONFIRMING_SERVE) controller.abort();
+      }
+      return undefined;
+    };
+    const workspace: VitestWorkspace = { path: ".", directory: root };
+    try {
+      return await falsifyWorkspace(
+        workspace,
+        chosenConfigFile(workspace) ?? "",
+        experiments(root).filter(({ defectId }) =>
+          ABORTED_JOB_EXPERIMENTS.includes(defectId),
+        ),
+        NO_DECLARED_NAMES,
+        controller.signal,
+      );
+    } finally {
+      delete runHooks()[RUN_HOOK];
+    }
+  });
+}
+
+/** Which runs a job's reply holds for each experiment, with each experiment's judgement; a job that ran nothing whole. */
+function runsAndJudgements(job: FalsificationJob): unknown {
+  const ran = ranJob(job);
+  if (ran === undefined) return job;
+  return {
+    interrupted: ran.interrupted,
+    experiments: ran.experiments.map((record) =>
+      record.status === "ran"
+        ? [record.defectId, record.status, record.confirming?.status ?? MISSING]
+        : [record.defectId, record.status, record.reason.kind],
+    ),
+    restored: ran.restoredBaseline !== undefined,
+    judgements: ran.experiments.map((record) =>
+      judgementOf(job, record.defectId),
+    ),
+  };
+}
+
+function recordedRuns(
+  outcomes: readonly (RunOutcome | undefined)[],
+): RunRecord[] {
+  return outcomes.flatMap((outcome) =>
+    outcome?.ran === true ? [outcome.record] : [],
+  );
+}
+
+/** Every run record of the job: both baselines, and each experiment's run and confirming run. */
+function runRecordsOf(job: RanJob): RunRecord[] {
+  return [
+    ...recordedRuns([job.baseline, job.restoredBaseline]),
+    ...job.experiments.flatMap((record) => {
+      if (record.status !== "ran") return [];
+      const { confirming } = record;
+      return confirming?.status === "ran"
+        ? [record.run, confirming.run]
+        : [record.run];
+    }),
+  ];
+}
+
+function errorsOf(run: RunRecord): RawError[] {
+  return [
+    ...run.unhandledErrors,
+    ...run.modules.flatMap((module) =>
+      module.collected
+        ? [
+            ...module.errors,
+            ...module.suiteErrors.flatMap((suite) => suite.errors),
+            ...module.tests.flatMap((test) => test.errors),
+          ]
+        : [],
+    ),
+  ];
+}
+
+/** An error's text fields as JSON spells each inside a string, so a text holding a line break is still found. */
+function textsOf(error: RawError): string[] {
+  return ERROR_TEXT_FIELDS.flatMap((field) => {
+    const text = error[field];
+    return typeof text === "string" && text !== ""
+      ? [JSON.stringify(text).slice(1, -1)]
+      : [];
+  });
+}
+
+/** Each message, stack or diff of any error of any run of the job that its judgements, serialized, hold. */
+function errorTextsInJudgements(fixture: FalsifiedFixture): unknown {
+  const job = ranJob(fixture.job);
+  if (job === undefined) return fixture.job.status;
+  const serialized = JSON.stringify(job.judgements);
+  const texts = new Set(runRecordsOf(job).flatMap(errorsOf).flatMap(textsOf));
+  return [...texts].filter((text) => serialized.includes(text));
 }

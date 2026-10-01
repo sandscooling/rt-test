@@ -18,7 +18,7 @@ Every criterion holds on Vitest 4.1.x and 5.x, on Windows and on Linux. "The int
 - [x] AC1: For every experiment of a job that read `ran`, the job's reply carries one judgement: a verdict (detected, survived, invalid experiment or unclear) or no verdict; for every judgement but detected and survived, its one reason as a value from a closed set, never a sentence; and the facts it rests on. Each condition that AC6, AC8 and AC9 list between semicolons is one reason of that set, and what a parenthesis adds travels with the reason as detail. The facts are read from the intended test in the experiment's run, in its confirming run when one ran, and in both baselines: its state and mode; each of its errors as a kind, with the name Vitest serialized; its hook states; and its reach. For each of those runs they give, of the intended test's module alone, whether it was collected (collected, not collected with the state the record gives, or missing), its count of module errors, and each of its failing suites by name path with its error count; and, of the run as a whole, the count of unhandled errors (for a baseline, of those that count against the experiment, and how many of those named no test module) and how the run ended. They also give what the mutation's transforms did in its run and in its confirming run, and, only for an experiment whose confirming run left a record, whether the run the job started next left a record, with its count of unhandled errors. A fact Vitest did not record is absent, never zero, empty or false. The facts hold no error message, stack or source text, and every judgement is decided from them alone. A job that did not read `ran` carries no judgement. The reply's falsifier version is higher than the one ticket 3.2 built, since what a record means has changed. (FR11, NFR6)
 - [x] AC2: An error is an assertion when Vitest serialized it with the name `AssertionError`, or with the `JestExtendError` constructor marker and an assertion name, or when its name is exactly one of the assertion error names the job was given. Every other error is another kind: a `TypeError`, a timeout, an `expect.assertions` count failure and a snapshot matcher's mismatch among them. The names reach the judge as an input of the job: an argument of `Executor.falsify`, a field of the `falsify` request, and a parameter of `falsifyWorkspace`. With no names given, only the first two forms are assertions. (FR11)
 - [x] AC3: A run of an experiment is a would-be detection when, in that run, all of these hold: the run ended cleanly and recorded no module error, no suite error and no unhandled error; the intended test ran and failed; it holds a `beforeEach` state, and every hook state Vitest recorded on it is `pass` (a state of `run` on the finished test is a hook that did not end in pass, and a test with no `beforeEach` state is one whose hook states were not recorded, since the reach setup file's own hook gives every test that ran one); it holds at least one error, and every error it holds is an assertion; and its reach reads executed, in the test or outside it. (FR11, NFR7)
-- [ ] AC4: An experiment whose run is a would-be detection runs once more, at once, as a confirming run: in the same instance, over the same specification, with its own mutation alone, behind the same stale-transform guard and abort check as its first run, before any other experiment and before the restored baseline. No other experiment runs twice, and no experiment runs a third time. Since only an experiment the baseline passed has a first run, no confirming run happens for a test the baseline did not pass. An abort during a confirming run ends the job there, as an abort during any run does. (FR10, FR11)
+- [x] AC4: An experiment whose run is a would-be detection runs once more, at once, as a confirming run: in the same instance, over the same specification, with its own mutation alone, behind the same stale-transform guard and abort check as its first run, before any other experiment and before the restored baseline. No other experiment runs twice, and no experiment runs a third time. Since only an experiment the baseline passed has a first run, no confirming run happens for a test the baseline did not pass. An abort during a confirming run ends the job there, as an abort during any run does. (FR10, FR11)
 - [x] AC5: An experiment reads detected only when all of these hold: the baseline and the restored baseline each passed the intended test, ended cleanly and recorded no unhandled error that counts against the experiment; its run and its confirming run are each a would-be detection; the run the job started next after its confirming run left a record that holds no unhandled error; and the job's own process recorded no unhandled error and closed the instance without error. Nothing else reads detected. (FR11, NFR7)
 - [x] AC6: An experiment reads invalid experiment, with the first reason that holds, in this order: its change has no probe site (the record's position travels with the reason); no test module of the workspace holds the test; the baseline did not pass the test (with the state the baseline gave it, or that it did not report it, and the test's mode, so a test declared with `it.skip` or `it.todo` reads as one); the baseline did not end cleanly, or recorded an unhandled error that counts against the experiment; the restored baseline did not pass the test; the restored baseline did not end cleanly, or recorded an unhandled error that counts against the experiment; the experiment's run did not end cleanly; its module recorded a module error, was not collected or is missing; a suite of its module recorded an error (naming the suite); the intended test did not run (it is absent from the run, skipped or pending); a hook did not end in pass, or the test holds no `beforeEach` state (naming the hook, and whether its state was `run` or not recorded); its reach reads not executed, neither in the test nor outside it; or its reach is unknown (with the record's reason). Reach is read only from the intended test's reach mark. What the mutation's transforms did only words the reason of a site that did not execute (the mutated module was never transformed, or `old` occurred other than once in the text transformed, naming the count), and never stands in for a mark. (FR11, NFR7)
 - [x] AC7: An experiment reads survived when no reason of AC6 holds and the intended test passed, so the mutated site executed, in the test or outside it, and the test did not reject the mutation. A survivor stays survived beside an unhandled error in its own run. (FR11)
@@ -388,15 +388,94 @@ Each names the guarantee and the defect a test would catch. Scratch evidence for
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId a23af9e8-d0c2-44d4-8f5e-0841941dfc71
+
+Written by the tests session on 2026-09-30 and 2026-10-01, in Tree 1 on `wt/1` at fea8b888. The suite scoped to the build's nine production files (`bun x vitest related`, 23 of 82 test files) held 35 reds in the two test files the handoff named, every one stale: the call sites that lost the assertion error names. No red was a code bug and none was pre-existing. Every expected value below was written from the criteria before its test first ran, and each test passed against the build unchanged, so no suspected defect went to the dev session.
 
 #### Named Defects
 
-None.
+`packages/daemon/test/falsify/verdict.test.ts` (new), the judge over hand-built facts and the facts over hand-built job records, with no Vitest load:
+
+- D3750: A baseline's unhandled error that counts against the experiment is not read, so a detection stands though the baseline its test passed in leaked an error. (AC5, AC6)
+- D3751: How a baseline ended is not read, so a detection stands on a baseline whose workers were force-stopped. (AC5, AC6)
+- D3752: The judge does not read whether the baseline passed the test, so an experiment that ran against a test the baseline failed is credited as a detection. (AC5, AC6)
+- D3753: The baseline-not-passed reason carries the test's state without its mode, so a test declared with `it.skip` cannot be told from one skipped at run time. (AC6)
+- D3754: The restored baseline's result for the test is not read, so a detection stands though the test no longer passes unmutated. (AC5, AC6)
+- D3755: The restored baseline's unhandled errors and ending are not read, so a detection stands though the restored baseline leaked an error that counts against it. (AC5, AC6)
+- D3756: A restored baseline that started and left no record is read as one that failed the test, so an experiment its job did not finish reads invalid experiment where it has no verdict. (AC9)
+- D3757: A confirming run that left no record is passed over and the first run judged in its place, so a would-be detection that never repeated gets a verdict. (AC9)
+- D3758: How an experiment's run ended is not read, so a run that was interrupted, force-stopped or failed to cancel is judged as a whole run. (AC3, AC6)
+- D3759: A test with no recorded `beforeEach` state reads as one whose hooks all passed, so a Vitest that stopped recording hook states would credit a failure in a `beforeEach` as a detection. (AC3, AC6)
+- D3760: A passed test reads survived before its hook states are read, so a test whose hook states were not recorded reads as a survivor. (AC6, AC7)
+- D3761: A failed test that holds no error counts as holding only assertion errors, so a failure with no assertion behind it is a would-be detection. (AC3, AC8)
+- D3762: A passed test beside an unhandled error in its own run is not read as a survivor, so a mutation the test let through reads unclear. (AC7)
+- D3763: A run started next that left no record is read as a clean one, so a detection stands though a late unhandled error may have been lost with that run. (AC5, AC8)
+- D3764: The job's own unhandled errors and its close are not read, so a detection stands though the executor's thread raised an error or the instance failed to close. (AC5, AC8)
+- D3765: Reach is read before the hook states, so a test whose `beforeEach` failed before the site could execute reads site not executed, hiding the hook that failed. Its one assertion pins the whole order of AC6's reasons for an experiment that ran. (AC6)
+- D3766: The run's unhandled error is read before the kind of the test's errors, so a test that threw a `TypeError` beside a leaked rejection reads unhandled error where its own error is no assertion. Its one assertion pins the whole order of AC8's reasons. (AC8)
+- D3767: A mutated module that was transformed with the anchor occurring other than once reads as never transformed, so the reason loses the count that tells the author the anchor went stale. (AC6)
+- D3768: A baseline's unhandled error that names no test module counts against no experiment, so a detection stands beside an error no module can be blamed for. (AC1, AC5)
+- D3769: An experiment whose run started and left no record is passed over as the run started next, so the detection before it is read against a later run though a late error may have been lost. (AC1, AC8)
+- D3770: A run the stale-transform guard refused counts as a started run that left no record, so the detection before it reads unclear though no run started. (AC1, AC5)
+- D3771: A record is judged against the experiment at its position whatever defect it names, so one defect's run is read with another defect's test. (AC1)
+- D3772: A declared assertion error name matches any error whose name contains it, so an error of another name is credited as an assertion. (AC2)
+- D3799: An experiment whose run left no record reads invalid experiment, as a change with no probe site, so the author is told to fix a definition a failed run says nothing about. (AC9)
+
+`packages/daemon/test/falsify/falsify-executor.test.ts`, over the `executor-crash` fixture:
+
+- D3773: The executor process drops the assertion error names its request carries, so an error the consumer declared as an assertion reads as another kind and its experiment as unclear. (AC2)
+
+`packages/daemon/test/falsify/falsify-workspace.test.ts`, over the `falsify` fixture, each on Vitest 5 and 4.1 in one assertion:
+
+- D3774: Every unhandled error of a baseline counts against every experiment, whatever test module it names, so one module's leak makes every defect of the workspace an invalid experiment. (AC5)
+- D3775: A baseline's unhandled error that names the experiment's own test module is not counted against it, so the experiment is judged as though its baseline were clean. (AC6)
+- D3776: The unhandled errors of the run started next are not read, so a detection stands though a late error of its own run may have landed in the run after it. (AC5, AC8)
+- D3777: The confirming run's reading is not compared, so a failure that did not repeat is credited as a detection. (AC5, AC8)
+- D3778: Every experiment that ran is run a second time, not only one whose run would be a detection, so a job runs its survivors and invalid experiments twice. (AC4)
+- D3779: An unhandled error is recorded as naming every test module of its run, so one module's leak counts against every experiment of the job. (AC1)
+- D3780: An unhandled error names only the first project that runs its file, so the same file's experiments under another project read the baseline as clean. (AC1)
+- D3781: An error's fact carries its message, so the text of an assertion, which can quote source and values, reaches the facts a judgement is stored with. (AC1)
+- D3782: The falsifier version is not raised, so evidence recorded before a confirming run and a judgement existed is kept as current. (AC1)
+- D3783: A job that ran nothing carries an empty list of judgements, so it reads as a job that judged every experiment it was given. (AC1)
+- D3784: A confirming run an abort interrupted is kept as a run that finished, so its experiment is judged from a run cut short where it has no verdict. (AC4, AC9)
+- D3785: The anchor-count reason does not carry how often the anchor occurred, so the author cannot tell a missing anchor from a repeated one. (AC6, AC9)
+
+`packages/daemon/test/falsify/canaries.test.ts` (new), one job per Vitest line over a copy of `packages/daemon/canaries/`, each on both lines in one assertion:
+
+- D3786: The canary file names detected for the canary whose test passes after executing the site, so the set vouches for a Vitest on which a passing test is credited. (AC10)
+- D3787: An error Vitest serialized with the name `AssertionError` is not read as an assertion, so a plain `expect` failure reads unclear. (AC2, AC10)
+- D3788: The failure of a matcher added by `expect.extend` is not read as an assertion, so a jest-dom style matcher's rejection reads unclear. (AC2, AC10)
+- D3789: The assertion error names the job was given are not read, so an error the consumer declared as an assertion reads as another kind. (AC2, AC10)
+- D3790: A site executed outside the test, while its module loaded, reads not executed, so a test that rejects what load-time code built can never detect its mutation. (AC3, AC10)
+- D3791: A hook state other than pass is not read, so an assertion that failed in a `beforeEach` is credited as a detection and a thrown `afterEach` reads as a failure of the body. (AC3, AC6, AC10)
+- D3792: A suite's error is not read, so a test its failing `beforeAll` skipped reads as a test that did not run, with no suite named. (AC6, AC10)
+- D3793: A module's own errors are not read, so a mutated module that threw while it loaded reads as a test absent from the run. (AC6, AC10)
+- D3794: A reach of not executed is read as executed, so a test that failed an assertion without running the mutated site is credited as a detection and one that passed reads as a survivor. (AC3, AC6, AC7, AC10)
+- D3795: A reach that is unknown is read as executed, so the failure of a test that ran beside others is credited though no probe says it ran the site. (AC3, AC6, AC10)
+- D3796: The kind of a failed test's errors is not read, so a thrown `TypeError`, a timeout, an assertion count failure, a snapshot mismatch or an undeclared error is credited as a detection. (AC3, AC8, AC10)
+- D3797: One assertion error is enough for a detection, so a test that also threw an error of another kind is credited though its failure may be a setup failure carried over a retry. (AC3, AC8, AC10)
+- D3798: An unhandled error in the experiment's own run is not read, so an assertion failure beside a leaked rejection is credited as a detection. (AC3, AC8, AC10)
+
+Repaired, not new: the 34 tests of `falsify-workspace.test.ts` and D3651 of `falsify-executor.test.ts` that the build's new argument broke now pass the assertion error names; none of their assertions changed.
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/src/falsify/fact-types.ts`: types and three constants, with no branch.
+- `packages/daemon/src/falsify/run-relay.ts`: moved out of `falsify-workspace.ts` unchanged; every job test runs through it, and D3637 already pins the queued modules it collects.
+- `packages/daemon/src/daemon/executor-jobs.ts`: one field of a type.
+- `packages/daemon/src/daemon/executor.ts`, the `assertionErrors` field of the request: D3773 goes red when the field is dropped there too. Its record sits on the executor process's side, the one the handoff named.
+- `packages/daemon/src/falsify/falsify-workspace.ts`, the abort read before the stale-transform guard in `#run`: reaching it needs an abort that lands between two runs while a module is stale, and either order reads no verdict, so it can neither credit a detection nor report a stale result (owner ruling of 03:25 on 2026-09-30).
+- `packages/daemon/src/falsify/falsify-workspace.ts`, the confirming clause of `wasInterrupted`: inert. Once the signal is aborted every later `#run` returns interrupted before it starts, so the job ends the same way with the clause removed. D3784 pins the outcome.
+- `packages/daemon/src/falsify/falsify-workspace.ts`, the confirming run behind the same stale-transform guard: it has one path to a run, `#mutatedRun`, shared with the first run, so no one-line defect separates them.
+- `packages/daemon/src/falsify/run-facts.ts`, `ownField`: inert. An inherited `constructor` is a function, never the marker string, so reading fields without the own-property check gives the same kinds.
+- `packages/daemon/src/falsify/run-facts.ts`, a fact that is absent rather than empty (hook states, reach, the test, the module, the next run only after a recorded confirming run): no judgement reads the difference, so no test of a judgement can go red. What 3.4 stores is its to pin.
+- `packages/daemon/src/falsify/run-facts.ts`, a `JestExtendError` marker with no assertion name: no supported Vitest serializes one, and it is a matcher failure either way.
+- `packages/daemon/src/falsify/run-facts.ts`, the length operand of the pairing guard: D3771 drives the guard through a record that names another defect, the case that judges one defect's run with another's test.
+- `packages/daemon/src/falsify/verdict.ts`, a module that was not collected or is missing, and a test absent from the run: dropping either check throws rather than misreads, and such a run holds no failed test to credit. D3765's ladder pins `module-failed` and `test-not-run` in the order, without a record of their own.
+- `packages/daemon/src/falsify/verdict.ts`, a run with no reach recorded, and a would-be detection with no confirming run at all: no production caller builds either, since `recordRun` gives every test of a mutated run a reach and the job confirms every would-be detection.
+- `packages/daemon/src/falsify/verdict.ts`, that AC6's three reasons decided without a run hold with no restored baseline: `judgeNotRun` never reads the restored baseline, so no one-line defect breaks it. D3785 reads all three kinds from a real job.
+- `packages/daemon/canaries/vitest.config.mjs` and the root config's project list: configuration no code branches on. `bun x vitest list --filesOnly` lists no `*.canary.mjs` module (23:57 on 2026-09-30).
+- The `survivor`, `unparsed-mutation` and `returned-cleanup-assertion` canaries: read by D3786 against the canary file, with no test of their own. The last pins a ruled known limit, so no test asks it to read anything but detected.
 
 ### Review Record
 

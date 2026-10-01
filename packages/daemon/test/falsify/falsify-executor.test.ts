@@ -10,6 +10,7 @@ import type {
 import { takeStartEnvironment } from "../../src/inputs/environment-digest.js";
 import { DAEMON_TEST_TIMEOUT_MS, memoryLog } from "../daemon-harness.js";
 import { inConsumerCopy, waitUntil } from "../harness.js";
+import { errorMarkersOf, judgementOf } from "./job-readings.js";
 
 const FIXTURE = "executor-crash";
 const FIXTURE_CONFIG = "vitest.config.mjs";
@@ -22,6 +23,8 @@ const EXPERIMENT_HOLD = "hold-point-2";
 const BASELINE_HOLD = "hold-point";
 /** How a reply that holds no baseline reads in `runsKept`. */
 const NO_RUN = "none";
+/** An error name the fixture's mutated test throws under, which the job counts as an assertion only when told to. */
+const DECLARED_NAME = "FixtureCheckError";
 
 const SECOND: TestIdentity = {
   workspacePath: ".",
@@ -44,7 +47,10 @@ function mutating(
   };
 }
 
-/** Falsifies `experiments` over a copy of the executor-crash fixture in a fresh executor, then closes it. */
+/**
+ * Falsifies `experiments` over a copy of the executor-crash fixture in a fresh executor, counting an error named in
+ * `assertionErrors` as an assertion, then closes it.
+ */
 function falsifiedThroughExecutor(
   experiments: (root: string) => DefectExperiment[],
   during: (
@@ -53,6 +59,7 @@ function falsifiedThroughExecutor(
     job: Promise<unknown>,
   ) => void | Promise<void> = () => undefined,
   crash = "",
+  assertionErrors: readonly string[] = [],
 ): Promise<JobOutcome<FalsificationJob>> {
   return inConsumerCopy(FIXTURE, "vitest", async (root) => {
     writeFileSync(join(root, CRASH_FILE), crash);
@@ -62,6 +69,7 @@ function falsifiedThroughExecutor(
         { path: ".", directory: root },
         FIXTURE_CONFIG,
         experiments(root),
+        assertionErrors,
       );
       await during(root, executor, job);
       return await job;
@@ -158,6 +166,37 @@ describe("a falsification job in the executor", () => {
         baseline: NO_RUN,
         experiments: [["planned", "not-run", "interrupted"]],
         restored: false,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3773: an error name given to Executor.falsify reaches the judge in the executor process, so that error reads as an assertion and its experiment as detected",
+    async () => {
+      const outcome = await falsifiedThroughExecutor(
+        (root) => [
+          mutating(
+            root,
+            "declared",
+            'it("second", () => {});',
+            `it("second", () => {throw Object.assign(new Error("checked"), { name: "${DECLARED_NAME}" });});`,
+          ),
+        ],
+        undefined,
+        undefined,
+        [DECLARED_NAME],
+      );
+      expect(
+        outcome.ended
+          ? {
+              judgement: judgementOf(outcome.value, "declared"),
+              errors: errorMarkersOf(outcome.value, "declared"),
+            }
+          : outcome,
+      ).toEqual({
+        judgement: { verdict: "detected" },
+        errors: ["declared-name"],
       });
     },
     DAEMON_TEST_TIMEOUT_MS,
