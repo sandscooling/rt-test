@@ -233,7 +233,7 @@ The recorder call a mutation's transform places at the start of the step that ho
 _Avoid_: coverage marker, reach flag
 
 **Probe site**:
-The start of the step that holds a mutation's change, where its reach probe stands: the statement around the change, or the head of the function's body when the change sits in a function outside every statement of its body. A mutation whose change has none is not run.
+The start of the step that holds a mutation's change, where its reach probe stands: the statement around the change, the head of the function's body when the change sits in a function outside every statement of its body, or a class field's initializer when the change sits in one. A mutation whose change has none is not run.
 _Avoid_: probe point, instrumentation point
 
 **Invalid experiment**:

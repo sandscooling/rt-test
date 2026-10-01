@@ -246,11 +246,15 @@ function bodyHead(fn: SyntaxNode, body: SyntaxNode): Step | undefined {
 }
 
 /**
- * A statement that is a branch or a loop's body on its own. A label stays with the statement it names, since a loop
- * that continues to its label must stand directly under it.
+ * A statement that is a branch or a loop's body on its own, held by the statement it belongs to. A label stays with
+ * the statement it names, since a loop that continues to its label must stand directly under it.
  */
 function standsAlone(node: SyntaxNode, holder: SyntaxNode): boolean {
-  return node.type.endsWith(STATEMENT_SUFFIX) && holder.type !== LABELED;
+  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;
+}
+
+function isStatement(node: SyntaxNode): boolean {
+  return node.type.endsWith(STATEMENT_SUFFIX);
 }
 
 /**

@@ -157,6 +157,36 @@ describe("a change inside a statement of a statement list", () => {
       site: { line: 2, column: 3, nodeKind: "ReturnStatement" },
     });
   });
+
+  it("D3987: a change in a one-line guard's condition is probed before the `if`, the statement that holds the condition", () => {
+    expect(
+      mutateWithProbe(
+        JS,
+        "function f(a) {\n  if (a) x();\n}\n",
+        "if (a)",
+        "if (!a)",
+      ),
+    ).toEqual({
+      status: "mutated",
+      text: `function f(a) {\n  ${PROBE}; if (!a) x();\n}\n`,
+      site: { line: 2, column: 3, nodeKind: "IfStatement" },
+    });
+  });
+
+  it("D3613: a change of types alone, outside any ambient declaration, is probed before its statement", () => {
+    expect(
+      mutateWithProbe(
+        TS,
+        "type N = -1;\nexport const n: N = -1;\n",
+        "type N = -1",
+        "type N = -2",
+      ),
+    ).toEqual({
+      status: "mutated",
+      text: `${PROBE}; type N = -2;\nexport const n: N = -1;\n`,
+      site: { line: 1, column: 1, nodeKind: "TSTypeAliasDeclaration" },
+    });
+  });
 });
 
 describe("a change that sits directly in a statement list", () => {
@@ -409,6 +439,46 @@ describe("what is no step of its own", () => {
     });
   });
 
+  it("D3988: a label replaced on a `case` that holds no statement and falls through is probed before the `switch`", () => {
+    expect(
+      mutateWithProbe(
+        JS,
+        "function f(k) {\n  switch (k) {\n    default:\n    case 1:\n      return 2;\n  }\n}\n",
+        "default:",
+        "case 3:",
+      ),
+    ).toEqual({
+      status: "mutated",
+      text: `function f(k) {\n  ${PROBE}; switch (k) {\n    case 3:\n    case 1:\n      return 2;\n  }\n}\n`,
+      site: { line: 2, column: 3, nodeKind: "SwitchStatement" },
+    });
+  });
+
+  it("D3989: a `break` removed from the end of a `case` is a change after the case's last statement, probed before the `switch`", () => {
+    expect(
+      mutateWithProbe(
+        JS,
+        "function f(k) {\n  switch (k) {\n    case 1:\n      a();\n      break;\n    case 2:\n      c();\n  }\n}\n",
+        "      a();\n      break;",
+        "      a();",
+      ),
+    ).toEqual({
+      status: "mutated",
+      text: `function f(k) {\n  ${PROBE}; switch (k) {\n    case 1:\n      a();\n    case 2:\n      c();\n  }\n}\n`,
+      site: { line: 2, column: 3, nodeKind: "SwitchStatement" },
+    });
+  });
+
+  it("D3986: a change inside a statement that stands directly in a namespace is probed before the namespace, not in a block inside it", () => {
+    expect(
+      mutateWithProbe(TS, "namespace N {\n  init();\n}\n", "init()", "start()"),
+    ).toEqual({
+      status: "mutated",
+      text: `${PROBE}; namespace N {\n  start();\n}\n`,
+      site: { line: 1, column: 1, nodeKind: "TSModuleDeclaration" },
+    });
+  });
+
   it("D3979: a change inside a namespace is probed before the namespace, not inside it", () => {
     expect(
       mutateWithProbe(
@@ -475,8 +545,8 @@ describe("a change with no probe site", () => {
     });
   });
 
-  it("D3981: a mutation that leaves its module with no statement has no probe site, reported at the start of the change", () => {
-    expect(mutateWithProbe(JS, "run();\n", "run();", "")).toEqual({
+  it("D3981: a mutation that leaves its module with a comment and no statement has no probe site, reported at the start of the change", () => {
+    expect(mutateWithProbe(JS, "run(); // go", "run();", "")).toEqual({
       status: "no-probe-site",
       reason: {
         kind: "position",
@@ -505,21 +575,6 @@ describe("a change with no probe site", () => {
         nodeKind: "ExportNamedDeclaration",
         role: "Program.body",
       },
-    });
-  });
-
-  it("D3613: a change of types alone, outside any ambient declaration, is probed before its statement", () => {
-    expect(
-      mutateWithProbe(
-        TS,
-        "type N = -1;\nexport const n: N = -1;\n",
-        "type N = -1",
-        "type N = -2",
-      ),
-    ).toEqual({
-      status: "mutated",
-      text: `${PROBE}; type N = -2;\nexport const n: N = -1;\n`,
-      site: { line: 1, column: 1, nodeKind: "TSTypeAliasDeclaration" },
     });
   });
 });

@@ -911,7 +911,7 @@
   },
   {
     "id": "D3966",
-    "defect": "A static block's statements are not taken for a statement list, so a changed statement there is wrapped in a block of its own rather than probed by a statement before it, and a changed declaration there is probed before the class.",
+    "defect": "A static block's statements are not taken for a statement list, so a change inside one is probed before the class that holds it rather than by a statement just before the changed one, and a run in which the block threw before that statement reads as having reached it.",
     "file": "packages/daemon/src/falsify/probe-step.ts",
     "old": "  [STATIC_BLOCK, BODY_FIELD],\n",
     "new": ""
@@ -962,8 +962,8 @@
     "id": "D3973",
     "defect": "A labelled loop is made a block under its label, so a `continue` to that label no longer names a loop and the probed module fails to load.",
     "file": "packages/daemon/src/falsify/probe-step.ts",
-    "old": "  return node.type.endsWith(STATEMENT_SUFFIX) && holder.type !== LABELED;",
-    "new": "  return node.type.endsWith(STATEMENT_SUFFIX);"
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return isStatement(node) && isStatement(holder);"
   },
   {
     "id": "D3974",
@@ -1037,9 +1037,9 @@
   },
   {
     "id": "D3984",
-    "defect": "A node that is no statement is made a block where it stands alone, so a change inside a JSX attribute is rewritten into text the parser rejects and has no probe site.",
+    "defect": "Neither a node nor what holds it is asked to be a statement, so any node not under a label is made a block where it stands, and a change inside a JSX attribute is rewritten into text the parser rejects and has no probe site.",
     "file": "packages/daemon/src/falsify/probe-step.ts",
-    "old": "  return node.type.endsWith(STATEMENT_SUFFIX) && holder.type !== LABELED;",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
     "new": "  return holder.type !== LABELED;"
   },
   {
@@ -1048,5 +1048,33 @@
     "file": "packages/daemon/src/falsify/probe-step.ts",
     "old": "const BRACED_LISTS = new Set([BLOCK, STATIC_BLOCK]);",
     "new": "const BRACED_LISTS = new Set([STATIC_BLOCK]);"
+  },
+  {
+    "id": "D3986",
+    "defect": "A statement that stands directly in a namespace is read as one standing alone as a branch and made a block inside the namespace, so a namespace's statement is probed inside it while its declarations are probed before it.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return isStatement(node) && holder.type !== LABELED;"
+  },
+  {
+    "id": "D3987",
+    "defect": "An expression a statement holds, as an `if` holds its condition, is made a block, so a change in a guard's condition is rewritten into text the parser rejects and has no probe site.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return isStatement(node) && isStatement(holder) && holder.type !== LABELED;",
+    "new": "  return isStatement(holder) && holder.type !== LABELED;"
+  },
+  {
+    "id": "D3988",
+    "defect": "A `case` with no statement is read as a list with a place in it, so a label replaced on a fall-through `case` has no probe site and its experiment never runs, where the change belongs to the step around the `switch`.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "    (first === undefined || span.start < first.start)",
+    "new": "    (first !== undefined && span.start < first.start)"
+  },
+  {
+    "id": "D3989",
+    "defect": "The point where a statement ends is read as inside that statement, so a `break` removed from the end of a `case` is probed inside the case, where a change after a case's last statement belongs to the step around the `switch`.",
+    "file": "packages/daemon/src/falsify/probe-step.ts",
+    "old": "  return startsBefore && span.start < node.end;",
+    "new": "  return startsBefore && span.start <= node.end;"
   }
 ]
