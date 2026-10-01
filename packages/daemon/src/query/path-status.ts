@@ -104,7 +104,7 @@ export function withoutFingerprints(
 }
 
 /** Both relative to the consumer root, `/`-separated. */
-function liesAtOrUnder(path: string, target: string): boolean {
+export function liesAtOrUnder(path: string, target: string): boolean {
   return (
     target === ROOT_PATH ||
     path === target ||
@@ -112,7 +112,8 @@ function liesAtOrUnder(path: string, target: string): boolean {
   );
 }
 
-function testFile(standing: TestStanding): string {
+/** The standing's test module, relative to the consumer root. */
+export function testFile(standing: TestStanding): string {
   const { workspacePath, modulePath } = standing.test.identity;
   return testModuleFile(workspacePath, modulePath);
 }

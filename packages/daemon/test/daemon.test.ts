@@ -33,6 +33,7 @@ import { endOwnedProcesses } from "../../../test/scripts/run-cleanup.mjs";
 import {
   daemonStatus,
   queryChanges,
+  queryDefects,
   queryPathStatus,
   querySummary,
   queryWait,
@@ -53,6 +54,7 @@ import { DaemonConnection } from "../src/daemon/daemon-connection.js";
 import { PROTOCOL_VERSION, RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
 import {
   CHANGES_TYPE,
+  DEFECTS_TYPE,
   ERROR_TYPE,
   PATH_STATUS_TYPE,
   STOPPING_CODE,
@@ -2227,6 +2229,71 @@ describe("the files a changes query names as edited among those it asks about", 
         return { edited, b };
       });
       expect(sent.edited).toStrictEqual([[sent.b]]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+});
+
+/**
+ * The path each defects request `ask` sends carries, or `none`, and the bound each is given, answered by a keyed
+ * stand-in as a stopping daemon; `ask` is given the root and a path under it.
+ */
+async function defectsSent(
+  ask: (root: string, path: string) => Promise<void>,
+): Promise<{ path: string; paths: unknown[]; bounds: unknown[] }> {
+  return inTempDir(async (root) => {
+    const daemon = answerAs(exitedPid(), "key");
+    const path = join(root, "src");
+    const paths: unknown[] = [];
+    const sent = vi.spyOn(DaemonConnection.prototype, "request");
+    try {
+      await withKeyedStandIn(
+        root,
+        (context) => (request, standIn, connectionClosed) => {
+          if (request["type"] !== DEFECTS_TYPE) {
+            return daemon(context)(request, standIn, connectionClosed);
+          }
+          paths.push("path" in request ? request["path"] : "none");
+          return {
+            type: ERROR_TYPE,
+            code: STOPPING_CODE,
+            message: "the daemon is stopping",
+          };
+        },
+        () => ask(root, path),
+      );
+      const bounds = sent.mock.calls
+        .filter(
+          ([request]) => (request as ProtocolMessage)["type"] === DEFECTS_TYPE,
+        )
+        .map(([, bound]) => bound);
+      return { path, paths, bounds };
+    } finally {
+      sent.mockRestore();
+    }
+  });
+}
+
+describe("a defects query", () => {
+  it(
+    "D3706: queryDefects sends the absolute path when given one and no path otherwise",
+    async () => {
+      const sent = await defectsSent(async (root, path) => {
+        await settled(queryDefects(root, path));
+        await settled(queryDefects(root));
+      });
+      expect(sent.paths).toStrictEqual([sent.path, "none"]);
+    },
+    KEY_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3707: a defects query waits up to 60000 ms for its answer, since the daemon walks for the definition files first",
+    async () => {
+      const sent = await defectsSent(async (root) => {
+        await settled(queryDefects(root));
+      });
+      expect(sent.bounds).toStrictEqual([60_000]);
     },
     KEY_TEST_TIMEOUT_MS,
   );

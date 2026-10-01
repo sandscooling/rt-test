@@ -4245,8 +4245,8 @@
     "id": "D2214",
     "defect": "A symbolically linked rt-test.json is read through the link, so the target's declaration applies although an edit to the target is seen only at the next periodic reconciliation.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "  if (stats.isSymbolicLink()) return unusable(SYMBOLIC_LINK_PROBLEM);",
-    "new": "  if (stats.isSymbolicLink()) return true;"
+    "old": "  if (stats.isSymbolicLink()) return { kind: PRESENCE.link };",
+    "new": "  if (stats.isSymbolicLink()) return { kind: PRESENCE.file };"
   },
   {
     "id": "D2215",
@@ -4266,8 +4266,8 @@
     "id": "D2217",
     "defect": "An rt-test.json that is not a regular file is opened for reading, so a FIFO there blocks the reconciliation and a directory is refused only for the read error rather than for what it is.",
     "file": "packages/daemon/src/inputs/non-inputs.ts",
-    "old": "  return stats.isFile() ? true : unusable(NOT_A_FILE_PROBLEM);",
-    "new": "  return true;"
+    "old": "  return { kind: stats.isFile() ? PRESENCE.file : PRESENCE.other };",
+    "new": "  return { kind: PRESENCE.file };"
   },
   {
     "id": "D2218",
@@ -10456,5 +10456,173 @@
     "file": "packages/daemon/src/daemon/request-fields.ts",
     "old": "  if (!Array.isArray(edited)) {",
     "new": "  if (!Array.isArray(edited) || edited.length === 0) {"
+  },
+  {
+    "id": "D3691",
+    "defect": "A test only an invalid definition names counts as a gap, so a repeated id or a bad mutation leaves its test reported as having no defect.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "      definition.resolved === undefined",
+    "new": "      definition.resolved === undefined || definition.state === \"invalid-definition\""
+  },
+  {
+    "id": "D3692",
+    "defect": "A path scopes no definition, so an answer for one folder counts and lists definitions whose tests lie elsewhere.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    liesAtOrUnder(definition.discoveredModule, scope)",
+    "new": "    true"
+  },
+  {
+    "id": "D3693",
+    "defect": "A definition naming no usable module lies in no scope, so a path's answer leaves it out and its problem is never shown there.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    definition.discoveredModule === undefined ||",
+    "new": "    definition.discoveredModule === undefined ? false :"
+  },
+  {
+    "id": "D3694",
+    "defect": "A definition file problem is left out of the total, so the denominator is smaller than the definitions that exist.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "      total: definitions.length + invalidEntries.length,",
+    "new": "      total: definitions.length,"
+  },
+  {
+    "id": "D3695",
+    "defect": "Listed definitions are ordered by file alone, so past the bound of 500 the invalid ones may be the ones left unlisted.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "      DEFECT_STATES.indexOf(left.state) - DEFECT_STATES.indexOf(right.state) ||",
+    "new": "      0 ||"
+  },
+  {
+    "id": "D3696",
+    "defect": "Gap tests are listed without a bound, so a consumer with thousands of untested tests gets an answer past the protocol's line limit.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    const listed = (byModule.get(module) ?? []).slice(0, room);",
+    "new": "    const listed = byModule.get(module) ?? [];"
+  },
+  {
+    "id": "D3697",
+    "defect": "A module's gap count counts only the gap tests the answer listed, so a module past the bound reads fewer gaps than it holds.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "      gaps: byModule.get(module)?.length ?? 0,",
+    "new": "      gaps: gapTests.find((listed) => listed.module === module)?.tests.length ?? 0,"
+  },
+  {
+    "id": "D3698",
+    "defect": "A path outside the consumer root is answered for rather than refused, so the caller reads an empty scope as the answer.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "  if (!scope.ok) return { noAnswer: scope.reason };",
+    "new": "  if (false) return { noAnswer: \"\" };"
+  },
+  {
+    "id": "D3699",
+    "defect": "A path holding nothing is answered with zero counts, so an empty scope reads as a complete one with no problem.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    definitions.length === 0 &&",
+    "new": "    false &&"
+  },
+  {
+    "id": "D3700",
+    "defect": "A defects request's relative path reaches the query, which resolves it against the daemon's working directory rather than refusing it.",
+    "file": "packages/daemon/src/daemon/request-fields.ts",
+    "old": "  if (typeof path !== \"string\" || !isAbsolute(path)) {",
+    "new": "  if (typeof path !== \"string\") {"
+  },
+  {
+    "id": "D3701",
+    "defect": "A defects answer past the line limit asks the caller to query status for a narrower path, naming the wrong query.",
+    "file": "packages/daemon/src/daemon/server.ts",
+    "old": "  if (type === DEFECTS_TYPE) return NARROWER_REQUEST.defectsPath;",
+    "new": "  if (false) return NARROWER_REQUEST.defectsPath;"
+  },
+  {
+    "id": "D3706",
+    "defect": "queryDefects sends no path, so every scoped query is answered for the whole worktree.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "    ...(path === undefined ? {} : { path }),",
+    "new": "    ...{},"
+  },
+  {
+    "id": "D3707",
+    "defect": "A defects query waits only the connection's default bound, so a walk of a large tree fails as a timeout rather than answering.",
+    "file": "packages/daemon/src/query-client.ts",
+    "old": "  const answer = await query(targetOf(consumerRoot, \"query\"), request, {\n    requestMs: READ_FIRST_BOUND_MS,\n  });\n  return answer as unknown as DefectsResponse;",
+    "new": "  const answer = await query(targetOf(consumerRoot, \"query\"), request);\n  return answer as unknown as DefectsResponse;"
+  },
+  {
+    "id": "D3708",
+    "defect": "The lifecycle drops the caller's path, so a defects query for one folder is answered for the whole worktree.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      path,",
+    "new": "      path: undefined,"
+  },
+  {
+    "id": "D3710",
+    "defect": "The defects answer takes the daemon's moment before it reads the definition files and the anchors, so an input change or a newly stored discovery during the reads is answered with the earlier facts as current.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "  const { consumerRoot, signal } = query;",
+    "new": "  const { consumerRoot, signal } = query;\n  const early = query.moment();\n  query = { ...query, moment: () => early };"
+  },
+  {
+    "id": "D3713",
+    "defect": "A definition whose module the latest discovery does not list is scoped by the path it spells, so a scoped answer leaves it out of its total.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    definition.discoveredModule === undefined ||\n    liesAtOrUnder(definition.discoveredModule, scope)",
+    "new": "    definition.modulePath === undefined ||\n    liesAtOrUnder(definition.modulePath, scope)"
+  },
+  {
+    "id": "D3721",
+    "defect": "The answer tells the resolver the discovery is current whatever its freshness, so a not-discovered reason never says the discovery is not current.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    basis.context.discovery.freshness === CURRENT,",
+    "new": "    true,"
+  },
+  {
+    "id": "D3722",
+    "defect": "A listed definition's reason is not cut, so the bound on listed definitions no longer bounds the answer's size.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    ...(reason === undefined ? {} : { reason: cutReason(reason) }),",
+    "new": "    ...(reason === undefined ? {} : { reason: { reason, omittedCharacters: 0 } }),"
+  },
+  {
+    "id": "D3723",
+    "defect": "A listed definition file problem's reason is not cut, so one long reason can push the answer past the line limit.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "      ...cutReason(reason),",
+    "new": "      reason,\n      omittedCharacters: 0,"
+  },
+  {
+    "id": "D3724",
+    "defect": "A scope holding no test and no definition gets nothing-to-answer though a definition file problem lies in it, so the problem is never shown for that path.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    invalidEntries.length === 0",
+    "new": "    true"
+  },
+  {
+    "id": "D3725",
+    "defect": "A scope holding no test gets nothing-to-answer though a definition lying in every scope lies in it.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    definitions.length === 0 &&",
+    "new": "    true &&"
+  },
+  {
+    "id": "D3732",
+    "defect": "Anchor-missing definitions are listed after never-verified ones.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  DEFECT_STATE.anchorMissing,\n  DEFECT_STATE.neverVerified,\n];",
+    "new": "  DEFECT_STATE.neverVerified,\n  DEFECT_STATE.anchorMissing,\n];"
+  },
+  {
+    "id": "D3733",
+    "defect": "A listed definition's resolved test carries no duplicate mark, so a test named by its position reads as uniquely named.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "        : { identity: resolved.identity, duplicate: resolved.isDuplicate },",
+    "new": "        : { identity: resolved.identity, duplicate: false },"
+  },
+  {
+    "id": "D3734",
+    "defect": "The defects answer carries none of the facts every answer carries, so its reader cannot tell which discovery, inputs or activity it describes.",
+    "file": "packages/daemon/src/query/defects-answer.ts",
+    "old": "    ...basis.context,",
+    "new": "    ...{},"
   }
 ]

@@ -38,6 +38,7 @@ import {
 
 export {
   queryChanges,
+  queryDefects,
   queryPathStatus,
   querySummary,
   queryWait,
@@ -60,6 +61,17 @@ export {
   type TestChange,
   type UnreadFile,
 } from "./query/changes-answer.js";
+export type {
+  DefectCounts,
+  GapModule,
+  ListedDefinition,
+  ListedInvalidEntry,
+} from "./query/defects-answer.js";
+export {
+  DEFECT_STATE,
+  DEFECT_STATES,
+  type DefectState,
+} from "./defects/resolve-definitions.js";
 export {
   identityHash,
   userDirectory,
@@ -85,6 +97,7 @@ export {
   type ChangesResponse,
   type DaemonActivity,
   type DaemonIdentity,
+  type DefectsResponse,
   type PathStatusResponse,
   type StatusResponse,
   type SummaryResponse,

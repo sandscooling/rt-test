@@ -41,8 +41,9 @@ sprint-2: done
 2-7b-agent-edits-never-hold: done
 
 sprint-3: in-progress
-3-1-defect-definitions: ready-for-dev
+3-1-defect-definitions: done
 3-2-transform-experiments: review
+3-2b-probe-sites: backlog
 3-3-verdicts-from-facts: backlog
 3-4-defect-evidence: backlog
 3-5-schedule-falsification: backlog

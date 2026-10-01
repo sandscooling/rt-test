@@ -4749,3 +4749,25 @@ describe(
     });
   },
 );
+
+describe("answering a defects query", () => {
+  it("D3708: a defects query naming a path answers for that path, never the whole worktree", async () => {
+    const answered = await inTempDir(async (root) => {
+      const executor = new ScriptedExecutor({
+        ended: true,
+        value: discovery(discoveredWithTest("a"), discoveredWithTest("b")),
+      });
+      const { lifecycle } = await begun(
+        daemon(confirmed("a", "b"), executor, new RecordingStore(), {
+          ...IDENTITY,
+          consumerRoot: root,
+        }),
+      );
+      const answer = await lifecycle.defects(join(root, "a"), stillWaited());
+      return "noAnswer" in answer
+        ? answer
+        : { path: answer.path, testsInScope: answer.testsInScope };
+    });
+    expect(answered).toStrictEqual({ path: "a", testsInScope: 1 });
+  });
+});
