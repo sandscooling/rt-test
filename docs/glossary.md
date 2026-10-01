@@ -185,7 +185,7 @@ Running a test against its defect's mutation to prove the test rejects it.
 _Avoid_: mutation testing, defect check
 
 **Run facts**:
-What the daemon records during a falsification run: failure phase, error kind, whether the mutated code was reached, and the baseline result.
+What the daemon records during a falsification run: failure phase, error kind, whether the test reached the step that holds the mutation, and the baseline result.
 _Avoid_: classification, message match
 
 **Defect evidence**:
@@ -229,15 +229,15 @@ A second run of an experiment that would be a detection, which must fail the sam
 _Avoid_: retry, rerun check
 
 **Reach probe**:
-The recorder call a mutation's transform places at the mutated site, so an experiment records which tests executed the mutated code.
+The recorder call a mutation's transform places at the start of the step that holds the mutation, so an experiment records which tests reached that step.
 _Avoid_: coverage marker, reach flag
 
 **Probe site**:
-The place in a mutated module where its reach probe stands. A mutation whose change has none is not run.
+The start of the step that holds a mutation's change, where its reach probe stands: the statement around the change, or the head of the function's body when the change sits in a function outside every statement of its body. A mutation whose change has none is not run.
 _Avoid_: probe point, instrumentation point
 
 **Invalid experiment**:
-An experiment whose run cannot say whether the test rejects the mutation, such as one whose test failed in a hook or never executed the mutated site.
+An experiment whose run cannot say whether the test rejects the mutation, such as one whose test failed in a hook or never reached the step that holds the mutation.
 _Avoid_: void, setup kill
 
 **Unclear experiment**:
