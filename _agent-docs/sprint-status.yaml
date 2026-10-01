@@ -43,7 +43,7 @@ sprint-2: done
 sprint-3: in-progress
 3-1-defect-definitions: done
 3-2-transform-experiments: done
-3-2b-probe-sites: backlog
+3-2b-probe-sites: ready-for-dev
 3-3-verdicts-from-facts: ready-for-dev
 3-4-defect-evidence: backlog
 3-5-schedule-falsification: backlog
