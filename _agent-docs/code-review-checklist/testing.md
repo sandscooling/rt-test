@@ -108,6 +108,8 @@ C107. **Drive a CLI through its exit code and streams**: A script test asserts t
 
 C176. **Test a decision through the code that builds its inputs**: A decision proven over hand-built inputs also has a test through the code that builds those inputs, for each input the decision reads. FAIL when the builder could hand the decision a constant in place of a recorded value and no test would go red.
 
+C177. **Say what a generator cannot write**: A claim that rests on a fuzzer or a generated corpus names the constructs its generator never emits, and covers only what it emits. FAIL when a clean result is reported with no list of what the generator leaves out.
+
 ## Suite hygiene
 
 C108. **One owning test per behavior**: A new test does not re-cover a path already asserted in the same file or a sibling suite; overlap keeps the strongest test.
