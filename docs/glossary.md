@@ -14,6 +14,10 @@ _Avoid_: project, package
 One directory RT Test treats as a package: the consumer root, or a directory the root `package.json` `workspaces` field lists, whether or not it holds a `package.json`. Every Vitest workspace is one, and the dependencies between them decide selection.
 _Avoid_: package, project
 
+**Vitest install**:
+The Vitest that resolves from a Vitest workspace's directory, told apart by the package's real directory and its version. Several workspaces can resolve one install.
+_Avoid_: Vitest copy
+
 **Test identity**:
 The stable name RT Test gives one test: its Vitest workspace, Vitest project, module path, suite and test names, and its position among tests sharing those names.
 _Avoid_: test id, test name
@@ -251,6 +255,10 @@ _Avoid_: runnable defect, pending defect
 **Canary fixture**:
 A test that fails on purpose in one known way, so RT Test can check that it reads that failure's facts correctly on a Vitest version.
 _Avoid_: selftest, probe
+
+**Canary reading**:
+What one falsification job over the canary fixtures showed under a Vitest install: confirmed when every canary read the verdict and reason named for it, disagreed with the canaries that did not, or no reading otherwise.
+_Avoid_: canary result, canary verdict
 
 **Gap**:
 A test with no defect, or code no named defect reaches.
