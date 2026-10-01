@@ -1,0 +1,359 @@
+[
+  {
+    "id": "D3604",
+    "defect": "Anchor occurrences are counted overlapping, so an anchor the defect catalog counts once is refused as occurring more than once.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "  return new RegExp(lines.join(ANY_LINE_BREAK), \"g\");",
+    "new": "  return new RegExp(`(?=${lines.join(ANY_LINE_BREAK)})`, \"g\");"
+  },
+  {
+    "id": "D3605",
+    "defect": "A line break in an anchor matches only LF, so every multi-line anchor in a file checked out with CRLF reads as missing.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "const ANY_LINE_BREAK = \"\\\\r?\\\\n\";",
+    "new": "const ANY_LINE_BREAK = \"\\\\n\";"
+  },
+  {
+    "id": "D3606",
+    "defect": "An anchor written with CRLF line breaks is matched as written, so it reads as missing in a file with LF line breaks.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "  const lines = toLf(anchor)",
+    "new": "  const lines = anchor"
+  },
+  {
+    "id": "D3607",
+    "defect": "An anchor's regular-expression characters are not escaped, so an anchor holding a dot or brackets matches other text or none.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "    .map((line) => line.replace(REGEX_SPECIALS, \"\\\\$&\"));",
+    "new": "    .map((line) => line);"
+  },
+  {
+    "id": "D3608",
+    "defect": "An anchor that occurs more than once is replaced at its first occurrence, so the mutation lands on a site the author may not have meant.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "  if (count !== 1) return { found: false, count };",
+    "new": "  if (count < 1) return { found: false, count };"
+  },
+  {
+    "id": "D3609",
+    "defect": "A replacement is written with its own LF line breaks into a CRLF match, so the mutated text mixes line endings.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "  const written = withLineEnding(replacement, match.lineEnding);",
+    "new": "  const written = replacement;"
+  },
+  {
+    "id": "D3610",
+    "defect": "A match with no line break of its own is taken to use LF, so a line the replacement adds to a CRLF file ends with LF.",
+    "file": "packages/daemon/src/falsify/anchor-match.ts",
+    "old": "  return after > 0 && text[after - 1] === \"\\r\" ? CRLF : LF;",
+    "new": "  return LF;"
+  },
+  {
+    "id": "D3611",
+    "defect": "The probe is placed at the whole replaced text rather than the part that changed, so it fires where the changed code never ran.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "  return { start: offset + prefix, end: offset + written.length - suffix };",
+    "new": "  return { start: offset, end: offset + written.length };"
+  },
+  {
+    "id": "D3612",
+    "defect": "A call's callee takes a probe, so a method called through the wrap loses its receiver and the probe changes what the module does.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "  [\"CallExpression.arguments\", always],",
+    "new": "  [\"CallExpression.arguments\", always],\n  [\"CallExpression.callee\", always],"
+  },
+  {
+    "id": "D3613",
+    "defect": "A change under a TypeScript value wrapper is judged at the wrapper's operand slot, so it gets no probe site and its experiment never runs.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "  const position = outermostWrapper(slot);",
+    "new": "  const position = slot;"
+  },
+  {
+    "id": "D3614",
+    "defect": "A block's statement list takes no probe statement, so a replaced statement in a function body gets no probe site.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "  \"BlockStatement.body\",\n  \"StaticBlock.body\",",
+    "new": "  \"StaticBlock.body\","
+  },
+  {
+    "id": "D3615",
+    "defect": "A hoisted function declaration takes a probe statement before it, which fires when the module loads, marking every test reached though the function never ran.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "  \"FunctionDeclaration\",\n  \"ImportDeclaration\",",
+    "new": "  \"ImportDeclaration\","
+  },
+  {
+    "id": "D3616",
+    "defect": "A `typeof` operand is wrapped, so `typeof` of an undeclared name throws a ReferenceError and the probe fails a test.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "const VALUE_BLIND_UNARY = new Set([\"typeof\", \"delete\"]);",
+    "new": "const VALUE_BLIND_UNARY = new Set([\"delete\"]);"
+  },
+  {
+    "id": "D3617",
+    "defect": "A link of an optional chain is wrapped, ending the chain there, so a short circuit that returned undefined now throws a TypeError.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "    if (holder.node.type === CHAIN) return false;",
+    "new": "    if (holder.node.type === CHAIN) return true;"
+  },
+  {
+    "id": "D3618",
+    "defect": "A wrap that opens a statement after a line with no semicolon is written bare, so it parses as a call of the previous line's value.",
+    "file": "packages/daemon/src/falsify/reach-probe.ts",
+    "old": "  const opener = opensStatement(path) ? STATEMENT_OPENER : \"\";",
+    "new": "  const opener = \"\";"
+  },
+  {
+    "id": "D3619",
+    "defect": "A failed parse reports no offset, so a mutation whose text does not parse is refused without saying where the parse failed.",
+    "file": "packages/daemon/src/selection/source-imports.ts",
+    "old": "  return offset === undefined ? {} : { offset };",
+    "new": "  return {};"
+  },
+  {
+    "id": "D3620",
+    "defect": "Code inside an ambient declaration takes a probe, so a change there reads as a site that can run though its code never does.",
+    "file": "packages/daemon/src/falsify/probe-slots.ts",
+    "old": "  if (slot.path.some(({ node }) => isAmbient(node))) return undefined;",
+    "new": ""
+  },
+  {
+    "id": "D3621",
+    "defect": "The mutated file is keyed by the path the job was given rather than its real path, so under a consumer root reached through a link the mutation is never applied.",
+    "file": "packages/daemon/src/falsify/stale-transform-guard.ts",
+    "old": "  const slashed = realPathOf(moduleFilePath(path)).replaceAll(\"\\\\\", \"/\");",
+    "new": "  const slashed = moduleFilePath(path).replaceAll(\"\\\\\", \"/\");"
+  },
+  {
+    "id": "D3622",
+    "defect": "A firing during a test is marked on its file rather than on the test, so a test that executed the site reads not executed.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "    merge(test, IN_TEST);",
+    "new": "    merge(test.file, IN_TEST);"
+  },
+  {
+    "id": "D3623",
+    "defect": "A test the reach setup file only observed reads executed in the test, so a sibling that failed without reaching the site is credited with reach.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  if (mark.inTest === true) return IN_TEST;",
+    "new": "  if (mark.observed === true) return IN_TEST;"
+  },
+  {
+    "id": "D3624",
+    "defect": "A site executed while the test file loaded is not credited to the file's tests, though each can read what that code set.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "  if (firedAtFileLevel || firedOutside.has(test.file)) {",
+    "new": "  if (firedAtFileLevel) {"
+  },
+  {
+    "id": "D3625",
+    "defect": "A site executed in a suite's beforeAll is not credited to that suite's tests, though each can read what the hook set.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "    if (firedOutside.has(suite)) {",
+    "new": "    if (firedOutside.has(test)) {"
+  },
+  {
+    "id": "D3626",
+    "defect": "A site executed in one suite's beforeAll is recorded for the whole file, marking tests of other suites that never ran it.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "    firedOutside.add(current);",
+    "new": "    firedAtFileLevel = true;"
+  },
+  {
+    "id": "D3627",
+    "defect": "A test the reach recorder never observed reads not executed, where reach is unknown.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  if (mark === undefined) return NOT_OBSERVED;",
+    "new": "  if (mark === undefined) return NOT_EXECUTED;"
+  },
+  {
+    "id": "D3628",
+    "defect": "A test whose afterEach threw stays marked running, so a site a later suite's beforeAll executes is credited to it as reached in the test.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "  onTestFinished(() => running.delete(task));",
+    "new": ""
+  },
+  {
+    "id": "D3629",
+    "defect": "A site executed while two tests run concurrently is credited to one of them, though Vitest cannot say which one ran it.",
+    "file": "packages/daemon/src/falsify/reach-setup.ts",
+    "old": "  if (running.size > 1) {",
+    "new": "  if (running.size > 2) {"
+  },
+  {
+    "id": "D3630",
+    "defect": "A module cached from text its file no longer holds is kept, so a run after a source edit reads the old transform.",
+    "file": "packages/daemon/src/falsify/stale-transform-guard.ts",
+    "old": "  return recorded === undefined || recorded !== reads.digest(file);",
+    "new": "  return recorded === undefined;"
+  },
+  {
+    "id": "D3631",
+    "defect": "A transform that finds the anchor other than once records nothing, so the experiment reads as though its module was never loaded.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "        loads.push({ applied: false, occurrences: probed.count });",
+    "new": ""
+  },
+  {
+    "id": "D3632",
+    "defect": "Only the root's Vite server is wrapped, so a project with its own config file is served its module unmutated.",
+    "file": "packages/daemon/src/falsify/stale-transform-guard.ts",
+    "old": "    ...instance.projects.map((project) => project.vite),",
+    "new": ""
+  },
+  {
+    "id": "D3633",
+    "defect": "The mutated file is not invalidated before its experiment, so the experiment is served the baseline's cached transform and its mutation never runs.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    const invalidated = [mutation?.file, this.#lastMutated].filter(",
+    "new": "    const invalidated = [this.#lastMutated].filter("
+  },
+  {
+    "id": "D3634",
+    "defect": "Ending an experiment leaves its mutation active, so the restored baseline is served the last experiment's mutation.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "    this.#active = undefined;\n    return loads;",
+    "new": "    return loads;"
+  },
+  {
+    "id": "D3635",
+    "defect": "The workspace's isolate: false is kept, so test files share a worker and a test passes or fails through another file's side effects.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "      project.config.isolate = true;",
+    "new": "      project.config.isolate = project.config.isolate;"
+  },
+  {
+    "id": "D3636",
+    "defect": "The workspace's bail is kept, so an experiment whose mutation fails a test is cancelled and reads interrupted.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "      project.config.bail = BAIL_OFF;",
+    "new": ""
+  },
+  {
+    "id": "D3637",
+    "defect": "A run's record takes every module runTestSpecifications returns, so an experiment carries the modules and results earlier runs left.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "      specificationsWithoutModule(specifications, [testModule]).length <",
+    "new": "      true ||\n      specificationsWithoutModule(specifications, [testModule]).length <"
+  },
+  {
+    "id": "D3638",
+    "defect": "A serialized error is reduced to its message, so the constructor marker and assertion context that tell an assertion from another failure are lost.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  if (isPlainObject(error)) return jsonFields(error, 0, new Set());",
+    "new": "  if (isPlainObject(error)) return { message: String((error as { message?: unknown }).message) };"
+  },
+  {
+    "id": "D3639",
+    "defect": "The hook states Vitest recorded on a test's result are dropped, so a failure in a hook cannot be told from one in the test body.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  return task.result?.hooks;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D3640",
+    "defect": "Suite errors are dropped, so a failed beforeAll leaves no error on the module's record.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  if (errors.length === 0) return [];",
+    "new": "  if (errors.length >= 0) return [];"
+  },
+  {
+    "id": "D3641",
+    "defect": "A run's unhandled errors are reduced to text, losing the name and fields Vitest serialized.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "    unhandledErrors: evidence.unhandledErrors.map(rawError),",
+    "new": "    unhandledErrors: evidence.unhandledErrors.map((error) => ({ message: String(error) })),"
+  },
+  {
+    "id": "D3642",
+    "defect": "An experiment runs though its intended test failed the baseline, so a failure the mutation did not cause can read as a detection.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    if (result.state !== PASSED) {",
+    "new": "    if (result.state === NOT_REPORTED) {"
+  },
+  {
+    "id": "D3643",
+    "defect": "The intended test is found in the baseline by its name alone, so an experiment runs against a same-named test the baseline passed in another suite.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "      (test) => testIdentityKey(test.identity) === key,",
+    "new": "      (test) => test.identity.namePath.at(-1) === identity.namePath.at(-1),"
+  },
+  {
+    "id": "D3644",
+    "defect": "An intended test's module is matched by project alone, so a test in no module is run against another module of its project.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    location.modulePath === identity.modulePath",
+    "new": "    true"
+  },
+  {
+    "id": "D3645",
+    "defect": "An unreadable mutated file throws out of the job, so every other experiment of the workspace is lost.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    return { read: false, error: errorText(error) };",
+    "new": "    throw error;"
+  },
+  {
+    "id": "D3646",
+    "defect": "An experiment whose anchor does not occur exactly once when the job starts is run anyway, spending a run on a mutation that cannot apply.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    case \"anchor-count\":\n      return { kind: \"anchor-count\", count: probed.count };",
+    "new": "    case \"anchor-count\":\n      return undefined;"
+  },
+  {
+    "id": "D3647",
+    "defect": "An experiment whose change has no probe site is run anyway, and its record never names the position the author must move the mutation from.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    case \"no-probe-site\":\n      return { kind: \"no-probe-site\", site: probed.reason };",
+    "new": "    case \"no-probe-site\":\n      return undefined;"
+  },
+  {
+    "id": "D3648",
+    "defect": "The forks pool is left to copy each transformed module to the OS temp directory, so the mutated text is written to disk.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "      serveWithoutTempCopies(project);",
+    "new": ""
+  },
+  {
+    "id": "D3649",
+    "defect": "On Vitest 4.1 the experimental module cache setting is not read, so a project that keeps the cache on has the mutated transform written under the consumer's tree.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "    ...(major === undefined || major < TOP_LEVEL_MODULE_CACHE_MAJOR\n      ? [EXPERIMENTAL_MODULE_CACHE]",
+    "new": "    ...(major === undefined\n      ? [EXPERIMENTAL_MODULE_CACHE]"
+  },
+  {
+    "id": "D3650",
+    "defect": "On Vitest 5 the deprecated experimental module cache setting is read though the override has turned the cache off, so the workspace is refused and never falsified.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "major === undefined || major < TOP_LEVEL_MODULE_CACHE_MAJOR",
+    "new": "true"
+  },
+  {
+    "id": "D3651",
+    "defect": "A bigint in a serialized error is kept as a bigint, so the job's reply cannot be sent over the executor's JSON channel and the job's record is lost.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  if (typeof value === \"bigint\") return `${value}${BIGINT_SUFFIX}`;",
+    "new": ""
+  },
+  {
+    "id": "D3652",
+    "defect": "A falsification job whose executor process died is returned as ended, with no record, as though the job had finished.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "    return reply.type === \"falsified\"\n      ? { ended: true, value: reply.job }",
+    "new": "    return reply.type === \"falsified\" || reply.type === \"exited\"\n      ? { ended: true, value: reply.job }"
+  },
+  {
+    "id": "D3653",
+    "defect": "An experiment an abort interrupted is kept in the reply as a run that finished, and the job goes on to a restored baseline.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    if (execution === \"interrupted\" && this.#signal.aborted) {",
+    "new": "    if (execution === \"interrupted\" && !this.#signal.aborted) {"
+  },
+  {
+    "id": "D3709",
+    "defect": "A module Vite soft-invalidated, whose old transform it keeps and serves again, does not count as cached, so an importer of an invalidated module that was edited on disk is served from its old text.",
+    "file": "packages/daemon/src/falsify/stale-transform-guard.ts",
+    "old": "    module.transformResult ?? (typeof state === \"object\" ? state : undefined)",
+    "new": "    module.transformResult ?? undefined"
+  }
+]
