@@ -116,9 +116,14 @@ export interface DefectStanding {
   readonly evidence?: EvidenceStanding;
 }
 
-/** What the standings are decided from, each read at the moment the query answers. */
+/**
+ * What the standings are decided from: facts of one moment of the daemon, beside the consumer root and the declared
+ * names, which are as `rt-test.json` was read before it.
+ */
 export interface StandingFacts {
   readonly consumerRoot: string;
+  /** The error names `rt-test.json` declares as assertions, as it writes them. */
+  readonly assertionErrors: readonly string[];
   readonly evidence: LatestEvidence;
   /** The latest stored discovery, whose workspaces report the Vitest version each was discovered under. */
   readonly discovery: TestDiscovery;
@@ -152,6 +157,8 @@ interface DigestSubject {
 
 interface StandingIndex {
   readonly consumerRoot: string;
+  /** The declared names as a set: each once, in code unit order. */
+  readonly assertionErrors: readonly string[];
   readonly evidence: ReadonlyMap<string, StoredEvidence>;
   readonly refusals: ReadonlyMap<string, string>;
   /** The Vitest version of each discovered workspace, by its path. */
@@ -174,6 +181,32 @@ export function defectStandings(
 ): DefectStanding[] {
   const index = standingIndex(facts);
   return definitions.map((definition) => standingOf(definition, index));
+}
+
+/**
+ * The order a listing of standings takes: by state in `DEFECT_STATES` order, within a state evidence that is not
+ * current before current, then by file and position.
+ */
+export function compareStandings(
+  left: DefectStanding,
+  right: DefectStanding,
+): number {
+  return (
+    DEFECT_STATES.indexOf(left.state) - DEFECT_STATES.indexOf(right.state) ||
+    currentRank(left) - currentRank(right) ||
+    compareFiles(left.definition.file, right.definition.file) ||
+    left.definition.position - right.definition.position
+  );
+}
+
+/** Evidence that is not current sorts before current evidence; a state that reads no evidence has one rank. */
+function currentRank(standing: DefectStanding): number {
+  return standing.evidence?.freshness === CURRENT ? 1 : 0;
+}
+
+function compareFiles(left: string, right: string): number {
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
 }
 
 /** Every count is over all the standings given, whatever an answer goes on to list of them. */
@@ -231,6 +264,7 @@ function zeroTally<K extends string>(keys: readonly K[]): Tally<K> {
 function standingIndex(facts: StandingFacts): StandingIndex {
   return {
     consumerRoot: facts.consumerRoot,
+    assertionErrors: [...new Set(facts.assertionErrors)].sort(),
     evidence: new Map(
       facts.evidence.evidence.map((record) => [record.defectId, record]),
     ),
@@ -271,7 +305,7 @@ function standingOf(
   ) {
     return notRunnable(definition, subject, index);
   }
-  const digest = definitionDigest(subject, index.consumerRoot);
+  const digest = definitionDigest(subject, index);
   const shared = {
     definition,
     eligible: index.currentPasses.has(testIdentityKey(subject.test.identity)),
@@ -307,7 +341,7 @@ function notRunnable(
     eligible: false,
     ...(subject === undefined
       ? {}
-      : { definitionDigest: definitionDigest(subject, index.consumerRoot) }),
+      : { definitionDigest: definitionDigest(subject, index) }),
   };
 }
 
@@ -342,20 +376,22 @@ function digestSubject(
 
 /**
  * Covers the definition's id, its resolved test's whole identity and its mutation, the file named relative to the
- * consumer root so that every spelling of one path digests alike. It holds none of the text it digests.
+ * consumer root so that every spelling of one path digests alike, and the declared assertion error names as a set,
+ * since they decide which of the test's errors a verdict counts as an assertion. It holds none of the text it digests.
  */
 function definitionDigest(
   subject: DigestSubject,
-  consumerRoot: string,
+  index: Pick<StandingIndex, "consumerRoot" | "assertionErrors">,
 ): string {
   const { id, test, mutation, mutationPath } = subject;
   return wholeDigest(
     JSON.stringify([
       id,
       testIdentityKey(test.identity),
-      relativePosixPath(consumerRoot, mutationPath),
+      relativePosixPath(index.consumerRoot, mutationPath),
       mutation.old,
       mutation.new,
+      index.assertionErrors,
     ]),
   );
 }

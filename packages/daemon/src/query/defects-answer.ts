@@ -1,15 +1,9 @@
 import { testIdentityKey, type TestIdentity } from "@rt-test/core";
+import type { InvalidEntryKind } from "../defects/definition-files.js";
+import type { DefinitionTest } from "../defects/definitions.js";
 import {
-  readDefinitionFiles,
-  type InvalidEntryKind,
-} from "../defects/definition-files.js";
-import {
-  checkDefinitions,
-  type DefinitionTest,
-} from "../defects/definitions.js";
-import {
+  compareStandings,
   countDefectStandings,
-  defectStandings,
   type DefectStanding,
   type DefectStandingCounts,
   type EvidenceFreshness,
@@ -18,26 +12,20 @@ import {
   type VerdictReason,
 } from "../defects/defect-standings.js";
 import { DEFECT_STATES, type DefectState } from "../defects/defect-states.js";
+import type { ResolvedDefinition } from "../defects/resolve-definitions.js";
 import {
-  readAnchors,
-  resolveDefinitions,
-  type ResolvedDefinition,
-} from "../defects/resolve-definitions.js";
-import type { WaitMoment } from "../daemon/waits.js";
+  worktreeStandings,
+  type WorktreeRead,
+} from "../defects/worktree-standings.js";
 import type { ErrorFact } from "../falsify/fact-types.js";
 import { ROOT_PATH } from "../vitest/find-workspaces.js";
-import {
-  CURRENT,
-  type AnswerContext,
-  type CutReason,
-  type NoAnswer,
-} from "./answer.js";
+import type { AnswerContext, CutReason, NoAnswer } from "./answer.js";
 import {
   resolveCallerPath,
   type CallerPathResolution,
 } from "./caller-paths.js";
 import { liesAtOrUnder, testFile } from "./path-status.js";
-import { cutReason, queryBasis } from "./summary.js";
+import { cutReason } from "./summary.js";
 import type { TestStanding } from "./test-states.js";
 
 /**
@@ -92,7 +80,7 @@ export type ListedEvidence = EvidenceFreshness & {
   readonly omittedCharacters?: number;
 };
 
-/** A definition file problem, which lies in every scope. */
+/** A problem in `rt-test.json` or in reading the definition files, which lies in every scope. */
 export type ListedInvalidEntry = CutReason & {
   readonly kind: InvalidEntryKind;
   /** Relative to the consumer root, `/`-separated. */
@@ -103,7 +91,10 @@ export type DefectStateCounts = Readonly<Record<DefectState, number>>;
 
 /** Counts over every definition in scope, whatever the listing leaves out. */
 export interface DefectCounts extends DefectStandingCounts {
-  /** Every definition in scope and every definition file problem: what `verified` is read against. */
+  /**
+   * Every definition in scope and every invalid entry, a problem in the declared assertion error names among them:
+   * what `verified` is read against.
+   */
   readonly total: number;
   readonly invalidEntries: number;
 }
@@ -147,55 +138,31 @@ export interface DefectsAnswer extends AnswerContext {
   readonly gapTestsNotListed: number;
 }
 
-export interface DefectsQuery {
+export interface DefectsQuery extends WorktreeRead {
   /** Absolute; the whole worktree when undefined. */
   readonly path: string | undefined;
-  readonly consumerRoot: string;
-  readonly stateDirectory: string;
-  readonly signal: AbortSignal;
-  /** The latest stored results, the daemon's view and the inputs, read when it is called. */
-  readonly moment: () => WaitMoment;
 }
 
 /**
- * Reads the definition files and each mutation's file as they are now, then takes the daemon's moment and resolves
- * each definition against the latest stored discovery without awaiting again, so the facts the answer carries are
- * those that hold when it answers. It answers for the definitions and tests at or under the path, and starts no job.
- * Once the signal aborts nobody waits for the answer and a stop may have closed the store, so it reads no moment.
+ * Answers for the definitions and tests at or under the path from the worktree's standings, which hold the facts of
+ * the moment they were taken at, and starts no job. A path it refuses is answered before any file is read.
  */
 export async function defectsAnswer(
   query: DefectsQuery,
 ): Promise<DefectsAnswer | NoAnswer> {
-  const { consumerRoot, signal } = query;
-  const scope = scopeOf(query.path, consumerRoot);
+  const scope = scopeOf(query.path, query.consumerRoot);
   if (!scope.ok) return { noAnswer: scope.reason };
-  const files = await readDefinitionFiles(
-    consumerRoot,
-    query.stateDirectory,
-    signal,
-  );
-  const checked = checkDefinitions(files.definitions, consumerRoot);
-  const anchors = await readAnchors(checked, signal);
-  signal.throwIfAborted();
-  const { results, view, inputs } = query.moment();
-  const basis = queryBasis(results, view, inputs);
-  if ("noAnswer" in basis) return basis;
-  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;
-  const resolved = resolveDefinitions(
-    checked,
-    anchors,
-    basis.discovery.discovery,
-    discoveryCurrent,
-  );
-  const definitions = resolved.filter((definition) =>
-    inScope(definition, scope.path),
+  const worktree = await worktreeStandings(query);
+  if ("noAnswer" in worktree) return worktree;
+  const { basis, invalidEntries } = worktree;
+  const standings = worktree.standings.filter((standing) =>
+    inScope(standing.definition, scope.path),
   );
   const tests = basis.standings.filter((standing) =>
     liesAtOrUnder(testFile(standing), scope.path),
   );
-  const { invalidEntries } = files;
   if (
-    definitions.length === 0 &&
+    standings.length === 0 &&
     tests.length === 0 &&
     invalidEntries.length === 0
   ) {
@@ -204,7 +171,7 @@ export async function defectsAnswer(
     };
   }
   const covered = new Set(
-    resolved.flatMap((definition) =>
+    worktree.definitions.flatMap((definition) =>
       definition.resolved === undefined
         ? []
         : [testIdentityKey(definition.resolved.identity)],
@@ -213,20 +180,12 @@ export async function defectsAnswer(
   const gaps = tests.filter(
     (standing) => !covered.has(testIdentityKey(standing.test.identity)),
   );
-  const standings = defectStandings(definitions, {
-    consumerRoot,
-    evidence: results,
-    discovery: basis.discovery.discovery,
-    discoveryCurrent,
-    currentFingerprint: basis.currentFingerprint,
-    testStandings: basis.standings,
-  });
   const counts = countDefectStandings(standings);
   return {
     ...basis.context,
     path: scope.path,
     counts: {
-      total: definitions.length + invalidEntries.length,
+      total: standings.length + invalidEntries.length,
       ...counts,
       invalidEntries: invalidEntries.length,
     },
@@ -263,22 +222,14 @@ function inScope(definition: ResolvedDefinition, scope: string): boolean {
   );
 }
 
-/**
- * The first `MAX_LISTED_DEFINITIONS` in state order, within a state those whose evidence is not current first, then
- * by file and position, and how many of each state were left out.
- */
+/** The first `MAX_LISTED_DEFINITIONS` in the standings' listing order, and how many of each state were left out. */
 function listedDefinitions(
   standings: readonly DefectStanding[],
   states: DefectStateCounts,
 ): Pick<DefectsAnswer, "definitions" | "definitionsNotListed"> {
-  const ordered = [...standings].sort(
-    (left, right) =>
-      DEFECT_STATES.indexOf(left.state) - DEFECT_STATES.indexOf(right.state) ||
-      currentRank(left) - currentRank(right) ||
-      compareFiles(left.definition.file, right.definition.file) ||
-      left.definition.position - right.definition.position,
-  );
-  const listed = ordered.slice(0, MAX_LISTED_DEFINITIONS);
+  const listed = [...standings]
+    .sort(compareStandings)
+    .slice(0, MAX_LISTED_DEFINITIONS);
   return {
     definitions: listed.map(listedDefinition),
     definitionsNotListed: Object.fromEntries(
@@ -289,16 +240,6 @@ function listedDefinitions(
       ]),
     ) as Record<DefectState, number>,
   };
-}
-
-/** Evidence that is not current sorts before current evidence; a state that reads no evidence has one rank. */
-function currentRank(standing: DefectStanding): number {
-  return standing.evidence?.freshness === CURRENT ? 1 : 0;
-}
-
-function compareFiles(left: string, right: string): number {
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
 }
 
 function listedDefinition(standing: DefectStanding): ListedDefinition {
