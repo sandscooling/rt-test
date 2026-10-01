@@ -21,7 +21,7 @@ import type {
   TestFacts,
 } from "../../src/falsify/fact-types.js";
 import type { MutationLoad } from "../../src/falsify/mutation-transform.js";
-import { experimentFacts } from "../../src/falsify/run-facts.js";
+import { experimentFacts, type JobEnd } from "../../src/falsify/run-facts.js";
 import { judge, type Judgement } from "../../src/falsify/verdict.js";
 
 type RanFacts = Extract<ExperimentFacts, { run: ExperimentRunFacts }>;
@@ -133,6 +133,8 @@ interface Knobs {
   readonly failingSuites: readonly FailingSuite[];
   readonly state: TestFacts["state"];
   readonly hooks: HookStates;
+  /** Absent for a test Vitest runs once. */
+  readonly repeats?: number;
   readonly reach: Reach;
   readonly errors: readonly ErrorFact[];
   readonly unhandled: number;
@@ -184,6 +186,7 @@ function troubled(troubles: Partial<Knobs>): RanFacts {
         state: knobs.state,
         mode: "run",
         errors: knobs.errors,
+        ...(knobs.repeats === undefined ? {} : { repeats: knobs.repeats }),
         hooks: knobs.hooks,
         reach: knobs.reach,
       },
@@ -421,6 +424,25 @@ describe("what one run of an experiment reads", () => {
     });
   });
 
+  it("D3800: a failed test that declares repeats reads test repeated, naming how many, though its hook state reads pass and its error is an assertion", () => {
+    expect(
+      besideDetection(ranOnce({ test: { ...REJECTING_TEST, repeats: 2 } })),
+    ).toEqual([
+      DETECTED,
+      {
+        verdict: "invalid-experiment",
+        reason: "test-repeated",
+        detail: { repeats: 2 },
+      },
+    ]);
+  });
+
+  it("D3801: a test that declares repeats and passed, so every repeat passed after executing the site, reads survived", () => {
+    expect(judge(ranOnce({ test: { ...SURVIVING_TEST, repeats: 2 } }))).toEqual(
+      { verdict: "survived" },
+    );
+  });
+
   it("D3761: a failed test holding no error reads unclear, not an assertion", () => {
     expect(
       besideDetection(ranOnce({ test: { ...REJECTING_TEST, errors: [] } })),
@@ -450,7 +472,7 @@ describe("what one run of an experiment reads", () => {
 });
 
 describe("the first reason that holds", () => {
-  it("D3765: an invalid experiment reads baseline trouble first, then its run's end, module, suite, test, hook and reach, in that order", () => {
+  it("D3765: an invalid experiment reads baseline trouble first, then its run's end, module, suite, test, hook, repeats and reach, in that order", () => {
     expect(
       reasonsAsEachIsRemoved([
         { baselineState: "failed" },
@@ -462,6 +484,7 @@ describe("the first reason that holds", () => {
         { failingSuites: [{ namePath: ["outer"], errorCount: 1 }] },
         { state: "skipped" },
         { hooks: { beforeEach: "run" } },
+        { repeats: 1 },
         { reach: { executed: "no" } },
       ]),
     ).toEqual([
@@ -474,7 +497,31 @@ describe("the first reason that holds", () => {
       "suite-error",
       "test-not-run",
       "hook-not-passed",
+      "test-repeated",
       "site-not-executed",
+    ]);
+  });
+
+  it("D3808: an experiment its job did not finish has no verdict, though its baseline held an unhandled error that counts against it", () => {
+    const leaky = detection({
+      baseline: baseline({
+        unhandledErrorCount: 1,
+        countedUnhandledErrorCount: 1,
+      }),
+    });
+    const { restoredBaseline: _absent, ...unrestored } = leaky;
+    const { nextRun: _unread, ...unconfirmed } = leaky;
+    expect([
+      judge({
+        ...leaky,
+        restoredBaseline: { recorded: false, run: "run-failed" },
+      }),
+      judge(unrestored),
+      judge({ ...unconfirmed, confirming: { status: "interrupted" } }),
+    ]).toEqual([
+      { reason: "restored-baseline-unrecorded" },
+      { reason: "restored-baseline-unrecorded" },
+      { reason: "confirming-run-unrecorded" },
     ]);
   });
 
@@ -504,13 +551,23 @@ const INTENDED: TestIdentity = {
   namePath: ["a"],
   occurrence: 0,
 };
-const NO_JOB_ERRORS = { unhandledErrors: [] };
+const NO_JOB_ERRORS: JobEnd = { unhandledErrors: [] };
 const MISSING = "missing";
+/** An error as Vitest serializes a failed `expect`. */
+const REJECTION: RawError = { name: "AssertionError" };
 
-/** A run of the intended test's module alone, in which the test passed unless `errors` names what failed it. */
+/**
+ * A run of the intended test's module alone, in which the test passed unless `errors` names what failed it. The run
+ * ended cleanly but for what `ending` holds, and the test holds a reach or repeats only when given one.
+ */
 function runRecord(
   record: {
     readonly errors?: readonly RawError[];
+    readonly reach?: Reach;
+    readonly repeats?: number;
+    readonly ending?: Partial<
+      Pick<RunRecord, "execution" | "forceStopped" | "cancelError">
+    >;
     readonly unhandledErrors?: readonly RawError[];
     readonly unhandledErrorModules?: RunRecord["unhandledErrorModules"];
   } = {},
@@ -520,6 +577,7 @@ function runRecord(
   return {
     execution: "completed",
     forceStopped: false,
+    ...record.ending,
     modules: [
       {
         projectName: INTENDED.projectName,
@@ -535,7 +593,11 @@ function runRecord(
             mode: "run",
             state,
             errors,
+            ...(record.repeats === undefined
+              ? {}
+              : { repeats: record.repeats }),
             hooks: HOOKS_PASSED,
+            ...(record.reach === undefined ? {} : { reach: record.reach }),
           },
         ],
       },
@@ -560,9 +622,9 @@ function ran(
   return { defectId, status: "ran", run, mutation: [APPLIED] };
 }
 
-/** An experiment that ran twice, its confirming run leaving a record. */
+/** An experiment whose test rejected the mutation at an assertion in both its run and its confirming run. */
 function confirmed(defectId: string): ExperimentRecord {
-  const run = runRecord({ errors: [{ name: "AssertionError" }] });
+  const run = runRecord({ errors: [REJECTION], reach: IN_TEST });
   return {
     ...ran(defectId, run),
     confirming: { status: "ran", run, mutation: [APPLIED] },
@@ -593,14 +655,32 @@ function jobOf(
 function firstFacts(
   runs: JobRuns,
   assertionErrors: readonly string[] = [],
+  end: JobEnd = NO_JOB_ERRORS,
 ): ExperimentFacts | undefined {
   return experimentFacts(
     runs,
-    NO_JOB_ERRORS,
+    end,
     runs.experiments.map((record) => experiment(record.defectId)),
     assertionErrors,
   )[0]?.facts;
 }
+
+/** The first experiment's judgement, decided from the facts its job's records and the job's own end give. */
+function firstJudgement(runs: JobRuns, end: JobEnd = NO_JOB_ERRORS): unknown {
+  const facts = firstFacts(runs, [], end);
+  return facts === undefined ? MISSING : judge(facts);
+}
+
+/** A job whose one experiment reads detected, but for what `baselineRecord` holds. */
+function detectingJob(baselineRecord?: RunRecord): JobRuns {
+  return jobOf([confirmed("a")], baselineRecord);
+}
+
+const BASELINE_NOT_CLEAN = {
+  verdict: "invalid-experiment",
+  reason: "baseline-not-clean",
+};
+const JOB_UNCLEAN = { verdict: "unclear", reason: "job-unclean" };
 
 function nextRunOf(runs: JobRuns): unknown {
   const facts = firstFacts(runs);
@@ -610,6 +690,71 @@ function nextRunOf(runs: JobRuns): unknown {
 }
 
 describe("an experiment's facts, read from the job's records", () => {
+  it("D3802: the repeats a run's record holds for the test reach its facts, so the failed test reads test repeated", () => {
+    expect(
+      firstJudgement(
+        jobOf([
+          ran(
+            "a",
+            runRecord({ errors: [REJECTION], reach: IN_TEST, repeats: 1 }),
+          ),
+        ]),
+      ),
+    ).toEqual({
+      verdict: "invalid-experiment",
+      reason: "test-repeated",
+      detail: { repeats: 1 },
+    });
+  });
+
+  it("D3803: an unhandled error the job's own thread recorded reaches the facts, so a would-be detection reads job unclean", () => {
+    expect([
+      firstJudgement(detectingJob()),
+      firstJudgement(detectingJob(), {
+        unhandledErrors: ["unhandled rejection on the host thread"],
+      }),
+    ]).toEqual([DETECTED, JOB_UNCLEAN]);
+  });
+
+  it("D3804: an instance that failed to close reaches the facts, so a would-be detection reads job unclean", () => {
+    expect([
+      firstJudgement(detectingJob()),
+      firstJudgement(detectingJob(), {
+        unhandledErrors: [],
+        closeError: "Error: close timed out",
+      }),
+    ]).toEqual([DETECTED, JOB_UNCLEAN]);
+  });
+
+  it("D3805: a baseline record whose workers Vitest force-stopped reaches the facts, so the experiment reads baseline not clean", () => {
+    expect([
+      firstJudgement(detectingJob()),
+      firstJudgement(
+        detectingJob(runRecord({ ending: { forceStopped: true } })),
+      ),
+    ]).toEqual([DETECTED, BASELINE_NOT_CLEAN]);
+  });
+
+  it("D3806: a baseline record whose cancel raised an error reaches the facts, so the experiment reads baseline not clean", () => {
+    expect([
+      firstJudgement(detectingJob()),
+      firstJudgement(
+        detectingJob(
+          runRecord({ ending: { cancelError: "Error: cancel failed" } }),
+        ),
+      ),
+    ]).toEqual([DETECTED, BASELINE_NOT_CLEAN]);
+  });
+
+  it("D3807: a baseline record that reads interrupted reaches the facts, so the experiment reads baseline not clean", () => {
+    expect([
+      firstJudgement(detectingJob()),
+      firstJudgement(
+        detectingJob(runRecord({ ending: { execution: "interrupted" } })),
+      ),
+    ]).toEqual([DETECTED, BASELINE_NOT_CLEAN]);
+  });
+
   it("D3768: a baseline's unhandled error that names no test module counts against the experiment, as an unnamed one", () => {
     const facts = firstFacts(
       jobOf(

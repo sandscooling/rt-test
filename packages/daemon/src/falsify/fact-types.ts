@@ -45,6 +45,8 @@ export interface TestFacts {
   readonly state: RecordedRunTest["state"];
   readonly mode: RecordedRunTest["mode"];
   readonly errors: readonly ErrorFact[];
+  /** How many more times than once Vitest was told to run the test; absent when none. */
+  readonly repeats?: number;
   /** Absent when Vitest recorded no hook state on the test's result. */
   readonly hooks?: HookStates;
   /** Present only in an experiment's run. */
@@ -138,7 +140,7 @@ export interface JobFacts {
 interface SharedFacts {
   /** Absent when the baseline left no record or the job ran none. */
   readonly baseline?: BaselineFacts;
-  /** Absent when the job started no restored baseline. */
+  /** Absent when no restored baseline ran to its end: the job started none, or an abort interrupted it. */
   readonly restoredBaseline?: RestoredBaselineFacts;
   readonly job: JobFacts;
 }

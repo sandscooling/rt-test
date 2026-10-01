@@ -507,8 +507,8 @@
     "id": "D3760",
     "defect": "A passed test reads survived before its hook states are read, so a test whose hook states were not recorded reads as a survivor.",
     "file": "packages/daemon/src/falsify/verdict.ts",
-    "old": "  return (\n    readHooks(test.hooks) ??\n    readReach(test.reach, run) ??\n    readBody(test, run.unhandledErrorCount)\n  );",
-    "new": "  if (test.state === PASSED) return { verdict: VERDICT.survived };\n  return (\n    readHooks(test.hooks) ??\n    readReach(test.reach, run) ??\n    readBody(test, run.unhandledErrorCount)\n  );"
+    "old": "  return (\n    readHooks(test.hooks) ??\n    readRepeats(test) ??\n    readReach(test.reach, run) ??\n    readBody(test, run.unhandledErrorCount)\n  );",
+    "new": "  if (test.state === PASSED) return { verdict: VERDICT.survived };\n  return (\n    readHooks(test.hooks) ??\n    readRepeats(test) ??\n    readReach(test.reach, run) ??\n    readBody(test, run.unhandledErrorCount)\n  );"
   },
   {
     "id": "D3761",
@@ -542,8 +542,8 @@
     "id": "D3765",
     "defect": "Reach is read before the hook states, so a test whose beforeEach failed before the site could execute reads site not executed, hiding the hook that failed.",
     "file": "packages/daemon/src/falsify/verdict.ts",
-    "old": "    readHooks(test.hooks) ??\n    readReach(test.reach, run) ??",
-    "new": "    readReach(test.reach, run) ??\n    readHooks(test.hooks) ??"
+    "old": "    readHooks(test.hooks) ??\n    readRepeats(test) ??\n    readReach(test.reach, run) ??",
+    "new": "    readReach(test.reach, run) ??\n    readHooks(test.hooks) ??\n    readRepeats(test) ??"
   },
   {
     "id": "D3766",
@@ -673,14 +673,14 @@
   },
   {
     "id": "D3784",
-    "defect": "A confirming run an abort interrupted is kept as a run that finished, so its experiment is judged from a run cut short where it has no verdict.",
+    "defect": "A confirming run an abort interrupted is kept as a run that finished, so the reply holds the record of a run cut short, and the experiment's missing verdict is put down to the restored baseline where its confirming run is what did not finish.",
     "file": "packages/daemon/src/falsify/falsify-workspace.ts",
     "old": "    if (execution === \"interrupted\" && this.#signal.aborted) {",
     "new": "    if (execution === \"interrupted\" && !this.#signal.aborted) {"
   },
   {
     "id": "D3785",
-    "defect": "The anchor-count reason does not carry how often the anchor occurred, so the author cannot tell a missing anchor from a repeated one.",
+    "defect": "The anchor-count reason carries a count of zero whatever the anchor's count was, so an anchor that occurs twice reads as one that is missing.",
     "file": "packages/daemon/src/falsify/verdict.ts",
     "old": "        detail: { count: notRun.count },",
     "new": "        detail: { count: 0 },"
@@ -782,5 +782,89 @@
     "file": "packages/daemon/src/falsify/verdict.ts",
     "old": "    case \"run-unrecorded\":\n      return { reason: NO_VERDICT_REASON.runUnrecorded };\n",
     "new": "    case \"run-unrecorded\":\n"
+  },
+  {
+    "id": "D3800",
+    "defect": "A failed test that declares repeats is read as any failed test, so an assertion that failed in a beforeEach or afterEach on an earlier repeat, its last repeat's hooks and body passing, is credited as a detection.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    readRepeats(test) ??\n",
+    "new": ""
+  },
+  {
+    "id": "D3801",
+    "defect": "A passed test that declares repeats reads invalid experiment, so a mutation that every repeat let through is not reported as a survivor.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (test.state !== FAILED || test.repeats === undefined) return undefined;",
+    "new": "  if (test.repeats === undefined) return undefined;"
+  },
+  {
+    "id": "D3802",
+    "defect": "The repeats a test declares are not carried from the record to the facts, so the judge reads a failed repeated test as any failed test.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    ...(test.repeats === undefined ? {} : { repeats: test.repeats }),\n",
+    "new": ""
+  },
+  {
+    "id": "D3803",
+    "defect": "The job's own unhandled errors count as none in the facts, so a detection stands though the executor's thread raised an error.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    unhandledErrorCount: end.unhandledErrors.length,",
+    "new": "    unhandledErrorCount: 0,"
+  },
+  {
+    "id": "D3804",
+    "defect": "The instance reads closed in the facts whatever its close error, so a detection stands though the instance failed to close.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "    closed: end.closeError === undefined,",
+    "new": "    closed: true,"
+  },
+  {
+    "id": "D3805",
+    "defect": "A run's force-stop is not carried from the record to the facts, so a run whose workers Vitest force-stopped is judged as one that ended cleanly.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      forceStopped: record.forceStopped,",
+    "new": "      forceStopped: false,"
+  },
+  {
+    "id": "D3806",
+    "defect": "A run's cancel error is not carried from the record to the facts, so a run whose cancel raised an error is judged as one that ended cleanly.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      cancelFailed: record.cancelError !== undefined,",
+    "new": "      cancelFailed: false,"
+  },
+  {
+    "id": "D3807",
+    "defect": "How a run's execution ended is not carried from the record to the facts, so a run something interrupted is judged as one that completed.",
+    "file": "packages/daemon/src/falsify/run-facts.ts",
+    "old": "      execution: record.execution,",
+    "new": "      execution: \"completed\","
+  },
+  {
+    "id": "D3808",
+    "defect": "Baseline trouble is read before whether the experiment has a verdict, so an experiment of a job that left no restored baseline, or whose confirming run left no record, reads invalid experiment where it has no verdict.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "  if (confirming !== undefined && confirming.status !== \"ran\") {",
+    "new": "  const trouble = baselineTrouble(\n    baseline,\n    restoredBaseline as BaselineFacts,\n  );\n  if (trouble !== undefined) return trouble;\n  if (confirming !== undefined && confirming.status !== \"ran\") {"
+  },
+  {
+    "id": "D3809",
+    "defect": "The repeats Vitest was told to give a test are not recorded, so a test its suite repeats, whose setup assertion failed on an earlier repeat alone, is credited as a detection.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "    ...(repeats === undefined ? {} : { repeats }),\n",
+    "new": ""
+  },
+  {
+    "id": "D3810",
+    "defect": "A test told to run once more than once is recorded as a test Vitest runs once, so the fewest repeats a test can declare escape the reading and its hook failure is credited as a detection.",
+    "file": "packages/daemon/src/falsify/experiment-record.ts",
+    "old": "  return repeats !== undefined && repeats > 0 ? repeats : undefined;",
+    "new": "  return repeats !== undefined && repeats > 1 ? repeats : undefined;"
+  },
+  {
+    "id": "D3811",
+    "defect": "The unhandled errors the job's own thread recorded are not handed to the judging, so a detection stands though the executor's thread raised an error while the instance was open.",
+    "file": "packages/daemon/src/falsify/falsify-workspace.ts",
+    "old": "    unhandledErrors: job.unhandledErrors,",
+    "new": "    unhandledErrors: [],"
   }
 ]

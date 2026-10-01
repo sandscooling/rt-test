@@ -48,6 +48,7 @@ const INVALID_REASON = {
   suiteError: "suite-error",
   testNotRun: "test-not-run",
   hookNotPassed: "hook-not-passed",
+  testRepeated: "test-repeated",
   siteNotExecuted: "site-not-executed",
   reachUnknown: "reach-unknown",
 } as const;
@@ -108,6 +109,11 @@ type InvalidRun =
         readonly hook: string;
         readonly state: HookState | typeof HOOK_NOT_RECORDED;
       };
+    }
+  | {
+      readonly reason: typeof INVALID_REASON.testRepeated;
+      /** How many more times than once Vitest was told to run the test. */
+      readonly detail: { readonly repeats: number };
     }
   | {
       readonly reason: typeof INVALID_REASON.siteNotExecuted;
@@ -342,6 +348,7 @@ function readRun(run: ExperimentRunFacts): RunReading {
   }
   return (
     readHooks(test.hooks) ??
+    readRepeats(test) ??
     readReach(test.reach, run) ??
     readBody(test, run.unhandledErrorCount)
   );
@@ -394,6 +401,19 @@ function hookNotPassed(
     verdict: VERDICT.invalidExperiment,
     reason: INVALID_REASON.hookNotPassed,
     detail: { hook, state },
+  };
+}
+
+/**
+ * A repeated test stays failed once any repeat failed and keeps that repeat's errors, while the hook states it holds
+ * are its last repeat's alone, so its failure cannot be told from one in a hook. It passes only when every repeat did.
+ */
+function readRepeats(test: TestFacts): RunReading | undefined {
+  if (test.state !== FAILED || test.repeats === undefined) return undefined;
+  return {
+    verdict: VERDICT.invalidExperiment,
+    reason: INVALID_REASON.testRepeated,
+    detail: { repeats: test.repeats },
   };
 }
 

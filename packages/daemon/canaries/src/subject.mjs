@@ -83,6 +83,25 @@ export function cleanupValue() {
   return "cleanup";
 }
 
+// The two below return their own value on the first call alone, so a setup that checks one meets its mutated value on
+// a repeated test's first repeat and on no later one.
+
+let suiteRepeatSeen = false;
+
+export function suiteRepeatValue() {
+  if (suiteRepeatSeen) return "seen";
+  suiteRepeatSeen = true;
+  return "suite-repeat";
+}
+
+let testRepeatSeen = false;
+
+export function testRepeatValue() {
+  if (testRepeatSeen) return "seen";
+  testRepeatSeen = true;
+  return "test-repeat";
+}
+
 function requireLoadable(loadable) {
   if (!loadable) throw new Error("the subject module failed to load");
 }

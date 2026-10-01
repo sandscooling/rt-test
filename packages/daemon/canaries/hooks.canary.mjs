@@ -14,9 +14,13 @@ import {
   beforeEachValue,
   cleanupValue,
   concurrentValue,
+  suiteRepeatValue,
+  testRepeatValue,
 } from "./src/subject.mjs";
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// What the subject's one-time values return on every call after the first.
+const SEEN_BEFORE = "seen";
 
 describe("module load", () => {
   it("reads what a module built while it loaded", () => {
@@ -46,6 +50,29 @@ describe("after each", () => {
   });
 
   it("runs before a checked teardown", () => {
+    expect(true).toBe(true);
+  });
+});
+
+// The suite gives its test the repeats. Under the mutation the setup's assertion fails on the first repeat alone, and
+// Vitest keeps the test failed while the hook states it holds are those of its last repeat, which passed.
+describe("repeated by its suite", { repeats: 2 }, () => {
+  beforeEach(() => {
+    assert.include(["suite-repeat", SEEN_BEFORE], suiteRepeatValue());
+  });
+
+  it("passes its body on every repeat", () => {
+    expect(true).toBe(true);
+  });
+});
+
+// The test declares one repeat itself, the fewest a test can be given.
+describe("repeated by its own options", () => {
+  beforeEach(() => {
+    assert.include(["test-repeat", SEEN_BEFORE], testRepeatValue());
+  });
+
+  it("passes its body on both runs", { repeats: 1 }, () => {
     expect(true).toBe(true);
   });
 });

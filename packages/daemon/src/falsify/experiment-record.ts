@@ -70,6 +70,8 @@ export interface RecordedRunTest extends IdentifiedTest {
   readonly mode: TestCase["options"]["mode"];
   readonly state: TestState;
   readonly errors: readonly RawError[];
+  /** How many more times than once Vitest was told to run the test, by its own options or a suite's; absent when none. */
+  readonly repeats?: number;
   /** Absent when Vitest recorded no hook state on the test's result. */
   readonly hooks?: HookStates;
   /** Present only in an experiment's run. */
@@ -199,7 +201,10 @@ export type ExperimentJudgement = Judgement & {
   readonly facts: ExperimentFacts;
 };
 
-/** A job that ran carries one judgement per experiment it was given, in the order given, decided once its instance closed. */
+/**
+ * A job that ran carries one judgement per experiment it was given, in the order given, decided once its instance
+ * closed. `Job` is a parameter so that the condition is applied to each member of the job's union alone.
+ */
 export type JudgedJobFacts<Job = SessionJobFacts> = Job extends {
   readonly status: "ran";
 }
@@ -389,11 +394,13 @@ function recordTest(
 ): RecordedRunTest {
   const result = test.result();
   const hooks = hookStates(test);
+  const repeats = declaredRepeats(test);
   return {
     ...identified,
     mode: test.options.mode,
     state: result.state,
     errors: (result.errors ?? []).map(rawError),
+    ...(repeats === undefined ? {} : { repeats }),
     ...(hooks === undefined ? {} : { hooks }),
     ...(reachOf === undefined ? {} : { reach: reachOf(test) }),
   };
@@ -422,6 +429,12 @@ function reachFromMark(test: TestCase): Reach {
   if (mark.inTest === true) return IN_TEST;
   if (mark.outsideTest === true) return OUTSIDE_TEST;
   return NOT_EXECUTED;
+}
+
+/** The repeats the test's options hold, its own or those a suite gave it; undefined for a test Vitest runs once. */
+function declaredRepeats(test: TestCase): number | undefined {
+  const { repeats } = test.options;
+  return repeats !== undefined && repeats > 0 ? repeats : undefined;
 }
 
 /** The public `TestCase.result()` leaves out the hook states the runner records on its task. */

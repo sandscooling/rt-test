@@ -80,6 +80,7 @@ describe("body", () => {
     expect(readShared()).toBeDefined();
   });
 
+  // Relies on the test before it, the only one that runs the site: this one reads what that one stored.
   it("reads the value another test stored", () => {
     expect(readShared()).toBe("shared");
   });

@@ -235,6 +235,42 @@ describe("a canary whose run cannot say whether its test rejects the mutation", 
   );
 
   it(
+    "D3809: a test its suite gave repeats, whose setup assertion failed on the first repeat alone, reads test repeated, naming how many, never detected",
+    async () => {
+      const read = {
+        "suite-repeats-setup-assertion": {
+          verdict: "invalid-experiment",
+          reason: "test-repeated",
+          detail: { repeats: 2 },
+        },
+      };
+      expect(await onBothLines(judgementsOf(Object.keys(read)))).toEqual([
+        read,
+        read,
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D3810: a test that declares one repeat of its own, whose setup assertion failed on its first run alone, reads test repeated, never detected",
+    async () => {
+      const read = {
+        "test-repeats-setup-assertion": {
+          verdict: "invalid-experiment",
+          reason: "test-repeated",
+          detail: { repeats: 1 },
+        },
+      };
+      expect(await onBothLines(judgementsOf(Object.keys(read)))).toEqual([
+        read,
+        read,
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "D3792: a beforeAll that throws reads suite error, naming the suite",
     async () => {
       const read = {

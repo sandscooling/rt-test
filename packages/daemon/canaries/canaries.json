@@ -128,6 +128,41 @@
       }
     },
     {
+      "id": "suite-repeats-setup-assertion",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": ["repeated by its suite", "passes its body on every repeat"]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"suite-repeat\"",
+        "new": "\"suite-repeat!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "test-repeated"
+      }
+    },
+    {
+      "id": "test-repeats-setup-assertion",
+      "test": {
+        "modulePath": "hooks.canary.mjs",
+        "namePath": [
+          "repeated by its own options",
+          "passes its body on both runs"
+        ]
+      },
+      "mutation": {
+        "file": "src/subject.mjs",
+        "old": "\"test-repeat\"",
+        "new": "\"test-repeat!\""
+      },
+      "judgement": {
+        "verdict": "invalid-experiment",
+        "reason": "test-repeated"
+      }
+    },
+    {
       "id": "before-all-throw",
       "test": {
         "modulePath": "hooks.canary.mjs",

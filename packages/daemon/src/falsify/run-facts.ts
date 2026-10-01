@@ -299,6 +299,7 @@ function testFacts(
     state: test.state,
     mode: test.mode,
     errors: test.errors.map((error) => errorFact(error, assertionErrors)),
+    ...(test.repeats === undefined ? {} : { repeats: test.repeats }),
     ...(test.hooks === undefined ? {} : { hooks: test.hooks }),
     ...(test.reach === undefined ? {} : { reach: test.reach }),
   };

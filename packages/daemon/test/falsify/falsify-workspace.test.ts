@@ -25,7 +25,7 @@ import { falsifyWorkspace } from "../../src/falsify/falsify-workspace.js";
 import { StaleTransformGuard } from "../../src/falsify/stale-transform-guard.js";
 import { chosenConfigFile } from "../../src/vitest/confirmed-start.js";
 import type { VitestWorkspace } from "../../src/vitest/find-workspaces.js";
-import { DAEMON_TEST_TIMEOUT_MS } from "../daemon-harness.js";
+import { DAEMON_TEST_TIMEOUT_MS, withEnvironment } from "../daemon-harness.js";
 import {
   copyFixture,
   HAND_BUILT_ROOT,
@@ -59,6 +59,9 @@ const GREET_MODULE = "src/greet.mjs";
 const ABORTED_JOB_EXPERIMENTS: readonly string[] = ["add", "greet", "lib"];
 /** A would-be detection's module is served mutated once in its first run and a second time in its confirming run. */
 const CONFIRMING_SERVE = 2;
+/** Read by the fixture's `once` test: the file it marks the first time it meets a mutated value. */
+const ONCE_MARKER_VARIABLE = "RT_FIXTURE_ONCE_MARKER";
+const ONCE_MARKER = "flaked-once";
 /** The fields of a serialized error that hold message or source text. */
 const ERROR_TEXT_FIELDS = ["message", "stack", "diff"] as const;
 /** How many `/`-separated segments of a module's id name it within the fixture, as `src/math.mjs` does. */
@@ -285,7 +288,8 @@ const jobs = new Map<VitestInstall, Promise<FalsifiedFixture>>();
  * and runs every experiment. The label module is edited as Vite first transforms it, so the runs after the baseline
  * find it changed on disk. A test module that imports the math module is edited while the `add` experiment runs,
  * after the job invalidated the math module for that experiment and before any later run asks for the test module.
- * The job's temp directory is also where the `once` experiment's test keeps the marker that makes it fail only once.
+ * The `once` experiment's test is told where to keep the marker that makes it fail only once: a file under the job's
+ * temp directory, named through `ONCE_MARKER_VARIABLE`.
  */
 function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
   const cached = jobs.get(install);
@@ -334,12 +338,14 @@ function falsifiedOn(install: VitestInstall): Promise<FalsifiedFixture> {
     const workspace: VitestWorkspace = { path: ".", directory: root };
     try {
       const falsified = await withTempDirectory(temp, () =>
-        falsifyWorkspace(
-          workspace,
-          chosenConfigFile(workspace) ?? "",
-          experiments(root),
-          NO_DECLARED_NAMES,
-          NEVER_ABORTED,
+        withEnvironment(ONCE_MARKER_VARIABLE, join(temp, ONCE_MARKER), () =>
+          falsifyWorkspace(
+            workspace,
+            chosenConfigFile(workspace) ?? "",
+            experiments(root),
+            NO_DECLARED_NAMES,
+            NEVER_ABORTED,
+          ),
         ),
       );
       const expected = new Map(before);
@@ -1166,7 +1172,8 @@ describe("the judgement each experiment reads", () => {
   it(
     "D3781: a job's judgements, with the facts they rest on, hold no error's message, stack or diff",
     async () => {
-      expect(await onBothLines(errorTextsInJudgements)).toEqual([[], []]);
+      const none = { compared: true, held: [] };
+      expect(await onBothLines(errorTextsInJudgements)).toEqual([none, none]);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -1400,11 +1407,17 @@ function textsOf(error: RawError): string[] {
   });
 }
 
-/** Each message, stack or diff of any error of any run of the job that its judgements, serialized, hold. */
+/**
+ * Each message, stack or diff of any error of any run of the job that its judgements, serialized, hold, and whether
+ * the runs held any such text to compare.
+ */
 function errorTextsInJudgements(fixture: FalsifiedFixture): unknown {
   const job = ranJob(fixture.job);
   if (job === undefined) return fixture.job.status;
   const serialized = JSON.stringify(job.judgements);
   const texts = new Set(runRecordsOf(job).flatMap(errorsOf).flatMap(textsOf));
-  return [...texts].filter((text) => serialized.includes(text));
+  return {
+    compared: texts.size > 0,
+    held: [...texts].filter((text) => serialized.includes(text)),
+  };
 }
