@@ -13,109 +13,32 @@ import type {
   BaselineFacts,
   ErrorFact,
   ExperimentFacts,
-  ExperimentRunFacts,
   FailingSuite,
   HookStates,
-  ModuleFacts,
   RunEnding,
   TestFacts,
 } from "../../src/falsify/fact-types.js";
-import type { MutationLoad } from "../../src/falsify/mutation-transform.js";
 import { experimentFacts, type JobEnd } from "../../src/falsify/run-facts.js";
 import { judge, type Judgement } from "../../src/falsify/verdict.js";
+import {
+  APPLIED,
+  ASSERTION,
+  baseline,
+  CLEAN_END,
+  CLEAN_JOB,
+  detection,
+  HOOKS_PASSED,
+  IN_TEST,
+  mutatedRun,
+  PASSED_TEST,
+  ranOnce,
+  REJECTING_TEST,
+  SURVIVING_TEST,
+  TYPE_ERROR,
+  type RanFacts,
+} from "../experiment-facts.js";
 
-type RanFacts = Extract<ExperimentFacts, { run: ExperimentRunFacts }>;
-
-const CLEAN_END: RunEnding = {
-  execution: "completed",
-  forceStopped: false,
-  cancelFailed: false,
-};
-const COLLECTED: ModuleFacts = {
-  collected: true,
-  errorCount: 0,
-  failingSuites: [],
-};
-const ASSERTION: ErrorFact = {
-  kind: "assertion",
-  marker: "assertion-error-name",
-  name: "AssertionError",
-};
-const TYPE_ERROR: ErrorFact = { kind: "other", name: "TypeError" };
-const APPLIED: MutationLoad = {
-  applied: true,
-  probe: {
-    placed: true,
-    site: { line: 2, column: 10, nodeKind: "BinaryExpression" },
-  },
-};
-const HOOKS_PASSED: HookStates = { beforeEach: "pass" };
-const IN_TEST: Reach = { executed: "in-test" };
-const PASSED_TEST: TestFacts = {
-  state: "passed",
-  mode: "run",
-  errors: [],
-  hooks: HOOKS_PASSED,
-};
-/** The intended test as a detection's run records it: failed at an assertion, its hook passed, the site executed in it. */
-const REJECTING_TEST: TestFacts = {
-  state: "failed",
-  mode: "run",
-  errors: [ASSERTION],
-  hooks: HOOKS_PASSED,
-  reach: IN_TEST,
-};
-const SURVIVING_TEST: TestFacts = { ...PASSED_TEST, reach: IN_TEST };
-const CLEAN_JOB = { unhandledErrorCount: 0, closed: true };
 const DETECTED = { verdict: "detected" };
-
-function baseline(facts: Partial<BaselineFacts> = {}): BaselineFacts {
-  return {
-    test: PASSED_TEST,
-    module: COLLECTED,
-    unhandledErrorCount: 0,
-    ending: CLEAN_END,
-    countedUnhandledErrorCount: 0,
-    unnamedUnhandledErrorCount: 0,
-    ...facts,
-  };
-}
-
-function mutatedRun(
-  facts: Partial<ExperimentRunFacts> = {},
-): ExperimentRunFacts {
-  return {
-    test: REJECTING_TEST,
-    module: COLLECTED,
-    unhandledErrorCount: 0,
-    ending: CLEAN_END,
-    mutation: [APPLIED],
-    ...facts,
-  };
-}
-
-/** Facts that hold every condition of a detection, but for what `facts` replaces. */
-function detection(facts: Partial<RanFacts> = {}): RanFacts {
-  return {
-    baseline: baseline(),
-    restoredBaseline: { recorded: true, ...baseline() },
-    job: CLEAN_JOB,
-    run: mutatedRun(),
-    confirming: { status: "ran", ...mutatedRun() },
-    nextRun: { recorded: true, unhandledErrorCount: 0 },
-    ...facts,
-  };
-}
-
-/** An experiment whose one run was no would-be detection, as the job leaves it: no confirming run and no run read after it. */
-function ranOnce(run: Partial<ExperimentRunFacts>): RanFacts {
-  return {
-    baseline: baseline(),
-    restoredBaseline: { recorded: true, ...baseline() },
-    job: CLEAN_JOB,
-    run: mutatedRun(run),
-  };
-}
 
 /** What the judge reads from facts that hold every condition of a detection, then from each of `others`. */
 function besideDetection(...others: ExperimentFacts[]): Judgement[] {

@@ -1291,8 +1291,8 @@
     "id": "D3704",
     "defect": "An anchor-missing definition is left out of the text, so the author never sees why it cannot run.",
     "file": "packages/cli/src/commands/defects.ts",
-    "old": "  (state) => state !== DEFECT_STATE.neverVerified,",
-    "new": "  (state) => state === DEFECT_STATE.invalidDefinition,"
+    "old": "      listedIn(answer, NOT_RUNNABLE_STATES).map(reasonedText),",
+    "new": "      listedIn(answer, [DEFECT_STATE.invalidDefinition]).map(reasonedText),"
   },
   {
     "id": "D3705",
@@ -1303,10 +1303,10 @@
   },
   {
     "id": "D3729",
-    "defect": "The command leaves out the line saying how many invalid and anchor-missing definitions the answer did not list, so a 500-entry list reads as the whole.",
+    "defect": "The command leaves out the line saying how many definitions of each state the answer did not list, so a 500-entry list reads as the whole.",
     "file": "packages/cli/src/commands/defects.ts",
-    "old": "    ...(unlisted.length === 0",
-    "new": "    ...(true"
+    "old": "    notListedLine(answer.definitionsNotListed),\n",
+    "new": ""
   },
   {
     "id": "D3730",
@@ -1314,5 +1314,40 @@
     "file": "packages/cli/src/commands/defects.ts",
     "old": "    ...defectCountLines(answer.counts),",
     "new": "    ...defectCountLines({ ...answer.counts, states: Object.fromEntries(DEFECT_STATES.map((state) => [state, answer.definitions.filter((definition) => definition.state === state).length])) as DefectCounts[\"states\"] }),"
+  },
+  {
+    "id": "D3958",
+    "defect": "One definition file problem is worded as several, so the text reads \"1 are definition file problems\".",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "    counts.invalidEntries === 1\n      ? \"1 is a definition file problem\"",
+    "new": "    false\n      ? \"1 is a definition file problem\""
+  },
+  {
+    "id": "D3959",
+    "defect": "The text leaves out the count of each cause of staleness, so a stale detection it does not list is never explained.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "    `Stale causes: ${namedCounts(counts.staleCauses)}`,\n",
+    "new": ""
+  },
+  {
+    "id": "D3960",
+    "defect": "The text lists no verdict that is not a detection, so a survivor is counted and never named.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "      listedIn(answer, UNDETECTED_VERDICTS).map(verdictText),",
+    "new": "      [],"
+  },
+  {
+    "id": "D3961",
+    "defect": "The text leaves out a never verified definition whose stored evidence was refused, so its refusal is counted and never named.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "      listedIn(answer, [DEFECT_STATE.neverVerified])\n        .filter((definition) => definition.reason !== undefined)\n        .map(reasonedText),",
+    "new": "      [],"
+  },
+  {
+    "id": "D3962",
+    "defect": "The text adds a line saying every defect is verified when verified equals the total, summing a scope up as passed.",
+    "file": "packages/cli/src/commands/defects.ts",
+    "old": "    ...defectCountLines(answer.counts),\n",
+    "new": "    ...defectCountLines(answer.counts),\n    ...(answer.counts.verified === answer.counts.total\n      ? [\"Every defect in scope is verified\"]\n      : []),\n"
   }
 ]

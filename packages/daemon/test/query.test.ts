@@ -39,6 +39,17 @@ import {
   waitAnswer,
   type Coverage,
 } from "../src/query/wait-answer.js";
+import { defectStandings } from "../src/defects/defect-standings.js";
+import { readDefinitionFiles } from "../src/defects/definition-files.js";
+import { checkDefinitions } from "../src/defects/definitions.js";
+import {
+  readAnchors,
+  resolveDefinitions,
+} from "../src/defects/resolve-definitions.js";
+import type {
+  LatestEvidence,
+  StoredEvidence,
+} from "../src/store/defect-evidence.js";
 import type { LatestResults } from "../src/store/open-store.js";
 import type {
   InputFingerprint,
@@ -60,6 +71,7 @@ import {
   onPlatform,
   projectFacts,
 } from "./harness.js";
+import { detectionFor, ranOnce, REJECTING_TEST } from "./experiment-facts.js";
 import { narrowingSelecting } from "./round-fixtures.js";
 import {
   defectsAnswer,
@@ -288,8 +300,9 @@ function results(
   latestRuns: readonly StoredRun[] = [],
   discoveryRefusal?: string,
   runRefusals: LatestResults["runRefusals"] = [],
+  evidence: LatestEvidence = { evidence: [], evidenceRefusals: [] },
 ): LatestResults {
-  return { discovery, discoveryRefusal, latestRuns, runRefusals };
+  return { discovery, discoveryRefusal, latestRuns, runRefusals, ...evidence };
 }
 
 function answered<A extends object>(answer: A | NoAnswer): A {
@@ -2572,6 +2585,17 @@ function defectsOver(
   });
 }
 
+/** A count of zero for each state a definition can read. */
+const NO_DEFINITIONS = {
+  "invalid-definition": 0,
+  "anchor-missing": 0,
+  survived: 0,
+  "invalid-experiment": 0,
+  unclear: 0,
+  "never-verified": 0,
+  detected: 0,
+};
+
 /** A stored discovery of the tests named in `A_MODULE` and of the test `d` in `B_MODULE`. */
 function discoveryOfAAndB(...names: readonly string[]): LatestResults {
   return results(
@@ -2717,11 +2741,13 @@ describe(
         listed: 500,
         listedStates: ["invalid-definition"],
         notListed: {
+          ...NO_DEFINITIONS,
           "invalid-definition": 1,
           "anchor-missing": 1,
           "never-verified": 1,
         },
         states: {
+          ...NO_DEFINITIONS,
           "invalid-definition": 501,
           "anchor-missing": 1,
           "never-verified": 1,
@@ -3020,3 +3046,255 @@ describe("the defects answer's gap listing and refusals", () => {
     });
   });
 });
+
+/** Settled inputs under which workspace A's current fingerprint is the one each stored detection below ran at. */
+const A_AT_DIGEST = settled({
+  [WORKSPACE_A]: { ok: true, digest: DIGEST.digest },
+});
+
+/**
+ * A detection for each definition the files under `root` hold, bound as a job that ran at `DIGEST` binds it: to the
+ * definition's digest from its standing and to its mutation file's digest from its anchor read.
+ */
+async function detectionsUnder(
+  root: string,
+  latest: LatestResults,
+): Promise<StoredEvidence[]> {
+  const signal = new AbortController().signal;
+  const files = await readDefinitionFiles(root, join(root, ".rt-test"), signal);
+  const checked = checkDefinitions(files.definitions, root);
+  const discovery = latest.discovery?.discovery ?? {
+    workspaces: [],
+    notRead: [],
+  };
+  return defectStandings(
+    resolveDefinitions(
+      checked,
+      await readAnchors(checked, signal),
+      discovery,
+      true,
+    ),
+    {
+      consumerRoot: root,
+      evidence: { evidence: [], evidenceRefusals: [] },
+      discovery,
+      discoveryCurrent: true,
+      currentFingerprint: () => undefined,
+      testStandings: [],
+    },
+  ).map((standing) => detectionFor(standing, DIGEST.digest));
+}
+
+interface EvidenceCase {
+  readonly latest: LatestResults;
+  readonly files: DefinitionFilesTree;
+  /** What the store holds of the detections a job stored for the definitions, once this has altered them. */
+  readonly alter?: (stored: StoredEvidence[]) => StoredEvidence[];
+}
+
+/**
+ * Writes a case's files under `root` and stores a detection for each of its definitions, then gives the function
+ * that answers `defects` for the whole worktree under the inputs handed to it, unsettled when none are.
+ */
+async function withDetections(
+  root: string,
+  given: EvidenceCase,
+): Promise<(inputs?: CurrentInputs) => Promise<DefectsAnswer>> {
+  answered(await defectsOver(root, given.latest, given.files));
+  const stored = await detectionsUnder(root, given.latest);
+  const latest: LatestResults = {
+    ...given.latest,
+    evidence: given.alter?.(stored) ?? stored,
+  };
+  return async (inputs) =>
+    answered(
+      await defectsOver(
+        root,
+        latest,
+        given.files,
+        undefined,
+        inputs === undefined ? {} : { inputs },
+      ),
+    );
+}
+
+describe(
+  "the defects answer over stored evidence",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    const ONE_DEFINITION: EvidenceCase = {
+      latest: discoveryOfAAndB("one"),
+      files: { "a.json": [defectDefinition("D1", "one")] },
+    };
+
+    it("D3951: before the first reconciliation has ended, evidence nothing made stale reads unknown and is not verified, though it reads current and verified once its workspace's fingerprint can be computed", async () => {
+      const read = await inTempDir(async (root) => {
+        const answer = await withDetections(root, ONE_DEFINITION);
+        const fingerprinted = await answer(A_AT_DIGEST);
+        const unsettled = await answer();
+        return [fingerprinted, unsettled].map(({ definitions, counts }) => ({
+          evidence: definitions[0]?.evidence,
+          verified: counts.verified,
+        }));
+      });
+      expect(read).toStrictEqual([
+        { evidence: { freshness: "current" }, verified: 1 },
+        {
+          evidence: {
+            freshness: "unknown",
+            unknownReasons: ["no-current-fingerprint"],
+          },
+          verified: 0,
+        },
+      ]);
+    });
+
+    it("D3952: an answer over a scope whose every definition is verified carries the same fields as one over a scope where none is", async () => {
+      const fieldsOf = (answer: DefectsAnswer) => ({
+        answer: Object.keys(answer).sort(),
+        counts: Object.keys(answer.counts).sort(),
+      });
+      const { verified, unverified } = await inTempDir(async (root) => {
+        const all = await withDetections(join(root, "all"), ONE_DEFINITION);
+        const none = await withDetections(join(root, "none"), {
+          ...ONE_DEFINITION,
+          alter: () => [],
+        });
+        return {
+          verified: await all(A_AT_DIGEST),
+          unverified: await none(A_AT_DIGEST),
+        };
+      });
+      expect({
+        fields: fieldsOf(verified),
+        verified: verified.counts.verified,
+        total: verified.counts.total,
+      }).toStrictEqual({ fields: fieldsOf(unverified), verified: 1, total: 1 });
+    });
+
+    it("D3953: within a state, a definition whose evidence is not current is listed before one whose evidence is, whatever their order in the file", async () => {
+      const listed = await inTempDir(async (root) => {
+        const answer = await withDetections(root, {
+          latest: discoveryOfAAndB("one", "two"),
+          files: {
+            "a.json": [
+              defectDefinition("D1", "one"),
+              defectDefinition("D2", "two"),
+            ],
+          },
+          alter: (stored) =>
+            stored.map((record) =>
+              record.defectId === "D2"
+                ? { ...record, adapterVersion: OTHER_ADAPTER_VERSION }
+                : record,
+            ),
+        });
+        const { definitions } = await answer(A_AT_DIGEST);
+        return definitions.map(({ id, state, evidence }) => [
+          id,
+          state,
+          evidence?.freshness,
+        ]);
+      });
+      expect(listed).toStrictEqual([
+        ["D2", "detected", "stale"],
+        ["D1", "detected", "current"],
+      ]);
+    });
+
+    it("D3954: a listed definition says whether it is eligible, and one whose verdict is not a detection carries the verdict's reason and detail beside its freshness and causes", async () => {
+      const listed = await inTempDir(async (root) => {
+        const passed = discovered("one");
+        const answer = await withDetections(root, {
+          latest: results(
+            storedDiscovery([discoveredWorkspace(WORKSPACE_A, [passed])]),
+            [
+              storedRun(
+                ranRun([ranModule([finished(passed, "passed")])]),
+                VITEST_ADAPTER_VERSION,
+                DIGEST,
+              ),
+            ],
+          ),
+          files: ONE_DEFINITION.files,
+          alter: (stored) =>
+            stored.map((record) => ({
+              ...record,
+              adapterVersion: OTHER_ADAPTER_VERSION,
+              verdict: "invalid-experiment",
+              judgement: {
+                verdict: "invalid-experiment",
+                reason: "hook-not-passed",
+                detail: { hook: "beforeEach", state: "fail" },
+                facts: ranOnce({
+                  test: { ...REJECTING_TEST, hooks: { beforeEach: "fail" } },
+                }),
+              },
+            })),
+        });
+        const [only] = (await answer(A_AT_DIGEST)).definitions;
+        return {
+          state: only?.state,
+          eligible: only?.eligible,
+          evidence: only?.evidence,
+        };
+      });
+      expect(listed).toStrictEqual({
+        state: "invalid-experiment",
+        eligible: true,
+        evidence: {
+          freshness: "stale",
+          staleCauses: ["another-adapter-version"],
+          reason: "hook-not-passed",
+          detail: { hook: "beforeEach", state: "fail" },
+          omittedCharacters: 0,
+        },
+      });
+    });
+
+    it("D3955: evidence for a test told apart only by its position reads unknown when the daemon's moment reads the discovery stale, and current when it reads it current", async () => {
+      const read = await inTempDir(async (root) => {
+        const first = discovered("one", { isDuplicate: true });
+        const second = {
+          ...first,
+          identity: { ...first.identity, occurrence: 1 },
+        };
+        const answer = await withDetections(root, {
+          latest: results(
+            storedDiscovery(
+              [discoveredWorkspace(WORKSPACE_A, [first, second])],
+              [],
+              VITEST_ADAPTER_VERSION,
+              DIGEST,
+            ),
+          ),
+          files: {
+            "a.json": [
+              {
+                ...defectDefinition("D1", "one"),
+                test: { module: A_MODULE, name: ["one"], occurrence: 1 },
+              },
+            ],
+          },
+        });
+        const current = await answer(
+          settled(
+            { [WORKSPACE_A]: { ok: true, digest: DIGEST.digest } },
+            { ok: true, digest: DIGEST.digest },
+          ),
+        );
+        const stale = await answer(A_AT_DIGEST);
+        return [current, stale].map(
+          ({ definitions }) => definitions[0]?.evidence,
+        );
+      });
+      expect(read).toStrictEqual([
+        { freshness: "current" },
+        {
+          freshness: "unknown",
+          unknownReasons: ["duplicate-test-discovery-not-current"],
+        },
+      ]);
+    });
+  },
+);

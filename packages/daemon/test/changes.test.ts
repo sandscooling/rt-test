@@ -155,6 +155,8 @@ function resultsWith(outcomes: {
       outcomes.b ?? runOf(WORKSPACE_B, "passed"),
     ],
     runRefusals: [],
+    evidence: [],
+    evidenceRefusals: [],
   };
 }
 

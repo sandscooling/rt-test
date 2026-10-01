@@ -93,6 +93,8 @@ function resultsOf(found: StoredDiscovery): LatestResults {
     discoveryRefusal: undefined,
     latestRuns: [],
     runRefusals: [],
+    evidence: [],
+    evidenceRefusals: [],
   };
 }
 
@@ -573,6 +575,8 @@ describe("a wait's limit", () => {
           discoveryRefusal: undefined,
           latestRuns: [],
           runRefusals: [],
+          evidence: [],
+          evidenceRefusals: [],
         };
         const waited = world.wait([A_SOURCE]);
         await flush();

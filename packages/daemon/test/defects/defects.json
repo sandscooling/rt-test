@@ -348,5 +348,138 @@
     "file": "packages/daemon/src/defects/resolve-definitions.ts",
     "old": "  if (problems.length > 0 || resolved === undefined) {",
     "new": "  if ((problems.length > 0 || resolved === undefined) && anchors.get(definition)?.missing === undefined) {"
+  },
+  {
+    "id": "D3932",
+    "defect": "The definition digest leaves out the mutation's new text, so evidence for one replacement still reads current after the definition is edited to another.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "      mutation.old,\n      mutation.new,\n    ]),",
+    "new": "      mutation.old,\n    ]),"
+  },
+  {
+    "id": "D3933",
+    "defect": "The definition digest takes the mutation's file as the definition spells it, so respelling the same path makes every stored verdict of that definition read stale.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "      relativePosixPath(consumerRoot, mutationPath),",
+    "new": "      mutation.file,"
+  },
+  {
+    "id": "D3934",
+    "defect": "A changed definition digest never makes evidence stale, so a verdict for an earlier mutation reads current for the one the definition now holds.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    [STALE_CAUSE.definitionChanged]: record.definitionDigest !== digest,",
+    "new": "    [STALE_CAUSE.definitionChanged]: false,"
+  },
+  {
+    "id": "D3935",
+    "defect": "An edit to the mutation's file never makes evidence stale, so a detection reads current though the file it mutated has changed.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    [STALE_CAUSE.mutationFileChanged]:\n      record.mutationFileDigest !== definition.mutationFileDigest,",
+    "new": "    [STALE_CAUSE.mutationFileChanged]: false,"
+  },
+  {
+    "id": "D3936",
+    "defect": "Evidence stored under another Vitest adapter version never reads stale for it, so it reads current under an adapter that did not produce it.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    [STALE_CAUSE.anotherAdapterVersion]: !isCurrentAdapterVersion(\n      record.adapterVersion,\n    ),",
+    "new": "    [STALE_CAUSE.anotherAdapterVersion]: false,"
+  },
+  {
+    "id": "D3937",
+    "defect": "Evidence stored under another falsifier version never reads stale for it, so a verdict decided under another meaning reads current.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    [STALE_CAUSE.anotherFalsifierVersion]:\n      record.falsifierVersion !== FALSIFIER_VERSION,",
+    "new": "    [STALE_CAUSE.anotherFalsifierVersion]: false,"
+  },
+  {
+    "id": "D3938",
+    "defect": "Evidence stored under another Vitest version than the workspace's never reads stale for it, so a verdict from another Vitest reads current.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    [STALE_CAUSE.anotherVitestVersion]:\n      record.vitestVersion !== index.vitestVersions.get(workspacePath),",
+    "new": "    [STALE_CAUSE.anotherVitestVersion]: false,"
+  },
+  {
+    "id": "D3939",
+    "defect": "A changed input fingerprint never makes evidence stale, so a detection reads current after an edit to its workspace's inputs.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    [STALE_CAUSE.inputsChanged]: fingerprint === STALE,",
+    "new": "    [STALE_CAUSE.inputsChanged]: false,"
+  },
+  {
+    "id": "D3940",
+    "defect": "Stale evidence names only the first cause that holds, so the other bindings that changed go unsaid.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "  const staleCauses = STALE_CAUSES.filter((cause) => holding[cause]);",
+    "new": "  const staleCauses = STALE_CAUSES.filter((cause) => holding[cause]).slice(0, 1);"
+  },
+  {
+    "id": "D3941",
+    "defect": "Evidence a certain cause makes stale reads unknown while no current fingerprint can be computed, so the cause is hidden until the first reconciliation ends.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "  if (staleCauses.length > 0) return { freshness: STALE, staleCauses };",
+    "new": "  if (staleCauses.length > 0 && fingerprint !== UNKNOWN) {\n    return { freshness: STALE, staleCauses };\n  }"
+  },
+  {
+    "id": "D3942",
+    "defect": "Evidence for a test told apart only by its position reads current while the latest discovery is not current, so it may be another same-named test's.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    ...(test.isDuplicate && !index.discoveryCurrent",
+    "new": "    ...(false"
+  },
+  {
+    "id": "D3943",
+    "defect": "The anchor read digests its file with CRLF line endings folded to LF, so its digest never equals the one a job records for the same unedited file.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "    return { text, digest: wholeDigest(text) };",
+    "new": "    return { text, digest: wholeDigest(text.replaceAll(\"\\r\\n\", \"\\n\")) };"
+  },
+  {
+    "id": "D3944",
+    "defect": "A definition whose anchor is missing reads the verdict stored for its id, so it reads detected, eligible and verified though its mutation can no longer be applied.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    subject === undefined ||\n    definition.state !== DEFECT_STATE.neverVerified\n  ) {",
+    "new": "    subject === undefined\n  ) {"
+  },
+  {
+    "id": "D3945",
+    "defect": "A definition whose stored evidence was refused reads never verified with no reason and is not counted, so nothing says its evidence could not be read.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    return { ...shared, ...neverVerified(index.refusals.get(subject.id)) };",
+    "new": "    return { ...shared, ...neverVerified(undefined) };"
+  },
+  {
+    "id": "D3946",
+    "defect": "A module that failed to collect is said only to be listed by the discovery, so the reason never says why none of its tests is discovered.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "  if (!index.failedModules.has(modulePath)) return LISTED_MODULE;",
+    "new": "  if (true) return LISTED_MODULE;"
+  },
+  {
+    "id": "D3947",
+    "defect": "A standing lists every error of the intended test, so the listing of an unclear verdict has no bound.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    listed: ordered.slice(0, MAX_LISTED_ERRORS),",
+    "new": "    listed: ordered,"
+  },
+  {
+    "id": "D3948",
+    "defect": "Detected definitions are listed before the verdicts that are not a detection, so past the listing's bound the survivors may be the ones left unlisted.",
+    "file": "packages/daemon/src/defects/defect-states.ts",
+    "old": "  survived: VERDICT.survived,\n  invalidExperiment: VERDICT.invalidExperiment,\n  unclear: VERDICT.unclear,\n  neverVerified: \"never-verified\",\n  detected: VERDICT.detected,",
+    "new": "  detected: VERDICT.detected,\n  survived: VERDICT.survived,\n  invalidExperiment: VERDICT.invalidExperiment,\n  unclear: VERDICT.unclear,\n  neverVerified: \"never-verified\","
+  },
+  {
+    "id": "D3949",
+    "defect": "Verified counts every detection whatever its evidence's freshness, so a stale detection counts as verified.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    standing.state === DEFECT_STATE.detected &&\n    standing.evidence?.freshness === CURRENT",
+    "new": "    standing.state === DEFECT_STATE.detected"
+  },
+  {
+    "id": "D3950",
+    "defect": "A definition whose test passed under inputs since changed is eligible, so a job would falsify against a result that is not current.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "            standing.state === PASSED && standing.freshness === CURRENT,",
+    "new": "            standing.state === PASSED,"
   }
 ]

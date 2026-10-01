@@ -80,6 +80,7 @@ import {
   memoryLog,
   type MemoryLog,
 } from "./daemon-harness.js";
+import { detection, ranReply } from "./experiment-facts.js";
 import { inTempDir, projectFacts, settle, WAITING } from "./harness.js";
 import { onPlatform } from "./on-platform.js";
 import {
@@ -1617,6 +1618,103 @@ describe(
         expect(entries).toStrictEqual([
           refusalEntry("a", "bogus"),
           refusalEntry("b", "bogus"),
+        ]);
+      });
+    });
+
+    describe("stored defect evidence the store refuses as unreadable", () => {
+      const EVIDENCE_REFUSED_BEFORE = "warning: the stored evidence of defect ";
+      const EVIDENCE_REFUSED_AFTER =
+        " was refused as unreadable, so the defect reads never verified until a new verdict replaces it: ";
+
+      /** Gives the stored evidence of `defectId` facts no reader can rebuild, through a second connection. */
+      function setEvidenceFacts(
+        file: string,
+        defectId: string,
+        facts: string,
+      ): void {
+        alterStore(
+          file,
+          `UPDATE defect_evidence SET facts = '${facts}' WHERE defect_id = '${defectId}'`,
+        );
+      }
+
+      /** The whole entry the daemon logs for `defectId`'s evidence refused for its facts `facts`. */
+      function evidenceRefusalEntry(defectId: string, facts: string): string {
+        return `${EVIDENCE_REFUSED_BEFORE}${defectId}${EVIDENCE_REFUSED_AFTER}The store holds an unreadable JSON field job: ${facts}`;
+      }
+
+      /**
+       * Runs a daemon over a readable store to idle, stores a detection for each of `defectIds` as a job's reply
+       * gives them, then runs `after` against the store's file and the daemon, and returns the log's evidence
+       * refusal entries.
+       */
+      function afterEvidenceStored(
+        defectIds: readonly string[],
+        after: (file: string, lifecycle: DaemonLifecycle) => void,
+      ): Promise<string[]> {
+        return inTempDir((dir) => {
+          const store = openStore(join(dir, "state"));
+          const started = daemon(
+            confirmed("a"),
+            new ScriptedExecutor({
+              ended: true,
+              value: discovery(discovered("a")),
+            }),
+            store,
+          );
+          return begunThenStopped(started, ({ lifecycle, log }) => {
+            store.writeEvidence(
+              { ...SCOPE, inputFingerprintDigest: "a-digest" },
+              ranReply(
+                defectIds.map((defectId) => ({
+                  defectId,
+                  facts: detection(),
+                  mutationFileDigest: `file-digest-${defectId}`,
+                })),
+              ),
+              new Map(
+                defectIds.map((defectId) => [
+                  defectId,
+                  `definition-digest-${defectId}`,
+                ]),
+              ),
+            );
+            after(store.file, lifecycle);
+            return log.entries.filter((entry) =>
+              entry.startsWith(EVIDENCE_REFUSED_BEFORE),
+            );
+          });
+        });
+      }
+
+      it("D3956: an evidence refusal a summary reads is logged, naming its defect, with its whole text", async () => {
+        const facts = `{"job":"${"x".repeat(1500)}"}`;
+        const entries = await afterEvidenceStored(
+          ["D1", "D2"],
+          (file, lifecycle) => {
+            setEvidenceFacts(file, "D1", facts);
+            lifecycle.summary();
+          },
+        );
+        expect(entries).toStrictEqual([evidenceRefusalEntry("D1", facts)]);
+      });
+
+      it("D3957: an evidence refusal read again is logged once, and a second defect's refusal for the same reason is logged too", async () => {
+        const facts = '{"job":5}';
+        const entries = await afterEvidenceStored(
+          ["D1", "D2"],
+          (file, lifecycle) => {
+            setEvidenceFacts(file, "D1", facts);
+            lifecycle.summary();
+            lifecycle.summary();
+            setEvidenceFacts(file, "D2", facts);
+            lifecycle.summary();
+          },
+        );
+        expect(entries).toStrictEqual([
+          evidenceRefusalEntry("D1", facts),
+          evidenceRefusalEntry("D2", facts),
         ]);
       });
     });

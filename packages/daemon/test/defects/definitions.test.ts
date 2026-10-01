@@ -77,6 +77,25 @@ import {
   inTempDir,
   settle,
 } from "../harness.js";
+import { createHash } from "node:crypto";
+import {
+  countDefectStandings,
+  defectStandings,
+  type DefectStanding,
+  type StandingFacts,
+} from "../../src/defects/defect-standings.js";
+import { DEFECT_STATES } from "../../src/defects/defect-states.js";
+import { FALSIFIER_VERSION } from "../../src/falsify/experiment-record.js";
+import type { ErrorFact } from "../../src/falsify/fact-types.js";
+import type { StoredEvidence } from "../../src/store/defect-evidence.js";
+import { VITEST_ADAPTER_VERSION } from "../../src/vitest/adapter-version.js";
+import {
+  detectionFor,
+  ranOnce,
+  REJECTING_TEST,
+  SURVIVING_TEST,
+  TYPE_ERROR,
+} from "../experiment-facts.js";
 
 /** Files by their path relative to a root, `/`-separated, with their text. */
 type Tree = Readonly<Record<string, string>>;
@@ -1067,5 +1086,614 @@ describe("resolving each definition's test and reading its anchor", () => {
       ),
     );
     expect(only?.state).toBe("invalid-definition");
+  });
+});
+
+/** The digest of the workspace's input fingerprint each stored detection below is bound to. */
+const BOUND_PRINT = "sha256:2C26B46B68FFC68F";
+const OTHER_PRINT = "sha256:9F86D081884C7D65";
+const OTHER_VITEST_VERSION = "4.1.11";
+const OTHER_ADAPTER_VERSION = VITEST_ADAPTER_VERSION + 1;
+const CURRENT_EVIDENCE = { freshness: "current" };
+
+/** Definitions, the tests they resolve against, and what the query's moment holds beside them. */
+interface StandingCase {
+  /** One definition `D1` of the test `t` when absent. */
+  readonly values?: readonly unknown[];
+  readonly tests?: readonly DiscoveredTest[];
+  readonly files?: Tree;
+  /** Replaces members of a moment in which every test holds a current pass and the store holds no evidence. */
+  readonly facts?: Partial<StandingFacts>;
+}
+
+function stale(...staleCauses: string[]) {
+  return { freshness: "stale", staleCauses };
+}
+
+/** Resolves a case's definitions over its files under a consumer root in `dir`, and gives each its standing. */
+async function standingsIn(
+  dir: string,
+  given: StandingCase = {},
+): Promise<DefectStanding[]> {
+  const tests = given.tests ?? [TEST_T];
+  const definitions = await resolvedIn(
+    dir,
+    given.values ?? [definition("D1")],
+    tests,
+    given.files === undefined ? {} : { files: given.files },
+  );
+  return defectStandings(definitions, {
+    consumerRoot: join(dir, CONSUMER),
+    evidence: { evidence: [], evidenceRefusals: [] },
+    discovery: discoveryOf(tests),
+    discoveryCurrent: true,
+    currentFingerprint: () => BOUND_PRINT,
+    testStandings: tests.map((test) => ({
+      test,
+      state: "passed",
+      freshness: "current",
+    })),
+    ...given.facts,
+  });
+}
+
+/** A detection stored for the definition `standing` describes, bound to what `standingsIn` holds unless a case says otherwise. */
+function detectionOf(standing: DefectStanding | undefined): StoredEvidence {
+  return detectionFor(standing, BOUND_PRINT);
+}
+
+/** A detection stored for a case's first definition while nothing it is bound to had changed. */
+async function boundDetection(
+  dir: string,
+  given: StandingCase = {},
+): Promise<StoredEvidence> {
+  return detectionOf((await standingsIn(dir, given))[0]);
+}
+
+function holding(
+  ...evidence: StoredEvidence[]
+): Pick<StandingFacts, "evidence"> {
+  return { evidence: { evidence, evidenceRefusals: [] } };
+}
+
+/** What a case's first definition reads of its stored evidence when the store holds `record`. */
+async function evidenceOf(
+  dir: string,
+  record: StoredEvidence,
+  given: StandingCase = {},
+) {
+  const [standing] = await standingsIn(dir, {
+    ...given,
+    facts: { ...holding(record), ...given.facts },
+  });
+  return standing?.evidence;
+}
+
+/** What a bound detection reads with nothing changed, then what `changed` reads of it, each over a consumer root of its own. */
+function besideCurrent(
+  changed: (dir: string, record: StoredEvidence) => Promise<unknown>,
+  given: StandingCase = {},
+): Promise<unknown[]> {
+  return inTempDir(async (dir) => {
+    const record = await boundDetection(join(dir, "verified"), given);
+    return [
+      await evidenceOf(join(dir, "unchanged"), record, given),
+      await changed(join(dir, "changed"), record),
+    ];
+  });
+}
+
+/** The definition digest of each case's last definition, each case resolved under a consumer root of its own. */
+function lastDigests(
+  cases: readonly StandingCase[],
+): Promise<(string | undefined)[]> {
+  return inTempDir((dir) =>
+    Promise.all(
+      cases.map(async (given, index) => {
+        const standings = await standingsIn(join(dir, `case-${index}`), given);
+        return standings.at(-1)?.definitionDigest;
+      }),
+    ),
+  );
+}
+
+/** Resolves `values` against `discovery` over `SOURCE` under a consumer root in `dir`. */
+async function resolvedAgainst(
+  dir: string,
+  values: readonly unknown[],
+  discovery: TestDiscovery,
+): Promise<ResolvedDefinition[]> {
+  const root = join(dir, CONSUMER);
+  writeTree(root, { [SOURCE]: SOURCE_TEXT });
+  const definitions = checked(values, root);
+  const anchors = await readAnchors(definitions, new AbortController().signal);
+  return resolveDefinitions(definitions, anchors, discovery, true);
+}
+
+describe("a definition's digest", () => {
+  it("D3932: the digest changes with the definition's id, with the test's workspace, project, module, name path or occurrence, and with the mutation's file, old or new", async () => {
+    const twins = [
+      discoveredTest(["t"], { isDuplicate: true }),
+      discoveredTest(["t"], { occurrence: 1, isDuplicate: true }),
+    ];
+    const [base, ...changed] = await lastDigests([
+      {},
+      { values: [definition("D2")] },
+      {
+        tests: [
+          discoveredTest(["t"], {
+            workspacePath: "src",
+            modulePath: "a.test.ts",
+          }),
+        ],
+      },
+      { tests: [discoveredTest(["t"], { projectName: "e2e" })] },
+      {
+        values: [definition("D1", { test: { module: "src/b.test.ts" } })],
+        tests: [discoveredTest(["t"], { modulePath: "src/b.test.ts" })],
+      },
+      {
+        values: [definition("D1", { test: { name: ["u"] } })],
+        tests: [discoveredTest(["u"])],
+      },
+      {
+        values: [definition("D1", { test: { occurrence: 1 } })],
+        tests: twins,
+      },
+      {
+        values: [definition("D1", { mutation: { file: "src/b.ts" } })],
+        files: { [SOURCE]: SOURCE_TEXT, "src/b.ts": SOURCE_TEXT },
+      },
+      { values: [definition("D1", { mutation: { old: "return 1" } })] },
+      { values: [definition("D1", { mutation: { new: "return 3;" } })] },
+    ]);
+    expect(
+      changed.map((digest) => typeof digest === "string" && digest !== base),
+    ).toStrictEqual([true, true, true, true, true, true, true, true, true]);
+  });
+
+  it("D3933: the digest stays the same whatever the definition's position, its defect and required text, and the spelling of its module or its mutation's file", async () => {
+    const [base, ...respelled] = await lastDigests([
+      {},
+      { values: [definition("D0"), definition("D1")] },
+      {
+        values: [
+          {
+            ...definition("D1"),
+            defect: "a returns 3",
+            required: "a returns one",
+          },
+        ],
+      },
+      { values: [definition("D1", { test: { module: `./${TEST_MODULE}` } })] },
+      { values: [definition("D1", { mutation: { file: `./${SOURCE}` } })] },
+      { values: [definition("D1", { mutation: { file: "src/../src/a.ts" } })] },
+    ]);
+    expect({
+      base: typeof base,
+      same: respelled.map((digest) => digest === base),
+    }).toStrictEqual({ base: "string", same: [true, true, true, true, true] });
+  });
+});
+
+describe("whether stored evidence still describes what it was decided from", () => {
+  it("D3934: evidence stored for a definition whose mutation has since changed reads stale, naming the definition", async () => {
+    const read = await besideCurrent(async (dir, record) => {
+      const before = await boundDetection(join(dir, "as-verified"), {
+        values: [definition("D1", { mutation: { new: "return 3;" } })],
+      });
+      return evidenceOf(dir, {
+        ...record,
+        definitionDigest: before.definitionDigest,
+      });
+    });
+    expect(read).toStrictEqual([CURRENT_EVIDENCE, stale("definition-changed")]);
+  });
+
+  it("D3935: evidence whose mutation's file was edited since, its anchor still matching once, reads stale, naming the file", async () => {
+    const read = await besideCurrent((dir, record) =>
+      evidenceOf(dir, record, {
+        files: { [SOURCE]: `${SOURCE_TEXT}// edited since\n` },
+      }),
+    );
+    expect(read).toStrictEqual([
+      CURRENT_EVIDENCE,
+      stale("mutation-file-changed"),
+    ]);
+  });
+
+  it("D3936: evidence stored under another Vitest adapter version reads stale, naming it", async () => {
+    const read = await besideCurrent((dir, record) =>
+      evidenceOf(dir, { ...record, adapterVersion: OTHER_ADAPTER_VERSION }),
+    );
+    expect(read).toStrictEqual([
+      CURRENT_EVIDENCE,
+      stale("another-adapter-version"),
+    ]);
+  });
+
+  it("D3937: evidence stored under another falsifier version reads stale, naming it, with no reason, detail or errors", async () => {
+    const read = await besideCurrent((dir, record) => {
+      const { judgement: _unread, ...bindings } = record;
+      return evidenceOf(dir, {
+        ...bindings,
+        falsifierVersion: FALSIFIER_VERSION + 1,
+      });
+    });
+    expect(read).toStrictEqual([
+      CURRENT_EVIDENCE,
+      stale("another-falsifier-version"),
+    ]);
+  });
+
+  it("D3938: evidence stored under a Vitest version other than the one the latest discovery reports for the test's workspace reads stale, naming it", async () => {
+    const read = await besideCurrent((dir, record) =>
+      evidenceOf(dir, { ...record, vitestVersion: OTHER_VITEST_VERSION }),
+    );
+    expect(read).toStrictEqual([
+      CURRENT_EVIDENCE,
+      stale("another-vitest-version"),
+    ]);
+  });
+
+  it("D3939: evidence whose workspace's current input fingerprint differs from the one it ran at reads stale, naming the inputs", async () => {
+    const read = await besideCurrent((dir, record) =>
+      evidenceOf(dir, record, {
+        facts: { currentFingerprint: () => OTHER_PRINT },
+      }),
+    );
+    expect(read).toStrictEqual([CURRENT_EVIDENCE, stale("inputs-changed")]);
+  });
+
+  it("D3940: stale evidence names every cause that holds, not the first alone", async () => {
+    const evidence = await inTempDir(async (dir) => {
+      const record = await boundDetection(join(dir, "verified"));
+      return evidenceOf(
+        join(dir, "changed"),
+        {
+          ...record,
+          adapterVersion: OTHER_ADAPTER_VERSION,
+          vitestVersion: OTHER_VITEST_VERSION,
+        },
+        { facts: { currentFingerprint: () => OTHER_PRINT } },
+      );
+    });
+    expect(
+      evidence !== undefined && "staleCauses" in evidence
+        ? [...evidence.staleCauses].sort()
+        : evidence,
+    ).toStrictEqual([
+      "another-adapter-version",
+      "another-vitest-version",
+      "inputs-changed",
+    ]);
+  });
+
+  it("D3941: while no current fingerprint can be computed, evidence no cause makes stale reads unknown, and evidence under another adapter version still reads stale, naming it", async () => {
+    const noPrint: StandingCase = {
+      facts: { currentFingerprint: () => undefined },
+    };
+    const read = await inTempDir(async (dir) => {
+      const record = await boundDetection(join(dir, "verified"));
+      return [
+        await evidenceOf(join(dir, "unchanged"), record, noPrint),
+        await evidenceOf(
+          join(dir, "changed"),
+          { ...record, adapterVersion: OTHER_ADAPTER_VERSION },
+          noPrint,
+        ),
+      ];
+    });
+    expect(read).toStrictEqual([
+      { freshness: "unknown", unknownReasons: ["no-current-fingerprint"] },
+      stale("another-adapter-version"),
+    ]);
+  });
+
+  it("D3942: evidence for a test told apart only by its position reads unknown while the latest discovery is not current, and current once it is", async () => {
+    const twins: StandingCase = {
+      values: [definition("D1", { test: { occurrence: 1 } })],
+      tests: [
+        discoveredTest(["t"], { isDuplicate: true }),
+        discoveredTest(["t"], { occurrence: 1, isDuplicate: true }),
+      ],
+    };
+    const read = await besideCurrent(
+      (dir, record) =>
+        evidenceOf(dir, record, {
+          ...twins,
+          facts: { discoveryCurrent: false },
+        }),
+      twins,
+    );
+    expect(read).toStrictEqual([
+      CURRENT_EVIDENCE,
+      {
+        freshness: "unknown",
+        unknownReasons: ["duplicate-test-discovery-not-current"],
+      },
+    ]);
+  });
+
+  it("D3943: the anchor read digests its mutation's file as decoded, a byte order mark and CRLF line endings kept, as the job that read the same file did", async () => {
+    const text = "﻿export function a() {\r\n  return 1;\r\n}\r\n";
+    const [only] = await inTempDir((dir) =>
+      resolvedIn(dir, [definition("D1")], [TEST_T], {
+        files: { [SOURCE]: text },
+      }),
+    );
+    expect({
+      state: only?.state,
+      digest: only?.mutationFileDigest,
+    }).toStrictEqual({
+      state: "never-verified",
+      digest: createHash("sha256").update(text).digest("hex"),
+    });
+  });
+});
+
+describe("each definition's one state, with its stored evidence", () => {
+  it("D3944: a definition whose anchor is missing or that is invalid reads that, never the detection stored for its id, and is neither eligible, verified nor counted as holding unreadable evidence", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const values = [
+        definition("D1", { mutation: { old: "return 3;" } }),
+        definition("D2", { test: { name: ["missing"] } }),
+        definition("D3", { mutation: { old: "return 4;" } }),
+      ];
+      const [anchorGone] = await standingsIn(join(dir, "bare"), { values });
+      const detected = detectionOf(anchorGone);
+      const standings = await standingsIn(join(dir, "stored"), {
+        values,
+        facts: {
+          evidence: {
+            evidence: [detected, { ...detected, defectId: "D2" }],
+            evidenceRefusals: [
+              { defectId: "D3", reason: "The store holds an unreadable facts" },
+            ],
+          },
+        },
+      });
+      const counts = countDefectStandings(standings);
+      return {
+        read: standings.map(({ state, evidence, eligible }) => ({
+          state,
+          evidence,
+          eligible,
+        })),
+        verified: counts.verified,
+        unreadableEvidence: counts.unreadableEvidence,
+      };
+    });
+    expect(outcome).toStrictEqual({
+      read: [
+        { state: "anchor-missing", evidence: undefined, eligible: false },
+        { state: "invalid-definition", evidence: undefined, eligible: false },
+        { state: "anchor-missing", evidence: undefined, eligible: false },
+      ],
+      verified: 0,
+      unreadableEvidence: 0,
+    });
+  });
+
+  it("D3945: a definition whose stored evidence was refused reads never verified with the refusal as its reason and is counted, while another definition still reads its verdict", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const values = [definition("D1"), definition("D2")];
+      const [, second] = await standingsIn(join(dir, "bare"), { values });
+      const standings = await standingsIn(join(dir, "stored"), {
+        values,
+        facts: {
+          evidence: {
+            evidence: [detectionOf(second)],
+            evidenceRefusals: [
+              {
+                defectId: "D1",
+                reason: 'The store holds an unreadable facts: "not json"',
+              },
+            ],
+          },
+        },
+      });
+      const counts = countDefectStandings(standings);
+      return {
+        read: standings.map(({ state, reason }) => ({ state, reason })),
+        unreadableEvidence: counts.unreadableEvidence,
+        verified: counts.verified,
+      };
+    });
+    expect(outcome).toStrictEqual({
+      read: [
+        {
+          state: "never-verified",
+          reason: expect.stringMatching(
+            /refused as unreadable.*: The store holds an unreadable facts: "not json"$/,
+          ),
+        },
+        { state: "detected", reason: undefined },
+      ],
+      unreadableEvidence: 1,
+      verified: 1,
+    });
+  });
+
+  it("D3947: an unclear verdict whose error is not an assertion lists 3 of the intended test's errors by kind and name, with how many it left out", async () => {
+    const errors: ErrorFact[] = [
+      TYPE_ERROR,
+      { kind: "other", name: "RangeError" },
+      { kind: "other" },
+      { kind: "other", name: "SyntaxError" },
+      { kind: "other", name: "ReferenceError" },
+    ];
+    const evidence = await inTempDir(async (dir) => {
+      const record = await boundDetection(join(dir, "verified"));
+      return evidenceOf(join(dir, "stored"), {
+        ...record,
+        verdict: "unclear",
+        judgement: {
+          verdict: "unclear",
+          reason: "not-an-assertion",
+          facts: ranOnce({ test: { ...REJECTING_TEST, errors } }),
+        },
+      });
+    });
+    expect(evidence).toStrictEqual({
+      freshness: "current",
+      reason: "not-an-assertion",
+      errors: { listed: errors.slice(0, 3), notListed: 2 },
+    });
+  });
+
+  it("D3948: the states are listed invalid definition, anchor missing, survived, invalid experiment, unclear, never verified, then detected", () => {
+    expect(DEFECT_STATES).toStrictEqual([
+      "invalid-definition",
+      "anchor-missing",
+      "survived",
+      "invalid-experiment",
+      "unclear",
+      "never-verified",
+      "detected",
+    ]);
+  });
+
+  it("D3949: the counts give each state, each freshness and each cause, and verified counts a detection only while its evidence is current", async () => {
+    const counts = await inTempDir(async (dir) => {
+      const values = [definition("D1"), definition("D2"), definition("D3")];
+      const bare = await standingsIn(join(dir, "bare"), { values });
+      const [first, second, third] = bare.map((standing) =>
+        detectionOf(standing),
+      );
+      const stored = [
+        first,
+        second === undefined
+          ? undefined
+          : { ...second, adapterVersion: OTHER_ADAPTER_VERSION },
+        third === undefined
+          ? undefined
+          : {
+              ...third,
+              verdict: "survived" as const,
+              judgement: {
+                verdict: "survived" as const,
+                facts: ranOnce({ test: SURVIVING_TEST }),
+              },
+            },
+      ].flatMap((record) => (record === undefined ? [] : [record]));
+      return countDefectStandings(
+        await standingsIn(join(dir, "stored"), {
+          values,
+          facts: holding(...stored),
+        }),
+      );
+    });
+    expect(counts).toStrictEqual({
+      states: {
+        "invalid-definition": 0,
+        "anchor-missing": 0,
+        survived: 1,
+        "invalid-experiment": 0,
+        unclear: 0,
+        "never-verified": 0,
+        detected: 2,
+      },
+      freshness: { current: 2, stale: 1, unknown: 0 },
+      staleCauses: {
+        "definition-changed": 0,
+        "mutation-file-changed": 0,
+        "another-adapter-version": 1,
+        "another-falsifier-version": 0,
+        "another-vitest-version": 0,
+        "inputs-changed": 0,
+      },
+      unknownReasons: {
+        "no-current-fingerprint": 0,
+        "duplicate-test-discovery-not-current": 0,
+      },
+      unreadableEvidence: 0,
+      eligible: 3,
+      verified: 1,
+    });
+  });
+
+  it("D3950: a definition is eligible only when it is valid, its anchor matches and its test holds a current pass", async () => {
+    const outcome = await inTempDir(async (dir) => {
+      const passing = discoveredTest(["t"]);
+      const stalePass = discoveredTest(["u"]);
+      const failing = discoveredTest(["v"]);
+      const standings = await standingsIn(dir, {
+        values: [
+          definition("D1"),
+          definition("D2", { test: { name: ["u"] } }),
+          definition("D3", { test: { name: ["v"] } }),
+          definition("D4", { mutation: { old: "return 3;" } }),
+        ],
+        tests: [passing, stalePass, failing],
+        facts: {
+          testStandings: [
+            { test: passing, state: "passed", freshness: "current" },
+            { test: stalePass, state: "passed", freshness: "stale" },
+            { test: failing, state: "failed", freshness: "current" },
+          ],
+        },
+      });
+      return {
+        eligible: standings.map((standing) => standing.eligible),
+        counted: countDefectStandings(standings).eligible,
+      };
+    });
+    expect(outcome).toStrictEqual({
+      eligible: [true, false, false, false],
+      counted: 1,
+    });
+  });
+});
+
+describe("a definition naming a test in a module that failed to collect", () => {
+  it("D3946: the not-discovered reason says the module failed to collect in the latest discovery, so none of its tests is discovered, and says so of no module that collected", async () => {
+    const reasons = await inTempDir(async (dir) => {
+      const found = discoveryOf([
+        discoveredTest(["t"], { modulePath: "src/b.test.ts" }),
+      ]);
+      const failing: TestDiscovery = {
+        ...found,
+        workspaces: found.workspaces.map((entry) =>
+          entry.status === "discovered"
+            ? {
+                ...entry,
+                failedModules: [
+                  {
+                    projectName: "unit",
+                    modulePath: TEST_MODULE,
+                    errors: ["SyntaxError: Unexpected token"],
+                  },
+                ],
+              }
+            : entry,
+        ),
+      };
+      const definitions = await resolvedAgainst(
+        dir,
+        [
+          definition("D1"),
+          definition("D2", {
+            test: { module: "src/b.test.ts", name: ["missing"] },
+          }),
+        ],
+        failing,
+      );
+      return definitions.map(({ state, reason }) => ({ state, reason }));
+    });
+    expect(reasons).toStrictEqual([
+      {
+        state: "invalid-definition",
+        reason: expect.stringMatching(
+          /; that module failed to collect in the latest discovery, so none of its tests is discovered$/,
+        ),
+      },
+      {
+        state: "invalid-definition",
+        reason: expect.stringMatching(
+          /; the latest discovery lists that module$/,
+        ),
+      },
+    ]);
   });
 });
