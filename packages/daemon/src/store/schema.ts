@@ -1,7 +1,7 @@
 /** Written to `PRAGMA application_id`, so a file RT Test did not create is never read as its store. */
 export const STORE_APPLICATION_ID = 1381258324;
 /** Written to `PRAGMA user_version`. A change to the tables below, or a stored value an older version's code cannot read, raises it and gives each older version in `STORE_MIGRATIONS` a path to it, since the opener refuses every version it cannot migrate. */
-export const STORE_SCHEMA_VERSION = 10;
+export const STORE_SCHEMA_VERSION = 11;
 /** Its code never force-stopped a run and never kept a workspace's selection facts. */
 const FORCE_STOP_UNAWARE_SCHEMA_VERSION = 1;
 /** Its code never kept a workspace's selection facts. */
@@ -20,6 +20,8 @@ const ENV_SOURCES_UNAWARE_SCHEMA_VERSION = 7;
 const ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION = 8;
 /** Its code never kept a discovery's workspaces that have a test script but are not Vitest workspaces. */
 const NOT_COVERED_UNAWARE_SCHEMA_VERSION = 9;
+/** Its code never kept a defect's falsification evidence. */
+const EVIDENCE_UNAWARE_SCHEMA_VERSION = 10;
 export const STORE_FILE_NAME = "store.sqlite";
 /** How long a write waits for another process's write on the same file before it fails whole. */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -35,6 +37,25 @@ const FORCE_STOPPED_COLUMN = `force_stopped INTEGER CHECK (force_stopped IN (${N
 const SELECTION_FACTS_COLUMN = "selection_facts TEXT";
 /** Last in `discoveries`, so a new store and a migrated one hold the same columns in the same order. NULL is a report never made. */
 const NOT_COVERED_COLUMN = "not_covered TEXT";
+/** One record per defect in a project and worktree. Created by this one statement in a new store and in a migrated one, so both hold the same table. */
+const CREATE_DEFECT_EVIDENCE = `
+CREATE TABLE defect_evidence (
+  project_identity TEXT NOT NULL CHECK (project_identity <> ''),
+  worktree_identity TEXT NOT NULL CHECK (worktree_identity <> ''),
+  defect_id TEXT NOT NULL CHECK (defect_id <> ''),
+  evidence_id TEXT NOT NULL CHECK (evidence_id <> ''),
+  definition_digest TEXT NOT NULL CHECK (definition_digest <> ''),
+  mutation_file_digest TEXT NOT NULL CHECK (mutation_file_digest <> ''),
+  fingerprint_digest TEXT NOT NULL CHECK (fingerprint_digest <> ''),
+  vitest_version TEXT NOT NULL,
+  falsifier_version INTEGER NOT NULL,
+  adapter_version INTEGER NOT NULL,
+  verdict TEXT NOT NULL,
+  reason TEXT,
+  detail TEXT,
+  facts TEXT NOT NULL,
+  PRIMARY KEY (project_identity, worktree_identity, defect_id)
+) STRICT;`;
 
 /** A NULL column is a value the record never held. JSON columns hold arrays and objects the record carries whole. */
 export const STORE_SCHEMA = `
@@ -137,6 +158,7 @@ CREATE TABLE discovered_tests (
   PRIMARY KEY (discovery_sequence, workspace_index, test_index),
   FOREIGN KEY (discovery_sequence, workspace_index) REFERENCES discovery_workspaces (discovery_sequence, workspace_index)
 ) STRICT;
+${CREATE_DEFECT_EVIDENCE}
 `;
 
 /** Version 1's code never force-stopped a run, so each of its `ran` runs was not force-stopped. */
@@ -159,38 +181,42 @@ PRAGMA user_version = ${STORE_SCHEMA_VERSION};`;
 export const STORE_MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
     FORCE_STOP_UNAWARE_SCHEMA_VERSION,
-    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${ADD_FORCE_STOPPED}${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     SELECTION_FACTS_UNAWARE_SCHEMA_VERSION,
-    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${ADD_SELECTION_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     VITE_ROOT_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     CRASH_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     VITEST_SPELLING_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     CRAWLED_LINKS_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     ENV_SOURCES_UNAWARE_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     ENV_SOURCES_ALWAYS_KNOWN_SCHEMA_VERSION,
-    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${DROP_INCOMPLETE_FACTS}${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
   [
     NOT_COVERED_UNAWARE_SCHEMA_VERSION,
-    `${ADD_NOT_COVERED}${SET_SCHEMA_VERSION}`,
+    `${ADD_NOT_COVERED}${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
+  ],
+  [
+    EVIDENCE_UNAWARE_SCHEMA_VERSION,
+    `${CREATE_DEFECT_EVIDENCE}${SET_SCHEMA_VERSION}`,
   ],
 ]);

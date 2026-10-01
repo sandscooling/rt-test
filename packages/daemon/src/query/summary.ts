@@ -39,6 +39,7 @@ import {
   isCurrentAdapterVersion,
   recordFreshness,
   testStandings,
+  type CurrentFingerprints,
   type TestStanding,
 } from "./test-states.js";
 
@@ -56,6 +57,8 @@ export interface QueryBasis {
   /** Why each workspace's latest stored run was refused as unreadable, by workspace path. */
   readonly refusedRuns: ReadonlyMap<string, string>;
   readonly standings: readonly TestStanding[];
+  /** Each discovered workspace's current input fingerprint digest, the one its standings were rated against. */
+  readonly currentFingerprint: CurrentFingerprints;
   readonly notDiscovered: readonly NotDiscoveredEntry[];
   readonly context: AnswerContext;
 }
@@ -138,6 +141,8 @@ export function queryBasis(
     ]),
   );
   const fingerprints = workspaceFingerprints(discovery.discovery, inputs);
+  const currentFingerprint: CurrentFingerprints = (path) =>
+    fingerprintDigest(fingerprints.get(path));
   const freshness = recordFreshness(
     discovery,
     fingerprintDigest(inputs.discoveryFingerprint(discovery.discovery)),
@@ -160,9 +165,10 @@ export function queryBasis(
       discovery,
       latestRuns,
       refusedRuns,
-      (path) => fingerprintDigest(fingerprints.get(path)),
+      currentFingerprint,
       freshness === CURRENT,
     ),
+    currentFingerprint,
     notDiscovered: notDiscoveredEntries(discovery.discovery),
     context: {
       consumerRoot: daemon.consumerRoot,

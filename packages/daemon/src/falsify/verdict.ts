@@ -17,7 +17,7 @@ import {
 } from "./fact-types.js";
 import type { NoProbeSite } from "./reach-probe.js";
 
-const VERDICT = {
+export const VERDICT = {
   detected: "detected",
   survived: "survived",
   invalidExperiment: "invalid-experiment",
@@ -54,7 +54,7 @@ const INVALID_REASON = {
 } as const;
 
 /** Why a failed test is no detection, in the order the first that holds is given. */
-const UNCLEAR_REASON = {
+export const UNCLEAR_REASON = {
   notAnAssertion: "not-an-assertion",
   unhandledError: "unhandled-error",
   confirmingRunDiffered: "confirming-run-differed",

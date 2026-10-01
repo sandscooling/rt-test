@@ -290,19 +290,19 @@ export function unreadable(
   );
 }
 
-function jsonText(value: unknown, key: string): string {
+export function jsonText(value: unknown, key: string): string {
   const field = jsonField(value, key);
   if (typeof field === "string") return field;
   throw unreadable(`JSON field ${key}`, value);
 }
 
-function jsonBoolean(value: unknown, key: string): boolean {
+export function jsonBoolean(value: unknown, key: string): boolean {
   const field = jsonField(value, key);
   if (typeof field === "boolean") return field;
   throw unreadable(`JSON field ${key}`, value);
 }
 
-function jsonArray<T>(
+export function jsonArray<T>(
   value: unknown,
   key: string,
   item: (element: unknown) => T,
@@ -313,16 +313,49 @@ function jsonArray<T>(
   throw unreadable(`JSON field ${key}`, value);
 }
 
-function jsonStrings(value: unknown, key: string): string[] {
+export function jsonStrings(value: unknown, key: string): string[] {
   const field = jsonField(value, key);
   if (isStringArray(field)) return field;
   throw unreadable(`JSON field ${key}`, value);
 }
 
-function jsonRecord(value: unknown, key: string): Record<string, unknown> {
+export function jsonRecord(
+  value: unknown,
+  key: string,
+): Record<string, unknown> {
   const field = jsonField(value, key);
   if (isRecord(field)) return field;
   throw unreadable(`JSON field ${key}`, value);
+}
+
+/** A count or a position: a whole number from 0. */
+export function jsonCount(value: unknown, key: string): number {
+  const field = jsonField(value, key);
+  if (typeof field === "number" && Number.isInteger(field) && field >= 0) {
+    return field;
+  }
+  throw unreadable(`JSON field ${key}`, value);
+}
+
+/** A string field holding one value of a closed set. */
+export function jsonMember<T extends string>(
+  members: Members<T>,
+  value: unknown,
+  key: string,
+): T {
+  return member(members, jsonText(value, key), `JSON field ${key}`);
+}
+
+/** A field the value does not hold stays absent, as an object to spread, never null or a default. */
+export function jsonOptional<K extends string, T>(
+  value: unknown,
+  key: K,
+  read: (value: unknown, key: K) => T,
+): { readonly [P in K]?: T } {
+  if (jsonField(value, key) === undefined) return {};
+  const held: { [P in K]?: T } = {};
+  held[key] = read(value, key);
+  return held;
 }
 
 function jsonField(value: unknown, key: string): unknown {
