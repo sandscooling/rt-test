@@ -226,7 +226,7 @@ About 22 raw files and 29 estimated (22 times 1.3 is 28.6, the orchestrator's "a
 ### References
 
 - `_agent-docs/sprints/sprint-3-falsification.md` § Ticket 3.2 and its objective.
-- ADR-0003, ADR-0007, ADR-0008, ADR-0009; `docs/design-decisions/falsification-instance-reuse/FINDINGS.md`.
+- ADR-0003, ADR-0007, ADR-0008, ADR-0009.
 - `docs/requirements.md`: FR10, FR11, NFR6.
 - `docs/architecture.md` § Workspace runs, interruption and force-stop; § Host and consumer isolation during discovery and runs; § Executor processes, crashed runs and process trees; § Execution and falsification isolation.
 - GitHub issues: `node scripts/list-open-issues.mjs` printed "0 open issues, complete" on 2026-09-30.

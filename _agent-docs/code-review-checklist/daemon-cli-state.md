@@ -81,6 +81,8 @@ C138. **Count setup failures as invalid, not detected**: A compile, collection, 
 
 C139. **Never call an incomplete set verified**: "Verified" requires every defect in the denominator detected; tests with no defect are reported as a gap rather than left out of the count.
 
+C174. **Count work in flight as stale**: A guard that vouches for cached entries before an action also covers an entry whose producer is still running: it invalidates that entry or waits for its producer, and never reads "no result yet" as fresh. FAIL on a freshness check that skips an entry with no cached value while something can still write one.
+
 ## Execution and trust
 
 C140. **Execute only a started, trusted project**: No code path runs a project's tests, loads its Vitest config or imports its files unless that project was explicitly started and trusted. Before that start, discovery reads files without executing them.
