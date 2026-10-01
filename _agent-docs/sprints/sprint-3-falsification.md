@@ -8,7 +8,7 @@ The roadmap's first spike, plugin transforms under Vitest 4.1, held on 4.1.11 an
 
 Evidence freshness has workspace granularity (ADR-0007): an edit anywhere in a workspace's inputs stales every defect in it, and M3's file-level dependencies narrow that. Fleet Cooling commits no defect definitions today (its mutation specs live in change records), so the M2 trial there needs definitions written in its repository first, in ADR-0009's format.
 
-Order: 3.1 and 3.2 build in parallel, since 3.1 works in the daemon's query, protocol and CLI and 3.2 in its Vitest session and executor. 3.3 follows 3.2, whose experiment records it judges. 3.4 follows 3.1 and 3.3, storing 3.3's verdicts against 3.1's definitions. 3.5 follows 3.4, since a scheduled job stores evidence. 3.6 follows 3.5, gating the job 3.5 starts. 3.7 measures the milestone's acceptance. 3.8 comes last, once RT Test runs this repository's own suite, since its evidence needs this repository started under RT Test. Each ticket is estimated at 25 files or fewer.
+Order: 3.1 and 3.2 build in parallel, since 3.1 works in the daemon's query, protocol and CLI and 3.2 in its Vitest session and executor. 3.3 follows 3.2, whose experiment records it judges. 3.2b follows 3.2, whose probe placement it widens without changing the record, and lands before 3.5, so no evidence is ever stored under 3.2's looser placement. 3.4 follows 3.1 and 3.3, storing 3.3's verdicts against 3.1's definitions. 3.5 follows 3.4, since a scheduled job stores evidence. 3.6 follows 3.5, gating the job 3.5 starts. 3.7 measures the milestone's acceptance. 3.8 comes last, once RT Test runs this repository's own suite, since its evidence needs this repository started under RT Test. Each ticket is estimated at 25 files or fewer.
 
 ## Ticket 3.1: Defect definitions and gaps
 
@@ -17,6 +17,10 @@ Scope: read the definition files `rt-test.json`'s `defects` member lists, valida
 ## Ticket 3.2: Transform experiments in a reused instance
 
 Scope: a falsification job in the daemon's executor loads one Vitest instance for a workspace with RT Test's mutation plugin, runs the intended tests' modules as a baseline, each defect's experiment alone, and the restored baseline, behind the stale-transform guard; the plugin places a reach probe at each mutated site, or records that none can be placed, and a setup file RT Test places first marks each test that executed it; the job reads each run's facts only from the modules it executed and returns one raw record per experiment, on Vitest 4.1 and 5, leaving every consumer file byte-identical. Requirements: FR10, FR11, NFR6. Ticket file: [3-2-transform-experiments](../tickets/3-2-transform-experiments.md)
+
+## Ticket 3.2b: Probe sites for removed, added and replaced code
+
+Scope: make a deletion's probe sound first, placed only where its firing means execution reached the point the deleted text stood and never on an ancestor that can run without it (as 3.2 built it, a pure deletion's probe can sit on such an ancestor, in about 39 of this repository's 2,092 probed mutations), raising `FALSIFIER_VERSION`; then widen the reach probe's placement so a mutation that removes or adds whole statements in a statement list gets its probe at that point in the list, and so does each further position whose probe can be shown to fire only when the changed code begins executing (a callee or property name through its parent expression, a replaced function through its body, a declarator through its statement), leaving every other position refused; measured over this repository's own catalog, where placement as 3.2 built it refuses 874 of 2,966 mutations (29.5%, 3.2's review, 20:40 on 2026-09-30), most of them deleted guards and writes. Requirements: FR10, FR11.
 
 ## Ticket 3.3: Verdicts from run facts
 
