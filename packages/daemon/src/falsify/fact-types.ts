@@ -15,7 +15,10 @@ import type { MutationLoad } from "./mutation-transform.js";
 
 export const ERROR_KIND = { assertion: "assertion", other: "other" } as const;
 
-/** The name an error carries unless it is given one of its own, and the name of every plain error's class. */
+/**
+ * The name an error inherits from `Error` unless it, or a class between it and `Error`, sets another. A plain error's
+ * class has this name too.
+ */
 export const PLAIN_ERROR_NAME = "Error";
 
 export const PASSED = "passed" satisfies RecordedRunTest["state"];
