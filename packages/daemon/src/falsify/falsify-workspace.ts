@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { TestIdentity, TestModuleLocation } from "@rt-test/core";
 import type { TestModule, TestSpecification } from "vitest/node";
+import { wholeDigest } from "../inputs/input-inventory.js";
 import { errorText } from "../vitest/error-text.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import { RunInterruption } from "../vitest/run-interruption.js";
@@ -62,9 +63,9 @@ type RunStep =
 type EndedStep = Exclude<RunStep, { kind: "interrupted" }>;
 type RanStep = Extract<RunStep, { kind: "ran" }>;
 
-/** A mutated file's text as the job read it when it started, or why it could not be read. */
+/** A mutated file's text as the job read it when it started, with that text's digest, or why it could not be read. */
 type FileText =
-  | { readonly read: true; readonly text: string }
+  | { readonly read: true; readonly text: string; readonly digest: string }
   | { readonly read: false; readonly error: string };
 
 const INTERRUPTED: ExperimentNotRun = { kind: "interrupted" };
@@ -215,7 +216,9 @@ class FalsificationRuns {
     const ordered = (): ExperimentRecord[] =>
       experiments.flatMap((experiment) => {
         const record = records.get(experiment);
-        return record === undefined ? [] : [record];
+        return record === undefined
+          ? []
+          : [this.#withFileDigest(experiment, record)];
       });
     if (planned.length === 0) {
       return { interrupted: false, experiments: ordered() };
@@ -330,6 +333,17 @@ class FalsificationRuns {
     return text;
   }
 
+  /** The record with the digest of its mutation file's text as the job read it; a file it could not read adds none. */
+  #withFileDigest(
+    experiment: DefectExperiment,
+    record: ExperimentRecord,
+  ): ExperimentRecord {
+    const fileText = this.#texts.get(experiment.mutation.file);
+    return fileText?.read === true
+      ? { ...record, mutationFileDigest: fileText.digest }
+      : record;
+  }
+
   /** Once an abort interrupts one experiment, every later one is recorded interrupted without a run. */
   async #experimentsAfter(
     baseline: EndedStep,
@@ -435,7 +449,8 @@ class FalsificationRuns {
 
 function readText(file: string): FileText {
   try {
-    return { read: true, text: readFileSync(file, "utf8") };
+    const text = readFileSync(file, "utf8");
+    return { read: true, text, digest: wholeDigest(text) };
   } catch (error) {
     return { read: false, error: errorText(error) };
   }

@@ -34,6 +34,8 @@ when that is literally true.
 
 None: the ticket calls no third-party behavior this repository has not already exercised. The digest is `node:crypto`'s SHA-256 through `wholeDigest`, which `packages/daemon/src/inputs/fingerprint.ts` and `inputs/env-files.ts` already call.
 
+Resolution (dev, 02:11 on 2026-10-01): no row to resolve. CONFIRMED in this repository's own source that `wholeDigest` is `createHash("sha256").update(content).digest("hex")` over a string or bytes (`wholeDigest` in `packages/daemon/src/inputs/input-inventory.ts`), and that its module imports only Node built-ins, `vitest/error-text.js` and `vitest/find-workspaces.js` at run time, with `inputs/input-filter.js` as a type alone.
+
 ## Tasks / Subtasks
 
 <!--
@@ -42,12 +44,12 @@ builds from tasks, so a task's instruction must satisfy the current text of ever
 No task writes or edits a test: create-tests owns every test change.
 -->
 
-- [ ] (Support) Resolve every Unverified Assumption above before implementing; the table holds none.
-- [ ] (AC1, AC2) In `falsify/experiment-record.ts`, give both members of `ExperimentRecord` one optional member for the mutation file digest, a string, and raise `FALSIFIER_VERSION` by one, from 2 to 3, since a record now holds more: ticket 3.4 binds evidence to that version and ticket 3.6 keeps a canary result for each. D3782 pins the literal 2 twice, in its record's anchor (`export const FALSIFIER_VERSION = 2;`, in `packages/daemon/test/falsify/defects.json`) and in its test's expected value (`packages/daemon/test/falsify/falsify-workspace.test.ts`), so the raise breaks both: list D3782 under Dev Handoff, Test Files This Change Broke, and edit neither, since create-tests owns them. Until create-tests moves the anchor, `node scripts/check-defects.mjs` fails on it, since every anchor must match its file exactly once.
-- [ ] (AC1, AC2) In `falsify/falsify-workspace.ts`, set the digest on every record whose mutation's file `#textOf` read, from the text `FalsificationRuns` already holds in `#texts`, with `wholeDigest` from `inputs/input-inventory.ts`, the function ticket 3.4 calls on the query side (C5, C8). Read no file a second time. Set it in one place for every record, so no path that builds a record (a run, a not-run reason, an interruption) can leave it out. Edit around the anchored text of the records these two files hold (Dev Notes § Tests this change may break counts and names them), and list any record whose anchor an edit breaks under Dev Handoff, Test Files This Change Broke. `falsify-workspace.ts` holds 461 of its 500 code lines and `experiment-record.ts` 406 (Dev Notes § Current structure of the modified files gives the command) (P16).
-- [ ] (AC1) Check every reader of `ExperimentRecord` and of the reply (C38): at 45f92eb6 the type is read only in `falsify/falsify-workspace.ts` and `falsify/run-facts.ts`, each by named member (`git grep -n --untracked "ExperimentRecord" -- packages/daemon/src packages/cli/src` printed those two files and the type's own at 02:00 on 2026-10-01), and the reply crosses the executor's channel whole (`{ type: "falsified", job }` in `daemon/executor-main.ts`, returned as `reply.job` by `Executor.falsify`), so nothing rebuilds a record. Search the `defects.json` files for a record whose `new` text builds an experiment record as a literal or replaces the place the digest is set: at 45f92eb6 none does (Dev Notes § Tests this change may break), so the search is for a record that lands after that commit. Stop and report any reader that copies a record member by member, since its file is not in this ticket's list.
-- [ ] (Support) Report to the orchestrator the sentence for `docs/architecture.md` § Falsification jobs (an experiment's record carries a digest of its mutation file's text as the job read it); write none of it yourself.
-- [ ] (Support) Lint and typecheck.
+- [x] (Support) Resolve every Unverified Assumption above before implementing; the table holds none.
+- [x] (AC1, AC2) In `falsify/experiment-record.ts`, give both members of `ExperimentRecord` one optional member for the mutation file digest, a string, and raise `FALSIFIER_VERSION` by one, from 2 to 3, since a record now holds more: ticket 3.4 binds evidence to that version and ticket 3.6 keeps a canary result for each. D3782 pins the literal 2 twice, in its record's anchor (`export const FALSIFIER_VERSION = 2;`, in `packages/daemon/test/falsify/defects.json`) and in its test's expected value (`packages/daemon/test/falsify/falsify-workspace.test.ts`), so the raise breaks both: list D3782 under Dev Handoff, Test Files This Change Broke, and edit neither, since create-tests owns them. Until create-tests moves the anchor, `node scripts/check-defects.mjs` fails on it, since every anchor must match its file exactly once.
+- [x] (AC1, AC2) In `falsify/falsify-workspace.ts`, set the digest on every record whose mutation's file `#textOf` read, from the text `FalsificationRuns` already holds in `#texts`, with `wholeDigest` from `inputs/input-inventory.ts`, the function ticket 3.4 calls on the query side (C5, C8). Read no file a second time. Set it in one place for every record, so no path that builds a record (a run, a not-run reason, an interruption) can leave it out. Edit around the anchored text of the records these two files hold (Dev Notes § Tests this change may break counts and names them), and list any record whose anchor an edit breaks under Dev Handoff, Test Files This Change Broke. `falsify-workspace.ts` holds 461 of its 500 code lines and `experiment-record.ts` 406 (Dev Notes § Current structure of the modified files gives the command) (P16).
+- [x] (AC1) Check every reader of `ExperimentRecord` and of the reply (C38): at 45f92eb6 the type is read only in `falsify/falsify-workspace.ts` and `falsify/run-facts.ts`, each by named member (`git grep -n --untracked "ExperimentRecord" -- packages/daemon/src packages/cli/src` printed those two files and the type's own at 02:00 on 2026-10-01), and the reply crosses the executor's channel whole (`{ type: "falsified", job }` in `daemon/executor-main.ts`, returned as `reply.job` by `Executor.falsify`), so nothing rebuilds a record. Search the `defects.json` files for a record whose `new` text builds an experiment record as a literal or replaces the place the digest is set: at 45f92eb6 none does (Dev Notes § Tests this change may break), so the search is for a record that lands after that commit. Stop and report any reader that copies a record member by member, since its file is not in this ticket's list.
+- [x] (Support) Report to the orchestrator the sentence for `docs/architecture.md` § Falsification jobs (an experiment's record carries a digest of its mutation file's text as the job read it); write none of it yourself.
+- [x] (Support) Lint and typecheck.
 
 ## Reusable Code
 
@@ -185,15 +187,20 @@ one, and write None. under any that is empty, since an absent heading reads as n
 
 ### Dev Handoff
 
-Dev session: threadId {{dev_thread_id}}
+Dev session: threadId b7f47c7a-004b-4932-bdb3-3e86c004ae85
 
 #### Test Files This Change Broke
 
-None.
+Dev ran no test; each entry is read from the test's text against the change.
+
+- `packages/daemon/test/falsify/defects.json`: D3782's anchor `export const FALSIFIER_VERSION = 2;` matches nothing now that the line reads `= 3`, so `node scripts/check-defects.mjs` exits 1 on it ("D3782: mutation anchor must match exactly once.", 02:12 on 2026-10-01). Of the 29 records anchored in the two edited files it is the only one whose anchor no longer matches exactly once (counted over all 19 tracked `defects.json` files at 02:12).
+- `packages/daemon/test/falsify/falsify-workspace.test.ts`, D3782: its test expects `[2, 2]` and its title names version 2; the reply now reads 3.
+- `packages/daemon/test/falsify/falsify-workspace.test.ts`, D3642, D3643, D3644, D3646 and D3647, in `describe("experiments decided without running")`: each compares a whole not-run record with `toEqual` against the local `notRun(reason)` literal of three members (`defectId`, `status`, `reason`). Each of those records now also carries `mutationFileDigest`, since its file was read, so each comparison is expected to fail on the extra member. The behavior changed on purpose (AC1); their records' anchors in `defects.json` still match. D3645, beside them, reads named members and is not affected.
 
 #### ACs Owed a Test
 
-None.
+- AC1: every experiment record of a job's reply whose file the job read carries `mutationFileDigest`, whatever its status and not-run reason (a run, `baseline-not-passed`, `baseline-not-run`, `no-module`, `anchor-count`, `no-probe-site`, `run-unrecorded`, `interrupted`); a record whose reason is `unreadable` carries none; and the reply's `falsifierVersion` reads 3.
+- AC2: the member's value is `wholeDigest` of the file's text read whole as UTF-8, so two experiments on one file carry equal digests, a file with a byte order mark or CRLF line endings digests with them kept, a file that differs in one character digests differently, and the member holds no part of the text.
 
 #### Tests Owed
 
@@ -219,6 +226,27 @@ None.
 
 ### Completion Notes
 
+Dev, 02:18 on 2026-10-01, in Tree 1 on `wt/1` over e473c80b.
+
+- `falsify/experiment-record.ts`: `FALSIFIER_VERSION` is 3, and both members of `ExperimentRecord` hold an optional `mutationFileDigest`, a string. The ticket left the member's name open; ticket 3.4 reads it by this name. 408 code lines.
+- `falsify/falsify-workspace.ts`: `readText` digests the text it read with `wholeDigest`, once for each file, and keeps the digest beside the text in `FileText`. `FalsificationRuns.all`'s `ordered()`, which every return of `all` collects its records through, hands each record to `#withFileDigest`, which adds the digest when the file was read and nothing when it was not. It reads the `#texts` map and never the file, so no path reads a file a second time. 474 code lines.
+- Readers (C38): in production the record is read in `falsify/falsify-workspace.ts` and `falsify/run-facts.ts`, each by named member, and the reply crosses the executor's channel whole (`daemon/executor-main.ts`, `daemon/executor.ts`). No `defects.json` record's `new` text builds an experiment record or replaces `ordered`, `notRun`, `readText` or `#textOf`.
+- Assumptions: the table held none; the resolution beneath it records what was read.
+- Ticket sanity check: no findings.
+- Gates, each against the tree as it stands at 02:17: `bun run --filter @rt-test/daemon typecheck` exit 0 (02:12, before a comment-only edit); `bun run --filter rt-test typecheck` exit 0 (02:12), the one workspace that depends on the daemon; `bun x oxlint` over both files exit 0 (02:17); `bun x prettier --check` over both files exit 0 (02:17); `node scripts/check-line-citations.mjs` clean (02:17). `node scripts/check-defects.mjs` exits 1 on D3782 alone, as the ticket expects. The repo-wide gate is the orchestrator's.
+- Acceptance evidence, by reading: every one of the five returns of `all` takes its records from `ordered()`; `#planAll` reads each experiment's file through `#textOf` before `ordered()` can run, so `#texts` holds an entry for every experiment given; an unreadable file is `read: false` and adds no member; `falsifySession` sets `falsifierVersion` from `FALSIFIER_VERSION`; and the spread in `#withFileDigest` adds one member and changes no other. Both criteria state what a job's reply holds on each Vitest line and platform, which only a test observes, so both stay unticked under ACs Owed a Test.
+- Adversarial review (one agent, 02:13 to 02:16): 4 findings. Fixed: the member's comment now names `wholeDigest` and the kept byte order mark (F3). Discarded F2 (a missing `#texts` entry read as an unread file): unreachable by construction, absence fails safe since ticket 3.4 refuses a verdict whose record has no digest, and a throw would add a branch no test reaches. Discarded F4 (`#texts` keyed by the path as given): it predates this change, each mutation's file arrives as one absolute path, and both reads would fall in the synchronous `#planAll`. F1 is the candidate below. Re-validation after the fix was lint alone, under the comment-only exemption.
+- README: no line changes, since nothing a user sees changes until ticket 3.4 reads the member.
+- `docs/architecture.md` § Falsification jobs: the sentence was sent to the orchestrator, which owns the file.
+- Left on disk until the lane is settled: `_agent-docs/.scratch/3-3b/anchors.mjs` (the anchor count above) and the gate logs `_agent-docs/.scratch/3-3b-*.log`, all ignored by git.
+
+#### Change request candidates
+
+- A fork, not a defect in this ticket's code, sent to the orchestrator at 02:19 on 2026-10-01. The ruling of 00:20 names the known limit as a declared non-input file "edited and restored byte for byte inside one job's run". The first design decision above states the case wider: "restored to the same text before the query". The gap is a file edited inside the job and restored after it: its run was served the edited text, its record carries the start text's digest, and once the file is restored the evidence reads current. It needs the same false declaration as the ruled case, since ticket 3.5 stores nothing for a file in the workspace's inputs that moved during the job. Recommendation: keep it as the same known limit and word ticket 3.4's Known limits as "restored before the query". Closing it instead means comparing the text a run was served with the start digest and storing nothing when they differ, which changes shipped behavior and edits `falsify/stale-transform-guard.ts` or `falsify/mutation-transform.ts`, outside this ticket's files.
+
 ### File List
+
+- `packages/daemon/src/falsify/experiment-record.ts` (modified by dev)
+- `packages/daemon/src/falsify/falsify-workspace.ts` (modified by dev)
 
 - `_agent-docs/tickets/3-3b-mutation-file-digest.md` (created by create-ticket, 00:10 on 2026-10-01, cut from ticket 3.4; amended by its author at 02:06 for ticket 3.3 as landed)

@@ -45,7 +45,7 @@ sprint-3: in-progress
 3-2-transform-experiments: done
 3-2b-probe-sites: ready-for-dev
 3-3-verdicts-from-facts: done
-3-3b-mutation-file-digest: ready-for-dev
+3-3b-mutation-file-digest: review
 3-4-defect-evidence: ready-for-dev
 3-5-schedule-falsification: backlog
 3-4b-summary-defect-counts: backlog
