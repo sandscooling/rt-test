@@ -81,7 +81,8 @@ const TEMP_VARIABLES = ["TMPDIR", "TMP", "TEMP"] as const;
 const FIXTURE_SOURCE = join(REPO, "test/fixtures/daemon", FIXTURE);
 /** A module the test writes into a copy of the fixture before a job starts, so the test chooses its exact text. */
 const WRITTEN_MODULE = "src/written.mjs";
-const BYTE_ORDER_MARK = "﻿";
+/** U+FEFF, built from its code so no invisible character sits in this file. */
+const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
 /** The experiments of the shared job that mutate the math module and are decided without a run, with each one's reason. */
 const DECIDED_WITH_TEXT: Readonly<Record<string, string>> = {
   failing: "baseline-not-passed",

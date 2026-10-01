@@ -60,7 +60,7 @@ Check this list before creating any constant, helper or type, and import what ex
 ### Reuse
 
 - `wholeDigest(content)` (`packages/daemon/src/inputs/input-inventory.ts`): SHA-256 as hex over a string or bytes held in memory. Exported. Its module imports Node built-ins, `vitest/error-text.js` and `vitest/find-workspaces.js` at run time; `find-workspaces.ts` imports Node built-ins, `json-guards.js` and `error-text.js`, and `error-text.ts` imports nothing (read at 45f92eb6, 02:02 on 2026-10-01). `daemon/executor-main.ts` already imports both at run time, so the executor process loads nothing new, and the chain reaches neither the store nor the daemon's server.
-- In ticket 3.3 as landed (`main` at 45f92eb6, read at 02:00 on 2026-10-01): `FalsificationRuns.#textOf(file)` and its `#texts` map, which hold each mutated file's text read once when the job starts, through `readText` (`readFileSync(file, "utf8")`), as a `FileText` that is the text or the read's error; `FalsificationRuns.all`, whose `ordered()` returns the job's records in the order given and is called at every return of `all`; `ExperimentRecord`, `FALSIFIER_VERSION` (`falsify/experiment-record.ts`).
+- In ticket 3.3 as landed (`main` at 45f92eb6, read at 02:00 on 2026-10-01): `FalsificationRuns.#textOf(file)` and its `#texts` map, which hold each mutated file's text read once when the job starts, through `readText` (`readFileSync(file, "utf8")`), as a `FileText` that is the text or the read's error; `FalsificationRuns.all`, whose `ordered()` returns the job's records in the order given, and every return of `all` takes its records from it; `ExperimentRecord`, `FALSIFIER_VERSION` (`falsify/experiment-record.ts`).
 - The private `digestOf(text)` in `packages/daemon/src/falsify/stale-transform-guard.ts` gives the same value for a string. Do not export it for this: one exported function already answers the question (C5).
 
 ### Must Create
@@ -127,7 +127,7 @@ On `main` at 45f92eb6, read at 02:00 on 2026-10-01. Code lines are by `grep -cv 
 #### Tests this change may break
 
 - D3782 changes. Its test, in `packages/daemon/test/falsify/falsify-workspace.test.ts`, expects `[2, 2]` and names version 2 in its title; its record, in `packages/daemon/test/falsify/defects.json`, anchors `export const FALSIFIER_VERSION = 2;` with the mutant `= 1`. That test holds the only line of test code that reads `falsifierVersion` (`git grep -n "falsifierVersion" -- packages/daemon/test packages/cli/test` printed that line alone at 45f92eb6, 02:06 on 2026-10-01).
-- A test that compares a whole experiment record of a job's reply with a literal would change too. `git grep -c 'status: "not-run"'` over the same paths printed two hits, both a hand-built record a test hands in (`falsify-workspace.test.ts`, `verdict.test.ts`), which the optional member leaves compiling; that search is not proof that no test compares one.
+- A test that compares a whole experiment record of a job's reply with a literal would change too. `git grep -c 'status: "not-run"'` over the same paths printed two hits. The one in `verdict.test.ts` is a hand-built record a test hands in, which the optional member leaves compiling. The one in `falsify-workspace.test.ts` is the `notRun(reason)` literal of `describe("experiments decided without running")`, which D3642, D3643, D3644, D3646 and D3647 each compare with a whole not-run record of the job's reply through `toEqual`; each of those records gains the digest, so those five tests change.
 - Records anchored in the two files, at 45f92eb6 (02:00 on 2026-10-01), each count by `cat packages/daemon/test/defects.json packages/daemon/test/*/defects.json packages/cli/test/defects.json | grep -c '"file": "packages/daemon/src/falsify/<file>"'`: `falsify/experiment-record.ts` 16 (D3623, D3627, D3637 to D3641, D3643, D3651, D3743, D3744, D3779, D3780, D3782, D3809, D3810) and `falsify/falsify-workspace.ts` 13 (D3633, D3642, D3644 to D3647, D3653, D3741, D3742, D3778, D3783, D3784, D3811). Of the 29, only D3782 anchors a line this ticket must change. None anchors the `ExperimentRecord` type, `notRun`, `ordered` or `#textOf`, and no record's `new` text builds an experiment record. Two anchor a line beside where a record is built or collected: D3778 the `return record;` line of `#experiment`, and D3741 the `markAll` call in `all`. Edit around their anchored text, and list any record whose anchor an edit breaks under the Dev Handoff.
 
 #### Previous-ticket intel
@@ -216,6 +216,8 @@ Tests session: threadId f081927f-fb38-484a-aaf1-5bf32055d3dc
 
 All tests are in `packages/daemon/test/falsify/falsify-workspace.test.ts`, with their records in `packages/daemon/test/falsify/defects.json`. Proof, by id through the run lease, over 6a7a3332 with those two files as edited: 60 of 60 detected on Windows (02:28 to 02:32 on 2026-10-01) and 60 of 60 on Linux under Node 24.19.0 (ended 02:34), baseline green before and after on each. The 60 are the 6 new records, the 29 anchored in `falsify/experiment-record.ts` and `falsify/falsify-workspace.ts`, and every other record whose test is in the edited test file.
 
+Review gap G1: the test file's `BYTE_ORDER_MARK` is built with `String.fromCharCode(0xfeff)`, so the file holds no invisible character a tool could drop. Its value at run time is unchanged, and no record or expected value moved. Proof, by id through the run lease, over c1d2aca9 with the test file as edited, of the 54 records whose test is in that file: 54 of 54 detected on Windows (ended 02:59 on 2026-10-01) and 54 of 54 on Linux under Node 24.19.0 (02:59 to 03:01), baseline green before and after on each.
+
 #### Named Defects
 
 - D3870: The record of an experiment that ran carries no digest of its mutation file's text, so a detection has nothing to bind to and cannot be stored as evidence. (AC1)
@@ -231,16 +233,86 @@ Each expected digest is what `wholeDigest` gives the text read whole as UTF-8, t
 
 #### Deliberately Untested
 
-- `packages/daemon/src/falsify/falsify-workspace.ts`, the not-run reasons `interrupted`, `baseline-not-run` and `run-unrecorded`: each reads no verdict, so ticket 3.4 stores nothing for them and a missing digest there can neither report stale evidence as current nor refuse good evidence. The digest is set in the one place every return of `all` collects its records through, which D3870 and D3871 pin for both statuses.
+- `packages/daemon/src/falsify/falsify-workspace.ts`, the not-run reasons `interrupted`, `baseline-not-run` and `run-unrecorded`: each reads no verdict, so ticket 3.4 stores nothing for them and a missing digest there can neither report stale evidence as current nor refuse good evidence. The digest is set in the one place every return of `all` collects its records through, which D3870 and D3871 pin for both statuses. Asked of the orchestrator at 02:35 on 2026-10-01 whether to test them anyway; decided by the orchestrator at 02:37: leave them untested, and a gap row from the review naming a defect there that could store a wrong digest reopens it.
 - `packages/daemon/src/daemon/executor-main.ts` and `executor.ts`: the reply crosses the executor's channel whole, as JSON, and no branch there reads a record's members, so no defect is nameable for the digest. `falsify-executor.test.ts` passes unedited.
 - A digest of the file's bytes in place of its text read as UTF-8: the two are equal for every file that is valid UTF-8, a byte order mark included, so no mutation is observable short of an invalid encoding no realistic consumer's source holds.
 - A declared non-input file a defect mutates, edited while a job runs and restored to the same text before the query: the known limit the orchestrator ruled at 02:20 on 2026-10-01.
 
 ### Review Record
 
+Review session: threadId 757706d6-30ee-4701-89f6-efda7312059c
+
+Reviewed cold at 02:37 to 02:46 on 2026-10-01, in Tree 1 on `wt/1` at c1d2aca9: `git diff main...wt/1` (seven files), and the authoring text of commits 0f6eb4b3 and e473c80b. One fresh-eyes agent read the two production files, the test file and the seven records; two doc-verify agents read ticket 3.4's amendment and this ticket's authoring text; the checklist pass ran the ticket's bound rules (C3, C5, C8, C12, C14, C38, C45, C48, C59, C118, C147, P13, P16, P17, P36, P37) over both production files.
+
+**Verdict: no code finding.** Both criteria hold by reading and by the tests session's proof. What the dispatch asked to stress, each traced:
+
+- The digest is of the start text. `readText` digests the string its one `readFileSync(file, "utf8")` returned, in the same statement, and `#withFileDigest` takes it from the `#texts` map, never from the file. `#planAll` fills that map synchronously, before any run and before any await of `all`. D3873 pins it against a file edited mid-job.
+- Every record that can carry a verdict carries it. All five returns of `all` take their records from `ordered()`, which hands each to `#withFileDigest`. `judgeNotRun` and `judgeRan` (`falsify/verdict.ts`) give a verdict only to a record that ran, or whose reason is `no-probe-site`, `no-module` or `baseline-not-passed`, each decided with the text in hand. D3870 and D3871 pin both statuses.
+- It equals what the query computes. The job reads with `readFileSync(file, "utf8")` and today's `readMutationFile` (`defects/resolve-definitions.ts`) with `readFile(path, "utf8")` after a `stat`. Measured at 02:44 on Node 24.19.0 on Windows with a scratch probe, 4 of 4 texts (plain, a byte order mark, CRLF, both): the SHA-256 of the two strings is equal, and equal to that of the text written and of the file's bytes. D3874 and D3875 prove the job's half on both platforms.
+- The record holds the digest and no part of the text. `#withFileDigest` spreads one member, and the text stays in `FileText`, which never leaves the executor's job. The five repaired whole-record tests pin four members on a not-run record.
+
+**The three no-verdict reasons left untested** (`interrupted`, `baseline-not-run`, `run-unrecorded`): agreed. `judgeNotRun` gives each no verdict, so ticket 3.4 stores nothing for them. The digest a record gets depends on its experiment's `mutation.file` alone, read from the map the tested reasons read, so a defect there can only leave the digest out and never store a wrong one. The fresh-eyes agent looked for a wrong-digest defect there and found none.
+
+**Fixes applied by the review** (this ticket's authoring text only; no production file, test or defect record changed).
+
+- Dev Notes § Tests this change may break read the `falsify-workspace.test.ts` hit of its `status: "not-run"` search as a record a test hands in. It is the expected literal D3642, D3643, D3644, D3646 and D3647 compare with a whole record of the reply, the case the sentence before it warned of. The dev's handoff named the five and the tests session repaired them; the sentence now says what the hit is.
+- § Reusable Code said `ordered()` is called at every return of `all`. It is called at three sites and every return takes its records from it; reworded.
+
+**Discarded, with the reason.**
+
+- The optional chain in `fileText?.read === true` could hide a broken invariant: the dev's adversarial pass weighed it (Completion Notes, F2). A missing entry is unreachable, absence fails safe since ticket 3.4 refuses a verdict whose record has no digest, and a throw would add a branch no test reaches.
+- `mutationFileDigest` required on the record that ran: this ticket's design decision makes it optional on both members, ticket 3.4 is written against that, and the record crosses the executor's channel as JSON, which no type checks, so its reader handles an absent member either way.
+- D3870 does not read the record's status, and D3873 does not itself show the label module was edited: each input is pinned by a test of the same shared job that goes red when it drifts. D3621 reads `add` as a record that ran, and D3631 reads the `label` experiment's anchor as occurring zero times, which only the mid-job edit produces.
+
+**Tech debt, recorded for Step 9** (none can report a stale result as current or credit a detection; each is in `packages/daemon/src/falsify/`).
+
+- `falsify-workspace.ts` holds 474 of its 500 code lines after this ticket, and neither ticket 3.2b nor ticket 3.4 edits it, so nothing planned relieves it. The start-of-job planning (`FileText`, `readText`, `startCheck`, `#plan`, `#planAll`, `#textOf`, `#withFileDigest`) is the responsibility to extract when a ticket next needs room there.
+- `FileText` keeps each mutated file's whole text in `#texts` until the job ends, though only `startCheck` reads it, during `#planAll`; after planning only the digest is read.
+- `#texts` is keyed by `mutation.file` as given, so two spellings of one file are read twice, in one synchronous loop. Each record's digest is of the text its own start check read, so no wrong evidence follows.
+- `digestOf` in `stale-transform-guard.ts` and `wholeDigest` in `inputs/input-inventory.ts` are the same SHA-256 over a string. The guard compares its digests only with each other, never with a record's.
+
+**Doc text, final** (for the orchestrator to apply; it replaces `C:/source/rt-test/_agent-docs/.scratch/3-3b-doc-text.md`, checked against the code and written against the files as this tree holds them).
+
+`docs/architecture.md` § Falsification jobs, in the paragraph that starts "An experiment's record also lists each transform of its mutated module", after the sentence that ends "or that an abort interrupted it." and before "A run that throws is recorded as failed", insert:
+
+> An experiment's record also carries `mutationFileDigest`, a digest of its mutation file's text as the job read it when it started: `wholeDigest` of the file read whole as UTF-8, a byte order mark and its line endings kept. Every record carries it, whatever its status and its reason, except one whose file the job could not read. A file edited later in the job keeps the start text's digest on its record, and the record holds no part of the text.
+
+Same section, the last entry of Known limits, replace "a source file edited while the job runs is served from its new text at the next run, and the record does not say that a file changed between its runs." with:
+
+> a source file edited while the job runs is served from its new text at the next run, and the record does not say that a file changed between its runs: the digest it carries is of the text the job read when it started.
+
+The limit the orchestrator ruled at 02:20 (a declared non-input file a defect mutates, edited while a job runs and restored to the same text before the query, reads current) is not architecture text at this ticket's landing: nothing stores or reads evidence until ticket 3.4, so no evidence reads current yet. Ticket 3.4's § Known limits carries it, and that ticket's build reports it with its own doc text.
+
+`docs/testing.md` § Falsification jobs, mutation transforms and reach, first sentence: the id list reads "D3604 through D3653, D3709, D3735 through D3745, D3750 through D3811 and D3870 through D3875" (beside whatever lane t3-2b adds; the second lane to land adds its ranges to the list the first one left).
+
+Same section, after the paragraph that ends "and D3742 passes a signal already aborted.", add this paragraph:
+
+> D3870 through D3875 read the digest of its mutation file's text that each experiment record carries. `startDigest` gives the expected value: `wholeDigest` of the fixture's module as committed, read whole as UTF-8 as a query reads the file, which is the module's text when a job over a copy starts. D3870 and D3871 read experiments of the shared job that all mutate the math module, one that ran and five decided without a run, each of the five with its reason beside the digest. D3872 reads the `unreadable` experiment, whose record must hold no such member. D3873 reads the `label` experiment, whose module the test rewrites while the baseline runs, so its record must carry the digest of the text the job read. D3874 and D3875 each run a job of their own per Vitest line through `digestCarriedOver`, which writes `src/written.mjs` into a copy of the fixture with the test's exact text, a byte order mark or CRLF line endings, and names a test in no module, so the job decides the experiment from the text it read and runs nothing. The whole not-run records D3642, D3643, D3644, D3646 and D3647 compare hold four members, the fourth the math module's digest.
+
+README: no change, since nothing a user sees changes until ticket 3.4 reads the member. `docs/plan.md` and `docs/roadmap.md`: no line this change made false.
+
+**For the tickets that follow.**
+
+- 3.4: the member is `mutationFileDigest`, an optional string on both members of `ExperimentRecord`, absent exactly when the record's reason is `unreadable`, which reads no verdict; so the refusal of a verdict without one guards a broken reply. Compute the query's side as `wholeDigest` of the string `readFile(path, "utf8")` returns, with nothing stripped or normalized: the probe above measured that equal to the job's for a byte order mark and for CRLF. `FALSIFIER_VERSION` is 3. A test that compares a whole record of a job's reply expects the member (four members on a not-run record). D3782 anchors `export const FALSIFIER_VERSION = 3;` with the mutant `= 2`, so the next raise moves its record and its test. Pair a verdict with its record by defect id: a record's digest follows its experiment's `mutation.file` as the job was given it. `falsify-workspace.ts` has 26 code lines of room and `experiment-record.ts` 92.
+- 3.4, its own text: § Pending siblings still reads "3.3b (built at 6a7a3332 on `wt/1`, not yet tested or reviewed)"; it is tested at c1d2aca9 and reviewed here, and the entry should name the merge on `main` once this lane lands.
+- 3.5: the digest covers an edit that still stands at the query and nothing else. A file in the workspace's inputs that is edited while the job runs and restored is 3.5's to refuse from its change events, as its scope says. The job reads each mutation's file inside `FalsificationRuns.all`, after the Vitest instance has loaded, so the window in which 3.5 must count a moved input runs from the fingerprint it hands the store to the job's end, the load included, and not only from the job's first run.
+
+**Gap rows, worked** by the tests session (sent at 02:46, reply at 03:01 on 2026-10-01): G1, with one deviation the review accepts. `BYTE_ORDER_MARK` is `String.fromCharCode(0xfeff)` and not the escape sequence, since the edit tool decodes a typed escape into the raw character, which is how the raw mark got there. The review read the edit at 03:01: the test file holds no raw U+FEFF (a byte search for EF BB BF counts 0), the value at run time is unchanged, and no record or expected value moved.
+
+**Validation of the final tree** (Tree 1, `wt/1` at c1d2aca9 plus this ticket file and `falsify-workspace.test.ts` uncommitted; Windows 11, Node 24.19.0).
+
+- The review's own fixes are all in this ticket file, so the typecheck and the suite are inert for them under the outside-the-graph exemption. Its own tools, at 03:01: `bun x prettier --check` over the ticket and the test file exit 0; `node scripts/check-sprint-keys.mjs` exit 0 (3 sprints, 47 tickets); `node scripts/check-requirement-markers.mjs` exit 0 (31 requirements); `node scripts/check-line-citations.mjs` clean; `node scripts/check-defects.mjs` exit 0 (3132 named defects, each anchor matches once).
+- `bun x oxlint` over `experiment-record.ts`, `falsify-workspace.ts` and `falsify-workspace.test.ts` exit 0 (02:39), and over the test file as edited exit 0 (03:01). Code lines: 408 and 474 of 500.
+- The tests session's round for G1, read from its reply and its logs: `bun x vitest run packages/daemon/test/falsify/falsify-workspace.test.ts` exit 0, 1 file, 54 of 54 tests (02:47); by-id proof through the run lease of the 54 records whose test is in that file, 54 of 54 detected on Windows (ended 02:59) and 54 of 54 on Linux under Node 24.19.0 (02:59 to 03:01), baseline green before and after on each.
+- The review ran no suite of its own: no production file changed after the tests session's first proof, and the one test edit was run and proven by its owner.
+
 #### Test Coverage Gaps
 
-None.
+Denominator: 6 named-defect tests the lane added (D3870 to D3875), 1 repaired with its record (D3782) and 5 repaired with their records unchanged, against the behaviors AC1 and AC2 name. Every behavior of both criteria has a test that goes red, the three no-verdict reasons recorded under Deliberately Untested apart. The one row is a test whose input can stop exercising its defect without a sign. Severity LOW; surface `internal`; reach unknown.
+
+| #   | Source                                                                                   | Named defect                                                                                                                                                                                                                                                                                                                                               | Expected test                                                                                                                                                                                                                                                                            |
+| --- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | `packages/daemon/test/falsify/falsify-workspace.test.ts`, the constant `BYTE_ORDER_MARK` | The constant holds a raw, invisible U+FEFF between its quotes. An editor or a tool that drops it leaves an empty string with no visible change, D3874 then writes a file with no mark, and the test passes with and without its record's mutation, which strips only a mark that is present; nothing else in the file reads the mark, so nothing goes red. | No new test and no new id. Write the constant as the escape sequence for U+FEFF, so the mark is visible in the source and survives any tool. The value at run time is unchanged, so D3874's record and expected digest stand; prove what `_agent-docs/crew.md` § Gates asks of the edit. |
 
 ### Completion Notes
 
