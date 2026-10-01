@@ -1,3 +1,4 @@
+import { PLAIN_ERROR_NAME } from "../falsify/fact-types.js";
 import {
   listProblem,
   NON_INPUTS_FILE,
@@ -20,10 +21,8 @@ const DEFECTS_RULE: ListMember = {
 const ASSERTION_ERRORS_MEMBER = "assertionErrors";
 /** Every error of a judged test is compared with every name, so this bounds that work. */
 const MAX_ASSERTION_ERRORS = 256;
-/** The name an error carries unless it is given one of its own. */
-const PLAIN_ERROR_NAME = "Error";
 const PLAIN_ERROR_PROBLEM =
-  "is carried by every plain thrown error, a setup failure among them, and an error must carry a name of its own to be declared; throw an error with a name of its own and declare that name, or fail through expect";
+  "is what every plain thrown error is called, a setup failure among them, and an error must have a name or a class of its own to be declared; throw an error with a name or a class of its own and declare that name, or fail through expect";
 const ASSERTION_ERRORS_RULE: ListMember = {
   member: ASSERTION_ERRORS_MEMBER,
   max: MAX_ASSERTION_ERRORS,

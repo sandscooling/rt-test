@@ -1,4 +1,5 @@
 import type { FalsificationJob } from "../../src/falsify/experiment-record.js";
+import type { ErrorFact } from "../../src/falsify/fact-types.js";
 import type { VitestInstall } from "../harness.js";
 
 export type RanJob = Extract<FalsificationJob, { status: "ran" }>;
@@ -28,18 +29,27 @@ export function judgementOf(job: FalsificationJob, defectId: string): unknown {
   return judgement;
 }
 
+/** The intended test's errors in the experiment's first run, each as the fact its judgement was decided from. */
+export function errorFactsOf(
+  job: FalsificationJob,
+  defectId: string,
+): readonly ErrorFact[] | typeof MISSING {
+  const facts = ranJob(job)?.judgements.find(
+    (judgement) => judgement.defectId === defectId,
+  )?.facts;
+  if (facts === undefined || !("run" in facts)) return MISSING;
+  return facts.run.test?.errors ?? MISSING;
+}
+
 /** The kinds of the intended test's errors in the experiment's first run, an assertion as the marker that made it one. */
 export function errorMarkersOf(
   job: FalsificationJob,
   defectId: string,
 ): unknown {
-  const facts = ranJob(job)?.judgements.find(
-    (judgement) => judgement.defectId === defectId,
-  )?.facts;
-  if (facts === undefined || !("run" in facts)) return MISSING;
-  return (
-    facts.run.test?.errors.map((error) =>
-      error.kind === "assertion" ? error.marker : error.kind,
-    ) ?? MISSING
-  );
+  const errors = errorFactsOf(job, defectId);
+  return errors === MISSING
+    ? MISSING
+    : errors.map((error) =>
+        error.kind === "assertion" ? error.marker : error.kind,
+      );
 }

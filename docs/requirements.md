@@ -24,7 +24,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - FR8: Execute every selection in the daemon, and record a run whose inputs changed while it ran as invalidated and rerun it from stable inputs; a workspace or discovery that keeps becoming due only through changes the daemon's own runs and discoveries made to the same file is held until an edit, and every answer says why. [Tickets 2.3f, 2.3h, 2.3i, 2.3k, 2.3l, 2.3p, 2.7b, 3.5]
 - FR9: Answer `wait <files>` once every test covering those files has a current result or an explicit non-current state, as superseded when a covering input changes after the call, or as unsettled, naming each covering workspace's execution state, when its time limit passes first. [Ticket 2.4b]
 - FR10: Falsify each defect definition by applying its mutation as an in-memory transform in a separate Vitest instance, between a baseline and a restored baseline that both pass its test, without writing any file. [Tickets 3.2, 3.5]
-- FR11: Decide each falsification verdict from run facts (failure phase, error kind, whether the intended test reached the step that holds the mutation, the baseline result), counting as a detection only an assertion failure in the intended test after it reached that step, repeated in a confirming run. [Tickets 3.2, 3.3, 3.4c, 3.6]
+- FR11: Decide each falsification verdict from run facts (failure phase, error kind, whether the intended test reached the step that holds the mutation, the baseline result), counting as a detection only an assertion failure in the intended test after it reached that step, repeated in a confirming run. [Tickets 3.2, 3.3, 3.4c, 3.5b, 3.6]
 - FR12: Read defect definitions committed at a configurable location in the consumer repository, attribute evidence by stable test identity including each `it.each` arm, and keep evidence in the local state directory. [Tickets 3.1, 3.4]
 - FR13: Report a defect whose mutation anchor is missing as anchor missing, count it in the denominator, and withhold verified while the other defects still run. [Tickets 3.1, 3.5]
 - FR14: Report every test with no defect as a gap. [Ticket 3.1]
@@ -36,7 +36,7 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - FR20: Report to a coding agent, after its tool calls, each change since its previous report in the state or freshness of the tests covering the files it edited, naming each test that failed or recovered, through a hook that only queries the CLI and reports the files the agent edited, starts no test and no daemon, and says when RT Test cannot answer rather than falling silent. [Tickets 2.7, 2.7b]
 - FR21: Answer `changes <files>` with each test covering those files whose state or freshness changed since a cursor an earlier answer returned, failures and recoveries first, with counts for the covering and the other tests, without starting a test. [Ticket 2.6]
 - FR22: Answer a `defects` query through the CLI with versioned `--json` output, giving each defect definition's evidence state, its freshness and reason, the verified, eligible and total counts, and the gaps, without starting a test. [Tickets 3.1, 3.4, 3.4c, 3.5]
-- FR23: Refuse to falsify in a Vitest workspace whose Vitest version RT Test's canary fixtures have not confirmed its run facts against, naming the version and the canary that disagreed. [Ticket 3.6]
+- FR23: Refuse to falsify in a Vitest workspace whose Vitest version RT Test's canary fixtures have not confirmed its run facts against, naming the version and the canary that disagreed. [Tickets 3.5b, 3.6]
 - FR24: Report a defect definition that cannot be applied as written as invalid, naming why (an unreadable file, a repeated id, a test not discovered or named ambiguously, a mutation that changes nothing, a file outside the consumer root), count it in the denominator, and withhold verified. [Ticket 3.1]
 
 ## Non-functional requirements
@@ -46,5 +46,5 @@ RT Test's product requirements. Each is one list line with an id, its text, and 
 - NFR3: Never report a result as current unless its stored input fingerprint matches the current inputs. [Tickets 2.1, 2.3g, 2.3j, 2.3m, 2.3q, 2.3n, 2.3o, 2.3p, 2.4d]
 - NFR4: Keep state, logs, and results on the machine under the configured state directory, and send nothing off it. [Tickets 1.2, 1.3, 1.3b]
 - NFR5: Run on Node `^22.13.0`, `^24`, and `>=26`, on Windows and Linux. [Ticket 1.2]
-- NFR6: Leave every consumer file byte-identical through falsification, writing no mutation anywhere on disk. [Tickets 3.2, 3.7]
+- NFR6: Leave every consumer file byte-identical through falsification, writing no mutation anywhere on disk. [Tickets 3.2, 3.5b, 3.7]
 - NFR7: Credit no detection to a setup, collection, compile, timeout, unhandled, or unrelated failure, across the canary fixtures and the falsification corpus on every supported Vitest line. [Tickets 3.3, 3.7]

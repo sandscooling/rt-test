@@ -48,6 +48,7 @@ sprint-3: in-progress
 3-4-defect-evidence: done
 3-4c-declared-assertion-names: done
 3-5-schedule-falsification: review
+3-5b-canary-reading: ready-for-dev
 3-4b-summary-defect-counts: backlog
 3-6-canary-gate: backlog
 3-7-falsification-corpus: backlog
