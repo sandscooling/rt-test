@@ -268,6 +268,10 @@ _Avoid_: canary result, canary verdict
 The one executor job a canary reading takes. It runs the canary fixtures as a falsification job runs a workspace's waiting defects, and is no workspace's falsification job.
 _Avoid_: canary run
 
+**Falsification corpus**:
+The committed synthetic consumer with its defect definitions and the steps saved to it, replayed against RT Test's own daemon on each supported Vitest line, over which the milestone's falsification acceptance is checked.
+_Avoid_: mutation corpus, defect benchmark
+
 **Gap**:
 A test with no defect, or code no named defect reaches.
 _Avoid_: coverage hole
