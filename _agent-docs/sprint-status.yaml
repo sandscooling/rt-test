@@ -46,7 +46,7 @@ sprint-3: in-progress
 3-3-verdicts-from-facts: done
 3-3b-mutation-file-digest: done
 3-4-defect-evidence: done
-3-4c-declared-assertion-names: review
+3-4c-declared-assertion-names: done
 3-5-schedule-falsification: ready-for-dev
 3-4b-summary-defect-counts: backlog
 3-6-canary-gate: backlog
