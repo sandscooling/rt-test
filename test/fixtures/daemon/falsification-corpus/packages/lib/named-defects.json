@@ -1,0 +1,46 @@
+{
+  "defects": [
+    {
+      "id": "lib-discount",
+      "defect": "The discount takes a fifth off a price.",
+      "required": "A discounted price is nine tenths of the price.",
+      "test": {
+        "module": "packages/lib/test/price.test.mjs",
+        "name": ["discount", "takes a tenth off"]
+      },
+      "mutation": {
+        "file": "packages/lib/src/price.mjs",
+        "old": "price * 0.9",
+        "new": "price * 0.8"
+      }
+    },
+    {
+      "id": "lib-rate-setup",
+      "defect": "The rate is a half.",
+      "required": "The rate is nine tenths.",
+      "test": {
+        "module": "packages/lib/test/price.test.mjs",
+        "name": ["rate, checked before each test", "stays under one"]
+      },
+      "mutation": {
+        "file": "packages/lib/src/price.mjs",
+        "old": "return 0.9;",
+        "new": "return 0.5;"
+      }
+    },
+    {
+      "id": "lib-label",
+      "defect": "A label shows one decimal.",
+      "required": "A label shows a price with two decimals and its currency.",
+      "test": {
+        "module": "packages/lib/test/price.test.mjs",
+        "name": ["label", "shows two decimals and the currency"]
+      },
+      "mutation": {
+        "file": "packages/lib/src/price.mjs",
+        "old": "toFixed(2)",
+        "new": "toFixed(1)"
+      }
+    }
+  ]
+}

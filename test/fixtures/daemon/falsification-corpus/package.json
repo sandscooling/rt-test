@@ -1,0 +1,8 @@
+{
+  "name": "falsification-corpus",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ]
+}

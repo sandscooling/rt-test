@@ -50,5 +50,5 @@ sprint-3: in-progress
 3-5-schedule-falsification: done
 3-5b-canary-reading: done
 3-6-canary-gate: ready-for-dev
-3-7-falsification-corpus: ready-for-dev
+3-7-falsification-corpus: review
 3-8-own-defects-to-rt-test: backlog

@@ -1,0 +1,62 @@
+{
+  "defects": [
+    {
+      "id": "app-total-first",
+      "defect": "The total takes each discounted price away.",
+      "required": "The total is the sum of the discounted prices.",
+      "test": {
+        "module": "packages/app/test/cart.test.mjs",
+        "name": ["total", "sums the discounted prices"],
+        "occurrence": 0
+      },
+      "mutation": {
+        "file": "packages/app/src/cart.mjs",
+        "old": "sum += discounted",
+        "new": "sum -= discounted"
+      }
+    },
+    {
+      "id": "app-total-second",
+      "defect": "The total takes each discounted price away.",
+      "required": "The total is the sum of the discounted prices.",
+      "test": {
+        "module": "packages/app/test/cart.test.mjs",
+        "name": ["total", "sums the discounted prices"],
+        "occurrence": 1
+      },
+      "mutation": {
+        "file": "packages/app/src/cart.mjs",
+        "old": "sum += discounted",
+        "new": "sum -= discounted"
+      }
+    },
+    {
+      "id": "app-total-unnamed",
+      "defect": "The total takes each discounted price away.",
+      "required": "The total is the sum of the discounted prices.",
+      "test": {
+        "module": "packages/app/test/cart.test.mjs",
+        "name": ["total", "sums the discounted prices"]
+      },
+      "mutation": {
+        "file": "packages/app/src/cart.mjs",
+        "old": "sum += discounted",
+        "new": "sum -= discounted"
+      }
+    },
+    {
+      "id": "app-receipt",
+      "defect": "The receipt prints the total without its colon.",
+      "required": "The receipt prints the total after the word Total and a colon.",
+      "test": {
+        "module": "packages/app/test/cart.test.mjs",
+        "name": ["receipt", "prints the total"]
+      },
+      "mutation": {
+        "file": "packages/app/src/cart.mjs",
+        "old": "Total: ${total(prices)}",
+        "new": "Total ${total(prices)}"
+      }
+    }
+  ]
+}
