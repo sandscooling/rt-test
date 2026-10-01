@@ -168,8 +168,6 @@ interface Rig {
   readonly log: MemoryLog;
   /** Each job in the order it began, as `discover@<revision>` or `run:<path>@<revision>`, and each idle entry as `idle`. */
   readonly calls: string[];
-  /** The revision each falsification look was planned at, in the order the looks were taken. */
-  readonly looks: number[];
   /** Whether `scheduler.start()` has returned. */
   over(): boolean;
   stop(): Promise<void>;
@@ -188,7 +186,7 @@ function rig(options: RigOptions = {}): Rig {
   const inputs = new StandInInputs(options.script);
   const log = memoryLog();
   const calls: string[] = [];
-  const looks: number[] = [];
+  let looks = 0;
   const runsOf = new Map<string, number>();
   let discoveries = 0;
   let stopping = false;
@@ -299,8 +297,8 @@ function rig(options: RigOptions = {}): Rig {
       };
     },
     falsify: async (revision) => {
-      const call = looks.length;
-      looks.push(revision);
+      const call = looks;
+      looks += 1;
       if (options.falsified === undefined) return false;
       calls.push(`look@${revision}`);
       await nextTurn();
@@ -324,7 +322,6 @@ function rig(options: RigOptions = {}): Rig {
     scheduler,
     log,
     calls,
-    looks,
     over: () => over,
     async stop() {
       stopping = true;
@@ -4251,6 +4248,41 @@ describe("the falsification look once nothing is due", () => {
     expect(round).toStrictEqual({
       state: "pending",
       waitsFor: "job-in-progress",
+    });
+  });
+
+  it("D4156: a look that took nothing because the input revision moved during it is followed by the run the move made due, with no idle entry and no idle call before it", async () => {
+    const edited = { a: false };
+    const outcome = await running(
+      {
+        seed: currentResults("a"),
+        script: {
+          fingerprintOf: (path) => ({
+            ok: true,
+            digest: edited.a ? `${path}-edited` : `${path}-digest`,
+          }),
+        },
+        falsified: (call, inputs) => {
+          if (call === 0) {
+            edited.a = true;
+            inputs.moveRevision();
+          }
+          return false;
+        },
+      },
+      async (started) => {
+        await untilQuiet(started);
+        return {
+          calls: started.calls,
+          idleEntries: started.log.entries.filter(
+            (entry) => entry === IDLE_ENTRY,
+          ).length,
+        };
+      },
+    );
+    expect(outcome).toStrictEqual({
+      calls: ["look@1", "run:a@2", "look@2", "idle"],
+      idleEntries: 1,
     });
   });
 });

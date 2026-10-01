@@ -613,7 +613,7 @@ export function activityText(activity: DaemonActivity): string {
     case "running":
       return `running workspace ${activity.workspacePath}`;
     case "falsifying":
-      return `falsifying workspace ${activity.workspacePath}, defect definitions in the job ${activity.definitions}`;
+      return `falsifying workspace ${activity.workspacePath}, with ${activity.definitions} of its defect definitions in the job`;
     case "idle":
       return "idle";
   }

@@ -1903,7 +1903,7 @@ describe("a summary with nothing to answer", () => {
     });
     expect(
       reason.includes(
-        `falsifying workspace ${WORKSPACE_A}, defect definitions in the job 2`,
+        `falsifying workspace ${WORKSPACE_A}, with 2 of its defect definitions in the job`,
       ),
     ).toBe(true);
   });

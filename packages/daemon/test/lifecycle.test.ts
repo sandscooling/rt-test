@@ -5308,26 +5308,28 @@ function falsifying<T>(
 }
 
 /** How long a wait for the daemon lets the event loop turn, on the process's own clock, which no test fakes. */
-const REACH_BOUND_NS = 3_000_000_000n;
+const REACH_BOUND_NS = 15_000_000_000n;
 
 /**
- * Lets the event loop turn until `ready`, since a look's file reads end on no turn a test can count. It returns at
- * the bound whether or not the daemon got there, so one that never does fails the test's own assertion.
+ * Lets the event loop turn until `ready`, since a look's file reads end on no turn a test can count. It resolves at
+ * the bound whether or not the daemon got there, with whether it did, so one that never does fails the test's own
+ * assertion. A test whose expected value a daemon that did nothing would also give asserts that answer.
  */
-async function reached(ready: () => boolean): Promise<void> {
+async function reached(ready: () => boolean): Promise<boolean> {
   const deadline = process.hrtime.bigint() + REACH_BOUND_NS;
   while (!ready() && process.hrtime.bigint() < deadline) {
     await new Promise((resolve) => setImmediate(resolve));
   }
+  return ready();
 }
 
-/** Until `count` falsification jobs have been sent. */
-function sent(started: Falsifying, count: number): Promise<void> {
+/** Until `count` falsification jobs have been sent; whether they were. */
+function sent(started: Falsifying, count: number): Promise<boolean> {
   return reached(() => started.executor.jobs.length >= count);
 }
 
-/** Until the scheduler has gone idle `count` times: it logs so each time a look takes nothing after work. */
-function idled(started: Falsifying, count = 1): Promise<void> {
+/** Until the scheduler has gone idle `count` times, and whether it did: it logs so each time a look takes nothing after work. */
+function idled(started: Falsifying, count = 1): Promise<boolean> {
   return reached(
     () =>
       started.log.entries.filter((entry) => entry === IDLE_ENTRY).length >=
@@ -5335,13 +5337,16 @@ function idled(started: Falsifying, count = 1): Promise<void> {
   );
 }
 
-/** Ends a periodic reconciliation with the revision unmoved, and waits for the look the plan after it takes. */
-async function afterPeriodicReconciliation(started: Falsifying): Promise<void> {
+/** Ends a periodic reconciliation with the revision unmoved, and waits for the look the plan after it takes; whether it was taken. */
+async function afterPeriodicReconciliation(
+  started: Falsifying,
+): Promise<boolean> {
   const { inputs } = started;
   const windows = inputs.jobsEnded;
   inputs.endPeriodicReconciliation();
-  await reached(() => inputs.jobsEnded > windows);
+  const looked = await reached(() => inputs.jobsEnded > windows);
   await flush();
+  return looked;
 }
 
 /** The ids each job sent held, in the order the jobs were sent. */
@@ -5438,10 +5443,10 @@ describe(
       const jobs = await falsifying({ tests: { a: 2 } }, async (started) => {
         await idled(started);
         started.inputs.moveRevision();
-        await idled(started, 2);
-        return jobIds(started);
+        const idledAgain = await idled(started, 2);
+        return { idledAgain, jobs: jobIds(started) };
       });
-      expect(jobs).toStrictEqual([["A0", "A1"]]);
+      expect(jobs).toStrictEqual({ idledAgain: true, jobs: [["A0", "A1"]] });
     });
 
     it("D4052: each experiment holds its definition's id, its resolved test's identity, and its mutation with the file as an absolute path", async () => {
@@ -5617,12 +5622,12 @@ describe(
             return replied(job);
           },
         },
-        async (started) => {
-          await idled(started);
-          return started.store.evidenceWrites.length;
-        },
+        async (started) => ({
+          idled: await idled(started),
+          writes: started.store.evidenceWrites.length,
+        }),
       );
-      expect(writes).toBe(0);
+      expect(writes).toStrictEqual({ idled: true, writes: 0 });
     });
 
     it("D4061: a workspace whose job an event named an input during, at a revision that did not move, gets no further job, and its entry says which event and what ends the wait", async () => {
@@ -5658,12 +5663,12 @@ describe(
     it("D4062: a reply that carries no verdict is never handed to the store", async () => {
       const writes = await falsifying(
         { replies: (job) => replied(job, () => NO_VERDICT) },
-        async (started) => {
-          await idled(started);
-          return started.store.evidenceWrites.length;
-        },
+        async (started) => ({
+          idled: await idled(started),
+          writes: started.store.evidenceWrites.length,
+        }),
       );
-      expect(writes).toBe(0);
+      expect(writes).toStrictEqual({ idled: true, writes: 0 });
     });
 
     it("D4063: a stop during a job stores nothing of it and leaves no definition and no workspace waiting", async () => {
@@ -5674,16 +5679,55 @@ describe(
           aborted: (job) => aborted(job, { running: "A0", decided: ["A1"] }),
         },
         async (started) => {
-          await sent(started, 1);
+          const jobSent = await sent(started, 1);
           started.lifecycle.stop();
           await started.lifecycle.stopped();
           return {
+            jobSent,
             writes: started.store.evidenceWrites.length,
             entries: falsificationEntries(started),
           };
         },
       );
-      expect(outcome).toStrictEqual({ writes: 0, entries: [] });
+      expect(outcome).toStrictEqual({ jobSent: true, writes: 0, entries: [] });
+    });
+
+    it("D4157: a stop that lands while a look reads the definition files ends the look as one that took nothing, and no scheduling step is logged as failed", async () => {
+      const look = { armed: false, held: false };
+      let planned = (): boolean => false;
+      // The scheduler's own wait for the inputs comes while the round at the new revision is pending, the look's once it is planned.
+      const inputs = new StandInInputs({
+        heldSettleIf: () => {
+          look.held = look.armed && planned();
+          return look.held;
+        },
+      });
+      const outcome = await falsifying({ inputs }, async (started) => {
+        planned = () => {
+          const answer = started.lifecycle.summary();
+          return (
+            !("noAnswer" in answer) && answer.schedule.round.state === "planned"
+          );
+        };
+        await idled(started);
+        look.armed = true;
+        inputs.moveRevision();
+        await reached(() => look.held);
+        // Registered behind the look's own wait, so the stop lands once the look has begun its read.
+        const stopping = inputs.settleHeld.promise.then(() => {
+          started.lifecycle.stop();
+        });
+        inputs.settleHeld.resolve();
+        await stopping;
+        await started.lifecycle.stopped();
+        return {
+          heldInTheLook: look.held,
+          failedSteps: started.log.entries.filter((entry) =>
+            entry.includes("a scheduling step failed"),
+          ).length,
+        };
+      });
+      expect(outcome).toStrictEqual({ heldInTheLook: true, failedSteps: 0 });
     });
   },
 );
@@ -5719,13 +5763,13 @@ describe(
       const aborts = await falsifying(
         endedWhileA0Runs([0]),
         async (started) => {
-          await sent(started, 1);
+          const jobSent = await sent(started, 1);
           started.inputs.endPeriodicReconciliation();
           await flush();
-          return started.executor.aborts;
+          return { jobSent, aborts: started.executor.aborts };
         },
       );
-      expect(aborts).toBe(0);
+      expect(aborts).toStrictEqual({ jobSent: true, aborts: 0 });
     });
 
     it("D4066: one input change that ends a job marks none of its definitions, so the one that was running is taken first again", async () => {
@@ -5782,10 +5826,10 @@ describe(
       const aborts = await falsifying({}, async (started) => {
         await idled(started);
         started.inputs.moveRevision();
-        await idled(started, 2);
-        return started.executor.aborts;
+        const idledAgain = await idled(started, 2);
+        return { idledAgain, aborts: started.executor.aborts };
       });
-      expect(aborts).toBe(0);
+      expect(aborts).toStrictEqual({ idledAgain: true, aborts: 0 });
     });
   },
 );
@@ -6018,11 +6062,11 @@ describe(
         { replies: (job) => replied(job, () => NO_VERDICT) },
         async (started) => {
           await idled(started);
-          await afterPeriodicReconciliation(started);
-          return jobIds(started);
+          const looked = await afterPeriodicReconciliation(started);
+          return { looked, jobs: jobIds(started) };
         },
       );
-      expect(jobs).toStrictEqual([["A0"]]);
+      expect(jobs).toStrictEqual({ looked: true, jobs: [["A0"]] });
     });
 
     it("D4080: a workspace whose job was refused for an on-disk module cache gets no further job, and its entry names the projects and their settings", async () => {
@@ -6120,7 +6164,7 @@ describe(
       ).toStrictEqual(WAITS_AFTER_ONE_JOB);
     });
 
-    it("D4089: a workspace the confirmed start no longer holds is sent no job and gets none, and its entry says its config is not confirmed", async () => {
+    it("D4089: a workspace the confirmed start no longer holds is sent no job and gets none, and its entry says the confirmed start does not hold it", async () => {
       const store = new RecordingStore();
       store.seedDiscovery(discovery(discoveredIn("a", [TEST_MODULE])), {
         kind: "digest",
@@ -6128,10 +6172,11 @@ describe(
       });
       store.seedRun(ranWorkspace("a"), { kind: "digest", digest: "a-digest" });
       expect(
-        await afterJob(TEST_ENDED, ["confirmed"], {
-          store,
-          start: confirmed(),
-        }),
+        await afterJob(
+          TEST_ENDED,
+          ["the confirmed start does not hold the workspace"],
+          { store, start: confirmed() },
+        ),
       ).toStrictEqual({ ...WAITS_AFTER_ONE_JOB, jobs: 0 });
     });
 
@@ -6212,6 +6257,39 @@ describe(
       expect(logged).toBe(1);
     });
 
+    it("D4160: in an entry of both parts read through an answer, a long error ahead of them leaves what ends the definitions' wait inside the 1,000 characters the answer keeps", async () => {
+      const says = await falsifying(
+        {
+          tests: { a: MAX_JOB_DEFINITIONS + 1 },
+          replies: (job, call) =>
+            call === 0
+              ? replied(job, () => NO_VERDICT)
+              : replyOf({ ...FAILED_TO_LOAD, error: LONG_ERROR }),
+        },
+        async (started) => {
+          await idled(started);
+          const answer = started.lifecycle.summary();
+          const jobs = "noAnswer" in answer ? [] : answer.unstoredJobs;
+          const text =
+            jobs.find((job) => job.kind === "falsification")?.reason ?? "";
+          return {
+            cutByTheAnswer: text.endsWith(
+              "more characters are in the daemon log)",
+            ),
+            workspaceWaitEnds: text.includes(WORKSPACE_WAIT_ENDS),
+            definitionsWaitEnds: text.includes(
+              "until the input revision, the definition or the declared assertion error names change",
+            ),
+          };
+        },
+      );
+      expect(says).toStrictEqual({
+        cutByTheAnswer: true,
+        workspaceWaitEnds: true,
+        definitionsWaitEnds: true,
+      });
+    });
+
     it("D4094: a look that throws after it opened its window on the tracker closes the window before the throw goes on", async () => {
       const windows = await falsifying(
         {
@@ -6229,6 +6307,17 @@ describe(
         },
       );
       expect(windows).toStrictEqual({ begun: 4, ended: 4 });
+    });
+
+    it("D4159: a look that took nothing closes the window it opened on the tracker", async () => {
+      const windows = await falsifying({}, async (started) => {
+        await idled(started);
+        return {
+          begun: started.inputs.jobsBegun,
+          ended: started.inputs.jobsEnded,
+        };
+      });
+      expect(windows).toStrictEqual({ begun: 5, ended: 5 });
     });
   },
 );
@@ -6503,6 +6592,27 @@ describe(
         };
       });
       expect(logged).toStrictEqual({ atOneRevision: [true], afterAMove: 2 });
+    });
+
+    it("D4158: the entry for a look that took none counts the definitions of a workspace that gets no further job apart from those given no further experiment", async () => {
+      const entries = await falsifying(
+        {
+          tests: { a: 2, b: 1 },
+          replies: (job) =>
+            job.workspacePath === "a"
+              ? replyOf(FAILED_TO_LOAD)
+              : replied(job, () => NO_VERDICT),
+        },
+        async (started) => {
+          await idled(started);
+          return started.log.entries.filter((entry) =>
+            entry.startsWith("falsification: "),
+          );
+        },
+      );
+      expect(entries).toStrictEqual([
+        "falsification: none of the waiting definitions is taken at input revision 1: waiting 3, of which in a workspace that gets no further falsification job until the input revision changes 2, and given no further experiment at this revision 1",
+      ]);
     });
   },
 );

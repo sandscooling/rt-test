@@ -344,7 +344,7 @@ Tests session: threadId 106e57e6-ca1f-437b-a517-a6adb807f7fa (rt-t3-5-tests-2, w
 
 #### Named Defects
 
-69 new records, D4045 to D4114 less D4105, which is unused. D4112 is in `packages/cli/test/defects.json`, the rest in `packages/daemon/test/defects.json`.
+69 new records, D4045 to D4114 less D4105, which is unused. D4112 is in `packages/cli/test/defects.json`, the rest in `packages/daemon/test/defects.json`. The review's gap round added five more, D4156 to D4160, at the end of `packages/daemon/test/defects.json`.
 
 - D4045: A falsification look that asks for another plan is followed by the idle wait, so the next falsification job never follows until an input changes. (AC1)
 - D4046: A falsification look is taken while a run is due, so the run waits for a falsification job. (AC1)
@@ -415,6 +415,11 @@ Tests session: threadId 106e57e6-ca1f-437b-a517-a6adb807f7fa (rt-t3-5-tests-2, w
 - D4112: The CLI words a falsification entry as the run of its workspace. (AC8)
 - D4113: The protocol version stays 5, so a version 5 client takes a daemon whose answers carry a falsifying activity and a job kind it does not know for its own. (AC8)
 - D4114: Evidence stored under an older falsifier version is read as the current version's, so its reason, detail and facts are parsed under meanings they were not recorded with. (AC3)
+- D4156: The idle entry is logged, and the idle call made, before the scheduler checks whether a round is already due, so a look that took nothing because the input revision moved during it leaves 'idle: no confirmed workspace is due' in the log while a workspace is due. (AC1; gap row 1)
+- D4157: A stop that lands while a look reads the definition files is rethrown, so the scheduler logs a failed scheduling step and holds the round during the shutdown. (AC1, AC3; gap row 3)
+- D4158: The entry for a look that took none counts a definition of a workspace that gets no further job among those given no further experiment, so its why names the wrong cause. (AC10; gap row 4)
+- D4159: A look that took nothing leaves its window on the tracker open, so the tracker records every later change into a window no job closes. (AC3; gap row 5. D2080, D2081 and D2082 also go red on its mutation.)
+- D4160: What happened to a workspace is kept so long that, in an entry of both parts, what ends its definitions' wait falls past the 1,000 characters an answer keeps. (AC8; gap row 6)
 
 Records re-anchored, each against the text the make-room moves left, and proven again: D1879, D1988, D1989, D2081, D2083, D2090, D2159, D2163, D3327, D3328 (`daemon/job-endings.ts`, `protectDiscovered`); D2658 (`daemon/discovery-history.ts`); D2668, D2695, D3000, D3001, D3171 (`daemon/round-selection.ts`, `selectRound`); D1987 (`daemon/lifecycle.ts`); D3107, D3243 (`daemon/scheduler.ts`); D3175, D3183 (`packages/cli/src/answer-text.ts`). D3108 keeps its defect: its mutation in `daemon/scheduler.ts` advances `#snapshot` before the `selectRound` call and hands the call the earlier snapshot as `before`, so a selection that throws leaves the next plan comparing the inputs with themselves, as the old mutation did.
 
@@ -438,6 +443,7 @@ Stale tests updated: D2080, D2081 and D2082 in `packages/daemon/test/lifecycle.t
 - **Asked of the orchestrator (threadId 61f4cc16) at 09:58 on 2026-10-01:** 30 more defect ids, the plan coming to about 69 named defects against the 40 dispatched; or a trim of the per-cause AC6 and AC8 tests. **Decided by the orchestrator at 10:01:** D4085 to D4114 granted, and the per-cause tests stay untrimmed, since each cause's reason is its own line and is what an author reads when falsification did not run for a workspace. D2080 to D2082 sorted as stale accepted. No new test waits on a real clock.
 - **Decided by the orchestrator (threadId e88c9bb1, successor) at 13:12 on 2026-10-01:** a proof selection of a few hundred records runs without a further word; more than 600 comes back as a question.
 - **Reported to the orchestrator at 13:16 on 2026-10-01:** three criterion clauses under Deliberately Untested hold no proven test: AC7's change-record clause, AC6's changed-digest clause and AC9's `wait` clause. **Decided by the orchestrator (threadId e88c9bb1) at 13:45:** all three stand as recorded, and none gains a test or a code change. AC7's "nothing of a falsification job is told to the change record" has no line for a mutation to edit, so a record there would need a mutation that adds code, and its "it ends the job as AC4 says" is D4064. AC6's "a definition whose definition digest changed is one that has had no experiment" is two mechanisms giving one answer (the marks are keyed by digest, and the plan forgets every digest no standing holds), so each single mutation is inert; the orchestrator hands that fact to the review to weigh, and it is no code bug for the dev. AC9's `wait` clause rests on D4104 and D4049, which pin the execution state and the round a wait reads.
+- **From the orchestrator (threadId e88c9bb1) at 14:04 on 2026-10-01, unasked:** the green report is accepted and the twelve paths are committed on wt/2 as af76a489. D4156 to D4165 are reserved for the review's gaps, and D4105 is taken back. The dev is settled, so a code bug found now goes to the review (rt-t3-5-review, threadId a8a19733-131d-42e6-b413-328827b02aa2). A gap test that seems to need a fourth queue rule in the code is a question for the orchestrator.
 
 #### Tests stage progress
 
@@ -464,11 +470,114 @@ Proof on Windows, Node 24.19.0, through the run lease, 13:27 to 13:43 on 2026-10
 
 UNVERIFIED: none. Every proof, gate and suite of this stage, U1's probe and the dev's acceptance probe ran on Windows and on Linux under Node 24. Not run by this stage on either platform: `bun run check`, which is the orchestrator's over the merged tree.
 
+**The review's gap round, 14:25 to 15:08 on 2026-10-01**, over HEAD 7d380642 with the review's three production fixes on disk (`daemon/scheduler.ts`, `query/answer.ts`, `daemon/falsification-plan.ts`). Files modified: `packages/daemon/test/scheduler.test.ts`, `packages/daemon/test/query.test.ts`, `packages/daemon/test/lifecycle.test.ts`, `packages/daemon/test/defects.json`, and this ticket. No file created, no production file edited by this stage.
+
+- Row 1: D4156 in `scheduler.test.ts`. A scripted look moves the revision with an edit to `a` and resolves false; the calls read `look@1`, `run:a@2`, `look@2`, `idle`, with one idle entry in the log. Its mutation is the code the review replaced.
+- Row 2: D4111 in `query.test.ts` pins `falsifying workspace <path>, with 2 of its defect definitions in the job`, and its record is re-anchored on the new line, with the same defect and the same mutation (the count dropped).
+- Row 3: D4157 in `lifecycle.test.ts`. The stand-in inputs hold the look's own wait for the inputs (`heldSettleIf`, armed once the daemon has idled, true only while the round reads planned at the revision the test moves to, since the scheduler's own wait comes while that round is pending). The test registers the stop behind the held wait, so the stop lands once the look has begun its read, and asserts that the wait was held and that no scheduling step was logged as failed. A rethrown stop does not hang the shutdown, so the mutation fails the assertion and no timeout.
+- Row 4: D4158 pins the whole entry over two workspaces, one whose job failed to load (2 definitions) and one whose definition got no verdict (1): `waiting 3, of which in a workspace that gets no further falsification job until the input revision changes 2, and given no further experiment at this revision 1`. D4109 is unchanged.
+- Row 5: D4159 has its own record: after a job that stored its verdict and a look that found nothing waiting, the tracker reads five windows begun and five ended.
+- Row 6: D4160 reads an entry of both parts through `summary()`: 25 definitions left without a verdict by a first job and a second job that failed to load with a 3,000 character error. The answer's cut reason still holds what ends the workspace's wait and what ends the definitions'.
+- The review's notes: `Rig.looks` is removed from `scheduler.test.ts`; D4089's title and fragment now both say "the confirmed start does not hold the workspace"; the wording for `docs/testing.md` says D4113 is rewritten at each raise. Not taken: `FalsifyingExecutor.abort` answering false when no job is held. No test observes the difference, since the watch asks only while its job is in flight, and a stand-in that tracked held falsification jobs would answer false during a run, where the real executor answers true.
+- **Found by the round's first proof: a wait that returned at its bound let a test pass unseen.** The Windows proof of 14:36 to 14:44 detected 575 of 576: D4062's test passed under its mutation (`gap-proof-windows-1.log`), where the Linux proof of the same tree and the Windows proof of 13:27 detected it. `idled` returned after 3 s whether or not the daemon had got there, and D4062 asserted only that nothing was written, which is also what a daemon that has not yet run its job reads. The fix is in the tests: `reached`, `sent`, `idled` and `afterPeriodicReconciliation` resolve with whether they were reached, the bound is 15 s (the suite's timeout is 120 s and no test chains more than four waits), and the seven tests whose expected value a daemon that did nothing would also give assert that answer: D4051, D4060, D4062, D4063, D4065, D4069 and D4079. No code bug: the mutation is observable and was detected in every other proof.
+
+Gates of the gap round on the final tree. Windows 11, Node 24.19.0: `bun x vitest run` over the three suites exit 0 at 14:57, 3 files, 576 tests; `bun run --filter @rt-test/daemon typecheck` exit 0, `bun x oxlint` over the three test files exit 0 with no warning and `bun x prettier --check` over them and the catalog exit 0, all at 14:56; `node scripts/check-defects.mjs` exit 0 at 14:57, 3332 named defects. Linux, Node 24.19.0, at 15:08: the same typecheck, lint and format check exit 0 each, and `check-defects` exit 0 with 3332.
+
+Proofs of the gap round, through the run lease, over the worktree's diff of `packages/` (SHA-256 f1c16265, equal to the tree when the last run ended): `node scripts/verify-defects.mjs --ids <the 576 ids of _agent-docs/.scratch/t3-5-tests/gap-ids.txt>`, which are every record whose test is in `scheduler.test.ts` (185), `query.test.ts` (146) or `lifecycle.test.ts` (245), since each file's diff changes existing lines and the waits are a shared helper. Windows, 14:57 to 15:05: exit 0, 576 of 576 detected in 12 sandboxes, baseline green before and after (`gap-proof-windows.log`). Linux, 15:05 to 15:08: exit 0, 576 of 576 detected in 12 sandboxes, baseline green before and after (`gap-proof-linux.log`). Launched together as `bash _agent-docs/.scratch/t3-5-tests/gap-proofs.sh <threadId>`.
+
+Ids: D4156 to D4160 used; D4161 to D4165 unused and still reserved until the review closes.
+
+UNVERIFIED after the gap round: none on either platform. The records that mutate the three files the review edited and whose tests live outside these three suites are the review's to prove, as its dispatch says.
+
 ### Review Record
+
+Review session: threadId a8a19733-131d-42e6-b413-328827b02aa2 (rt-t3-5-review)
+
+Reviewed on 2026-10-01 from 14:04: `git diff cdffd3e4 7d380642` (the build 24181192, the docs commit f05005d2, the tests af76a489) and the doc lines of the authoring commit 2f3a3534. One checklist pass by the review session over the eleven production files against the ticket's rule contract, and four fresh-eyes agents: the two new modules with the lifecycle and its tests, the scheduler with the two files that took its moves, the protocol and the two daemon wordings with their tests, and the CLI. No doc agent and no assumptions agent ran: the doc batch is four changed lines, checked by the review session, and U1 is the only assumption, ruled on its observation on Windows and on Linux.
+
+#### What the review confirmed
+
+- **No evidence is stored when an input moved while its job ran.** `#store` in `daemon/falsification.ts` is the only evidence write. It is gated on the verdict of the window `look` opens on the tracker in the same tick `worktreeStandings` reads the moment, which that function reads once, after its last await. An input event not yet read when the window opens makes the tracker's view unavailable (`unavailableReason` in `inputs/current-inputs.ts`), so the mark reads unsettled and nothing is stored, and no test holds a current pass, so no definition is eligible.
+- **AC9's `wait` clause holds by the code.** `WorkspaceSchedule.round` answers a query at the job's own revision from the plan in effect, with nothing due, and reads pending on the job in progress only at a later revision.
+- **The three moves kept their behavior.** `selectRound` now leaves the scheduler's snapshot unset when a log entry or `isHeld` throws inside it, where the method set it first: the direction D3108 asks for. Every re-anchored record matches once and names the same defect.
+- Every recorded mutation D4045 to D4114 was traced against its test by the fresh-eyes agents, and each test fails by its assertion under its mutation.
+
+#### Findings fixed
+
+- **`daemon/scheduler.ts`, `#idle` (C160; daemon-state; reach unknown; MEDIUM).** The look stands between the plan that found nothing due and the idle entry that plan vouched for. A look that took nothing because the input revision moved, a periodic reconciliation ended or a stop arrived during it was followed by "idle: no confirmed workspace is due" and the idle call, though a round was due. `#idle` now evaluates its wake condition first and logs only when it has something to wait for. No record anchored in its body.
+- **`query/answer.ts`, `activityText` (consumer, cosmetic; LOW).** "falsifying workspace a, defect definitions in the job 2" read as a job numbered 2 to two readers. It now reads "falsifying workspace a, with 2 of its defect definitions in the job". D4111 asserts the old text and its record anchors the old line: row 2 below.
+- **`daemon/falsification-plan.ts`, `#noneTaken` (daemon-state, log; LOW).** The third count was labelled "given an experiment at this revision", false of a definition held as `repeated-input-change`, which ran at the revision before. It now reads "given no further experiment at this revision". No record anchored in the line.
+- **This ticket's File List** omitted `docs/requirements.md`; added.
+
+#### What the lane asked the review to weigh
+
+- **Heading "Ended with nothing stored" over a falsification entry (candidate 1, the dev's F4): keep.** AC8 puts the entries in that list by name, design decision 8 adds no answer member, and each entry's own text says what was left. Three fresh-eyes readers raised it again. A rewording, if ever wanted, belongs to ticket 3.4b, which rewrites both `packages/cli/src/answer-text.ts` and `query/summary.ts`.
+- **`wasInterrupted` twice (candidate 2, F7): not here.** The two functions are the same four lines, under C13's threshold. Sharing one from `falsify/experiment-record.ts` edits three files and owes the proof of 72 records (37, 19 and 16) on two platforms. It folds into the next ticket that edits `falsify/falsify-workspace.ts`, which at 474 of 500 lines must extract first.
+- **`INTERRUPTED_BEFORE_SEND_REASON` (candidate 3, F9): leave, with no ticket.** For a falsification job the text reaches no answer and no log line: a job a change ended logs its ending through `endingText` and never its outcome's reason, and the bound cannot fall before a send.
+- **The two mechanisms behind AC6's changed-digest clause: both are wanted.** The marks' key, the definition digest, is what makes the clause true. `#forget` bounds the marks over a daemon's life and drops the entry of a changed or deleted definition at the next look (AC8). They are not two spellings of one answer: `#forget` also drops the mark of a definition whose standing carries no digest at one look, the known limit below.
+
+#### Known limits the review adds
+
+- **A periodic retry waits behind a running job.** A reconciliation's end does not abort a job (D4065), and retries are armed only at a plan, so the retry of a run that failed or crashed with no input change waits for the job in progress: about 2 minutes at Fleet Cooling's size, the time bound at most.
+- **A job the time bound ends stores nothing of the experiments that ran.** Its reply has no restored baseline, so each such experiment is judged no verdict. A workspace whose 25 experiments outlast the bound therefore stores no verdict of a run at all, and each job marks whichever definition was running. Fleet Cooling's scoped runs of 2.3 to 3.2 s are far inside the bound; ticket 3.7 measures it.
+- **A definition whose standing carries no digest at one look loses its place at the end of the order.** `digestSubject` (`defects/defect-standings.ts`) gives none while the definition's test is unresolved, as when its module fails to collect mid-edit, and `#forget` then drops its mark. A mutation that never ends is taken first again and costs one more time bound. Fleet Cooling meets it only when the looping definition's own test module is broken at a look. No verdict is ever wrong. **Asked of the orchestrator at 14:25 on 2026-10-01**, as more handling in one of the three rules, with the alternatives: (a) record it as a known limit, (b) drop a mark only when its id is gone or carries another digest, (c) keep `takenLast` apart from the marks `#forget` clears; the review recommended (a). **Decided by the orchestrator (threadId e88c9bb1) at 14:26: (a) stands**, with neither (b) nor (c), on the owner's words of 06:29 ("i don't mind letting you make design decisions, I just want to avoid the over engineering branch that happened earlier"). AC2's "in this daemon's life" is not literally true of that case, so the architecture's known limits say so.
+
+**Decided by the orchestrator at 14:26 on 2026-10-01, on the review's interim note:** the review's three code fixes are accepted in scope, the first closing a debt item the orchestrator carried for the next ticket to edit `daemon/scheduler.ts`; and the review's answers on the three change-request candidates and on the two mechanisms are accepted as recorded above.
+
+#### Decided, no fix
+
+- A look that throws holds the round (two agents). The falsification task asks for it ("any other throw goes on to the scheduler's step as a discovery's does"), the orchestrator declined handling at 09:47, and the definition reads throw only on their aborted signal.
+- A reply of a known status without its members, a `ran` reply whose lists hold a non-object, and a reply naming a definition its job does not hold: only a forged reply (ruled at 09:47).
+- A job that returned by itself, not interrupted, after the input revision moved is read as ended by a change (`#ending`). No test pins that line, and none can show a consequence: the tracker's window refuses the store (D4060), and `ranToEnd` would mark at a revision that has passed. The stand-in inputs vouch for a window across `moveRevision()`, so a test of it would prove the stand-in.
+- Verdicts decided before any run are dropped when the bound ends a job in a baseline: AC5's last sentence reads that reply as a job that did not run, and they are decided again at the next revision.
+- The end entry names a left definition by its judgement's reason where the status entry names it `time-bound` or `repeated-input-change`; the log's ending says which mark applies.
+- Each look reads every definition file (design decision 9, measured by 3.7). `protectDiscovered` in `daemon/job-endings.ts` and `selectRound`'s reading are the shapes the make-room task prescribes.
+- The answer's separator between jobs is also the separator between an entry's two parts, and an unknown job kind would read "undefined" in the CLI and as a run in the daemon: an entry of both parts is rare, and a client refuses a daemon of another protocol version.
+- AC7 cites FR8 while FR8's marker no longer lists this ticket: a marker says where a requirement's work is planned, and this ticket changes none of FR8's behavior.
+
+#### Tech debt, undisposed
+
+- **The job's name is spelled once per package.** `jobName` in `packages/daemon/src/query/summary.ts` and `jobText` with `KIND_JOBS`, `RUN_JOB` and `DISCOVERY_JOB` in `packages/cli/src/answer-text.ts` each map an entry to "the discovery", "the run of" or "the falsification of", while `activityText` and `roundText` are shared through `@rt-test/daemon/client`. D4110 and D4112 each pin their own copy and nothing pins that they agree; the daemon's ternary words any other kind as a run where the CLI's keyed record fails the typecheck. One exported function taking the path's formatter serves both.
+- **`markText` in `packages/daemon/src/daemon/falsification.ts` cuts by code point and appends `omittedText`, as `cutReason` with `answeredJob` in `packages/daemon/src/query/summary.ts` does with another bound.** Nothing ties its 400 characters to the 1,000 an answer keeps, and `daemon/falsification-plan.ts` declares a `REASON_SEPARATOR` beside the one of another value in `query/summary.ts`. Ticket 3.4b extracts `cutReason`.
+- **`wasInterrupted`** in `packages/daemon/src/daemon/falsification.ts` and in `packages/daemon/src/falsify/falsify-workspace.ts`, as above.
+- **Two test stand-ins are more lenient than what they stand for.** `StandInInputs.moveRevision()` in `packages/daemon/test/scheduling-harness.ts` records nothing in the open windows, and `endJob` answers fingerprinted unless scripted, so no lifecycle test can show the window refusing a job across a moved revision. `RecordingStore.writeEvidence` in the same file stores a reply the real store refuses (a verdict with no definition digest handed in).
+- **No CLI test asserts the heading above the list of jobs that stored nothing, or the first-line cut of a reason in it** (`contextLines` in `packages/cli/src/answer-text.ts`): D4112 keeps only the lines that name a workspace. Older than this change.
+- **`#quietWindow`'s comment in `packages/daemon/src/daemon/scheduler.ts` says the window is timed from the revision's last change;** it is timed from when the scheduler next reads the revision, so after a job a change ended the next round starts one abort latency and a full window after the change. Older than this change.
+- **`INTERRUPTED_BEFORE_SEND_REASON`** in `packages/daemon/src/daemon/executor.ts`, as above.
+
+#### Notes for the tests session, no row
+
+- `Rig.looks` in `packages/daemon/test/scheduler.test.ts` is exposed and read by no test.
+- `FalsifyingExecutor.abort` in `packages/daemon/test/lifecycle.test.ts` answers that it found a job when none is held, where the real executor answers false once the reply has settled.
+- D4089's title says the entry "says its config is not confirmed" and asserts the fragment "confirmed".
+- D4113 pins the literal 6, where `docs/testing.md` says the protocol-version tests read `PROTOCOL_VERSION` so that a raise edits no test; say in the wording for `docs/testing.md` that this one is rewritten at each raise.
 
 #### Test Coverage Gaps
 
-None.
+Written at 14:24 on 2026-10-01 against the tree with the review's three fixes on disk. `bun x vitest run` over `scheduler.test.ts`, `query.test.ts` and `lifecycle.test.ts` then ran 571 tests, 570 passed, D4111 failed (row 2); `node scripts/check-defects.mjs` stops on D4111's anchor.
+
+1. `packages/daemon/src/daemon/scheduler.ts`, `#idle` (MEDIUM, daemon-state). Defect: "The idle entry is logged, and the idle call made, before the scheduler checks whether a round is already due, so a look that took nothing because the input revision moved during it leaves 'idle: no confirmed workspace is due' in the log while a workspace is due." Expected test: in `scheduler.test.ts`, a scripted look during which the revision moves and which resolves false is followed by no idle entry and no `idle` call before the round at the new revision is planned. D4049's scenario produces it and asserts nothing of it. The mutation is the code the review replaced: the `#dirty` block above the loop.
+2. `packages/daemon/src/query/answer.ts`, `activityText` (LOW, consumer). Behavior the review changed on purpose: the text now reads `falsifying workspace <path>, with <n> of its defect definitions in the job`. D4111 in `query.test.ts` asserts the old text and is red, and its record's `old` no longer matches. Pin the new text, re-anchor D4111 and prove it.
+3. `packages/daemon/src/daemon/falsification.ts`, `look`'s catch (LOW, internal). Defect: "A stop that lands while a look reads the definition files is rethrown, so the scheduler logs a failed scheduling step and holds the round during the shutdown." The Dev Handoff's Tests Owed asked for it ("the look resolves false with no window open and no job"); D4108 pins that the read throws, not that the look takes it for a look that took nothing. The mutation: drop `if (stopSignal.aborted) return false;`.
+4. `packages/daemon/src/daemon/falsification-plan.ts`, `#noneTaken` (LOW, daemon-state). Defect: "The entry for a look that took none counts a definition of a workspace that gets no further job among those given no further experiment, so its why names the wrong cause." D4109 asserts the entry's lead and its revision alone, and AC10 asks for the why. Expected test: the whole entry, for a look with definitions waiting in a workspace that gets no further job and one definition held at the revision.
+5. `packages/daemon/src/daemon/falsification.ts`, `look`'s `finally` (LOW, daemon-state). Defect: "A look that took nothing leaves its window on the tracker open, so the tracker records every later change into a window no job closes." D2080, D2081 and D2082 already go red on it, by the windows they count after a start; it has no named test of its own. The mutation: close the window only when the look resolved true.
+6. `packages/daemon/src/daemon/falsification.ts`, `MAX_HAPPENED_CHARACTERS` (LOW, consumer). Defect: "What happened to a workspace is kept so long that, in an entry of both parts, what ends its definitions' wait falls past the 1,000 characters an answer keeps." D4092 holds a workspace-only entry, so raising the bound to 750 leaves it green. Expected test: D4092's assertion over an entry of both parts, read through an answer.
+
+**All six rows are closed** by the tests session's reply of 15:09 on 2026-10-01, none refuted: row 1 by D4156, row 2 by D4111 re-anchored, row 3 by D4157, row 4 by D4158, row 5 by D4159, row 6 by D4160. Its detail is in the Tests Record.
+
+#### Validation of the fix round
+
+On the final tree: `wt/2` at 7d380642 with the uncommitted diff of `packages/` whose SHA-256 begins f1c16265, the same before and after every run below, and the one the tests session's gap proof measured. Windows 11 and WSL, Node 24.19.0, 2026-10-01. Logs are under `_agent-docs/.scratch/t3-5-review/`.
+
+- Size and lint, 15:11: `bun x oxlint` over the three fixed files and the three edited test files, exit 0, no diagnostic. Code lines: `daemon/scheduler.ts` 445, `query/answer.ts` 494, `daemon/falsification-plan.ts` 254.
+- Typecheck, 15:11: `bun run --filter @rt-test/daemon typecheck` exit 0 and `bun run --filter rt-test typecheck` exit 0, each a workspace compile.
+- `node scripts/check-defects.mjs`, 15:11: exit 0, 3332 named defects. `node scripts/check-line-citations.mjs`: exit 0, clean over 6 changed files.
+- The suite, scoped from the fix round by `bun x vitest related` over the three fixed files, through the run lease. Windows, 15:11 to 15:16: exit 0, 27 of the repository's 166 test files, 1894 tests passed. Linux, from 15:27: exit 0, 27 test files, 1894 tests passed.
+- Named defects. The selection is 75 records: every record whose mutated file is `daemon/scheduler.ts` (48), `query/answer.ts` (5) or `daemon/falsification-plan.ts` (19), and the six the tests session added or re-anchored. The tests session's gap proof of 576 ids, on this tree, holds 71 of them: Windows 14:57 to 15:05 and Linux 15:05 to 15:08, 576 of 576 detected on each. The review proved the other four, whose tests are in other suites, with `node scripts/verify-defects.mjs --ids D2692,D3467,D2605,D2606` through the lease: Windows 15:16 to 15:27, exit 0, 4 of 4 detected in 4 sandboxes, baseline green before and after; Linux 15:27 to 15:33, exit 0, 4 of 4 detected in 4 sandboxes, baseline green before and after.
+- The Linux log (`linux.log`) holds the suite and the proof and lost the lines before them: the clone's diff hash and `check-defects`' own exit. The verifier loads the same catalog and counted 3332 defects there, which only the patched catalog holds, and the tests session ran `check-defects` on Linux on this tree at 15:08, exit 0.
+- `node scripts/check-sprint-keys.mjs` and `node scripts/check-requirement-markers.mjs`, 15:34: exit 0 each.
+
+UNVERIFIED: none on either platform for the review's gates. Not run by the review: `bun run check` over the merged tree, which is the orchestrator's.
 
 ### Completion Notes
 
@@ -561,6 +670,7 @@ Decided, no fix: F2a (the ticket's Known limits hold it) and F8 (the Reuse list 
 
 - `_agent-docs/tickets/3-5-schedule-falsification.md` (created by create-ticket)
 - `_agent-docs/sprints/sprint-3-falsification.md` (create-ticket: § Ticket 3.5's scope line and ticket link, and this ticket's sizing figures in the paragraph on the cut from 3.4c)
+- `docs/requirements.md` (create-ticket: FR22's marker gains this ticket; FR8's text and marker read as before it, by the ruling of 08:49)
 
 Created by dev:
 

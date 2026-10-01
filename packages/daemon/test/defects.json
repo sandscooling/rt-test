@@ -11441,7 +11441,7 @@
     "id": "D4111",
     "defect": "The falsifying activity's text leaves out the number of definitions in the job.",
     "file": "packages/daemon/src/query/answer.ts",
-    "old": "      return `falsifying workspace ${activity.workspacePath}, defect definitions in the job ${activity.definitions}`;",
+    "old": "      return `falsifying workspace ${activity.workspacePath}, with ${activity.definitions} of its defect definitions in the job`;",
     "new": "      return `falsifying workspace ${activity.workspacePath}`;"
   },
   {
@@ -11457,5 +11457,40 @@
     "file": "packages/daemon/src/store/defect-evidence.ts",
     "old": "  if (falsifierVersion !== FALSIFIER_VERSION) {",
     "new": "  if (falsifierVersion > FALSIFIER_VERSION) {"
+  },
+  {
+    "id": "D4156",
+    "defect": "The idle entry is logged, and the idle call made, before the scheduler checks whether a round is already due, so a look that took nothing because the input revision moved during it leaves 'idle: no confirmed workspace is due' in the log while a workspace is due.",
+    "file": "packages/daemon/src/daemon/scheduler.ts",
+    "old": "    const { inputs } = this.#parts;\n    while (!this.#isStopping()) {\n      if (\n        this.#revision() !== this.#roundRevision ||\n        inputs.periodicReconciliations() > this.#periodicSeen\n      ) {\n        return true;\n      }\n      if (this.#dirty) {\n        this.#dirty = false;\n        this.#parts.log.entry(IDLE_ENTRY);\n        this.#parts.idle();\n      }\n      await this.#untilChangeOrStop();",
+    "new": "    if (this.#dirty) {\n      this.#dirty = false;\n      this.#parts.log.entry(IDLE_ENTRY);\n      this.#parts.idle();\n    }\n    const { inputs } = this.#parts;\n    while (!this.#isStopping()) {\n      if (\n        this.#revision() !== this.#roundRevision ||\n        inputs.periodicReconciliations() > this.#periodicSeen\n      ) {\n        return true;\n      }\n      await this.#untilChangeOrStop();"
+  },
+  {
+    "id": "D4157",
+    "defect": "A stop that lands while a look reads the definition files is rethrown, so the scheduler logs a failed scheduling step and holds the round during the shutdown.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (stopSignal.aborted) return false;\n      throw error;",
+    "new": "      throw error;"
+  },
+  {
+    "id": "D4158",
+    "defect": "The entry for a look that took none counts a definition of a workspace that gets no further job among those given no further experiment, so its why names the wrong cause.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "and given no further experiment at this revision ${waiting.length - inWaitingWorkspace}`,",
+    "new": "and given no further experiment at this revision ${waiting.length}`,"
+  },
+  {
+    "id": "D4159",
+    "defect": "A look that took nothing leaves its window on the tracker open, so the tracker records every later change into a window no job closes.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "      if (typeof begun === \"boolean\") await this.#close(opened.mark);",
+    "new": "      if (begun === true) await this.#close(opened.mark);"
+  },
+  {
+    "id": "D4160",
+    "defect": "What happened to a workspace is kept so long that, in an entry of both parts, what ends its definitions' wait falls past the 1,000 characters an answer keeps.",
+    "file": "packages/daemon/src/daemon/falsification.ts",
+    "old": "const MAX_HAPPENED_CHARACTERS = 400;",
+    "new": "const MAX_HAPPENED_CHARACTERS = 750;"
   }
 ]

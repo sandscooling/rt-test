@@ -509,13 +509,11 @@ export class Scheduler {
     }
   }
 
-  /** Logs once after work, then waits for a change of revision or a periodic reconciliation; false after a stop. */
+  /**
+   * Waits for a change of revision or a periodic reconciliation, logging once after work when neither has come since
+   * the plan; false after a stop.
+   */
   async #idle(): Promise<boolean> {
-    if (this.#dirty) {
-      this.#dirty = false;
-      this.#parts.log.entry(IDLE_ENTRY);
-      this.#parts.idle();
-    }
     const { inputs } = this.#parts;
     while (!this.#isStopping()) {
       if (
@@ -523,6 +521,11 @@ export class Scheduler {
         inputs.periodicReconciliations() > this.#periodicSeen
       ) {
         return true;
+      }
+      if (this.#dirty) {
+        this.#dirty = false;
+        this.#parts.log.entry(IDLE_ENTRY);
+        this.#parts.idle();
       }
       await this.#untilChangeOrStop();
     }

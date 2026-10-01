@@ -234,7 +234,7 @@ export class FalsificationPlan {
     ).length;
     return {
       kind: "none-taken",
-      why: `none of the waiting definitions is taken at input revision ${revision}: waiting ${waiting.length}, of which in a workspace that gets no further falsification job until the input revision changes ${inWaitingWorkspace}, and given an experiment at this revision ${waiting.length - inWaitingWorkspace}`,
+      why: `none of the waiting definitions is taken at input revision ${revision}: waiting ${waiting.length}, of which in a workspace that gets no further falsification job until the input revision changes ${inWaitingWorkspace}, and given no further experiment at this revision ${waiting.length - inWaitingWorkspace}`,
       firstAtRevision,
     };
   }
