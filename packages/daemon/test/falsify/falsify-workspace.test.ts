@@ -62,6 +62,9 @@ const ERROR_KIND_CASES: Readonly<Record<string, string>> = {
   plain: "throws a plain error",
   "matcher-result": "fails an extended matcher's result",
 };
+/** A fixture whose `client` project's test environment is served through Vite's `client` environment, as jsdom's is. */
+const CLIENT_ENVIRONMENT_FIXTURE = "client-environment";
+const CLIENT_LABEL_DEFECT = "label";
 const MODULE_CACHE_WORKSPACE = "module-cache";
 const NEVER_ABORTED = new AbortController().signal;
 /** The fixture declares no assertion error name, so only the two forms Vitest marks itself are assertions. */
@@ -1465,6 +1468,21 @@ describe("the stale-transform guard before a run", () => {
   });
 });
 
+describe("a job in a project whose test environment is served through Vite's client environment", () => {
+  it(
+    "D4299: the baseline passes and a mutation the intended test catches reads detected, on Vitest 5 and 4.1",
+    async () => {
+      const detected = { verdict: "detected" };
+      expect(
+        await onEachLine(clientEnvironmentJob, (job) =>
+          judgementOf(job, CLIENT_LABEL_DEFECT),
+        ),
+      ).toEqual([detected, detected]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
 /** A job with no experiments over the fixture's module-cache workspace. */
 function moduleCacheJob(install: VitestInstall): Promise<FalsificationJob> {
   return inTempDir((dir) => {
@@ -1543,6 +1561,42 @@ function errorKindsOn(install: VitestInstall): Promise<FalsificationJob> {
   });
   errorKindJobs.set(install, job);
   return job;
+}
+
+/**
+ * Falsifies a copy of the client-environment fixture, which lies outside this repository, so the reach setup file and
+ * the module it imports lie under no directory Vitest puts on a project's allow list. Its one experiment mutates the
+ * label the `client` project's test reads.
+ */
+function clientEnvironmentJob(
+  install: VitestInstall,
+): Promise<FalsificationJob> {
+  return inConsumerCopy(CLIENT_ENVIRONMENT_FIXTURE, install, (root) => {
+    const workspace: VitestWorkspace = { path: ".", directory: root };
+    return falsifyWorkspace(
+      workspace,
+      chosenConfigFile(workspace) ?? "",
+      [
+        {
+          defectId: CLIENT_LABEL_DEFECT,
+          test: {
+            workspacePath: ".",
+            projectName: "client",
+            modulePath: "client/label.test.mjs",
+            namePath: ["reads the label"],
+            occurrence: 0,
+          },
+          mutation: {
+            file: join(root, "src/label.mjs"),
+            old: '"client"',
+            new: '"other"',
+          },
+        },
+      ],
+      NO_DECLARED_NAMES,
+      NEVER_ABORTED,
+    );
+  });
 }
 
 /** Each named experiment's judgement, beside the facts of its intended test's errors in its first run. */

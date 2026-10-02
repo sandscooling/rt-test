@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { Vitest } from "vitest/node";
 import { crawledLinks } from "../src/inputs/crawl-links.js";
 import { workspaceEnvFilesKnown } from "../src/inputs/env-files.js";
 import {
@@ -21,6 +22,7 @@ import {
 } from "../src/inputs/fingerprint.js";
 import { MAX_NAMED_CHANGES } from "../src/inputs/input-jobs.js";
 import { protection, workspaceListing } from "../src/inputs/protection.js";
+import { chosenConfigFile } from "../src/vitest/confirmed-start.js";
 import {
   discoverTests,
   type DiscoveredTest,
@@ -37,7 +39,11 @@ import {
   type ReportedAlias,
   type SelectionFacts,
 } from "../src/vitest/selection-facts.js";
-import { queueSessionJob } from "../src/vitest/workspace-session.js";
+import {
+  inWorkspaceSession,
+  queueSessionJob,
+  SNAPSHOT_GUARD_FILE,
+} from "../src/vitest/workspace-session.js";
 import {
   confirmEvery,
   copyFixture,
@@ -3294,6 +3300,159 @@ describe("dropping a not-covered workspace another workspace's config collects",
       expect(
         keptNotCovered(await discoverNotCovered(), "packages/broken"),
       ).toBe(false);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+/**
+ * Two inline projects of one config: `client`, whose test environment is served through Vite's `client` environment as
+ * jsdom's is, and `node`, which has a setup file of its own. Its copy lies outside this repository, so RT Test's own
+ * setup files lie under no directory Vitest puts on a project's allow list.
+ */
+const CLIENT_ENVIRONMENT_FIXTURE = "client-environment";
+const CLIENT_TEST = "client: client/label.test.mjs > reads the label";
+const NODE_TEST = "node: node/setup.test.mjs > runs after its setup file";
+const EVERY_TEST_NO_FAILED_MODULE = {
+  tests: [CLIENT_TEST, NODE_TEST],
+  failedModules: [],
+};
+const EVERY_TEST_PASSED = {
+  execution: "completed",
+  modules: {
+    "client/label.test.mjs": { "reads the label": finished("passed") },
+    "node/setup.test.mjs": { "runs after its setup file": finished("passed") },
+  },
+};
+const GUARD = "RT Test's snapshot guard";
+const GUARD_THEN_ITS_OWN = [GUARD, "node/node-setup.mjs"];
+/** How many `/`-separated segments of a setup file's path name it within the fixture, as `node/node-setup.mjs` does. */
+const FIXTURE_PATH_SEGMENTS = 2;
+
+/** The fixture's discovered tests, each by project, module and name, beside the modules that failed to load. */
+async function clientEnvironmentDiscovery(
+  install: VitestInstall,
+): Promise<unknown> {
+  const discovery = await discoverFixture(CLIENT_ENVIRONMENT_FIXTURE, install);
+  return {
+    tests: testsOf(discovery, ".")
+      .map(
+        ({ identity }) =>
+          `${identity.projectName}: ${identity.modulePath} > ${identity.namePath.join(" > ")}`,
+      )
+      .sort(),
+    failedModules: discoveredField(discovery, "failedModules"),
+  };
+}
+
+function clientEnvironmentRun(install: VitestInstall): Promise<unknown> {
+  return inConsumerCopy(CLIENT_ENVIRONMENT_FIXTURE, install, async (root) =>
+    runSummary(await settledRun(root)),
+  );
+}
+
+/** What `read` finds in the Vitest of a session opened over a copy of the fixture, which collects and runs nothing. */
+function inClientEnvironmentSession(
+  install: VitestInstall,
+  read: (instance: Vitest) => unknown,
+): Promise<unknown> {
+  return inConsumerCopy(CLIENT_ENVIRONMENT_FIXTURE, install, (root) => {
+    const workspace = { path: ".", directory: root };
+    return queueSessionJob(async () => {
+      const session = await inWorkspaceSession(
+        workspace,
+        chosenConfigFile(workspace) ?? "",
+        [],
+        ({ instance }) =>
+          Promise.resolve({ unhandledErrors: [], reading: read(instance) }),
+      );
+      return session.status === "loaded" ? session.value.reading : session;
+    });
+  });
+}
+
+/** The session's projects, beside how many times each Vite server among them allows the snapshot guard's directory. */
+function guardDirectoryEntries(instance: Vitest): unknown {
+  const guardDirectory = slashed(dirname(SNAPSHOT_GUARD_FILE));
+  const servers = new Set(instance.projects.map((project) => project.vite));
+  return {
+    projects: instance.projects.map((project) => project.name).sort(),
+    entriesOfEachServer: [...servers].map(
+      (server) =>
+        server.config.server.fs.allow.filter(
+          (entry) => entry === guardDirectory,
+        ).length,
+    ),
+  };
+}
+
+/** The `node` project's setup files in the order they run, RT Test's guard by name and any other by its fixture path. */
+function nodeProjectSetupFiles(instance: Vitest): unknown {
+  const project = instance.projects.find(({ name }) => name === "node");
+  if (project === undefined) return "the session holds no node project";
+  return project.config.setupFiles.map((file) =>
+    file === SNAPSHOT_GUARD_FILE
+      ? GUARD
+      : slashed(file).split("/").slice(-FIXTURE_PATH_SEGMENTS).join("/"),
+  );
+}
+
+describe("a project whose test environment is served through Vite's client environment", () => {
+  it(
+    "D4293: on Vitest 5, a discovery lists the project's tests and no module that failed to load",
+    async () => {
+      expect(await clientEnvironmentDiscovery("vitest")).toEqual(
+        EVERY_TEST_NO_FAILED_MODULE,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4294: on Vitest 4.1, a discovery lists the project's tests and no module that failed to load",
+    async () => {
+      expect(await clientEnvironmentDiscovery("vitest-4")).toEqual(
+        EVERY_TEST_NO_FAILED_MODULE,
+      );
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4295: on Vitest 5, a run runs the project's tests and records each one's outcome",
+    async () => {
+      expect(await clientEnvironmentRun("vitest")).toEqual(EVERY_TEST_PASSED);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4296: on Vitest 4.1, a run runs the project's tests and records each one's outcome",
+    async () => {
+      expect(await clientEnvironmentRun("vitest-4")).toEqual(EVERY_TEST_PASSED);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+describe("placing the snapshot guard in each project", () => {
+  it(
+    "D4297: on Vitest 5, a Vite server two projects share allows the guard's directory once",
+    async () => {
+      expect(
+        await inClientEnvironmentSession("vitest", guardDirectoryEntries),
+      ).toEqual({ projects: ["client", "node"], entriesOfEachServer: [1] });
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4298: the guard runs ahead of a project's own setup file, on Vitest 5 and 4.1",
+    async () => {
+      expect([
+        await inClientEnvironmentSession("vitest", nodeProjectSetupFiles),
+        await inClientEnvironmentSession("vitest-4", nodeProjectSetupFiles),
+      ]).toEqual([GUARD_THEN_ITS_OWN, GUARD_THEN_ITS_OWN]);
     },
     DISCOVERY_TIMEOUT_MS,
   );

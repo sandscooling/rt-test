@@ -2465,20 +2465,20 @@ describe("opening a store written before not-covered workspaces", () => {
 });
 
 describe("the adapter version a stored record carries", () => {
-  it("D1285: a stored run carries Vitest adapter version 3", async () => {
+  it("D1285: a stored run carries Vitest adapter version 4", async () => {
     const version = await inStore((store) => {
       store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
       return store.readRuns(WORKTREE_A)[0]?.adapterVersion;
     });
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 
-  it("D1286: a stored discovery carries Vitest adapter version 3", async () => {
+  it("D1286: a stored discovery carries Vitest adapter version 4", async () => {
     const version = await inStore((store) => {
       store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
       return store.readLatestDiscovery(WORKTREE_A)?.adapterVersion;
     });
-    expect(version).toBe(3);
+    expect(version).toBe(4);
   });
 });
 
@@ -3258,7 +3258,7 @@ describe("storing a falsification reply's verdicts as defect evidence", () => {
     ]);
   });
 
-  it("D3911: a stored record carries its verdict, reason, detail and facts, bound to its scope, the definition digest handed in, its record's mutation file digest, the fingerprint digest, the reply's versions and adapter version 3", async () => {
+  it("D3911: a stored record carries its verdict, reason, detail and facts, bound to its scope, the definition digest handed in, its record's mutation file digest, the fingerprint digest, the reply's versions and adapter version 4", async () => {
     const stored = await inStore((store) => {
       store.writeEvidence(
         evidenceBound(WORKTREE_A),
@@ -3281,7 +3281,7 @@ describe("storing a falsification reply's verdicts as defect evidence", () => {
         mutationFileDigest: "file-digest-3",
         vitestVersion: "4.1.11",
         falsifierVersion: FALSIFIER_VERSION,
-        adapterVersion: 3,
+        adapterVersion: 4,
         verdict: "invalid-experiment",
         judgement: HOOK_FAILED_JUDGEMENT,
         hasEvidenceId: true,
