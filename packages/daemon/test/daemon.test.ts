@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
@@ -66,8 +67,16 @@ import {
   WAIT_TYPE,
   type ProtocolMessage,
 } from "../src/daemon/protocol.js";
+import { runStoredEntry } from "../src/daemon/job-endings.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
+import { openStore } from "../src/store/open-store.js";
+import {
+  BUSY_TIMEOUT_MS,
+  FINGERPRINT_DIGEST,
+  STORE_FILE_NAME,
+  STORE_SCHEMA_VERSION,
+} from "../src/store/schema.js";
 import { withBuildHook } from "./build-hook.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
@@ -118,6 +127,7 @@ import {
   mainCheckout,
 } from "./harness.js";
 import { manifest, rootManifest, writeTree } from "./selection/harness.js";
+import { loggedRuns } from "./stored-run-log.js";
 
 const CLIENT = fileURLToPath(new URL("../src/client.ts", import.meta.url));
 const FIXTURES = join(REPO, "test/fixtures/daemon");
@@ -1703,17 +1713,55 @@ function idleCount(logFile: string): number {
   return logEntries(logFile).filter((entry) => entry === IDLE_ENTRY).length;
 }
 
-/** How many runs the store holds for each workspace of the worktree at `root`. */
-function runCounts(
-  stateDirectory: string,
-  root: string,
-): Record<string, number> {
+/** How many runs the log says the daemon stored for each workspace, one a later run replaced in the store included. */
+function runCounts(logFile: string): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const [path] of storedRuns(stateDirectory, root)) {
-    if (path !== undefined) counts[path] = (counts[path] ?? 0) + 1;
+  for (const { workspacePath } of loggedRuns(logFile)) {
+    counts[workspacePath] = (counts[workspacePath] ?? 0) + 1;
   }
   return counts;
 }
+
+/** The fingerprint digest the store holds for each workspace's run of the worktree at `root`; undefined for a run stored not fingerprinted. */
+function storedDigests(
+  stateDirectory: string,
+  root: string,
+): Record<string, string | undefined> {
+  const store = openStore(stateDirectory);
+  try {
+    return Object.fromEntries(
+      store
+        .readRuns(consumerIdentity(root))
+        .map(({ run, inputFingerprint }) => [
+          run.workspace.path,
+          inputFingerprint.kind === FINGERPRINT_DIGEST
+            ? inputFingerprint.digest
+            : undefined,
+        ]),
+    );
+  } finally {
+    store.close();
+  }
+}
+
+/** Raises the store's schema version through a second connection, as a newer RT Test migrating it does, so the daemon's next write is refused. */
+function migrateStoreAhead(stateDirectory: string): void {
+  const database = new DatabaseSync(join(stateDirectory, STORE_FILE_NAME));
+  try {
+    database.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    database.exec(`PRAGMA user_version = ${STORE_SCHEMA_VERSION + 1}`);
+  } finally {
+    database.close();
+  }
+}
+
+const RUN_STORED = "run stored: ";
+const RUN_ENDED = "run ended: ";
+/** A project and a worktree whose paths no log entry may carry. */
+const ENTRY_SCOPE = {
+  projectIdentity: "/work/shop/.git",
+  worktreeIdentity: "/work/shop",
+};
 
 describe("what a daemon runs after a start and after an edit", () => {
   it(
@@ -1724,12 +1772,12 @@ describe("what a daemon runs after a start and after an edit", () => {
         if ("thrown" in first) return first;
         await eventually(() => idleCount(first.logFile) >= 1);
         await settled(stopDaemon(root));
-        const before = runCounts(first.stateDirectory, root);
+        const before = runCounts(first.logFile);
         const idles = idleCount(first.logFile);
         const second = await started(root, pids, confirmEvery(root));
         if ("thrown" in second) return second;
         await eventually(() => idleCount(second.logFile) > idles);
-        return { before, after: runCounts(second.stateDirectory, root) };
+        return { before, after: runCounts(second.logFile) };
       });
       expect(outcome).toStrictEqual({
         before: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 1 },
@@ -1752,13 +1800,13 @@ describe("what a daemon runs after a start and after an edit", () => {
         const identity = await started(root, pids, confirmEvery(root));
         if ("thrown" in identity) return identity;
         await eventually(() => idleCount(identity.logFile) >= 1);
-        const before = runCounts(identity.stateDirectory, root);
+        const before = runCounts(identity.logFile);
         appendFileSync(
           join(root, WORKSPACE_B, "passes.test.mjs"),
           "// an edit\n",
         );
         await eventually(() => idleCount(identity.logFile) >= 2);
-        return { before, after: runCounts(identity.stateDirectory, root) };
+        return { before, after: runCounts(identity.logFile) };
       });
       expect(outcome).toStrictEqual({
         before: { [WORKSPACE_A]: 1, [WORKSPACE_B]: 1 },
@@ -1767,6 +1815,78 @@ describe("what a daemon runs after a start and after an edit", () => {
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
+});
+
+describe("the log's entry for a run a daemon stores", () => {
+  it(
+    "D4374: each run a daemon stores is logged once as stored, naming the fingerprint the store holds for it, ahead of its run ended entry",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        const identity = await started(root, pids, confirmEvery(root));
+        if ("thrown" in identity) return identity;
+        await eventually(() => logged(identity.logFile, IDLE_ENTRY));
+        return {
+          digests: storedDigests(identity.stateDirectory, root),
+          entries: logEntries(identity.logFile).filter(
+            (entry) =>
+              entry.startsWith(RUN_STORED) || entry.startsWith(RUN_ENDED),
+          ),
+        };
+      });
+      const digests = "digests" in outcome ? outcome.digests : {};
+      expect(outcome).toStrictEqual({
+        digests,
+        entries: [
+          `run stored: packages/a under fingerprint ${digests[WORKSPACE_A]}`,
+          "run ended: packages/a ran completed",
+          `run stored: packages/b under fingerprint ${digests[WORKSPACE_B]}`,
+          "run ended: packages/b ran completed",
+        ],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D4375: a run whose store write is refused is logged as ended with nothing stored, and never as stored",
+    async () => {
+      const outcome = await withDaemonConsumer(async (root, pids) => {
+        holdAt(root, "hold");
+        const identity = await started(root, pids, confirmEvery(root));
+        if ("thrown" in identity) return identity;
+        await atHoldPoint(root, "holding");
+        migrateStoreAhead(identity.stateDirectory);
+        holdAt(root, "release");
+        const unstored = await eventually(() =>
+          logged(
+            identity.logFile,
+            `the run of ${WORKSPACE_A} ended with nothing stored: the store write failed`,
+          ),
+        );
+        return { unstored, stored: loggedRuns(identity.logFile) };
+      });
+      expect(outcome).toStrictEqual({ unstored: true, stored: [] });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it("D4376: the entry for a run stored under a fingerprint names its workspace and that fingerprint's digest, and nothing else of its bindings", () => {
+    expect(
+      runStoredEntry(WORKSPACE_A, {
+        ...ENTRY_SCOPE,
+        inputFingerprint: { kind: "digest", digest: "sha256:9F86D081884C7D65" },
+      }),
+    ).toBe("run stored: packages/a under fingerprint sha256:9F86D081884C7D65");
+  });
+
+  it("D4377: the entry for a run stored not fingerprinted names its workspace and says so, with no digest", () => {
+    expect(
+      runStoredEntry(WORKSPACE_A, {
+        ...ENTRY_SCOPE,
+        inputFingerprint: { kind: "not-fingerprinted" },
+      }),
+    ).toBe("run stored: packages/a not fingerprinted");
+  });
 });
 
 describe("the environment a daemon's executor processes start with", () => {
@@ -1908,9 +2028,7 @@ describe("a wait for files", () => {
         return {
           idle,
           outcome: "thrown" in answer ? answer : answer.outcome,
-          runsOfB: storedRuns(identity.stateDirectory, root).filter(
-            ([path]) => path === WORKSPACE_B,
-          ).length,
+          runsOfB: runCounts(identity.logFile)[WORKSPACE_B],
         };
       });
       expect(outcome).toStrictEqual({

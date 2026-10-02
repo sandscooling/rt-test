@@ -57,6 +57,6 @@ Acceptance: a user can install into a supported project, explicitly start it, qu
 - Runtime support beyond the Node release lines in `package.json`.
 - Handling Vitest advanced API changes between 4.1 and 5.
 - Durable test identity across renames.
-- State schema migrations, retention, and recovery from partial writes.
+- State schema migrations and recovery from partial writes.
 - Declared external inputs and handling nondeterministic/live-service tests.
 - Performance budgets for cold indexing, memory, and function-level instrumentation.

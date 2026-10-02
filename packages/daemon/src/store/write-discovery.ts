@@ -48,6 +48,15 @@ const INSERT_TEST = `INSERT INTO discovered_tests
    is_duplicate, mode)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+const WORKTREE_DISCOVERIES = `SELECT d.sequence FROM discoveries d
+  WHERE d.project_identity = ? AND d.worktree_identity = ?`;
+/** Each takes the project and the worktree. Tests go before workspaces and workspaces before discoveries, since each refers to the next. */
+const REMOVE_WORKTREE_DISCOVERIES = [
+  `DELETE FROM discovered_tests WHERE discovery_sequence IN (${WORKTREE_DISCOVERIES})`,
+  `DELETE FROM discovery_workspaces WHERE discovery_sequence IN (${WORKTREE_DISCOVERIES})`,
+  `DELETE FROM discoveries WHERE sequence IN (${WORKTREE_DISCOVERIES})`,
+];
+
 const NO_WORKSPACE_COLUMNS: WorkspaceColumns = {
   vitestVersion: null,
   unsupportedVitest: null,
@@ -60,7 +69,10 @@ const NO_WORKSPACE_COLUMNS: WorkspaceColumns = {
   selectionFacts: null,
 };
 
-/** Stores one discovery whole, or nothing of it; the store assigns its identity and stamps the adapter version. */
+/**
+ * Stores one discovery whole, in place of every earlier discovery of that project and worktree, or stores nothing of
+ * it and removes nothing; the store assigns its identity and stamps the adapter version.
+ */
 export function writeDiscovery(
   database: DatabaseSync,
   bindings: StoreBindings,
@@ -72,6 +84,7 @@ export function writeDiscovery(
     fingerprintColumns(inputFingerprint);
   const discoveryId = randomUUID();
   return inRecordWrite(database, () => {
+    removeEarlierDiscoveries(database, bindings);
     const { lastInsertRowid } = database
       .prepare(INSERT_DISCOVERY)
       .run(
@@ -92,6 +105,19 @@ export function writeDiscovery(
       discoveryId,
     );
   });
+}
+
+/**
+ * Called before the insert, since it removes every discovery of the worktree, and inside the write's transaction, so
+ * a write that fails removes none. The new discovery may take the sequence of one it replaces.
+ */
+function removeEarlierDiscoveries(
+  database: DatabaseSync,
+  { projectIdentity, worktreeIdentity }: StoreBindings,
+): void {
+  for (const remove of REMOVE_WORKTREE_DISCOVERIES) {
+    database.prepare(remove).run(projectIdentity, worktreeIdentity);
+  }
 }
 
 /** Reading the discovery back before commit refuses, whole, a record the reader could not rebuild. */
