@@ -1440,5 +1440,12 @@
     "file": "packages/daemon/src/daemon/canary-gate.ts",
     "old": "  const given = verdict ?? NO_VERDICT;",
     "new": "  const given = String(verdict);"
+  },
+  {
+    "id": "D4299",
+    "defect": "The reach setup file is placed in a project without its directory joining the project's allow list, so a job in a project served through Vite's client environment cannot load it, its baseline does not pass and no experiment reads detected.",
+    "file": "packages/daemon/src/falsify/mutation-transform.ts",
+    "old": "      placeSetupFileFirst(project, REACH_SETUP_FILE);",
+    "new": "      project.config.setupFiles.unshift(REACH_SETUP_FILE);"
   }
 ]

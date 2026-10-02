@@ -5,12 +5,12 @@ import type {
   TestSpecification,
   Vitest,
 } from "vitest/node";
-import { extname } from "node:path";
+import { dirname, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WorkspaceConfig } from "./config-loader.js";
 import { confirmedConfig } from "./confirmed-start.js";
 import { errorText } from "./error-text.js";
-import type { VitestWorkspace } from "./find-workspaces.js";
+import { POSIX_SEPARATOR, type VitestWorkspace } from "./find-workspaces.js";
 import { recordingHostRejections } from "./host-rejections.js";
 import {
   importVitestNode,
@@ -228,8 +228,20 @@ async function openSession(
 /** Setup files are per project and no option overrides them, so each resolved project gets the guard first. */
 function guardSnapshots(instance: Vitest): void {
   for (const project of instance.projects) {
-    project.config.setupFiles.unshift(SNAPSHOT_GUARD_FILE);
+    placeSetupFileFirst(project, SNAPSHOT_GUARD_FILE);
   }
+}
+
+/**
+ * Puts a setup file of RT Test's own first in a project. A test environment served through Vite's `client`
+ * environment loads a file only from under the project's allow list, and RT Test's build can lie outside every
+ * directory on it, so the file's directory joins it, spelled as Vite compares paths.
+ */
+export function placeSetupFileFirst(project: TestProject, file: string): void {
+  project.config.setupFiles.unshift(file);
+  const allowed = project.vite.config.server.fs.allow;
+  const directory = dirname(file).split(sep).join(POSIX_SEPARATOR);
+  if (!allowed.includes(directory)) allowed.push(directory);
 }
 
 /**

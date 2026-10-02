@@ -2,7 +2,10 @@ import { basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TestProject, Vitest } from "vitest/node";
 import { releaseLine } from "../vitest/load-vitest.js";
-import { TOP_LEVEL_MODULE_CACHE_MAJOR } from "../vitest/workspace-session.js";
+import {
+  placeSetupFileFirst,
+  TOP_LEVEL_MODULE_CACHE_MAJOR,
+} from "../vitest/workspace-session.js";
 import { replaceAnchor } from "./anchor-match.js";
 import {
   mutateWithProbe,
@@ -88,7 +91,7 @@ export class MutationTransform {
       project.config.isolate = true;
       project.config.bail = BAIL_OFF;
       serveWithoutTempCopies(project);
-      project.config.setupFiles.unshift(REACH_SETUP_FILE);
+      placeSetupFileFirst(project, REACH_SETUP_FILE);
     }
     return new MutationTransform(instance);
   }
