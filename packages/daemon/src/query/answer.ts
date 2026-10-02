@@ -90,8 +90,8 @@ export interface DiscoveryFacts extends AdapterVersionFacts {
   /**
    * Stale when stored under another adapter version; otherwise as its stored digest rates against the discovery's
    * current input fingerprint, as for a result, and then current only while each discovered workspace holding a
-   * stored run has a latest run that is bound to the workspace's current fingerprint and ran every test module the
-   * discovery lists tests for.
+   * stored run has a latest run that is bound to the workspace's current fingerprint and recorded, for every test
+   * module the discovery lists tests for, exactly those tests. A latest run refused as unreadable makes it unknown.
    */
   readonly freshness: Freshness;
 }

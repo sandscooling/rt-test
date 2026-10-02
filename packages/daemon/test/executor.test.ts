@@ -1784,6 +1784,32 @@ describe("the test lists that cross the executor's process", () => {
   );
 
   it(
+    "D4353: a discovery job's outcome carries the collection its executor process reported for the workspace",
+    async () => {
+      const outcome = await inSingleConsumer((executor, root) =>
+        executor.discover({
+          consumerRoot: root,
+          workspaces: [{ path: ".", configFile: FIXTURE_CONFIG }],
+        }),
+      );
+      expect(
+        outcome.ended
+          ? outcome.collection?.map(({ wallMs: _wallMs, ...counts }) => counts)
+          : outcome,
+      ).toEqual([
+        {
+          workspacePath: ".",
+          status: "discovered",
+          listed: 1,
+          collected: 1,
+          carried: 0,
+        },
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "D4344: a run job's outcome carries the test lists its executor process collected, each test with its mode",
     async () => {
       const outcome = await inSingleConsumer((executor, root) =>

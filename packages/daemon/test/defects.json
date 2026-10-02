@@ -10573,8 +10573,8 @@
     "id": "D3721",
     "defect": "The answer tells the resolver the discovery is current whatever its freshness, so a not-discovered reason never says the discovery is not current.",
     "file": "packages/daemon/src/defects/worktree-standings.ts",
-    "old": "  const { discoveryCurrent } = basis;",
-    "new": "  const discoveryCurrent = true;"
+    "old": "  const listsCurrent = basis.context.discovery.freshness === CURRENT;",
+    "new": "  const listsCurrent = true;"
   },
   {
     "id": "D3722",
@@ -12265,7 +12265,7 @@
   },
   {
     "id": "D4330",
-    "defect": "A discovery that cannot be stored again with a run's lists throws out of the run's job, so a run that is stored is listed as a job that stored nothing and the failure is not logged as the refresh's.",
+    "defect": "A discovery that cannot be stored again with a run's lists throws out of the run's job, so the failure is not logged as that refresh's.",
     "file": "packages/daemon/src/daemon/carried-lists.ts",
     "old": "  } catch (error) {\n    log.error(what, error);\n    return;\n  }",
     "new": "  } catch (error) {\n    throw error;\n  }"
@@ -12374,5 +12374,61 @@
     "file": "packages/daemon/src/daemon/carried-lists.ts",
     "old": "  const lists = outcome.ended ? outcome.lists : undefined;",
     "new": "  const lists = undefined;"
+  },
+  {
+    "id": "D4346",
+    "defect": "A rediscovery keeps, for a module of one workspace, the list it was handed for a module of the same project name and path in another workspace, so that module is never collected and its listed tests carry the other workspace's identity.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    .filter((lists) => lists.workspacePath === workspace.path)\n",
+    "new": ""
+  },
+  {
+    "id": "D4347",
+    "defect": "A latest run that rates unknown against its workspace's current fingerprint, as one stored not fingerprinted because its inputs changed while it ran, vouches for its lists, so the discovery reads current.",
+    "file": "packages/daemon/src/query/list-freshness.ts",
+    "old": "  if (freshness !== CURRENT) return freshness;",
+    "new": "  if (freshness === STALE) return freshness;"
+  },
+  {
+    "id": "D4348",
+    "defect": "A later workspace's rating replaces an earlier workspace's unknown, so the discovery reads current while an earlier workspace's run does not vouch.",
+    "file": "packages/daemon/src/query/list-freshness.ts",
+    "old": "    if (vouched === UNKNOWN) rated = UNKNOWN;",
+    "new": "    rated = vouched;"
+  },
+  {
+    "id": "D4349",
+    "defect": "A discovery stored again with a run's lists keeps only the replaced modules' tests, so every other module of that workspace loses its tests.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "    tests: [...modules.values()].flatMap((module) => module.tests),",
+    "new": "    tests: changed.flatMap((list) => list.tests),"
+  },
+  {
+    "id": "D4350",
+    "defect": "A discovery stored under another adapter version is stored again with a run's lists, and the store stamps the new record with the current version, so a discovery recorded under another meaning can read current.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "  if (stored === undefined || !isCurrentAdapterVersion(stored.adapterVersion)) {\n    return undefined;",
+    "new": "  if (stored === undefined) {\n    return undefined;"
+  },
+  {
+    "id": "D4351",
+    "defect": "The resolver is told the discovery is current by its own fingerprint, so a definition naming a test added to a module whose list a rediscovery carried reads not discovered with nothing saying the list is not current, while that workspace is due.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "  const listsCurrent = basis.context.discovery.freshness === CURRENT;",
+    "new": "  const listsCurrent = discoveryCurrent;"
+  },
+  {
+    "id": "D4352",
+    "defect": "A confirmed workspace that was not discovered is reported in the collection as discovered, so the log's line for it gives module counts in place of how it ended.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "        status: entry.status,",
+    "new": "        status: \"discovered\","
+  },
+  {
+    "id": "D4353",
+    "defect": "An ended discovery's outcome drops the collection its executor process reported, so the log gives no line for any workspace.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      ? { ended: true, value: reply.discovery, collection: reply.collection }",
+    "new": "      ? { ended: true, value: reply.discovery }"
   }
 ]

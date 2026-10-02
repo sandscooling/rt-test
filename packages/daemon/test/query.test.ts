@@ -1186,7 +1186,7 @@ const BOTH_BUILDING = [
 ];
 
 describe("each workspace's inputs as the dependency builds narrow them", () => {
-  it("D2523: while the build at the current revision has not ended, each workspace is unfingerprinted naming the build, and the discovery's freshness is unaffected", () => {
+  it("D2523: while the build at the current revision has not ended, each workspace is unfingerprinted naming the build, and the discovery's freshness, with no stored run to rate its lists, is unaffected", () => {
     const stored = asStored(
       viewOf(undefined).discoveryFingerprint(TWO_WORKSPACES.discovery),
     );
@@ -3865,7 +3865,7 @@ function discoveryCurrentWith(
   );
 }
 
-/** The second of two tests named `name` in one module of workspace A, told apart only by position, with the first. */
+/** Two tests named `name` in one module of workspace A, told apart only by their position: the first, then the second. */
 function sameNamedPair(name: string): [DiscoveredTest, DiscoveredTest] {
   const first = discovered(name, { isDuplicate: true });
   return [first, { ...first, identity: { ...first.identity, occurrence: 1 } }];
@@ -4003,6 +4003,57 @@ describe(
         discovery: "stale",
         evidence: { freshness: "current" },
       });
+    });
+
+    it("D4347: a discovery current by its own fingerprint reads unknown while a workspace's latest run recorded exactly the listed tests but is stored not fingerprinted", () => {
+      const test = discovered("a");
+      const summary = summaryOf(
+        discoveryAtDigest([discoveredWorkspace(WORKSPACE_A, [test])]),
+        [storedRun(ranRun([ranModule([finished(test, "passed")])]))],
+        discoveryCurrentWith({ [WORKSPACE_A]: DIGEST.digest }),
+      );
+      expect(summary.discovery.freshness).toBe("unknown");
+    });
+
+    it("D4348: a discovery reads unknown when an earlier workspace's current run recorded other tests, although a later workspace's run vouches for its list", () => {
+      const inB = discovered("b", { workspacePath: WORKSPACE_B });
+      const summary = summaryOf(
+        discoveryAtDigest([
+          discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+          discoveredWorkspace(WORKSPACE_B, [inB]),
+        ]),
+        [vouchingRun([discovered("renamed")]), vouchingRun([inB], WORKSPACE_B)],
+        discoveryCurrentWith({
+          [WORKSPACE_A]: DIGEST.digest,
+          [WORKSPACE_B]: DIGEST.digest,
+        }),
+      );
+      expect(summary.discovery.freshness).toBe("unknown");
+    });
+
+    it("D4351: a not-discovered reason says the discovery is not current while its workspace's stored run is due, although the discovery's own fingerprint reads current, and not once that run is current", async () => {
+      const listed = discovered("one");
+      const latest = results(
+        discoveryAtDigest([discoveredWorkspace(WORKSPACE_A, [listed])]),
+        [vouchingRun([listed])],
+      );
+      const files = { "a.json": [defectDefinition("D1", "missing")] };
+      const reasons = await inTempDir(async (root) => {
+        const due = answered(
+          await defectsOver(join(root, "a"), latest, files, undefined, {
+            inputs: discoveryCurrentWith({ [WORKSPACE_A]: OTHER_DIGEST }),
+          }),
+        );
+        const current = answered(
+          await defectsOver(join(root, "b"), latest, files, undefined, {
+            inputs: discoveryCurrentWith({ [WORKSPACE_A]: DIGEST.digest }),
+          }),
+        );
+        return [due, current].map((answer) =>
+          /not current/.test(answer.definitions[0]?.reason?.reason ?? ""),
+        );
+      });
+      expect(reasons).toStrictEqual([true, false]);
     });
   },
 );

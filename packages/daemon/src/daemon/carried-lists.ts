@@ -98,7 +98,7 @@ export function listRefresh(
 /**
  * Stores the discovery in effect again with the test lists a stored run's job reported, when they differ from its
  * own, and hands the stored record to `stored` with what was done. A read or write that fails is logged, and leaves
- * the run stored and the lists as they were, which the run then no longer vouches for.
+ * the run stored and the lists as they were, which the run vouches for only where they hold the tests it recorded.
  */
 export function refreshLists(
   { store, scope, log }: RefreshParts,

@@ -7600,7 +7600,7 @@ describe("a rediscovery's carried lists and a run's own lists", () => {
     ]);
   });
 
-  it("D4330: a discovery that cannot be stored again with a run's lists is logged, and the run stays stored with its job listed as one that stored", async () => {
+  it("D4330: a discovery that cannot be stored again with a run's lists is logged as that refresh's failure, and the run stays stored", async () => {
     const started = await afterDifferingRunLists(new RefreshFailingStore());
     expect({
       runs: started.store.runs.length,

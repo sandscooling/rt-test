@@ -297,14 +297,19 @@ export function daemonFindings(
     ...reportedTestFindings(edit, tests, daemon),
     ...heldTestFindings(edit, tests, failedModules, daemon),
     ...moduleFindings(edit, failedModules, daemon),
-    ...listedCountFindings(edit, tests, daemon),
+    ...listedCountFindings(edit, tests, failedModules, daemon),
   ];
 }
 
-/** Each module whose tests the full run reports in another number than the daemon's answer counts for its file. */
+/**
+ * Each module whose tests the full run reports in another number than the daemon's answer counts for its file, and
+ * each file the daemon's answer counts tests for that the full run reports none for, unless the full run failed to
+ * load it.
+ */
 function listedCountFindings(
   edit: string,
   tests: readonly FullRunTest[],
+  failedModules: readonly FullRunModule[],
   daemon: DaemonSide,
 ): Finding[] {
   const reported = new Map<string, number>();
@@ -312,7 +317,8 @@ function listedCountFindings(
     const subject = moduleSubject(test);
     reported.set(subject, (reported.get(subject) ?? 0) + 1);
   }
-  return [...reported]
+  const unloaded = new Set(failedModules.map(moduleSubject));
+  const miscounted = [...reported]
     .filter(([subject, count]) => daemon.listed.get(subject) !== count)
     .map(([subject, count]) =>
       finding(
@@ -322,6 +328,20 @@ function listedCountFindings(
         `the full run reports ${count} test(s); the daemon's answer counts ${daemon.listed.get(subject) ?? 0}`,
       ),
     );
+  const leftOver = [...daemon.listed]
+    .filter(
+      ([file, count]) =>
+        count > 0 && !reported.has(file) && !unloaded.has(file),
+    )
+    .map(([file, count]) =>
+      finding(
+        FINDING.disagreement,
+        edit,
+        file,
+        `the daemon's answer counts ${count} test(s); the full run reports none`,
+      ),
+    );
+  return [...miscounted, ...leftOver];
 }
 
 function reportedTestFindings(

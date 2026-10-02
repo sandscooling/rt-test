@@ -1,5 +1,5 @@
 import type { WaitMoment } from "../daemon/waits.js";
-import type { NoAnswer } from "../query/answer.js";
+import { CURRENT, type NoAnswer } from "../query/answer.js";
 import { queryBasis, type QueryBasis } from "../query/summary.js";
 import { defectStandings, type DefectStanding } from "./defect-standings.js";
 import { readDefinitionFiles, type InvalidEntry } from "./definition-files.js";
@@ -53,11 +53,13 @@ export async function worktreeStandings(
   if ("noAnswer" in basis) return basis;
   const { discovery } = basis.discovery;
   const { discoveryCurrent } = basis;
+  // A list no run vouches for yet may lack a test added since, which the discovery's own fingerprint cannot say.
+  const listsCurrent = basis.context.discovery.freshness === CURRENT;
   const definitions = resolveDefinitions(
     checked,
     anchors,
     discovery,
-    discoveryCurrent,
+    listsCurrent,
   );
   const { assertionErrors, invalidEntries } = files;
   return {

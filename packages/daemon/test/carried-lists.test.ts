@@ -273,6 +273,37 @@ describe("the discovery stored again with a run's lists", () => {
     });
   });
 
+  it("D4349: a list that replaces one module's list leaves the workspace's other module's tests as they were", () => {
+    const other = listOf("a", "other.test.ts", ["o"]);
+    const grown = listOf("a", MODULE, ["t", "added"]);
+    expect(
+      withModuleLists(
+        discovery(listing("a", [listOf("a", MODULE, ["t"]), other])),
+        "a",
+        [grown],
+      ),
+    ).toStrictEqual({
+      discovery: discovery(listing("a", [grown, other])),
+      changedModules: 1,
+    });
+  });
+
+  it("D4350: a discovery stored under another adapter version is not stored again with a run's lists, while one of the current version is", () => {
+    const refreshes = (adapterVersion: number): boolean =>
+      listRefresh(
+        storedDiscovery(
+          [listing("a", [listOf("a", MODULE, ["t"])])],
+          adapterVersion,
+        ),
+        "a",
+        [listOf("a", MODULE, ["t", "added"])],
+      ) !== undefined;
+    expect([
+      refreshes(OTHER_ADAPTER_VERSION),
+      refreshes(VITEST_ADAPTER_VERSION),
+    ]).toStrictEqual([false, true]);
+  });
+
   it("D4320: lists equal to the discovery's own refresh nothing, while a list that gained a test does", () => {
     const held = listOf("a", MODULE, ["t"]);
     const stored = storedDiscovery([listing("a", [held])]);

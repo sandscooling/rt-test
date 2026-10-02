@@ -342,6 +342,7 @@ export const TESTS_IN_AN_EXISTING_MODULE: CorpusSequence = {
         },
       ],
       declaredRuns: [UI, WEB],
+      declaredRunsOnce: true,
       declaredFailures: {
         tests: [{ ...UI_LABEL_FAILS, names: ["label", "labels nothing"] }],
         modules: [],
@@ -358,6 +359,7 @@ export const TESTS_IN_AN_EXISTING_MODULE: CorpusSequence = {
         },
       ],
       declaredRuns: [UI, WEB],
+      declaredRunsOnce: true,
       declaredFailures: NO_FAILURES,
     },
   ],
