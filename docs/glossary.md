@@ -90,6 +90,10 @@ _Avoid_: user change, manual change
 One execution of a selection by the daemon, under its own run identity.
 _Avoid_: job, pass
 
+**Covered test module**:
+A test module a run was sent, or that it recorded unsent: its result from that run replaces every earlier one, and a covered module the run did not record has no result from it, so no earlier run answers for it.
+_Avoid_: coverage, run module
+
 **Invalidated run**:
 A run whose inputs changed while it ran, so none of its results become current.
 _Avoid_: cancelled run
