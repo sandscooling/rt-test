@@ -4,9 +4,10 @@ import type {
 } from "../falsify/experiment-record.js";
 import { FORCE_STOP_GRACE_MS } from "../vitest/force-stop.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
-import type { TestDiscovery } from "../vitest/discover-tests.js";
+import type { Rediscovery } from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
-import type { NotConfirmedRun, VitestRun } from "../vitest/run-workspace.js";
+import type { ListedRun } from "../vitest/run-workspace.js";
+import type { WorkspaceLists } from "../vitest/test-lists.js";
 import type {
   DependencyInformation,
   SelectableWorkspace,
@@ -19,7 +20,12 @@ export const EXECUTOR_BOUND_MS = FORCE_STOP_GRACE_MS + EXECUTOR_MARGIN_MS;
 
 /** Daemon to executor. */
 export type ExecutorRequest =
-  | { readonly type: "discover"; readonly start: ConfirmedStart }
+  | {
+      readonly type: "discover";
+      readonly start: ConfirmedStart;
+      /** The lists the discovery keeps in place of collecting their modules. */
+      readonly carried: readonly WorkspaceLists[];
+    }
   | {
       readonly type: "run";
       readonly workspace: VitestWorkspace;
@@ -47,8 +53,8 @@ export type ExecutorJob = Exclude<ExecutorRequest, { type: "abort" }>;
 
 /** Executor to daemon: one per job. */
 export type ExecutorReply =
-  | { readonly type: "discovered"; readonly discovery: TestDiscovery }
-  | { readonly type: "ran"; readonly run: VitestRun | NotConfirmedRun }
+  | ({ readonly type: "discovered" } & Rediscovery)
+  | ({ readonly type: "ran" } & ListedRun)
   | {
       readonly type: "dependencies-built";
       readonly dependencies: DependencyInformation;

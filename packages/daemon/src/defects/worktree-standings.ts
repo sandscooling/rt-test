@@ -1,5 +1,5 @@
 import type { WaitMoment } from "../daemon/waits.js";
-import { CURRENT, type NoAnswer } from "../query/answer.js";
+import type { NoAnswer } from "../query/answer.js";
 import { queryBasis, type QueryBasis } from "../query/summary.js";
 import { defectStandings, type DefectStanding } from "./defect-standings.js";
 import { readDefinitionFiles, type InvalidEntry } from "./definition-files.js";
@@ -52,7 +52,7 @@ export async function worktreeStandings(
   const basis = queryBasis(results, view, inputs);
   if ("noAnswer" in basis) return basis;
   const { discovery } = basis.discovery;
-  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;
+  const { discoveryCurrent } = basis;
   const definitions = resolveDefinitions(
     checked,
     anchors,

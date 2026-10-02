@@ -37,6 +37,7 @@ import {
   type UnfingerprintedWorkspace,
   type WorkspaceFacts,
 } from "./answer.js";
+import { listFreshness } from "./list-freshness.js";
 import {
   countStandings,
   fingerprintDigest,
@@ -63,6 +64,11 @@ export interface QueryBasis {
   readonly standings: readonly TestStanding[];
   /** Each discovered workspace's current input fingerprint digest, the one its standings were rated against. */
   readonly currentFingerprint: CurrentFingerprints;
+  /**
+   * Whether the discovery reads current by its own fingerprint, which vouches for the position of a test told apart
+   * from same-named ones only by it; the answer's `discovery.freshness` also asks a run to vouch for each list.
+   */
+  readonly discoveryCurrent: boolean;
   readonly notDiscovered: readonly NotDiscoveredEntry[];
   readonly context: AnswerContext;
 }
@@ -173,6 +179,7 @@ export function queryBasis(
       freshness === CURRENT,
     ),
     currentFingerprint,
+    discoveryCurrent: freshness === CURRENT,
     notDiscovered: notDiscoveredEntries(discovery.discovery),
     context: {
       consumerRoot: daemon.consumerRoot,
@@ -180,7 +187,12 @@ export function queryBasis(
       discovery: {
         discoveryId: discovery.discoveryId,
         ...adapterVersionFacts(discovery.adapterVersion),
-        freshness,
+        freshness: listFreshness(
+          freshness,
+          discovery.discovery,
+          { latestRuns, refusedRuns },
+          currentFingerprint,
+        ),
       },
       inputs: inputs.facts,
       unfingerprintedWorkspaces:

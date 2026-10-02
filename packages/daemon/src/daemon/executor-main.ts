@@ -1,10 +1,10 @@
 import type { FalsificationJob } from "../falsify/experiment-record.js";
 import type { DependencyInformation } from "../selection/selection-types.js";
-import { discoverTests } from "../vitest/discover-tests.js";
+import { rediscoverTests } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import { findPackageWorkspaces } from "../vitest/find-workspaces.js";
 import { guardHostRejections } from "../vitest/host-rejections.js";
-import { runWorkspace } from "../vitest/run-workspace.js";
+import { runWorkspaceListing } from "../vitest/run-workspace.js";
 import {
   EXECUTOR_BOUND_MS,
   type ExecutorJob,
@@ -73,12 +73,16 @@ async function answer(
     case "discover":
       return {
         type: "discovered",
-        discovery: await discoverTests(request.start, signal),
+        ...(await rediscoverTests(request.start, request.carried, signal)),
       };
     case "run":
       return {
         type: "ran",
-        run: await runWorkspace(request.workspace, request.configFile, signal),
+        ...(await runWorkspaceListing(
+          request.workspace,
+          request.configFile,
+          signal,
+        )),
       };
     case "build-dependencies":
       return {

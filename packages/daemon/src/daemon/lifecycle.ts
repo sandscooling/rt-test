@@ -23,11 +23,12 @@ import type {
   TestDiscovery,
   WorkspaceDiscovery,
 } from "../vitest/discover-tests.js";
-import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
+import type { WorkspaceRun } from "../vitest/run-workspace.js";
+import { collectionLog, listsToCarry, refreshLists } from "./carried-lists.js";
 import { Changes, type ChangesMoment } from "./changes.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { DependencyBuilds } from "./dependency-builds.js";
-import { ABORT_PURPOSE, type Executor, type JobOutcome } from "./executor.js";
+import { ABORT_PURPOSE, type Executor, type RunOutcome } from "./executor.js";
 import { Falsification, type FalsificationParts } from "./falsification.js";
 import {
   DISCOVERY_STOPPED_REASON,
@@ -351,9 +352,10 @@ export class DaemonLifecycle implements DaemonHandlers {
       changedWhileRunning: stored && changed,
       window: mark.window,
     });
+    const carried = listsToCarry(() => this.#latestResults(), log);
     const startedAt = Date.now();
     const outcome = await executor
-      .discover(start)
+      .discover(start, carried)
       .catch((error: unknown) => threwOutcome<TestDiscovery>(error));
     const verdict = await inputs.endJob(mark);
     if (!outcome.ended) {
@@ -361,6 +363,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       return report(false);
     }
     const discovery = outcome.value;
+    for (const entry of collectionLog(outcome)) log.entry(entry);
     const held = await protectDiscovered(
       inputs,
       () => this.isStopping(),
@@ -464,7 +467,7 @@ export class DaemonLifecycle implements DaemonHandlers {
   async #settleRun(
     entry: WorkspaceDiscovery,
     revision: number,
-    outcome: JobOutcome<WorkspaceRun | NotConfirmedRun>,
+    outcome: RunOutcome,
     watch: RunWatch,
   ): Promise<RunReport> {
     const { log } = this.#parts;
@@ -512,6 +515,11 @@ export class DaemonLifecycle implements DaemonHandlers {
       log.entry(
         `run ended: ${path} ${run.status}${"execution" in run ? ` ${run.execution}` : ""}`,
       );
+      refreshLists(this.#parts, path, outcome, (refreshed, what) => {
+        this.#builds.use(refreshed);
+        this.#waits.moved();
+        this.#changes.stored(what);
+      });
     }
     return report(stored, changedWhileRunning(judgment), ended);
   }
