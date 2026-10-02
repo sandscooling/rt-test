@@ -73,6 +73,11 @@ export interface LifecycleParts {
   readonly canaryGate: FalsificationParts["canaryGate"];
   /** Takes the dependency builds, so a build never waits behind a run. */
   readonly buildExecutor: Executor;
+  /**
+   * Holds each dependency build's parse record. Never the state directory: Windows watches the whole root, the state
+   * directory in it by default, and a write around every parse overflows that watch.
+   */
+  readonly parseRecordDirectory: string;
   /** Started with the scheduler and stopped before the store closes. */
   readonly inputs: TrackedInputs;
   /** How long the input revision must hold still before a discovery or run starts. */
@@ -118,7 +123,7 @@ export class DaemonLifecycle implements DaemonHandlers {
       inputs: parts.inputs,
       executor: parts.buildExecutor,
       consumerRoot: parts.start.consumerRoot,
-      stateDirectory: parts.identity.stateDirectory,
+      parseRecordDirectory: parts.parseRecordDirectory,
       log: parts.log,
     });
     this.#falsification = new Falsification({

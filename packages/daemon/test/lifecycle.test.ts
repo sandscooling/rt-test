@@ -159,6 +159,8 @@ const IDENTITY: DaemonIdentity = {
   logFile: "/consumer/.rt-test/daemon.log",
   protocolVersion: PROTOCOL_VERSION,
 };
+/** Where each start here has a build create its parse record: a directory apart from the identity's state directory. */
+const PARSE_RECORD_DIRECTORY = "/user/rt-test";
 /** The signal of a request whose client still waits for its answer. */
 function stillWaited(): AbortSignal {
   return new AbortController().signal;
@@ -240,14 +242,16 @@ const BUILD_ABORTED = "the build was aborted";
 
 /**
  * A build executor that answers each build from a script, given the build's index from 0, and records the workspaces
- * each was given. Each answer waits for the next event-loop turn, as a child process's reply does, so builds that
- * repeat without end still let `flush` return. An abort ends every held build, as the real executor ends its job.
+ * and the parse record directory each was given. Each answer waits for the next event-loop turn, as a child process's
+ * reply does, so builds that repeat without end still let `flush` return. An abort ends every held build, as the real
+ * executor ends its job.
  */
 class ScriptedBuilds implements Pick<
   Executor,
   "buildDependencies" | "abort" | "close"
 > {
   readonly builds: (readonly string[])[] = [];
+  readonly directories: string[] = [];
   aborts = 0;
   closes = 0;
   readonly #answer: (index: number) => BuildOutcome | Promise<BuildOutcome>;
@@ -265,9 +269,11 @@ class ScriptedBuilds implements Pick<
   buildDependencies(
     _consumerRoot: string,
     workspaces: readonly SelectableWorkspace[],
+    parseRecordDirectory: string,
   ): Promise<BuildOutcome> {
     const index = this.builds.length;
     this.builds.push(workspaces.map(({ workspace }) => workspace.path));
+    this.directories.push(parseRecordDirectory);
     return Promise.race([
       new Promise((resolve) => setImmediate(resolve)).then(() =>
         this.#answer(index),
@@ -354,6 +360,7 @@ function daemon(
     executor: executor as unknown as Executor,
     canaryGate,
     buildExecutor: builds as unknown as Executor,
+    parseRecordDirectory: PARSE_RECORD_DIRECTORY,
     inputs,
     quietWindowMs,
     closeEndpoint: () => {
@@ -508,6 +515,7 @@ async function declaredModuleStart(
     }) as unknown as Executor,
     canaryGate: CONFIRMING_GATE,
     buildExecutor: failingBuilds(),
+    parseRecordDirectory: PARSE_RECORD_DIRECTORY,
     inputs: new InputTracker({
       consumerRoot: root,
       exclusions: [],
@@ -592,6 +600,7 @@ async function idleStart(dir: string): Promise<IdleStart> {
     }) as unknown as Executor,
     canaryGate: CONFIRMING_GATE,
     buildExecutor: failingBuilds(),
+    parseRecordDirectory: PARSE_RECORD_DIRECTORY,
     inputs: new InputTracker({
       consumerRoot: root,
       exclusions: [],
@@ -2364,8 +2373,13 @@ class FinishesOnAbort extends ScriptedBuilds {
   override buildDependencies(
     consumerRoot: string,
     workspaces: readonly SelectableWorkspace[],
+    parseRecordDirectory: string,
   ): Promise<BuildOutcome> {
-    void super.buildDependencies(consumerRoot, workspaces);
+    void super.buildDependencies(
+      consumerRoot,
+      workspaces,
+      parseRecordDirectory,
+    );
     return this.#finish.promise;
   }
 
@@ -2414,7 +2428,7 @@ function withBuilds<T>(
       inputs,
       executor: executor as unknown as Executor,
       consumerRoot: root,
-      stateDirectory: join(root, ".rt-test"),
+      parseRecordDirectory: PARSE_RECORD_DIRECTORY,
       log,
       ...(buildsCase.boundMs === undefined
         ? {}
@@ -3373,6 +3387,16 @@ describe(
         }
       });
       expect(runs).toStrictEqual({ whileBuilding: [], after: ["a"] });
+    });
+
+    it("D4261: a dependency build is told to create its parse record in the directory the lifecycle was given for it, not in the state directory", async () => {
+      const directories = await inTempDir(async (root) =>
+        thenStopped(
+          await begun(rootedAt(root, {}, new ScriptedBuilds())),
+          async ({ builds }) => [...builds.directories],
+        ),
+      );
+      expect(directories).toStrictEqual([PARSE_RECORD_DIRECTORY]);
     });
   },
 );

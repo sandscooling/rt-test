@@ -62,7 +62,7 @@ const UNSENT_REASONS: Readonly<Record<AbortPurpose, string>> = {
 const NOT_STARTED_REASON =
   "the executor process could not be started, so the job was not run";
 const NO_PARSE_RECORD_REASON =
-  "the dependency build's parse record could not be created in the state directory, so the build was not run";
+  "the dependency build's parse record could not be created, so the build was not run";
 const BUILD_STOPPED_REASON =
   "the dependency build was stopped, so its executor process was ended before the build finished";
 const WHILE_PARSING = "while parsing";
@@ -161,19 +161,19 @@ export class Executor {
   }
 
   /**
-   * Builds the dependency information over `consumerRoot` as discovery was given it. `stateDirectory` holds the
+   * Builds the dependency information over `consumerRoot` as discovery was given it. `parseRecordDirectory` holds the
    * build's parse record, which names the file a parser crash ended the build in and is removed once the build ends.
    */
   async buildDependencies(
     consumerRoot: string,
     workspaces: readonly SelectableWorkspace[],
-    stateDirectory: string,
+    parseRecordDirectory: string,
   ): Promise<JobOutcome<DependencyInformation>> {
     let parseRecord: string;
     try {
-      parseRecord = createParseRecord(stateDirectory);
+      parseRecord = createParseRecord(parseRecordDirectory);
     } catch (error) {
-      const reason = `${NO_PARSE_RECORD_REASON}: ${errorText(error)}`;
+      const reason = `${NO_PARSE_RECORD_REASON} (${parseRecordDirectory}): ${errorText(error)}`;
       this.#log.entry(reason);
       return { ended: false, reason };
     }
