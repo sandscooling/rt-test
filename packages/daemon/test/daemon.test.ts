@@ -5,11 +5,14 @@ import {
   type ChildProcess,
   type StdioOptions,
 } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -51,6 +54,7 @@ import {
   type ExecutorRequest,
 } from "../src/daemon/executor-jobs.js";
 import { DaemonConnection } from "../src/daemon/daemon-connection.js";
+import { parsingLabel } from "../src/daemon/parse-record.js";
 import { PROTOCOL_VERSION, RESPONSE_BOUND_MS } from "../src/daemon/protocol.js";
 import {
   CHANGES_TYPE,
@@ -64,6 +68,7 @@ import {
 } from "../src/daemon/protocol.js";
 import { isRunning } from "../src/daemon/runtime-directory.js";
 import { consumerIdentity } from "../src/store/consumer-identity.js";
+import { withBuildHook } from "./build-hook.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
   DAEMON_WAIT_MS,
@@ -112,6 +117,7 @@ import {
   linkedWorktree,
   mainCheckout,
 } from "./harness.js";
+import { manifest, rootManifest, writeTree } from "./selection/harness.js";
 
 const CLIENT = fileURLToPath(new URL("../src/client.ts", import.meta.url));
 const FIXTURES = join(REPO, "test/fixtures/daemon");
@@ -1796,6 +1802,81 @@ describe("the environment a daemon's executor processes start with", () => {
         reported: true,
         forkedHoldingIt: true,
         gained: 0,
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});
+
+/** The name a dependency build gives its parse record, whatever directory holds it. */
+const PARSE_RECORD_NAME =
+  /^dependency-build-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.parsing$/;
+
+interface ParseRecord {
+  readonly file: string;
+  /** The root-relative label of the file it says is being parsed; undefined while it names none. */
+  readonly label: string | undefined;
+}
+
+/** The parse records in `directory`, which on a developer's machine holds those of every daemon of the user. */
+function parseRecords(directory: string): ParseRecord[] {
+  return readdirSync(directory)
+    .filter((name) => PARSE_RECORD_NAME.test(name))
+    .map((name) => join(directory, name))
+    .map((file) => ({ file, label: parsingLabel(file) }));
+}
+
+/**
+ * Unlinks each parse record in `directory` that names `label`, as a daemon killed mid-build leaves one. `label` is a
+ * file only the calling test wrote, so no other daemon's record names it.
+ */
+function unlinkNaming(directory: string, label: string): void {
+  for (const record of parseRecords(directory)) {
+    if (record.label === label) unlinkSync(record.file);
+  }
+}
+
+describe("where a daemon's dependency build keeps its parse record", () => {
+  it(
+    "D4262: a build held mid-parse has its parse record in the user's own RT Test directory, and none in the state directory",
+    async () => {
+      const outcome = await inTempDir(async (dir) => {
+        const root = join(dir, "consumer");
+        const held = `packages/held/src/held-${randomUUID()}.ts`;
+        writeTree(root, {
+          "package.json": rootManifest(),
+          "packages/held/package.json": manifest({ name: "@x/held" }),
+          [held]: "export const held = 1;\n",
+        });
+        const marker = join(dir, "holding");
+        let userDirectory: string | undefined;
+        try {
+          return await withDaemons([root], (pids) =>
+            withBuildHook({ at: held, action: "hold", marker }, async () => {
+              const identity = await started(root, pids);
+              if ("thrown" in identity) return identity;
+              const directory = clientLocation(
+                identity.worktreeIdentity,
+              ).keyDirectory;
+              userDirectory = directory;
+              const holding = await eventually(() => existsSync(marker));
+              return {
+                holding,
+                inUserDirectory: parseRecords(directory).filter(
+                  ({ label }) => label === held,
+                ).length,
+                inStateDirectory: parseRecords(identity.stateDirectory).length,
+              };
+            }),
+          );
+        } finally {
+          if (userDirectory !== undefined) unlinkNaming(userDirectory, held);
+        }
+      });
+      expect(outcome).toStrictEqual({
+        holding: true,
+        inUserDirectory: 1,
+        inStateDirectory: 0,
       });
     },
     DAEMON_TEST_TIMEOUT_MS,

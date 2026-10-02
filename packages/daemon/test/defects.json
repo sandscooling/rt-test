@@ -4313,7 +4313,7 @@
   },
   {
     "id": "D2242",
-    "defect": "A build's parse record is never removed, so every build leaves a file behind in the state directory.",
+    "defect": "A build's parse record is never removed, so every build leaves a file behind in the directory it was created in.",
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      this.#removeRecord(parseRecord);\n",
     "new": ""
@@ -4357,8 +4357,8 @@
     "id": "D2250",
     "defect": "A parse record that cannot be created makes the build reject with the raw file-system error rather than end unrun with a reason.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "    let parseRecord: string;\n    try {\n      parseRecord = createParseRecord(stateDirectory);\n    } catch (error) {\n      const reason = `${NO_PARSE_RECORD_REASON}: ${errorText(error)}`;\n      this.#log.entry(reason);\n      return { ended: false, reason };\n    }\n",
-    "new": "    const parseRecord = createParseRecord(stateDirectory);\n"
+    "old": "    let parseRecord: string;\n    try {\n      parseRecord = createParseRecord(parseRecordDirectory);\n    } catch (error) {\n      const reason = `${NO_PARSE_RECORD_REASON} (${parseRecordDirectory}): ${errorText(error)}`;\n      this.#log.entry(reason);\n      return { ended: false, reason };\n    }\n",
+    "new": "    const parseRecord = createParseRecord(parseRecordDirectory);\n"
   },
   {
     "id": "D2251",
@@ -11674,5 +11674,26 @@
     "file": "packages/daemon/src/daemon/falsification.ts",
     "old": "    const standing = canaryGate.standing(entry.workspace);\n    if (standing.state === STANDING.unread) return { job, unread: standing };\n    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }\n    const [first] = definitions;\n    log.entry(\n      `falsification started: ${workspacePath}, definitions ${definitions.length}${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}`,\n    );",
     "new": "    const [first] = definitions;\n    log.entry(\n      `falsification started: ${workspacePath}, definitions ${definitions.length}${first === undefined ? \"\" : `, first ${first.id} (${first.state})`}`,\n    );\n    const standing = canaryGate.standing(entry.workspace);\n    if (standing.state === STANDING.unread) return { job, unread: standing };\n    if (standing.state === STANDING.waits) {\n      return this.#waits(job, revision, standing.what, standing.ends);\n    }"
+  },
+  {
+    "id": "D4261",
+    "defect": "The lifecycle hands the dependency builds the state directory for their parse records, so on Windows a write around every parse falls under the root's watch and overflows it.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      parseRecordDirectory: parts.parseRecordDirectory,",
+    "new": "      parseRecordDirectory: parts.identity.stateDirectory,"
+  },
+  {
+    "id": "D4262",
+    "defect": "The daemon hands its lifecycle the state directory as the parse record directory, so a build's parse record is created under the consumer root by default rather than in the user's own RT Test directory.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "    parseRecordDirectory: listening.endpoint.keyDirectory,",
+    "new": "    parseRecordDirectory: directory,"
+  },
+  {
+    "id": "D4263",
+    "defect": "The reason of a parse record that cannot be created leaves out the directory it was to be created in, so the log and the failed build say only that no record could be created.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      const reason = `${NO_PARSE_RECORD_REASON} (${parseRecordDirectory}): ${errorText(error)}`;",
+    "new": "      const reason = `${NO_PARSE_RECORD_REASON}: ${errorText(error)}`;"
   }
 ]

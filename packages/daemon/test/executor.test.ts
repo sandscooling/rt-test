@@ -3,10 +3,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import {
-  HOOK_EXIT_CODE,
-  HOOK_VARIABLE,
-} from "../../../test/fixtures/daemon/build-hook.mjs";
+import { HOOK_EXIT_CODE } from "../../../test/fixtures/daemon/build-hook.mjs";
 import { REPORT_VARIABLE } from "../../../test/fixtures/daemon/report-environment.mjs";
 import {
   type ChildEnd,
@@ -49,6 +46,7 @@ import {
   withPreload,
   withVariables,
 } from "./daemon-harness.js";
+import { withBuildHook } from "./build-hook.js";
 import {
   finished,
   inConsumerCopy,
@@ -500,7 +498,6 @@ describe("holding each executor's tree before its job", () => {
   );
 });
 
-const BUILD_HOOK = join(REPO, "test/fixtures/daemon/build-hook.mjs");
 /** How the build-hook preload ends an executor. */
 const HOOK_EXIT = `exit code ${HOOK_EXIT_CODE}`;
 /** About 45,000 terms still parse; this many end the process inside the native parser on every gate platform. */
@@ -512,25 +509,13 @@ const PARSED_FILE = "packages/b/src/x.ts";
 const NOT_KNOWN = "and the file it was parsing, if any, is not known";
 const STOPPED =
   "the dependency build was stopped, so its executor process was ended before the build finished (process <pid>)";
-
-interface BuildHook {
-  /** The root-relative label of the file the hook acts at. */
-  readonly at: string;
-  readonly action: "hold" | "exit" | "remove-and-exit";
-  /** Written once a hold begins. */
-  readonly marker?: string;
-}
-
-/** Runs `body` with every executor it starts preloading the build hook. */
-function withBuildHook<T>(hook: BuildHook, body: () => Promise<T>): Promise<T> {
-  return withEnvironment(HOOK_VARIABLE, JSON.stringify(hook), () =>
-    withPreload(BUILD_HOOK, body),
-  );
-}
+const NO_PARSE_RECORD =
+  "the dependency build's parse record could not be created, so the build was not run";
 
 interface BuildConsumer {
   readonly root: string;
-  readonly state: string;
+  /** Where a build over it creates its parse record. */
+  readonly records: string;
 }
 
 /** A consumer under `dir` whose `packages/app` depends on `packages/b`, which holds `PARSED_FILE`, plus `files`. */
@@ -539,7 +524,7 @@ function buildConsumer(
   files: Readonly<Record<string, string>> = {},
 ): BuildConsumer {
   const root = join(dir, "consumer");
-  const state = join(dir, "state");
+  const records = join(dir, "records");
   writeTree(root, {
     "package.json": rootManifest(),
     "packages/app/package.json": manifest({
@@ -550,19 +535,19 @@ function buildConsumer(
     [PARSED_FILE]: "export const x = 1;\n",
     ...files,
   });
-  mkdirSync(state);
-  return { root, state };
+  mkdirSync(records);
+  return { root, records };
 }
 
 /** Builds over the consumer in an executor that holds the job's tree for real, then closes the executor. */
 async function buildIn(
-  { root, state }: BuildConsumer,
+  { root, records }: BuildConsumer,
   workspaces: readonly SelectableWorkspace[] = [],
 ): Promise<JobOutcome<DependencyInformation>> {
   next.containment = undefined;
   const executor = new Executor(memoryLog(), takeStartEnvironment());
   try {
-    return await executor.buildDependencies(root, workspaces, state);
+    return await executor.buildDependencies(root, workspaces, records);
   } finally {
     await executor.close();
   }
@@ -604,7 +589,7 @@ function stoppedMidBuild(
           const job = executor.buildDependencies(
             consumer.root,
             [],
-            consumer.state,
+            consumer.records,
           );
           await waitUntil(() => existsSync(marker), job);
           const stoppedAt = performance.now();
@@ -724,12 +709,12 @@ describe("a dependency build in an executor process of its own", () => {
   );
 
   it(
-    "D2242: no parse record is left in the state directory once the build has ended",
+    "D2242: no parse record is left in the directory it was created in once the build has ended",
     async () => {
       const left = await inTempDir(async (dir) => {
         const consumer = buildConsumer(dir);
         await buildIn(consumer);
-        return readdirSync(consumer.state);
+        return readdirSync(consumer.records);
       });
       expect(left).toStrictEqual([]);
     },
@@ -737,11 +722,11 @@ describe("a dependency build in an executor process of its own", () => {
   );
 
   it(
-    "D2243: a record an earlier daemon left in the state directory does not stop a later build",
+    "D2243: a record an earlier daemon left in the directory does not stop a later build that creates its own there",
     async () => {
       const outcome = await inTempDir(async (dir) => {
         const consumer = buildConsumer(dir);
-        const writer = openParseRecord(createParseRecord(consumer.state));
+        const writer = openParseRecord(createParseRecord(consumer.records));
         writer.parsing("packages/b/src/old.ts");
         writer.close();
         return buildIn(consumer);
@@ -778,7 +763,7 @@ describe("a dependency build in an executor process of its own", () => {
           settled(
             buildIn({
               root: buildConsumer(dir).root,
-              state: join(dir, "missing"),
+              records: join(dir, "missing"),
             }),
           ),
         ),
@@ -786,12 +771,32 @@ describe("a dependency build in an executor process of its own", () => {
       expect({ outcome, sent }).toStrictEqual({
         outcome: {
           ended: false,
-          reason: expect.stringContaining(
-            "parse record could not be created in the state directory",
-          ),
+          reason: expect.stringContaining(NO_PARSE_RECORD),
         },
         sent: [],
       });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D4263: the reason of a parse record that cannot be created names the directory it was to be created in",
+    async () => {
+      const { said, naming } = await inTempDir(async (dir) => {
+        const missing = join(dir, "missing");
+        const naming = `${NO_PARSE_RECORD} (${missing}): `;
+        const outcome = await settled(
+          buildIn({ root: buildConsumer(dir).root, records: missing }),
+        );
+        return {
+          said:
+            "reason" in outcome
+              ? outcome.reason.slice(0, naming.length)
+              : outcome,
+          naming,
+        };
+      });
+      expect(said).toStrictEqual(naming);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );
@@ -801,12 +806,12 @@ describe("a dependency build in an executor process of its own", () => {
     async () => {
       const log = memoryLog();
       const outcome = await inTempDir(async (dir) => {
-        const { root, state } = buildConsumer(dir);
+        const { root, records } = buildConsumer(dir);
         next.containment = undefined;
         next.unremovableRecord = true;
         const executor = new Executor(log, takeStartEnvironment());
         try {
-          return await settled(executor.buildDependencies(root, [], state));
+          return await settled(executor.buildDependencies(root, [], records));
         } finally {
           next.unremovableRecord = false;
           await executor.close();
