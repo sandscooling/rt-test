@@ -121,6 +121,7 @@ import {
   SURVIVING_TEST,
 } from "./experiment-facts.js";
 import { inTempDir, projectFacts, settle, WAITING } from "./harness.js";
+import { silentWatch } from "./harness.js";
 import { onPlatform } from "./on-platform.js";
 import {
   builtAt,
@@ -7633,3 +7634,132 @@ describe("a rediscovery's carried lists and a run's own lists", () => {
     ).toStrictEqual(["discovery of b: failed, in 7 ms"]);
   });
 });
+
+interface RunAcrossLostEvents {
+  /** Whether the root's watch was open to report the lost events. */
+  readonly lost: boolean;
+  readonly idle: boolean;
+  /** How many runs the workspace was sent before the scheduler went idle. */
+  readonly runs: number;
+  /** The kind of fingerprint each run was stored under, in order. */
+  readonly stored: readonly string[];
+  /** The log's lines saying a run was stored not fingerprinted. */
+  readonly notFingerprinted: readonly string[];
+}
+
+/**
+ * Runs the scheduler to idle with a real input tracker, over a consumer root holding the one input `a.ts` and
+ * discovered as one workspace. Every watch is silent, so the tracker hears only what the first run reports: inside it,
+ * `during` runs with the input's path, and then the root's watch reports an event naming no file, as Windows does for
+ * a batch of events it lost. Every build fails, so the workspace's inputs are the whole project's.
+ */
+async function runAcrossLostEvents(
+  dir: string,
+  during: (input: string) => void = () => undefined,
+): Promise<RunAcrossLostEvents> {
+  const root = join(dir, "consumer");
+  mkdirSync(root);
+  const input = join(root, "a.ts");
+  writeFileSync(input, "export {};\n");
+  const listeners: WatchListener<string>[] = [];
+  const paths: string[] = [];
+  vi.mocked(watch).mockImplementation(((
+    path: PathLike,
+    _options: unknown,
+    listener: WatchListener<string>,
+  ) => {
+    listeners.push(listener);
+    paths.push(String(path));
+    return silentWatch();
+  }) as typeof watch);
+  let lost = false;
+  const executor: ScriptedExecutor = new ScriptedExecutor(
+    {
+      ended: true,
+      value: discovery({
+        ...discovered("."),
+        workspace: { path: ".", directory: root },
+      }),
+    },
+    (path) => {
+      const rootWatch = listeners[paths.indexOf(realpathSync.native(root))];
+      if (executor.runs.length === 1 && rootWatch !== undefined) {
+        during(input);
+        rootWatch("rename", null as unknown as string);
+        lost = true;
+      }
+      return { ended: true, value: interrupted(path) };
+    },
+  );
+  const log = memoryLog();
+  const store = new RecordingStore();
+  const lifecycle = new DaemonLifecycle({
+    identity: { ...IDENTITY, consumerRoot: root },
+    scope: SCOPE,
+    start: confirmed("."),
+    store,
+    log,
+    executor: executor as unknown as Executor,
+    canaryGate: CONFIRMING_GATE,
+    buildExecutor: failingBuilds(),
+    parseRecordDirectory: PARSE_RECORD_DIRECTORY,
+    inputs: new InputTracker({
+      consumerRoot: root,
+      exclusions: [],
+      log: memoryLog(),
+      startEnvironment: takeStartEnvironment(),
+    }),
+    quietWindowMs: NO_QUIET_WINDOW_MS,
+    closeEndpoint: () => Promise.resolve(),
+  });
+  try {
+    lifecycle.begin();
+    const idle = await eventually(() => log.entries.includes(IDLE_ENTRY));
+    return {
+      lost,
+      idle,
+      runs: executor.runs.length,
+      stored: store.runFingerprints.map(({ kind }) => kind),
+      notFingerprinted: log.entries.filter((entry) =>
+        entry.startsWith("the run of . is stored not fingerprinted"),
+      ),
+    };
+  } finally {
+    lifecycle.stop();
+    await lifecycle.stopped();
+    vi.mocked(watch).mockReset();
+  }
+}
+
+describe(
+  "a run during which the watcher lost events",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4399: a run during which the watcher reported lost events, whose reconciliation found nothing moved, is stored under its fingerprint and is not run again", async () => {
+      expect(await inTempDir((dir) => runAcrossLostEvents(dir))).toStrictEqual({
+        lost: true,
+        idle: true,
+        runs: 1,
+        stored: ["digest"],
+        notFingerprinted: [],
+      });
+    });
+
+    it("D4400: a run during which an input's modification time moved with its content unchanged, seen only by the reconciliation after lost events, is stored not fingerprinted as a change inside its inputs and is run once more", async () => {
+      const outcome = await inTempDir((dir) =>
+        runAcrossLostEvents(dir, (input) =>
+          utimesSync(input, new Date(), new Date(Date.now() - 3_600_000)),
+        ),
+      );
+      expect(outcome).toStrictEqual({
+        lost: true,
+        idle: true,
+        runs: 2,
+        stored: ["not-fingerprinted", "digest"],
+        notFingerprinted: [
+          "the run of . is stored not fingerprinted: its inputs changed while it ran: a.ts",
+        ],
+      });
+    });
+  },
+);
