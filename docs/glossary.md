@@ -59,7 +59,7 @@ An input of a Vitest workspace that RT Test cannot tie to particular test module
 _Avoid_: global input, common file
 
 **Dependency graph**:
-The daemon's record of the files and package workspaces each source file names in its imports, scanned once in the daemon's life and updated for the files a change names.
+The daemon's record of the files and package workspaces each source file names in its imports, read whole at the daemon's first dependency build and again when a changed input is not a source file or the aliases a discovery reports change, and otherwise updated for the files a change names.
 _Avoid_: import map, module graph
 
 **Load record**:
@@ -89,6 +89,10 @@ _Avoid_: user change, manual change
 **Run**:
 One execution of a selection by the daemon, under its own run identity.
 _Avoid_: job, pass
+
+**Covered test module**:
+A test module a run was sent, or that it recorded unsent: its result from that run replaces every earlier one, and a covered module the run did not record has no result from it, so no earlier run answers for it.
+_Avoid_: coverage, run module
 
 **Invalidated run**:
 A run whose inputs changed while it ran, so none of its results become current.
