@@ -16,14 +16,14 @@ them AC1, AC2, ... and keep the numbers stable: tasks, named defects and review 
 The **falsification corpus** is the committed fixture, the steps saved to it and the check that replays them. A **replay** is one run of every step in one daemon life, over a fresh copy of the fixture linked to one Vitest install. A definition is **waiting** as the glossary's Waiting defect is: eligible, with evidence missing or not current. A definition was **falsified at a step** when the evidence record the store holds for it after the step is not the record it held before that step; at the baseline, when the store holds a record for it at all.
 
 - [x] AC1: A synthetic consumer committed under `test/fixtures/daemon/falsification-corpus/` holds two Vitest workspaces, a library and an app that depends on it, the dependency declared in the app's `package.json` and imported by package name, and an `rt-test.json` whose `defects` member lists one definition file in each workspace. Its definitions, in ADR-0009's format, hold between the two workspaces: one whose test rejects its mutation by an assertion in the test's body; one whose mutation fails an assertion in a setup hook before the intended test's body runs; two tests sharing one name path in one module, each named by its occurrence under one mutation, which the first checks and the second reaches without checking; one naming that name path with no occurrence; one whose anchor step 1 rewrites; and one more in the library, beside the one step 2 weakens, whose detection stands through both steps. Every test passes unmutated, is deterministic, finishes in well under a second and writes nothing into the tree. (FR12, FR24)
-- [ ] AC2: A replay runs, in one daemon life: the baseline, a start with every workspace confirmed and no edit; step 1, which rewrites in the app's source the line a definition's anchor names, leaving what the code does unchanged; and step 2, which weakens in the library's test the assertion that detected a definition's mutation, so that the test passes with and without the mutation. The corpus is replayed once on Vitest 4.1 and once on Vitest 5, each replay in a temporary copy of the fixture made a git repository, with that Vitest and the workspace packages linked under `node_modules` as a package manager links them. Each replay ends its daemon and every process it started however it ends, and keeps its copy, its state directory and its log under the run's temp root, so it writes nothing into this repository's tree. The corpus runs in the ordinary suite, so the gate runs it on Windows and on Linux. (NFR7)
-- [ ] AC3: At the baseline and after each step the check compares nothing until the daemon has finished what the step set off: a wait on the step's files, through `queryWait` (at the baseline, on every test module of the fixture), has answered settled; the daemon's schedule shows its round planned, every confirmed workspace idle and no change unread; its activity reads idle; and no definition is waiting. A step that does not get there within the check's bound is a finding naming the step, the definitions still waiting, the activity and each job the daemon lists as ended with nothing stored, and the replay ends there, since no later step can be judged. The check's waits share one deadline that falls before the test's own timeout, so a replay too slow to finish returns that finding, with what was pending, rather than ending at the test's timeout. This holds whether or not the daemon takes a canary job before a workspace's first falsification job (ticket 3.6). (FR15)
+- [x] AC2: A replay runs, in one daemon life: the baseline, a start with every workspace confirmed and no edit; step 1, which rewrites in the app's source the line a definition's anchor names, leaving what the code does unchanged; and step 2, which weakens in the library's test the assertion that detected a definition's mutation, so that the test passes with and without the mutation. The corpus is replayed once on Vitest 4.1 and once on Vitest 5, each replay in a temporary copy of the fixture made a git repository, with that Vitest and the workspace packages linked under `node_modules` as a package manager links them. Each replay ends its daemon and every process it started however it ends, and keeps its copy, its state directory and its log under the run's temp root, so it writes nothing into this repository's tree. The corpus runs in the ordinary suite, so the gate runs it on Windows and on Linux. (NFR7)
+- [x] AC3: At the baseline and after each step the check compares nothing until the daemon has finished what the step set off: a wait on the step's files, through `queryWait` (at the baseline, on every test module of the fixture), has answered settled; the daemon's schedule shows its round planned, every confirmed workspace idle and no change unread; its activity reads idle; and no definition is waiting. A step that does not get there within the check's bound is a finding naming the step, the definitions still waiting, the activity and each job the daemon lists as ended with nothing stored, and the replay ends there, since no later step can be judged. The check's waits share one deadline that falls before the test's own timeout, so a replay too slow to finish returns that finding, with what was pending, rather than ending at the test's timeout. This holds whether or not the daemon takes a canary job before a workspace's first falsification job (ticket 3.6). (FR15)
 - [x] AC4: After the baseline and after each step, every definition reads the state, the eligibility, the evidence freshness and, where its verdict has one, the reason that the step declares for it. At the baseline: the library's definitions whose tests assert in their bodies read detected; the setup hook's reads invalid experiment with the reason `hook-not-passed`, and never detected; of the two tests sharing a name path, the first occurrence's definition reads detected and the second's survived; the definition naming no occurrence reads invalid definition and is not eligible; the anchor's definition reads detected; and every verdict's evidence freshness reads current. After step 1 the anchor's definition reads anchor missing and is not eligible, and every other definition reads as at the baseline. After step 2 the weakened test's definition reads survived with evidence freshness current, and every other definition reads as after step 1. A definition the answer lists that the corpus does not declare, and one it declares that the answer does not list, are each a finding. (FR11, FR13, FR15, FR24, NFR7)
 - [x] AC5: After the baseline and after each step, the `defects` answer's total, eligible and verified counts and its count of each state equal the numbers the step declares. (FR22)
 - [x] AC6: At each step the definitions falsified are exactly the ones the step declares. At the baseline they are every definition that reads a verdict. At step 1 they are the app's definitions that read eligible once the step has settled (so not the one whose anchor it rewrote) and no definition of the library, whose evidence stays the records the baseline stored: an edit that reaches no input of a workspace gives it no experiment. At step 2 they are the definitions of both workspaces that read eligible once the step has settled, since the app depends on the library. A definition falsified that the step does not declare, and one declared that was not falsified, are each a finding naming the step and the definition. Every evidence record a replay stores carries the version of the Vitest install that replay linked, and one that carries another is a finding. (FR15, NFR7)
 - [x] AC7: After the baseline and after each step, every file of the consumer copy outside `.git`, any directory named `node_modules` at any depth and the state directory holds the bytes it held before the daemon started, the steps' own edits aside, with no entry added and none removed; and no file under the copy, those directories included and no link followed, other than a definition file, holds the `new` text of a definition. Each difference is a finding naming the step and the path. (NFR6)
 - [x] AC8: The check returns one report for a replay listing every finding by kind (not settled, state not as declared, count not as declared, definition not declared, declared definition not listed, falsified outside the declared set, declared and not falsified, evidence under another Vitest version, consumer file changed, mutation text on disk), each naming its step and the definition, count or path involved, and a replay with no finding returns exactly one clean value, so a test asserts a whole replay with one assertion and no hook. It throws only when the harness itself cannot run, and never turns a failure into a clean report.
-- [ ] AC9: Each replay, its baseline and both steps included, completes on an idle Windows machine in at most half of `DAEMON_TEST_TIMEOUT_MS`, measured on a tree that holds ticket 3.6's canary gate, so with a canary job ahead of the replay's first falsification job, and recorded in this ticket with the Linux figure. A figure taken on a tree without the gate does not meet this criterion. A replay that does not fit is never shortened by dropping a step: the figure goes to the orchestrator, since a second daemon life would start from a baseline that AC4, AC5 and AC6 do not declare. Nothing of AC10 runs in the suite.
+- [x] AC9: Each replay, its baseline and both steps included, completes on an idle Windows machine in at most half of `DAEMON_TEST_TIMEOUT_MS`, measured on a tree that holds ticket 3.6's canary gate, so with a canary job ahead of the replay's first falsification job, and recorded in this ticket with the Linux figure. A figure taken on a tree without the gate does not meet this criterion. A replay that does not fit is never shortened by dropping a step: the figure goes to the orchestrator, since a second daemon life would start from a baseline that AC4, AC5 and AC6 do not declare. Nothing of AC10 runs in the suite.
 - [x] AC10: The two targets ticket 3.5 left (the job size and the time bound) and the look between two jobs are measured outside the suite, over a consumer written for the measurement, on Windows and on Linux, and recorded in the Completion Notes with the hardware, the OS, the Node and Vitest versions, the consumer's sizes, the wall time of plain Vitest over the same consumer as the runner-only baseline, and that the file cache was warm, a cold figure being named as not taken: (a) the wall time, as the daemon's log reports it, of a falsification job of `MAX_JOB_DEFINITIONS` definitions and of a job of one definition, on Vitest 4.1 and on Vitest 5, as the median and the slowest of at least 5 jobs of each size on each line; (b) in the same runs, the time from one job's end entry to the next job's start entry, which is what the look between two jobs costs inside a running daemon at that consumer's size; and (c) on one Vitest line, named in the record, one job of a workspace whose `MAX_JOB_DEFINITIONS` experiments outlast `JOB_TIME_BOUND_MS`, run until the bound has ended it and the next job has started: when the job ended, how many verdicts were stored, which definition was marked, what a `defects` answer and the entry of the jobs that ended with nothing stored read, and how many definitions the next job holds. No figure of a job's wall time, of the look between two jobs or of the time bound is called measured in a doc but from these runs, and this ticket changes neither constant.
 
 ## Unverified Assumptions
@@ -381,15 +381,94 @@ Defects met while building that earn a test, each driven over hand-built reading
 
 ### Tests Record
 
-Tests session: threadId {{tests_thread_id}}
+Tests session: threadId 0b6c09cb-4283-4fef-bd67-eb526069d099
+
+Tests stage, rt-t3-7-tests, 2026-10-01, 18:08 to 20:27, in Tree 2 on `wt/2` at 2776b5ad, which holds ticket 3.6's canary gate. Created `packages/daemon/test/falsification-corpus.test.ts`, 36 tests; appended their 36 records, D4211 to D4246, to `packages/daemon/test/defects.json`; edited no production file and no file of dev's. D4247 to D4250 are unused and kept for the review's gaps. Every log is under `_agent-docs/.scratch/t3-7-tests/`.
+
+#### How the file is built
+
+Seven tests read a real replay. `replayedOn` replays the corpus once per Vitest install and keeps the report for the file, so a suite run pays two daemon lives however many tests read them, and the defect verifier, which runs each test alone, pays one replay for each of those seven records. D4211 and D4212 assert the clean report on each line; D4213 to D4217 each assert that the report holds no finding of one kind, so a detection shows that the mutation produced the finding its record names and no other. The other 29 tests drive the comparisons of `falsification-corpus-findings.ts` over hand-built readings and mutate that file only.
+
+Each of dev's Tests Owed has its test: the ten finding kinds each fire alone (D4217 to D4246, with D4213 to D4216 through a replay); an edited file holding other bytes is D4237; a lost record is D4231; the search's control is D4239; and the daemon that begins a job over current evidence is D4216, detected through the settle's hold with two replays running at once.
+
+#### AC9, measured on the tree that holds the gate
+
+Each figure is the duration of the test that pays the replay, from the test file's own run, its copy and its daemon's stop included, with the run lease held alone. The bound is 60 s, half of `DAEMON_TEST_TIMEOUT_MS`.
+
+| Run                                             | Vitest 4.1.11 | Vitest 5.0.1 | The file | Tests    |
+| ----------------------------------------------- | ------------- | ------------ | -------- | -------- |
+| Windows 10.0.26200, Node 24.19.0, 18:31         | 39.9 s        | 36.1 s       | 77.4 s   | 36 of 36 |
+| Windows 10.0.26300.9550, Node 24.19.0, 20:24    | 35.5 s        | 31.5 s       | 68.6 s   | 36 of 36 |
+| Linux (WSL2, Ubuntu 24.04), Node 24.19.0, 18:34 | 23.2 s        | 21.8 s       | 45.7 s   | 36 of 36 |
+| Linux (WSL2, Ubuntu 24.04), Node 22.23.3, 18:35 | 22.8 s        | 22.3 s       | 45.8 s   | 36 of 36 |
+
+Both replays fit on both platforms, so nothing was shortened or split. The machine restarted and took a Windows update between the two Windows samples. Beside dev's figures without the gate (30.2 s and 26.6 s on Windows), the canary job cost about 10 s a replay in the first sample. The file adds about 69 to 77 s of one worker to a suite run on Windows and 46 s on Linux. The verifier's log prints no duration, so its baselines gave no further sample. Logs: `ac9-win-1.log`, `ac9-win-2.log`, `ac9-linux-1.log`, each with its JSON report.
+
+#### Gates and proofs
+
+- The suite first, 18:24: `bun x vitest related` over dev's three modules selected 0 of 84 test files, exit 0, since no test imported them and the build changed no production file; nothing was red (`related-win.log`).
+- `bun x oxlint` over the test file, exit 0 (18:27). `bun run --filter @rt-test/daemon typecheck`, a whole-workspace compile, exit 0 (18:27). `bun x prettier --check` over the test file and the catalog, exit 0 (18:37). `bun run check:defects`, exit 0, 3441 named defects (18:37). Neither file changed after its gate.
+- Proof by id, `node scripts/verify-defects.mjs --jobs 2 --ids`, through the run lease. Windows: D4211 to D4216 and D4218 to D4246, 35 of 35 detected, exit 0, ended 18:54 (`proof-win-1.log`); D4217, 1 of 1 detected, exit 0, 20:06 to 20:10 (`proof-win-3.log`). Linux, in the clone `~/rt-test-t3-7-tests` at 2776b5ad under Node 24.19.0: 36 of 36 detected, exit 0, 20:10 to 20:15 (`proof-linux-1.log`). Each baseline was green before and after. A first Windows proof of D4217 was cut by the restart in its first baseline and holds no exit line (`proof-win-2.log`); it counts for nothing.
+- Reconciled: 2 files touched, both run. The test file ran on Windows and on Linux under Node 22 and 24; every record was proven on both platforms.
+
+#### Rulings
+
+The orchestrator (threadId e6fd9ca0-a25f-4b3a-bd24-c2e62c99acab) decided each, at 18:39 on 2026-10-01, on my message of 18:38; no owner sentence was involved.
+
+- D4217 mutates `daemon/daemon-main.ts`, one of the four files whose records are listed before any proof. Approved: an unbound `Executor.falsify` rejects before a job is sent, `readJob` reads the rejection as a no reading, and placement and removal run as `daemon/canary-reading.ts` writes them. "It earns its place: it is the only test that the bound call is wired, and with D4212 the only proof that a step which never settles comes back as a finding inside the test's timeout."
+- D4212 mutates `falsify/verdict.ts`, none of the four, listed because its judge makes the real canary reading read disagreed. Approved.
+- The plan of 36 and the proof with `--jobs 2`: accepted. AC9: taken as met on the first figures. The deliberately untested items: accepted as worded.
+- At 20:06, after the restart: the Windows proof of the 35 stands, since `proof-win-1.log` holds its exit line and neither the test file nor a mutated file changed after it.
+
+No record mutates `daemon/canary-reading.ts`, `daemon/canary-gate.ts`, `vitest/load-vitest.ts` or `falsify/canary-set.ts`, and the canary path imports none of the files D4211 and D4213 to D4216 mutate.
 
 #### Named Defects
 
-None.
+- D4211: Evidence freshness ignores a change of its workspace's inputs, so once the library's assertion is weakened the discount's detection still reads current and neither workspace is falsified again. (AC2, AC4, AC6)
+- D4212: The judge reads a failed setup hook as a body failure, so a setup failure is a detection; the canary reading then disagrees, the gate refuses both workspaces, and the baseline reads not settled. (AC2, AC3, AC4)
+- D4213: A definition whose anchor is missing reads invalid definition, so the rewritten anchor is hidden. (AC4)
+- D4214: A definition's occurrence is not compared, so the definition naming the second of two tests sharing a name path is credited with the first's detection. (AC4)
+- D4215: Verified counts every definition whose evidence reads current, a survivor and an invalid experiment among them. (AC5)
+- D4216: A look takes definitions whose evidence reads current, so the app's edit has the library falsified again. (AC6)
+- D4217: The canary gate is handed the executor's falsify unbound, so every reading is a no reading, nothing is falsified, and the baseline reads not settled at the replay's deadline. (AC3)
+- D4218: The state comparison does not compare the state. (AC4, AC8)
+- D4219: The state comparison does not compare the eligibility. (AC4, AC8)
+- D4220: The state comparison does not compare the evidence freshness. (AC4, AC8)
+- D4221: The state comparison does not compare the verdict's reason. (AC4, AC8)
+- D4222: A definition the answer lists that no step declares is not reported. (AC4, AC8)
+- D4223: A declared definition the answer does not list is not reported. (AC4, AC8)
+- D4224: The count comparison leaves the verified count out. (AC5, AC8)
+- D4225: The count comparison leaves the eligible count out. (AC5, AC8)
+- D4226: The count comparison leaves the total out. (AC5, AC8)
+- D4227: The count comparison reads no state's count. (AC5, AC8)
+- D4228: A definition falsified outside the set its step declares is not reported. (AC6, AC8)
+- D4229: A declared definition that was not falsified is not reported. (AC6, AC8)
+- D4230: A definition counts as falsified only where the store held an earlier record, so at the baseline none does. (AC6)
+- D4231: Evidence the store lost during a step, of a definition the step does not declare falsified, is not reported. (AC6)
+- D4232: An evidence record under another Vitest version than the replay linked is not reported. (AC6, AC8)
+- D4233: A file the step does not edit that holds other bytes after it is not reported. (AC7, AC8)
+- D4234: An entry added to the consumer copy is not reported. (AC7)
+- D4235: An entry removed from the consumer copy is not reported. (AC7)
+- D4236: A file the step edited that holds the bytes it held before the edit is accepted. (AC7)
+- D4237: Any difference in a file the step edited is accepted, so a file damaged after the edit reads clean. (AC7)
+- D4238: A file that holds a definition's new text is not reported. (AC7, AC8)
+- D4239: The search does not require a definition's new text in its own definition file, so a search that read nothing reads clean. (AC7)
+- D4240: A step is taken as settled while the round has not planned. (AC3)
+- D4241: A step is taken as settled while a confirmed workspace is running. (AC3)
+- D4242: A step is taken as settled while a change is unread. (AC3)
+- D4243: A step is taken as settled while the activity reads falsifying, as it does through a canary job. (AC3)
+- D4244: A step is taken as settled while a definition is waiting. (AC3)
+- D4245: A definition that is not eligible reads as waiting, so the fixture's invalid definition keeps every step from settling. (AC3)
+- D4246: The not-settled finding leaves out the jobs the daemon lists as ended with nothing stored. (AC3, AC8)
 
 #### Deliberately Untested
 
-None.
+- `packages/daemon/test/falsification-corpus.ts` (`SETTLE_HOLD_MS`): the hold's length shows only beside a daemon that begins an undeclared job, so no single mutation proves it; D4216 is detected through the hold.
+- `packages/daemon/test/falsification-corpus.ts` (`REPLAY_DEADLINE_MS`): the deadline's value shows only beside a daemon that never settles; D4212 and D4217 each fail at an assertion inside the test's timeout under one.
+- `packages/daemon/test/falsification-corpus.ts` (the tree reading, the file search, the linked version and the step's text replacement): private to the replay and read through D4211 and D4212, where a reading that saw no edit or a search that read nothing fails the replay by the comparisons' own controls (D4236, D4239).
+- `packages/daemon/test/falsification-corpus-findings.ts` (a state the answer counts that no step declares; a confirmed workspace the schedule does not list; a listed definition with no id; a not-settled finding with no answer read): cases Fleet Cooling's codebase would not meet.
+- `packages/daemon/test/falsification-corpus-steps.ts` and the fixture under `test/fixtures/daemon/falsification-corpus/`: data, read whole by D4211 and D4212.
+- A write into a consumer's tree by a product mutation: proven over hand-built readings only (D4233 to D4239), since a mutation that writes during a real canary reading is the hazard the orchestrator named, and ticket 3.2's records watch the job's own writes.
 
 ### Review Record
 
