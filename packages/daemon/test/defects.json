@@ -1142,17 +1142,17 @@
   },
   {
     "id": "D1285",
-    "defect": "The Vitest adapter version stays 2, so a run stored once runs were bound to the confirmed start looks current beside runs stored before it.",
+    "defect": "The Vitest adapter version stays 3, so a run stored by a build whose client-environment projects could not load RT Test's own setup file looks current.",
     "file": "packages/daemon/src/vitest/adapter-version.ts",
-    "old": "export const VITEST_ADAPTER_VERSION = 3;",
-    "new": "export const VITEST_ADAPTER_VERSION = 2;"
+    "old": "export const VITEST_ADAPTER_VERSION = 4;",
+    "new": "export const VITEST_ADAPTER_VERSION = 3;"
   },
   {
     "id": "D1286",
-    "defect": "The Vitest adapter version stays 2, so a discovery that can list a workspace as not confirmed at start looks current beside ones stored before that status existed.",
+    "defect": "The Vitest adapter version stays 3, so a discovery stored by a build whose client-environment projects could not load RT Test's own setup file, each of their modules listed as failed, looks current.",
     "file": "packages/daemon/src/vitest/adapter-version.ts",
-    "old": "export const VITEST_ADAPTER_VERSION = 3;",
-    "new": "export const VITEST_ADAPTER_VERSION = 2;"
+    "old": "export const VITEST_ADAPTER_VERSION = 4;",
+    "new": "export const VITEST_ADAPTER_VERSION = 3;"
   },
   {
     "id": "D1287",
@@ -12094,5 +12094,54 @@
     "file": "packages/daemon/src/inputs/input-inventory.ts",
     "old": "    while (next < paths.length && failures.length === 0) {",
     "new": "    if (next < paths.length && failures.length === 0) {"
+  },
+  {
+    "id": "D4293",
+    "defect": "RT Test's snapshot guard is placed in a project without its directory joining the project's allow list, so on Vitest 5 a discovery lists every module of a project served through Vite's client environment as failed to load and none of its tests.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  if (!allowed.includes(directory)) allowed.push(directory);\n",
+    "new": ""
+  },
+  {
+    "id": "D4294",
+    "defect": "RT Test's snapshot guard is placed in a project without its directory joining the project's allow list, so on Vitest 4.1 a discovery lists every module of a project served through Vite's client environment as failed to load and none of its tests.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  if (!allowed.includes(directory)) allowed.push(directory);\n",
+    "new": ""
+  },
+  {
+    "id": "D4295",
+    "defect": "RT Test's snapshot guard is placed in a project without its directory joining the project's allow list, so on Vitest 5 a run of a project served through Vite's client environment runs none of its tests and records no outcome for them.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  if (!allowed.includes(directory)) allowed.push(directory);\n",
+    "new": ""
+  },
+  {
+    "id": "D4296",
+    "defect": "RT Test's snapshot guard is placed in a project without its directory joining the project's allow list, so on Vitest 4.1 a run of a project served through Vite's client environment runs none of its tests and records no outcome for them.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  if (!allowed.includes(directory)) allowed.push(directory);\n",
+    "new": ""
+  },
+  {
+    "id": "D4297",
+    "defect": "Each project adds the guard's directory to its allow list whether or not the list holds it, so a Vite server two projects share allows it twice.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  if (!allowed.includes(directory)) allowed.push(directory);",
+    "new": "  allowed.push(directory);"
+  },
+  {
+    "id": "D4298",
+    "defect": "RT Test's setup file is placed last among a project's setup files, so the project's own setup file runs before the snapshot guard.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  project.config.setupFiles.unshift(file);",
+    "new": "  project.config.setupFiles.push(file);"
+  },
+  {
+    "id": "D4300",
+    "defect": "RT Test's directory joins a project's allow list in its native spelling, so on Windows the entry is spelled with backslashes where every path Vite compares is spelled with forward slashes.",
+    "file": "packages/daemon/src/vitest/workspace-session.ts",
+    "old": "  const directory = dirname(file).split(sep).join(POSIX_SEPARATOR);",
+    "new": "  const directory = dirname(file);"
   }
 ]
