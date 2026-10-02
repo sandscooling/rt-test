@@ -68,8 +68,19 @@ const INSERT_TEST = `INSERT INTO run_tests (
   run_sequence, module_index, test_index, workspace_path, project_name, module_path, name_path,
   occurrence, is_duplicate, execution, outcome, errors
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const WORKSPACE_RUNS = `SELECT r.sequence FROM runs r
+  WHERE r.project_identity = ? AND r.worktree_identity = ? AND r.workspace_path = ?`;
+/** Each takes the project, the worktree and the workspace path. Tests go before modules and modules before runs, since each refers to the next. */
+const REMOVE_WORKSPACE_RUNS = [
+  `DELETE FROM run_tests WHERE run_sequence IN (${WORKSPACE_RUNS})`,
+  `DELETE FROM run_modules WHERE run_sequence IN (${WORKSPACE_RUNS})`,
+  `DELETE FROM runs WHERE sequence IN (${WORKSPACE_RUNS})`,
+];
 
-/** Stores the run whole under a new run identity, or throws and stores nothing. */
+/**
+ * Stores the run whole under a new run identity, in place of every earlier run of its workspace in that project and
+ * worktree, or throws, stores nothing and removes nothing.
+ */
 export function writeRun(
   database: DatabaseSync,
   bindings: StoreBindings,
@@ -85,9 +96,25 @@ export function writeRun(
     run,
   };
   return inRecordWrite(database, () => {
+    removeEarlierRuns(database, stored);
     insertRun(database, stored);
     return readBack(selectRun(database, stored, stored.runId), stored.runId);
   });
+}
+
+/**
+ * Called before the insert, since it removes every run of the workspace, and inside the write's transaction, so a
+ * write that fails removes none. The new run may take the sequence of one it replaces.
+ */
+function removeEarlierRuns(database: DatabaseSync, stored: StoredRun): void {
+  const workspace = [
+    stored.projectIdentity,
+    stored.worktreeIdentity,
+    stored.run.workspace.path,
+  ];
+  for (const remove of REMOVE_WORKSPACE_RUNS) {
+    database.prepare(remove).run(...workspace);
+  }
 }
 
 /** Reading the run back before commit refuses, whole, a record the readers could not rebuild. */

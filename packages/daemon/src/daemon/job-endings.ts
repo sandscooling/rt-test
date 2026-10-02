@@ -107,6 +107,18 @@ export function storeBindings(
   return { ...scope, inputFingerprint: { kind: NOT_FINGERPRINTED } };
 }
 
+/** The log's entry for a run just stored: what it is bound to, which the store no longer holds once a later run of the workspace replaces it. */
+export function runStoredEntry(
+  workspacePath: string,
+  { inputFingerprint }: StoreBindings,
+): string {
+  const bound =
+    inputFingerprint.kind === FINGERPRINT_DIGEST
+      ? `under fingerprint ${inputFingerprint.digest}`
+      : "not fingerprinted";
+  return `run stored: ${workspacePath} ${bound}`;
+}
+
 /** Only a refusal that names its remedy reaches the reason; any other failure's detail stays in the log. */
 export function storeFailureReason(error: unknown): string {
   return error instanceof NewerStoreSchemaError

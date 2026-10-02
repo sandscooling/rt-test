@@ -36,6 +36,7 @@ import {
   interruptedRun,
   logMissingConfirmed,
   protectDiscovered,
+  runStoredEntry,
   runToStore,
   storeBindings,
   storeFailureReason,
@@ -506,6 +507,7 @@ export class DaemonLifecycle implements DaemonHandlers {
     let ended: EndedRun = {};
     const stored = this.#store(job, path, () => {
       const { runId } = this.#parts.store.writeRun(bindings, run);
+      log.entry(runStoredEntry(path, bindings));
       const notKept = notKeptVerdict(judgment);
       ended = notKept === undefined ? { runId } : { runId, notKept };
     });
