@@ -202,7 +202,10 @@ export function edge(
   graph.edges.push({ dependent, dependency, producer, detail });
 }
 
-/** `file` is given only when one source file's failed read or parse is the whole cause, as its root-relative label. */
+/**
+ * `file` is given only when one source file's failed read or parse is the whole cause, as its root-relative label,
+ * and only when its real path has that same label: selection leaves the widening out for a declared non-input.
+ */
 export function uncertain(
   graph: Graph,
   dependent: string,
