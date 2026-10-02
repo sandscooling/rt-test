@@ -60,8 +60,9 @@ interface QueuedReadsParts {
 }
 
 /**
- * Queues the paths events name between reconciliations and reads them into the input state, marking each job a change
- * can affect, and the listed files the inputs leave out into the reads it holds apart from them.
+ * Queues the paths events name between reconciliations, and those a reconciliation read restamped, and reads them into
+ * the input state, marking each job a change can affect, and the listed files the inputs leave out into the reads it
+ * holds apart from them.
  */
 export class QueuedReads {
   readonly #root: string;
@@ -117,6 +118,17 @@ export class QueuedReads {
   enqueue(path: string, kind: WatchEventType): void {
     this.#quiet.delete(path);
     if (this.#queue.get(path) !== RENAME_EVENT) this.#queue.set(path, kind);
+  }
+
+  /**
+   * Queues a read of each root-relative path as a change event on it would, for a write of which a reconciliation saw
+   * only a moved size or time, so that read marks the jobs running and is the one held; returns how many it queued.
+   */
+  enqueueRestamped(paths: readonly string[]): number {
+    for (const path of paths) {
+      this.enqueue(absoluteInputPath(this.#root, path), CHANGE_EVENT);
+    }
+    return paths.length;
   }
 
   /** Queues a read of the absolute `path` that marks no job, in place of a named one, unless an event queued one. */

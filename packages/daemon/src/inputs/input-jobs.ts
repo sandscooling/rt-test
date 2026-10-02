@@ -17,7 +17,7 @@ export interface JobMark {
 export interface JobWindow {
   /** Every input that changed, by the input state's own root-relative key. */
   readonly paths: ReadonlySet<string>;
-  /** Every cause that names no input: a watcher failure, a lost input set, or an event no read vouches for. */
+  /** Every cause that names no input: a lost input set, or an event no read vouches for. */
   readonly causes: ReadonlySet<string>;
   /** The committed digests when it began; undefined when its inputs could not be vouched for then. */
   readonly startDigests: InputDigests | undefined;
@@ -117,8 +117,8 @@ interface LedgerWait {
 }
 
 /**
- * Counts the events accepted and read, so a job ending waits only for the events seen before its end, never for a
- * stream that keeps arriving after it.
+ * Counts the events accepted and read, so a job ending waits only for the events seen before its end and for the
+ * reads a reconciliation it waited out queued, never for a stream that keeps arriving after it.
  */
 export class EventLedger {
   readonly #reconciling: () => boolean;
@@ -142,13 +142,26 @@ export class EventLedger {
     this.#accepted += count;
   }
 
+  /**
+   * Counts `count` reads a reconciliation queued. Every wait already placed waits for them too, since for a caller
+   * holding out for the reconciliation, what the reconciliation left to read is part of it.
+   */
+  acceptHeld(count: number): void {
+    if (count === 0) return;
+    this.#accepted += count;
+    this.#waiters = this.#waiters.map((wait) => ({
+      ...wait,
+      through: this.#accepted,
+    }));
+  }
+
   /** Records that every event accepted up to `through` has been read. */
   readUpTo(through: number): void {
     this.#readThrough = Math.max(this.#readThrough, through);
     this.notify();
   }
 
-  /** Resolves once the events accepted by now are read and no reconciliation runs. */
+  /** Resolves once the events accepted by now, and the reads a reconciliation queues meanwhile, are read and none runs. */
   waitForRead(): Promise<void> {
     return this.#wait(false);
   }
