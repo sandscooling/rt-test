@@ -35,6 +35,10 @@ const STORE_LOCK_HOLDER = "a daemon serving this worktree's store";
 const BUILD_EXECUTOR_ROLE = "dependency builds";
 const STARTER_GONE_REASON =
   "the starter did not accept the start after the daemon reported serving, so nothing was run";
+const NO_ARGUMENTS_REASON =
+  "the daemon was started without a consumer root and a state directory";
+const NO_STARTUP_CHANNEL_TEXT =
+  "the daemon was started without its startup channel\n";
 
 const [consumerRoot, stateDirectory] = process.argv.slice(2);
 
@@ -45,11 +49,7 @@ main().catch(async (error: unknown) => {
 
 async function main(): Promise<void> {
   if (consumerRoot === undefined || stateDirectory === undefined) {
-    void report({
-      type: REFUSED_TYPE,
-      reason:
-        "the daemon was started without a consumer root and a state directory",
-    });
+    void report({ type: REFUSED_TYPE, reason: NO_ARGUMENTS_REASON });
     return;
   }
   const request = await startupRequest();
@@ -141,6 +141,7 @@ async function serve(
       roleLog(log, BUILD_EXECUTOR_ROLE),
       startEnvironment,
     ),
+    parseRecordDirectory: listening.endpoint.keyDirectory,
     inputs,
     quietWindowMs: QUIET_WINDOW_MS,
     closeEndpoint: async () => {
@@ -226,9 +227,7 @@ function isStartupAcceptance(message: unknown): message is StartupAcceptance {
 /** The first message on the spawn-time channel; undefined when the channel closed first. */
 function startupRequest(): Promise<unknown> {
   if (!process.connected) {
-    process.stderr.write(
-      "the daemon was started without its startup channel\n",
-    );
+    process.stderr.write(NO_STARTUP_CHANNEL_TEXT);
     process.exitCode = REFUSED_EXIT_CODE;
     return Promise.resolve(undefined);
   }

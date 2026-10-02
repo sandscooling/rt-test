@@ -52,7 +52,7 @@ interface DependencyBuildParts {
   /** As discovery was given it. */
   readonly consumerRoot: string;
   /** Holds each build's parse record. */
-  readonly stateDirectory: string;
+  readonly parseRecordDirectory: string;
   readonly log: DaemonLog;
   /** How long after it began a build is ended; `DEPENDENCY_BUILD_BOUND_MS` when absent. */
   readonly boundMs?: number;
@@ -214,7 +214,8 @@ export class DependencyBuilds {
 
   /** Begins at `revision` with no await after the caller read it, so the job mark vouches for that revision. */
   async #build(discovery: StoredDiscovery, revision: number): Promise<void> {
-    const { inputs, executor, consumerRoot, stateDirectory, log } = this.#parts;
+    const { inputs, executor, consumerRoot, parseRecordDirectory, log } =
+      this.#parts;
     let realRoot: string;
     try {
       realRoot = realpathSync.native(consumerRoot);
@@ -257,7 +258,7 @@ export class DependencyBuilds {
       .buildDependencies(
         consumerRoot,
         selection.input.workspaces,
-        stateDirectory,
+        parseRecordDirectory,
       )
       .catch((error: unknown): JobOutcome<DependencyInformation> => ({
         ended: false,

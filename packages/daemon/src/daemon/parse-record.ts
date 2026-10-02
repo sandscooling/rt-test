@@ -25,12 +25,12 @@ export interface ParseRecordWriter extends ParseObserver {
 }
 
 /**
- * Creates an empty parse record in the state directory, under a name no other build in any daemon or worktree
- * shares, so no build can read a record another left.
+ * Creates an empty parse record in `directory`, under a name no other build in any daemon or worktree shares, so no
+ * build can read a record another left.
  */
-export function createParseRecord(stateDirectory: string): string {
+export function createParseRecord(directory: string): string {
   const file = join(
-    stateDirectory,
+    directory,
     `${RECORD_PREFIX}${randomUUID()}${RECORD_SUFFIX}`,
   );
   writeFileSync(file, EMPTY, { flag: EXCLUSIVE_CREATE });
