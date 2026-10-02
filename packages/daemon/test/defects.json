@@ -11947,5 +11947,33 @@
     "file": "packages/daemon/src/inputs/crawl-links.ts",
     "old": "  walk.links.push(path);\n",
     "new": "  walk.links.push(path);\n  (followed as string[]).push(target);\n"
+  },
+  {
+    "id": "D4276",
+    "defect": "The walk handles a directory's links as each one's resolution finishes, so the links are reported, and spelled in protection's pattern key, in an order that varies from walk to walk instead of the order the directory lists them.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  const listed = await Promise.all(\n    entries.map(async (entry) => {\n      const path = `${directory.spelled}${entry.name}`;\n      return {\n        entry,\n        path,\n        link: entry.isSymbolicLink() ? await directoryLink(path) : undefined,\n      };\n    }),\n  );\n",
+    "new": "  const listed: { entry: Dirent; path: string; link: DirectoryLink | undefined }[] = [];\n  await Promise.all(\n    entries.map(async (entry) => {\n      const path = `${directory.spelled}${entry.name}`;\n      const link = entry.isSymbolicLink() ? await directoryLink(path) : undefined;\n      listed.push({ entry, path, link });\n    }),\n  );\n"
+  },
+  {
+    "id": "D4277",
+    "defect": "The walk takes a directory's windows of entries last first, so the links listed after its first 1000 entries are reported, and spelled in protection's pattern key, ahead of those listed before them.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "for (let start = 0; start < entries.length; start += MAX_CRAWLED_LINKS) {",
+    "new": "for (let start = Math.floor(Math.max(entries.length - 1, 0) / MAX_CRAWLED_LINKS) * MAX_CRAWLED_LINKS; start >= 0; start -= MAX_CRAWLED_LINKS) {"
+  },
+  {
+    "id": "D4278",
+    "defect": "The walk leaves out the last entry of every 1000 it takes from a directory, so a subdirectory or a directory link listed there is never read or followed, and a test file Vitest reaches only through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "entries.slice(start, start + MAX_CRAWLED_LINKS),",
+    "new": "entries.slice(start, start + MAX_CRAWLED_LINKS - 1),"
+  },
+  {
+    "id": "D4279",
+    "defect": "The walk counts a link to a file as a directory link it follows, so the file is stored as a link base, spelled in protection's pattern key and counted toward the 1000-link bound, and a project with more than 1000 links to files below its pattern bases reads its links as not known and no declared pattern applies.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "return (await stat(target)).isDirectory() ? { path, target } : undefined;",
+    "new": "await stat(target);\n    return { path, target };"
   }
 ]
