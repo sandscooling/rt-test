@@ -11702,5 +11702,257 @@
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      return reply.type === \"dependencies-built\"\n        ? { ended: true, value: reply.dependencies }\n        : { ended: false, reason: failureReason(reply) };\n    } finally {\n      this.#removeRecord(parseRecord);\n    }\n",
     "new": "      if (reply.type !== \"dependencies-built\") {\n        return { ended: false, reason: failureReason(reply) };\n      }\n      this.#removeRecord(parseRecord);\n      return { ended: true, value: reply.dependencies };\n    } catch (error) {\n      throw error;\n    }\n"
+  },
+  {
+    "id": "D4211",
+    "defect": "Evidence freshness ignores a change of its workspace's inputs, so once the library's assertion is weakened the discount's detection still reads current and neither workspace is falsified again, which the corpus reports at step 2 as a state not as declared, counts not as declared and declared definitions not falsified.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "[STALE_CAUSE.inputsChanged]: fingerprint === STALE,",
+    "new": "[STALE_CAUSE.inputsChanged]: false,"
+  },
+  {
+    "id": "D4212",
+    "defect": "The judge reads a test whose setup hook failed an assertion as it reads one that failed in its body, so a setup failure is a detection. Under that judge the canary reading of the replay's Vitest install disagrees, the gate refuses both workspaces and nothing is falsified, which the corpus reports as its baseline not settled.",
+    "file": "packages/daemon/src/falsify/verdict.ts",
+    "old": "    if (state !== HOOK_PASSED) return hookNotPassed(hook, state);\n",
+    "new": ""
+  },
+  {
+    "id": "D4213",
+    "defect": "A definition whose anchor is missing reads invalid definition, so the rewritten anchor is hidden among the definitions that cannot be applied as written, which the corpus reports from step 1 on as a state not as declared.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": ": { ...read, state: DEFECT_STATE.anchorMissing, reason: missing };",
+    "new": ": { ...read, state: DEFECT_STATE.invalidDefinition, reason: missing };"
+  },
+  {
+    "id": "D4214",
+    "defect": "A definition's occurrence is not compared with a test's, so the definition naming the second of two tests sharing a name path resolves to the first, whose assertion rejects the mutation, and reads detected where the second test survives it, which the corpus reports as a state not as declared.",
+    "file": "packages/daemon/src/defects/resolve-definitions.ts",
+    "old": "(test.occurrence === undefined || identity.occurrence === test.occurrence)",
+    "new": "(test.occurrence === undefined || identity.occurrence === 0)"
+  },
+  {
+    "id": "D4215",
+    "defect": "Verified counts every definition whose evidence reads current, a survivor and an invalid experiment among them, which the corpus reports at every step as the verified count not as declared.",
+    "file": "packages/daemon/src/defects/defect-standings.ts",
+    "old": "    standing.state === DEFECT_STATE.detected &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4216",
+    "defect": "A look takes every eligible definition, one whose evidence reads current among them, so after the app's edit the daemon falsifies the library's definitions again once the app's job has ended, which the corpus reports at step 1 as falsified outside the declared set.",
+    "file": "packages/daemon/src/daemon/falsification-plan.ts",
+    "old": "if (!standing.eligible || standing.evidence?.freshness === CURRENT) return [];",
+    "new": "if (!standing.eligible) return [];"
+  },
+  {
+    "id": "D4217",
+    "defect": "The canary gate is handed the executor's falsify unbound, so every canary job fails before it is sent, every reading is a no reading and no workspace is ever falsified, which the corpus reports as its baseline not settled once the replay's deadline has passed.",
+    "file": "packages/daemon/src/daemon/daemon-main.ts",
+    "old": "falsify: (...job) => executor.falsify(...job),",
+    "new": "falsify: executor.falsify,"
+  },
+  {
+    "id": "D4218",
+    "defect": "The corpus's state comparison does not compare the state, so a survivor read as detected reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    declared.state === read.state &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4219",
+    "defect": "The corpus's state comparison does not compare the eligibility, so a definition whose test lost its current pass reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    declared.eligible === read.eligible &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4220",
+    "defect": "The corpus's state comparison does not compare the evidence freshness, so a verdict whose evidence reads stale reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    declared.evidence?.freshness === read.evidence?.freshness &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4221",
+    "defect": "The corpus's state comparison does not compare the verdict's reason, so an invalid experiment read for another reason than the failed setup hook's reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "declared.evidence?.reason === read.evidence?.reason",
+    "new": "true"
+  },
+  {
+    "id": "D4222",
+    "defect": "The corpus reports nothing of a definition the answer lists that no step declares, so a definition the daemon made up reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  if (declared === undefined) {\n    return [\n      finding(\n        FINDING.definitionNotDeclared,\n        step.name,\n        definitionName(definition),\n        `the answer lists it as ${readingText(definition)}; the step declares no such definition`,\n      ),\n    ];\n  }",
+    "new": "  if (declared === undefined) return [];"
+  },
+  {
+    "id": "D4223",
+    "defect": "The corpus reports nothing of a declared definition the answer does not list, so an answer that drops a definition reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    .filter(([id]) => !listedIds.has(id))",
+    "new": "    .filter(() => false)"
+  },
+  {
+    "id": "D4224",
+    "defect": "The corpus's count comparison leaves the verified count out, so an answer that counts a definition verified that is not reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "const COUNTED = [\"total\", \"eligible\", \"verified\"] as const;",
+    "new": "const COUNTED = [\"total\", \"eligible\"] as const;"
+  },
+  {
+    "id": "D4225",
+    "defect": "The corpus's count comparison leaves the eligible count out, so an answer that miscounts the eligible definitions reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "const COUNTED = [\"total\", \"eligible\", \"verified\"] as const;",
+    "new": "const COUNTED = [\"total\", \"verified\"] as const;"
+  },
+  {
+    "id": "D4226",
+    "defect": "The corpus's count comparison leaves the total out, so an answer whose denominator is wrong reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "const COUNTED = [\"total\", \"eligible\", \"verified\"] as const;",
+    "new": "const COUNTED = [\"eligible\", \"verified\"] as const;"
+  },
+  {
+    "id": "D4227",
+    "defect": "The corpus's count comparison reads no state's count, so an answer that counts a definition in the wrong state reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  const states = new Set([\n    ...Object.keys(declaredStates),\n    ...Object.keys(readStates),\n  ]);",
+    "new": "  const states = new Set<string>();"
+  },
+  {
+    "id": "D4228",
+    "defect": "The corpus reports nothing of a definition falsified outside the set its step declares, so a daemon that falsifies a workspace no edit reached reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    .filter((id) => !step.falsified.includes(id))",
+    "new": "    .filter(() => false)"
+  },
+  {
+    "id": "D4229",
+    "defect": "The corpus reports nothing of a declared definition that was not falsified, so a daemon that leaves a dependent's evidence as it was reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    .filter((id) => !falsified.includes(id))",
+    "new": "    .filter(() => false)"
+  },
+  {
+    "id": "D4230",
+    "defect": "The corpus takes a definition as falsified only where the store held an earlier record for it, so at the baseline, where it held none, no definition reads falsified.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": ".filter(([id, evidenceId]) => heldBefore.get(id) !== evidenceId)",
+    "new": ".filter(([id, evidenceId]) => heldBefore.has(id) && heldBefore.get(id) !== evidenceId)"
+  },
+  {
+    "id": "D4231",
+    "defect": "The corpus compares only the records the store holds after a step, so evidence lost during the step, of a definition the step does not declare falsified, reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    .filter(([id]) => !heldAfter.has(id) && !step.falsified.includes(id))",
+    "new": "    .filter(() => false)"
+  },
+  {
+    "id": "D4232",
+    "defect": "The corpus reports nothing of an evidence record stored under another Vitest version than the replay linked, so evidence credited to the wrong Vitest line reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    .filter((record) => record.vitestVersion !== linkedVersion)",
+    "new": "    .filter(() => false)"
+  },
+  {
+    "id": "D4233",
+    "defect": "The corpus's tree comparison reports nothing of a file the step does not edit that holds other bytes after it, so a mutation written into a consumer file reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  return `held ${before} before the step and holds ${after} after it; the step does not edit it`;",
+    "new": "  return undefined;"
+  },
+  {
+    "id": "D4234",
+    "defect": "The corpus's tree comparison reports nothing of an entry added to the consumer copy, so a file the daemon wrote into the consumer's tree reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  if (before === undefined) {\n    return `added since the reading before, holding ${after}`;\n  }",
+    "new": "  if (before === undefined) return undefined;"
+  },
+  {
+    "id": "D4235",
+    "defect": "The corpus's tree comparison reports nothing of an entry removed from the consumer copy, so a consumer file the daemon deleted reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  if (after === undefined) return `removed; it held ${before}`;",
+    "new": "  if (after === undefined) return undefined;"
+  },
+  {
+    "id": "D4236",
+    "defect": "The corpus's tree comparison accepts a file the step edited that holds the bytes it held before the edit, so a reading that saw no edit, or a daemon that wrote the old bytes back, reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  if (after === written) return undefined;",
+    "new": "  if (after === written || after === before) return undefined;"
+  },
+  {
+    "id": "D4237",
+    "defect": "The corpus's tree comparison accepts any difference in a file the step edited, so a daemon that damaged the file after the edit reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  if (after === written) return undefined;",
+    "new": "  if (after !== before) return undefined;"
+  },
+  {
+    "id": "D4238",
+    "defect": "The corpus's search reports no file that holds a definition's new text, so a mutation's text in the store, the log or a consumer file reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "        .filter((text) => file.content.includes(text))",
+    "new": "        .filter(() => false)"
+  },
+  {
+    "id": "D4239",
+    "defect": "The corpus's search does not require a definition's new text in its own definition file, so a search that read no file finds nothing and reads clean.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "  for (const mutation of mutations) requireOwnFileHolds(mutation, files);\n",
+    "new": ""
+  },
+  {
+    "id": "D4240",
+    "defect": "The corpus takes a step as settled while the daemon's round has not planned, so it compares before the daemon has selected what the step set off.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    round.state === ROUND.planned &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4241",
+    "defect": "The corpus takes a step as settled while a confirmed workspace is running, so it compares against results the run is about to replace.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    executions.every((execution) => execution.state === EXECUTION_STATE.idle) &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4242",
+    "defect": "The corpus takes a step as settled while the daemon holds a change it has not read, so it compares before the step's own edit has reached the inputs.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    answer.inputs.pendingChanges === 0 &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4243",
+    "defect": "The corpus takes a step as settled while the daemon's activity reads falsifying, so it compares while a canary job, or a falsification job nothing declared, is in progress.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    answer.activity.state === IDLE &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4244",
+    "defect": "The corpus takes a step as settled while a definition is waiting, so it compares before the daemon has falsified what the step made stale.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "waitingDefinitions(answer.definitions).length === 0",
+    "new": "true"
+  },
+  {
+    "id": "D4245",
+    "defect": "The corpus reads a definition that is not eligible as waiting, so the fixture's invalid definition, which never gets evidence, keeps every step from settling.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "        definition.eligible && definition.evidence?.freshness !== CURRENT,",
+    "new": "        definition.evidence?.freshness !== CURRENT,"
+  },
+  {
+    "id": "D4246",
+    "defect": "The not-settled finding leaves out the jobs the daemon lists as ended with nothing stored, so a step a refused or failed job kept from settling names no cause.",
+    "file": "packages/daemon/test/falsification-corpus-findings.ts",
+    "old": "    `jobs ended with nothing stored: ${listText(answer.unstoredJobs.map(unstoredJobText))}`,\n",
+    "new": ""
   }
 ]

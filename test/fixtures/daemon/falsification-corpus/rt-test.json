@@ -1,0 +1,6 @@
+{
+  "defects": [
+    "packages/lib/named-defects.json",
+    "packages/app/named-defects.json"
+  ]
+}
