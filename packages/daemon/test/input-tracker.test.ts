@@ -44,6 +44,7 @@ import {
 import { gitSources } from "../src/inputs/git-sources.js";
 import {
   readEntryDigest,
+  type EntryDigest,
   type InputRead,
 } from "../src/inputs/input-inventory.js";
 import { JobWindows, type JobVerdict } from "../src/inputs/input-jobs.js";
@@ -82,6 +83,7 @@ import {
   handBuiltReads,
   inTempDir,
   onPlatform,
+  oneShot,
   projectFacts,
   runTempRoot,
   settle,
@@ -5731,6 +5733,437 @@ describe(
         );
       });
       expect(rose).toBe(true);
+    });
+  },
+);
+
+interface HeldReads {
+  /** The base name of each path whose read has begun, in the order the reads began. */
+  readonly begun: string[];
+  /** Resolves once a read of the path with the base name `name` has begun. */
+  entered(name: string): Promise<void>;
+  /** Resolves as a read of `name` hands back what it read, so by the turn after it the tracker has applied it. */
+  returned(name: string): Promise<void>;
+  /** Lets the held read of `name` go on, and every later read of it. */
+  release(name: string): void;
+  /** Lets every held read go on, and holds none begun later. */
+  releaseAll(): void;
+}
+
+/** What answers a read of a base name in place of a read of the file. */
+type ScriptedReads = Readonly<Record<string, () => Promise<EntryDigest>>>;
+
+/**
+ * Records, by base name, each read the tracker takes of a path an event or a query named, and holds each read of a
+ * name in `names` until it is released. A name in `scripted` is answered by its script and never read. A walk's own
+ * reads pass by unrecorded.
+ */
+function holdingEachReadOf(
+  names: readonly string[],
+  scripted: ScriptedReads = {},
+): HeldReads {
+  const begun: string[] = [];
+  const gates = new Map<string, ReturnType<typeof readGate>>();
+  const gateOf = (name: string): ReturnType<typeof readGate> => {
+    const gate = gates.get(name) ?? readGate();
+    gates.set(name, gate);
+    return gate;
+  };
+  let holding = true;
+  vi.mocked(readEntryDigest).mockImplementation(async (path, signal) => {
+    const name = basename(path);
+    const gate = gateOf(name);
+    begun.push(name);
+    gate.entered.fire();
+    if (holding && names.includes(name)) await gate.released.done;
+    try {
+      return await (scripted[name]?.() ?? realReadEntryDigest(path, signal));
+    } finally {
+      gate.returned.fire();
+    }
+  });
+  return {
+    begun,
+    entered: (name) => gateOf(name).entered.done,
+    returned: (name) => gateOf(name).returned.done,
+    release: (name) => gateOf(name).released.fire(),
+    releaseAll() {
+      holding = false;
+      for (const gate of gates.values()) gate.released.fire();
+    },
+  };
+}
+
+function readGate(): Record<
+  "entered" | "released" | "returned",
+  ReturnType<typeof oneShot>
+> {
+  return { entered: oneShot(), released: oneShot(), returned: oneShot() };
+}
+
+/** `count` inputs under `many/`, each with a base name of its own. */
+function manyInputs(count: number): Record<string, string> {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [
+      `many/n${index}.ts`,
+      BEFORE_SAVE,
+    ]),
+  );
+}
+
+/** The inputs the tracker holds under the root-relative `folder`, sorted. */
+function inputsHeldUnder(tracker: InputTracker, folder: string): string[] {
+  const held = tracker.current().snapshot?.digests.keys() ?? [];
+  return [...held].filter((input) => input.startsWith(`${folder}/`)).sort();
+}
+
+/**
+ * Tracks `root`, holding the folder `many` of `count` inputs, over silent watches, reads the folder by name while
+ * every read of its inputs is held, and hands `body` the reads and the tracker; every read is released after.
+ */
+async function withFolderReadsHeld<T>(
+  root: string,
+  count: number,
+  body: (reads: HeldReads, tracker: InputTracker) => Promise<T>,
+): Promise<T> {
+  const tree = manyInputs(count);
+  writeTree(root, tree);
+  silentCapturedWatches();
+  const reads = holdingEachReadOf(
+    Object.keys(tree).map((path) => basename(path)),
+  );
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      const read = tracker.readNamed(["many"]);
+      try {
+        await afterATurn();
+        return await body(reads, tracker);
+      } finally {
+        reads.releaseAll();
+        await read;
+      }
+    });
+  } finally {
+    vi.mocked(readEntryDigest).mockReset();
+    vi.mocked(watch).mockReset();
+  }
+}
+
+interface AfterNamedReads {
+  /** The inputs held under `src` once the batch has been read. */
+  readonly held: string[];
+  /** The paths recorded on a job open across the whole batch, sorted. */
+  readonly marked: string[];
+}
+
+/** What a batch leaves once a walk of `src` has replaced the file `src/mod` by a directory holding one input. */
+const MOD_WALKED: AfterNamedReads = {
+  held: ["src/mod/x.ts"],
+  marked: [NEVER_WRITTEN, "src/mod", "src/mod/x.ts"],
+};
+
+/**
+ * Tracks `root`, holding the file `src/mod`, over silent watches, opens a job, replaces the file by a directory holding
+ * `x.ts`, and has one batch read `src` whole after a rename event and both `src/mod` and `src/mod/x.ts` by name, the
+ * two named reads handing back what they read in `order`. The queue waits behind a held read while the batch gathers.
+ */
+async function namedReadsAfterWalk(
+  root: string,
+  order: readonly string[],
+): Promise<AfterNamedReads> {
+  writeTree(root, { "src/mod": "a file\n", "b.ts": "" });
+  const watches = silentCapturedWatches();
+  const reads = holdingEachReadOf([NEVER_WRITTEN, "mod", "x.ts"]);
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      try {
+        const mark = tracker.beginJob();
+        deliver(watches, root, NEVER_WRITTEN);
+        await reads.entered(NEVER_WRITTEN);
+        rmSync(join(root, "src", "mod"));
+        writeTree(root, { "src/mod/x.ts": BEFORE_SAVE });
+        const read = tracker.readNamed(["src/mod", "src/mod/x.ts"]);
+        deliver(watches, root, "src", "rename");
+        reads.release(NEVER_WRITTEN);
+        await Promise.all(order.map((name) => reads.entered(name)));
+        for (const name of order) {
+          reads.release(name);
+          await reads.returned(name);
+          await afterATurn();
+        }
+        await read;
+        const marked = [...mark.window.paths].sort();
+        await tracker.endJob(mark);
+        return { held: inputsHeldUnder(tracker, "src"), marked };
+      } finally {
+        reads.releaseAll();
+      }
+    });
+  } finally {
+    vi.mocked(readEntryDigest).mockReset();
+    vi.mocked(watch).mockReset();
+  }
+}
+
+/**
+ * Tracks `root`, holding the file `src/mod`, over silent watches, replaces the file by a directory holding `x.ts`,
+ * queues a named read of `src/mod` behind a held read, and has a reconciliation run before that named read is taken.
+ * Opens a job once the named read has begun, and hands back what is held under `src` and the job's verdict.
+ */
+async function namedReadAfterReconciliation(
+  root: string,
+): Promise<{ held: string[]; verdict: JobVerdict }> {
+  writeTree(root, { "src/mod": "a file\n", "b.ts": "" });
+  const watches = silentCapturedWatches();
+  const reads = holdingEachReadOf([NEVER_WRITTEN, "mod"]);
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      try {
+        deliver(watches, root, NEVER_WRITTEN);
+        await reads.entered(NEVER_WRITTEN);
+        rmSync(join(root, "src", "mod"));
+        writeTree(root, { "src/mod/x.ts": BEFORE_SAVE });
+        void tracker.readNamed(["src/mod"]);
+        deliver(watches, root, DECLARATION_FILE);
+        reads.release(NEVER_WRITTEN);
+        await reads.entered("mod");
+        const mark = tracker.beginJob();
+        reads.release("mod");
+        const verdict = await tracker.endJob(mark);
+        return { held: inputsHeldUnder(tracker, "src"), verdict };
+      } finally {
+        reads.releaseAll();
+      }
+    });
+  } finally {
+    vi.mocked(readEntryDigest).mockReset();
+    vi.mocked(watch).mockReset();
+  }
+}
+
+const PLANTED_READ_FAILURE = "a planted read failure";
+
+describe(
+  "a query's named reads taken together",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4280: the reads of three inputs under a folder a query names have all begun before any of them has ended", async () => {
+      const inFlight = await inTempDir((root) =>
+        withFolderReadsHeld(root, 3, (reads) =>
+          Promise.resolve(reads.begun.length),
+        ),
+      );
+      expect(inFlight).toBe(3);
+    });
+
+    it("D4281: of twenty inputs under a folder a query names, sixteen are being read at once and the rest wait", async () => {
+      const inFlight = await inTempDir((root) =>
+        withFolderReadsHeld(root, 20, (reads) =>
+          Promise.resolve(reads.begun.length),
+        ),
+      );
+      expect(inFlight).toBe(16);
+    });
+
+    it("D4283: a named read queued ahead of an event's read in one batch begins only once that event's read has ended", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "b.ts": BEFORE_SAVE });
+        const watches = silentCapturedWatches();
+        const reads = holdingEachReadOf([NEVER_WRITTEN, "b.ts"]);
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            try {
+              deliver(watches, root, NEVER_WRITTEN);
+              await reads.entered(NEVER_WRITTEN);
+              const read = tracker.readNamed(["a.ts"]);
+              deliver(watches, root, "b.ts");
+              reads.release(NEVER_WRITTEN);
+              await reads.entered("b.ts");
+              await afterATurn();
+              const whileEventReadHeld = reads.begun.includes("a.ts");
+              reads.release("b.ts");
+              await read;
+              return {
+                whileEventReadHeld,
+                onceItEnded: reads.begun.includes("a.ts"),
+              };
+            } finally {
+              reads.releaseAll();
+            }
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        whileEventReadHeld: false,
+        onceItEnded: true,
+      });
+    });
+
+    it("D4284: a named read has applied what it read by the turn after its read returns, so a declared file saved again and released by protection in that turn is held as the walk then reads it", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, DOCS_DECLARED);
+        silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const nextTurn = oneShot();
+            let walked: Promise<unknown> = Promise.resolve();
+            vi.mocked(readEntryDigest).mockImplementationOnce(
+              async (path, signal) => {
+                const entry = await realReadEntryDigest(path, signal);
+                setImmediate(() => {
+                  writeFileSync(path, "# a, saved again\n");
+                  walked = tracker.protectInputs(unreportedDiscovery(root));
+                  nextTurn.fire();
+                });
+                return entry;
+              },
+            );
+            await tracker.readNamed(["docs/a.md"]);
+            await nextTurn.done;
+            await walked;
+            const held = inputsHeldUnder(tracker, "docs");
+            const revision = tracker.facts().revision;
+            await tracker.readNamed(["docs/a.md"]);
+            return {
+              held,
+              changedByALaterRead: tracker.facts().revision > revision,
+            };
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        held: ["docs/a.md"],
+        changedByALaterRead: false,
+      });
+    });
+
+    it("D4285: a named read that finds a directory where the tracker already holds one keeps the inputs under it, whichever named read of its batch returns first, and marks no job open across it", async () => {
+      const outcome = {
+        childReturnsFirst: await inTempDir((root) =>
+          namedReadsAfterWalk(root, ["x.ts", "mod"]),
+        ),
+        directoryReturnsFirst: await inTempDir((root) =>
+          namedReadsAfterWalk(root, ["mod", "x.ts"]),
+        ),
+        afterAReconciliation: await inTempDir(namedReadAfterReconciliation),
+      };
+      expect(outcome).toStrictEqual({
+        childReturnsFirst: MOD_WALKED,
+        directoryReturnsFirst: MOD_WALKED,
+        afterAReconciliation: {
+          held: ["src/mod/x.ts"],
+          verdict: { fingerprinted: true },
+        },
+      });
+    });
+
+    it("D4286: a named read that finds a held input replaced by a directory marks the job open across it, naming the input", async () => {
+      const verdict = await inTempDir((root) =>
+        verdictAcrossNamedRead(root, () => {
+          rmSync(join(root, "a.ts"));
+          mkdirSync(join(root, "a.ts"));
+        }),
+      );
+      expect(verdict).toStrictEqual(A_TS_CHANGED);
+    });
+
+    it("D4287: once an event's read has lost the input set, the named reads of its batch are not taken", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "locked.ts": BEFORE_SAVE });
+        const watches = silentCapturedWatches();
+        const reads = holdingEachReadOf([NEVER_WRITTEN], {
+          "locked.ts": () =>
+            Promise.resolve({
+              kind: "unreadable",
+              reason: "EBUSY: resource busy or locked",
+            }),
+        });
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            try {
+              deliver(watches, root, NEVER_WRITTEN);
+              await reads.entered(NEVER_WRITTEN);
+              deliver(watches, root, "locked.ts");
+              void tracker.readNamed(["a.ts"]);
+              reads.release(NEVER_WRITTEN);
+              await reads.entered("locked.ts");
+              await tracker.settled();
+              return {
+                eventReadTaken: reads.begun.includes("locked.ts"),
+                namedReadTaken: reads.begun.includes("a.ts"),
+              };
+            } finally {
+              reads.releaseAll();
+            }
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        eventReadTaken: true,
+        namedReadTaken: false,
+      });
+    });
+
+    it("D4289: a batch whose named read failed ends only once its other named reads have, so the reconciliation the failure asks for begins after them", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "a.ts": BEFORE_SAVE, "bad.ts": BEFORE_SAVE });
+        silentCapturedWatches();
+        const reads = holdingEachReadOf(["a.ts"], {
+          "bad.ts": () => Promise.reject(new Error(PLANTED_READ_FAILURE)),
+        });
+        const log = memoryLog();
+        const begun = (): boolean =>
+          log.entries.includes(
+            `${RECONCILIATION_STARTED}reading changed inputs failed: ${PLANTED_READ_FAILURE}`,
+          );
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              try {
+                void tracker.readNamed(["bad.ts", "a.ts"]);
+                await reads.entered("a.ts");
+                await afterATurn();
+                const whileNamedReadHeld = begun();
+                reads.release("a.ts");
+                await tracker.settled();
+                return { whileNamedReadHeld, onceItEnded: begun() };
+              } finally {
+                reads.releaseAll();
+              }
+            },
+            { log },
+          );
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        whileNamedReadHeld: false,
+        onceItEnded: true,
+      });
+    });
+
+    it("D4290: once the tracker stops, the named reads of a folder still waiting their turn are never begun", async () => {
+      const begun = await inTempDir((root) =>
+        withFolderReadsHeld(root, 18, async (reads, tracker) => {
+          const stopping = tracker.stop();
+          reads.releaseAll();
+          await stopping;
+          return reads.begun.length;
+        }),
+      );
+      expect(begun).toBe(16);
     });
   },
 );

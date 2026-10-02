@@ -246,6 +246,18 @@ export function within<T>(
   return Promise.race([work, bound]).finally(() => clearTimeout(timer));
 }
 
+/** A promise with the call that resolves it, so a test holds a step until it chooses and learns when one is reached. */
+export function oneShot(): {
+  readonly done: Promise<void>;
+  readonly fire: () => void;
+} {
+  let fire = (): void => undefined;
+  const done = new Promise<void>((resolve) => {
+    fire = resolve;
+  });
+  return { done, fire };
+}
+
 /**
  * Makes `root` a git repository under the fixture git settings, so no global hook, signing or identity of the
  * developer's reaches it, and returns a runner of git there, free of the caller's GIT_* variables.
