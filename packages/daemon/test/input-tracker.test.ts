@@ -5768,6 +5768,80 @@ describe(
   },
 );
 
+interface RefusableWatches {
+  /** Each silent watch opened before the refusal, by the path it opened on. */
+  readonly opened: Map<string, FSWatcher>;
+  /** Makes every watch opened from now on throw `EACCES`, as one past a permission would. */
+  readonly refuse: () => void;
+}
+
+/** Opens silent watches, keeping each one, until `refuse` is called. */
+function silentWatchesUntilRefused(): RefusableWatches {
+  const opened = new Map<string, FSWatcher>();
+  let refusing = false;
+  vi.mocked(watch).mockImplementation(((path: PathLike) => {
+    if (refusing) {
+      throw Object.assign(
+        new Error(`EACCES: permission denied, watch '${String(path)}'`),
+        { code: "EACCES" },
+      );
+    }
+    const watcher = silentWatch();
+    opened.set(String(path), watcher);
+    return watcher;
+  }) as typeof watch);
+  return {
+    opened,
+    refuse: () => {
+      refusing = true;
+    },
+  };
+}
+
+describe(
+  "a watch that still cannot open",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4403: a root watch that failed and still cannot open is tried again at the next reconciliation, so the watcher stays unhealthy and a job ending after it is not fingerprinted", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const watches = silentWatchesUntilRefused();
+        try {
+          return await withFakeTimeouts(() =>
+            tracking(root, async ({ tracker, log }) => {
+              const mark = tracker.beginJob();
+              watches.refuse();
+              watches.opened
+                .get(realpathSync.native(root))
+                ?.emit("error", new Error("EIO: the watch broke"));
+              await tracker.settled();
+              const afterFirst = tracker.facts().watcher.state;
+              await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+              const verdict = await tracker.endJob(mark);
+              return {
+                afterFirst,
+                periodic: log.entries.filter(
+                  (entry) => entry === PERIODIC_STARTED,
+                ).length,
+                watcher: tracker.facts().watcher.state,
+                fingerprinted: verdict.fingerprinted,
+              };
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        afterFirst: "unhealthy",
+        periodic: 1,
+        watcher: "unhealthy",
+        fingerprinted: false,
+      });
+    });
+  },
+);
+
 /** What a saved file holds before and after a save whose event the watcher has not reported. */
 const BEFORE_SAVE = "export const saved = 1;\n";
 const AFTER_SAVE = "export const saved = 2;\n";

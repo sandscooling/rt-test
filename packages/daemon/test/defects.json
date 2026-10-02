@@ -3276,6 +3276,13 @@
     "new": ""
   },
   {
+    "id": "D4403",
+    "defect": "`clearFailures` keeps the directories whose watch could not open, so the next reconciliation does not try them again, finds no watch failure, and reads the watcher healthy with the root's tree unwatched, and every job after it is fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    this.#failures = [];\n    this.#unopened.clear();",
+    "new": "    this.#failures = [];"
+  },
+  {
     "id": "D1922",
     "defect": "The repository's info/exclude is not watched, so a change to what it ignores runs no reconciliation.",
     "file": "packages/daemon/src/inputs/git-sources.ts",
