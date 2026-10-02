@@ -412,7 +412,7 @@ Adapters can add edges or require broader selection. They must not suppress core
 
 ### Convex adapter
 
-Convex tests can use broad module registries and `api`/`internal` references, so every Convex test file globs the whole package and import-based selection, including `vitest related`, cannot see the real edges. No adapter is planned for them ([ADR-0011](adr/0011-load-record-beside-dependency-graph.md)): the load record holds the modules a test reached through the registry, a function reference or a dispatch by variable, with no Convex rule, where Fleet Cooling's `scripts/test-blast-radius.mjs` folds every dispatch it cannot resolve into every selection and never selects under 263 of its 583 Convex test files. An adapter returns only for a dependency that neither the dependency graph nor a load record sees.
+Convex tests can use broad module registries and `api`/`internal` references, so every Convex test file globs the whole package and import-based selection, including `vitest related`, cannot see the real edges. No adapter is planned for them ([ADR-0011](adr/0011-load-record-beside-dependency-graph.md)): the load record holds the modules a test really loaded through the registry, a function reference resolved by name at call time or a dispatch by variable, which no static graph sees soundly, and nothing specific to one consumer enters the product. An adapter returns only for a dependency that neither the dependency graph nor a load record sees.
 
 Keep `convex-test` results distinct from typechecking, development backend synchronization, and live integration results. Use synthetic public fixtures. Do not make the daemon depend on a running Convex backend or automatically push code.
 
