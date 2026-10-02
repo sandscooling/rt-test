@@ -22,6 +22,10 @@ _Avoid_: Vitest copy
 The stable name RT Test gives one test: its Vitest workspace, Vitest project, module path, suite and test names, and its position among tests sharing those names.
 _Avoid_: test id, test name
 
+**Test module**:
+One test file as one Vitest project runs it: the unit RT Test runs, stores a result for and rates for freshness.
+_Avoid_: test file, spec
+
 **Consumer**:
 A project whose tests RT Test runs.
 _Avoid_: target, host project
@@ -49,6 +53,18 @@ _Avoid_: source, dependency
 **Declared non-input**:
 A file the consumer lists in `rt-test.json` as read by no test, so a change to it changes no input fingerprint and selects nothing.
 _Avoid_: ignored file, excluded file
+
+**Shared input**:
+An input of a Vitest workspace that RT Test cannot tie to particular test modules, such as a config, setup or env file, a lockfile, or a file that is not a source module, so a change to it reaches every test module of the workspace.
+_Avoid_: global input, common file
+
+**Dependency graph**:
+The daemon's record of the files and package workspaces each source file names in its imports, scanned once in the daemon's life and updated for the files a change names.
+_Avoid_: import map, module graph
+
+**Load record**:
+The consumer files a test module's worker executed in the run that produced its stored result.
+_Avoid_: coverage, trace, executed modules
 
 **Non-input variable**:
 An environment variable whose value the input fingerprint leaves out, counting only whether it is set and whether it is empty: a session or process identifier on RT Test's fixed list, or one `rt-test.json` declares in `nonInputVariables`. A discovered workspace whose tests Vite can hand one to, through an env file's expansion or an env prefix, counts it by value.

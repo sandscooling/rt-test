@@ -51,3 +51,16 @@ sprint-3: done
 3-5b-canary-reading: done
 3-6-canary-gate: done
 3-7-falsification-corpus: done
+
+sprint-4: backlog
+4-1-kept-dependency-graph: backlog
+4-2-store-by-test-module: backlog
+4-3-answers-by-test-module: backlog
+4-4-rediscover-on-list-change: backlog
+4-5-load-record: backlog
+4-6-nearest-first-runs: backlog
+4-7-module-inputs: backlog
+4-8-selection-in-answers: backlog
+4-9-narrow-by-load-record: backlog
+4-10-evidence-by-test-module: backlog
+4-11-file-level-corpus: backlog

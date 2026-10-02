@@ -6,7 +6,7 @@ Take test execution and falsification off coding agents. Today an agent writes, 
 
 Correct answers matter far more than fast ones. A correct selection that never runs a test twice and answers in a couple of minutes beats a ten-minute full run; latency counts only where agents pay it on every call. Terms follow [the glossary](glossary.md).
 
-The product is a separate project usable by any Vitest consumer. Framework-specific behavior belongs in adapters. Fleet Cooling is the proving ground, not a dependency: about 10,000 tests across five Vitest 4.1 workspaces, with a full sequential chain of about seven minutes, three of them in its Convex workspace. The Convex adapter and falsification are core value, and the milestones are ordered by what offloads agent work on Fleet Cooling soonest, while keeping every correctness guarantee.
+The product is a separate project usable by any Vitest consumer. Framework-specific behavior belongs in adapters. Fleet Cooling is the proving ground, not a dependency: about 15,000 tests across five Vitest 4.1 workspaces, with a full sequential chain of about seven minutes, three and a half of them in its Convex workspace. Selection by test module and falsification are core value, and the milestones are ordered by what offloads agent work on Fleet Cooling soonest, while keeping every correctness guarantee.
 
 ## Core experience
 
@@ -44,11 +44,11 @@ Maintain three relationships:
 | Executes               | A recorded run reached a function or module                 |
 | Detects a named defect | The intended test rejected a specific behavioral mutation   |
 
-Execution coverage is evidence of reachability in a prior run. It is not evidence that every new path is covered or every defect is detected.
+Execution coverage is evidence of reachability in a prior run. It is not evidence that every new path is covered or every defect is detected. A test module's load record, the files its last run loaded, narrows a selection only under the conditions of [ADR-0011](adr/0011-load-record-beside-dependency-graph.md), and never alone.
 
 ## Selection strategy
 
-Start at workspace granularity: an edit selects every test in its workspace and in the workspaces that depend on it, and a configuration, setup, or lockfile change is a broad fallback that names its trigger. That selection is coarse but correct, since it only widens. Refine to file granularity with static imports and framework adapters, where the Convex adapter ports Fleet Cooling's `scripts/test-blast-radius.mjs`, because every Convex test globs the whole package and `vitest related` cannot see the edges. Treat dynamic or unresolved relationships conservatively, explain broad fallbacks, and add function-level precision only where validated.
+Start at workspace granularity: an edit selects every test in its workspace and in the workspaces that depend on it, and a configuration, setup, or lockfile change is a broad fallback that names its trigger. That selection is coarse but correct, since it only widens. Then select by test module ([ADR-0010](adr/0010-results-by-test-module.md), [ADR-0011](adr/0011-load-record-beside-dependency-graph.md)): a changed file selects the test modules whose inputs hold it, where a module's inputs are the files its last run loaded, when that load record can be trusted, and otherwise the files a kept dependency graph of static imports says it can reach. The record never excludes alone: the graph answers for a new, deleted or renamed file, and where neither can vouch (a shared input such as a config, setup or env file, a test module that reads files or starts code by path, a module path computed at run time) the module keeps its workspace's whole inputs. A round runs the test modules nearest the edit first, as a small run of their own ([ADR-0012](adr/0012-small-runs-nearest-first.md)). No framework adapter is planned: the load record holds the modules a Convex test reaches through its registry and its `api` references, which static imports and `vitest related` cannot see, and an adapter returns only for a dependency neither source sees. Explain broad fallbacks, and add function-level precision only where validated.
 
 Watch additions, deletions, renames, test edits, snapshots, configuration, setup files, dependency lockfiles, and generated inputs as well as source files. Reconcile content fingerprints after restart or a branch change. Missing events must not preserve false freshness.
 
@@ -82,13 +82,14 @@ Correctness targets are requirements, measured at every milestone over the contr
 
 The following are provisional targets for a warm local project with 10,000 discovered tests. They are not measurements or release claims.
 
-| Operation                                                | Initial target                                                                               |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Saved edit in Fleet Cooling's Convex workspace to `wait` | At most that workspace's own run at workspace granularity; well under it at file granularity |
-| Summary inside the daemon                                | p95 below 50 ms                                                                              |
-| End-to-end CLI call, process start included              | p95 below 100 ms                                                                             |
-| Saved edit to stale-state publication                    | p95 below 100 ms after event receipt                                                         |
-| Idle daemon CPU                                          | Below 1% averaged over one idle minute                                                       |
+| Operation                                                | Initial target                                                                                                                                                                                                            |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Saved edit to a run starting, on Fleet Cooling           | 13.5 s measured at workspace granularity; about 5 s once a save re-reads only the changed files (computed)                                                                                                                |
+| Saved edit in Fleet Cooling's Convex workspace to `wait` | Measured at workspace granularity: all five workspaces rerun, 7 min 36 s. By test module: seconds after the run starts for a file few test modules load, near the Convex workspace's own run for a file most of them load |
+| Summary inside the daemon                                | p95 below 50 ms                                                                                                                                                                                                           |
+| End-to-end CLI call, process start included              | p95 below 100 ms                                                                                                                                                                                                          |
+| Saved edit to stale-state publication                    | p95 below 100 ms after event receipt                                                                                                                                                                                      |
+| Idle daemon CPU                                          | Below 1% averaged over one idle minute                                                                                                                                                                                    |
 
 Record hardware, OS, runtime, graph size, baseline runner timing, and warm/cold conditions. Cold indexing and memory budgets need measurement before setting targets. Bound queues and event buffers. Prioritize ordinary tests over falsification.
 
@@ -96,7 +97,7 @@ Record hardware, OS, runtime, graph size, baseline runner timing, and warm/cold 
 
 - Local Node-based Vitest projects on Vitest 4.1.x and 5.x, with several Vitest workspaces in one project.
 - Persistent state, explicit start/stop, a CLI with versioned `--json` output including `status <path>` and `wait`, and a small programmatic API. No MCP server.
-- Workspace-level selection, then file-level selection with the Convex adapter, then validated function-level refinements.
+- Workspace-level selection, then selection by test module from a kept dependency graph and each module's load record, then validated function-level refinements.
 - Named-defect definitions and isolated, incremental falsification, then the two suggestion add-ons.
 - Cross-platform development, gated on Windows and Linux before every push.
 
@@ -106,6 +107,8 @@ Record hardware, OS, runtime, graph size, baseline runner timing, and warm/cold 
 - Automatic business-requirement inference or automatic test rewriting.
 - A built-in model call, which needs explicit product approval.
 - A universal sound JavaScript call graph.
+- A language server as a dependency source, a Convex backend shared between test runs, and a Vitest instance kept open between runs.
+- A Convex adapter, until a consumer shows a dependency that neither the dependency graph nor a load record sees.
 - Replacing clean CI integration/release checks, lint, or typecheck.
 - Browser Mode, live service orchestration, and broad framework support until their adapters are tested.
 - A VS Code folder-view extension, which `status <path>` is shaped for.

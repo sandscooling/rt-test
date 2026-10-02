@@ -38,7 +38,7 @@ The result is a suite in which every test is proven to catch the bug it names, a
 - Start RT Test explicitly for a trusted project; from then on its daemon is the only thing that runs tests, and agents never start a run.
 - Ask through a CLI with versioned `--json` output: `status <path>` gives counts per state for a file or folder, `wait <files>` returns once the results covering your files are current or can get none, or sooner as superseded or unsettled, and `changes <files>` lists what changed for the tests covering your files since your last ask; an opt-in Claude Code hook tells the agent what its edits changed.
 - Mark affected results stale as soon as saved inputs change, and never run a test again while its result is current.
-- Select the tests each edit needs, widening when a dependency is uncertain and explaining every broad fallback, with a Convex adapter for function-reference edges.
+- Select the test modules each edit can reach, from what each loaded in its last run beside a kept dependency graph, run the nearest first, widen when a dependency is uncertain and explain every broad fallback.
 - Falsify each test against its named defect as an in-memory transform, without touching a developer's working files, and report tests with no defect as gaps.
 - Later, suggest defects for uncovered code: mechanically first, then through the coding agent. RT Test calls no model itself.
 
