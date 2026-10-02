@@ -10,6 +10,7 @@ import {
   NO_FAILURES,
   RENAME,
   SHARED_LIBRARY,
+  TESTS_IN_AN_EXISTING_MODULE,
   type CorpusEdit,
 } from "./edit-corpus-sequences.js";
 import { ranWorkspace } from "./round-fixtures.js";
@@ -44,6 +45,14 @@ describe("the edit corpus replayed against the daemon beside plain Vitest", () =
     "D3469: a Vitest config edit runs its workspace and that workspace's dependents only, as does an edit saved while a run is going",
     async () => {
       expect(await checkSequence(CONFIG_AND_RUN_IN_PROGRESS)).toBe(CLEAN);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D4345: a test added to an existing module, and then removed, is counted by the daemon's answers as a full run reports it once its workspace has run, with no workspace run twice",
+    async () => {
+      expect(await checkSequence(TESTS_IN_AN_EXISTING_MODULE)).toBe(CLEAN);
     },
     DAEMON_TEST_TIMEOUT_MS,
   );

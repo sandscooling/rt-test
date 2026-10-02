@@ -808,8 +808,8 @@
     "id": "D3359",
     "defect": "A discovery stores none of the not-covered workspaces its listing found, so neither the summary nor status names a package whose tests RT Test does not run.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "    notCovered: withoutDiscoveredModules(\n      notCovered,",
-    "new": "    notCovered: withoutDiscoveredModules(\n      [],"
+    "old": "      notCovered: withoutDiscoveredModules(\n        notCovered,",
+    "new": "      notCovered: withoutDiscoveredModules(\n        [],"
   },
   {
     "id": "D3450",

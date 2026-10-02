@@ -44,10 +44,12 @@ interface DaemonResult {
   readonly current: boolean;
 }
 
-/** Each workspace's latest stored run, by test and by module. */
+/** Each workspace's latest stored run, by test and by module, and how many tests the daemon's answer counts for each file. */
 export interface DaemonSide {
   readonly tests: ReadonlyMap<string, DaemonResult>;
   readonly modules: ReadonlyMap<string, DaemonResult>;
+  /** By the file's path relative to the consumer root. */
+  readonly listed: ReadonlyMap<string, number>;
 }
 
 interface ModuleLocation {
@@ -248,7 +250,11 @@ export function daemonSide(
       }
     }
   }
-  return { tests, modules };
+  return {
+    tests,
+    modules,
+    listed: new Map(files.map(({ file, counts }) => [file, counts.tests])),
+  };
 }
 
 /** The run stored last for each workspace. */
@@ -291,7 +297,31 @@ export function daemonFindings(
     ...reportedTestFindings(edit, tests, daemon),
     ...heldTestFindings(edit, tests, failedModules, daemon),
     ...moduleFindings(edit, failedModules, daemon),
+    ...listedCountFindings(edit, tests, daemon),
   ];
+}
+
+/** Each module whose tests the full run reports in another number than the daemon's answer counts for its file. */
+function listedCountFindings(
+  edit: string,
+  tests: readonly FullRunTest[],
+  daemon: DaemonSide,
+): Finding[] {
+  const reported = new Map<string, number>();
+  for (const test of tests) {
+    const subject = moduleSubject(test);
+    reported.set(subject, (reported.get(subject) ?? 0) + 1);
+  }
+  return [...reported]
+    .filter(([subject, count]) => daemon.listed.get(subject) !== count)
+    .map(([subject, count]) =>
+      finding(
+        FINDING.disagreement,
+        edit,
+        subject,
+        `the full run reports ${count} test(s); the daemon's answer counts ${daemon.listed.get(subject) ?? 0}`,
+      ),
+    );
 }
 
 function reportedTestFindings(

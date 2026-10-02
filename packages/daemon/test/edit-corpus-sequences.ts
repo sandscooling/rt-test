@@ -321,3 +321,44 @@ export const CONFIG_AND_RUN_IN_PROGRESS: CorpusSequence = {
     },
   ],
 };
+
+const UI_LABEL_SUITE = 'describe("label", () => {';
+const ADDED_TEST = `
+  it("labels nothing", () => {
+    expect(label(0)).toBe("Total: 1");
+  });`;
+
+export const TESTS_IN_AN_EXISTING_MODULE: CorpusSequence = {
+  name: "tests in an existing module",
+  edits: [
+    {
+      name: "a failing test added to ui's test module",
+      changes: [
+        {
+          kind: CHANGE.replace,
+          path: `${UI}/${UI_LABEL_FAILS.modulePath}`,
+          from: UI_LABEL_SUITE,
+          to: `${UI_LABEL_SUITE}${ADDED_TEST}`,
+        },
+      ],
+      declaredRuns: [UI, WEB],
+      declaredFailures: {
+        tests: [{ ...UI_LABEL_FAILS, names: ["label", "labels nothing"] }],
+        modules: [],
+      },
+    },
+    {
+      name: "the added test removed from ui's test module",
+      changes: [
+        {
+          kind: CHANGE.replace,
+          path: `${UI}/${UI_LABEL_FAILS.modulePath}`,
+          from: ADDED_TEST,
+          to: "",
+        },
+      ],
+      declaredRuns: [UI, WEB],
+      declaredFailures: NO_FAILURES,
+    },
+  ],
+};

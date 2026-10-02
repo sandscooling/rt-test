@@ -192,7 +192,7 @@
     "id": "D1050",
     "defect": "Discovery collects with Vitest's default collect, which on 5.x parses statically and lists a parameterized test as one unformatted test.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "instance.collectTests(specifications),",
+    "old": "instance.collectTests(uncollected),",
     "new": "instance.collect(),"
   },
   {
@@ -212,23 +212,23 @@
   {
     "id": "D1053",
     "defect": "Every test is reported with mode run, so a skipped or todo test reads as one that will run.",
-    "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "report.tests.push({ ...identified, mode: test.options.mode });",
-    "new": "report.tests.push({ ...identified, mode: \"run\" });"
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "    mode: test.options.mode,",
+    "new": "    mode: \"run\","
   },
   {
     "id": "D1054",
     "defect": "Discovery runs the tests it lists on Vitest 5, executing test bodies and hooks.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "instance.collectTests(specifications),",
-    "new": "instance.runTestSpecifications(specifications),"
+    "old": "instance.collectTests(uncollected),",
+    "new": "instance.runTestSpecifications(uncollected),"
   },
   {
     "id": "D1055",
     "defect": "Discovery runs the tests it lists on Vitest 4.1, executing test bodies and hooks.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "instance.collectTests(specifications),",
-    "new": "instance.runTestSpecifications(specifications),"
+    "old": "instance.collectTests(uncollected),",
+    "new": "instance.runTestSpecifications(uncollected),"
   },
   {
     "id": "D1056",
@@ -605,7 +605,7 @@
     "id": "D1185",
     "defect": "A run aborted while it waits in the queue loads the workspace anyway.",
     "file": "packages/daemon/src/vitest/run-workspace.ts",
-    "old": "    if (signal.aborted) {\n      return { status: \"interrupted-before-load\", workspace };\n    }\n",
+    "old": "    if (signal.aborted) {\n      return {\n        run: { status: \"interrupted-before-load\", workspace },\n        lists: NO_LISTS,\n      };\n    }\n",
     "new": ""
   },
   {
@@ -675,15 +675,15 @@
     "id": "D1195",
     "defect": "A run over a workspace on an unsupported Vitest reads as a run that ran instead of unsupported.",
     "file": "packages/daemon/src/vitest/run-workspace.ts",
-    "old": "    if (result.status !== \"loaded\") return { ...result, workspace };",
-    "new": "    if (result.status === \"failed\") return { ...result, workspace };"
+    "old": "    if (result.status !== \"loaded\") {\n      return { run: { ...result, workspace }, lists: NO_LISTS };\n    }",
+    "new": "    if (result.status === \"unsupported\") {\n      return { run: { ...result, status: \"ran\", workspace }, lists: NO_LISTS };\n    }\n    if (result.status !== \"loaded\") {\n      return { run: { ...result, workspace }, lists: NO_LISTS };\n    }"
   },
   {
     "id": "D1196",
     "defect": "A run over a workspace whose configuration fails to load reads as a run that ran instead of failed.",
     "file": "packages/daemon/src/vitest/run-workspace.ts",
-    "old": "    if (result.status !== \"loaded\") return { ...result, workspace };",
-    "new": "    if (result.status === \"unsupported\") return { ...result, workspace };"
+    "old": "    if (result.status !== \"loaded\") {\n      return { run: { ...result, workspace }, lists: NO_LISTS };\n    }",
+    "new": "    if (result.status === \"failed\") {\n      return { run: { ...result, status: \"ran\", workspace }, lists: NO_LISTS };\n    }\n    if (result.status !== \"loaded\") {\n      return { run: { ...result, workspace }, lists: NO_LISTS };\n    }"
   },
   {
     "id": "D1197",
@@ -1256,8 +1256,8 @@
     "id": "D1301",
     "defect": "A discovery aborted mid-collection goes on to load the next workspace and resolves with a result instead of rejecting.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "        : await discoverWorkspace(workspace, confirmed.configFile, signal),\n    );\n    signal.throwIfAborted();",
-    "new": "        : await discoverWorkspace(workspace, confirmed.configFile, signal),\n    );"
+    "old": "        wallMs: Math.round(performance.now() - began),\n      });\n    }\n    signal.throwIfAborted();",
+    "new": "        wallMs: Math.round(performance.now() - began),\n      });\n    }"
   },
   {
     "id": "D1302",
@@ -1277,8 +1277,8 @@
     "id": "D1303",
     "defect": "An aborted discovery rejects as soon as its signal aborts, while the Vitest instance is still open and the host still holds the workspace's environment and exit code.",
     "file": "packages/daemon/src/vitest/discover-tests.ts",
-    "old": "  return queueSessionJob(() => discoverAll(start, signal));",
-    "new": "  const job = queueSessionJob(() => discoverAll(start, signal));\n  return new Promise((resolve, reject) => {\n    signal.addEventListener(\"abort\", () => reject(signal.reason), { once: true });\n    job.then(resolve, reject);\n  });"
+    "old": "  return queueSessionJob(() => discoverAll(start, carried, signal));",
+    "new": "  const job = queueSessionJob(() => discoverAll(start, carried, signal));\n  return new Promise((resolve, reject) => {\n    signal.addEventListener(\"abort\", () => reject(signal.reason), { once: true });\n    job.then(resolve, reject);\n  });"
   },
   {
     "id": "D1305",
@@ -1879,8 +1879,8 @@
     "id": "D1494",
     "defect": "Discovery runs in the daemon's own process, so a synchronous loop in a global setup stops the daemon answering status.",
     "file": "packages/daemon/src/daemon/executor.ts",
-    "old": "    const reply = await this.#job({ type: \"discover\", start });",
-    "new": "    const reply = {\n      type: \"discovered\" as const,\n      discovery: await (\n        await import(\"../vitest/discover-tests.js\")\n      ).discoverTests(start, new AbortController().signal),\n    };"
+    "old": "    const reply = await this.#job({ type: \"discover\", start, carried });",
+    "new": "    const reply = {\n      type: \"discovered\" as const,\n      ...(await (\n        await import(\"../vitest/discover-tests.js\")\n      ).rediscoverTests(start, carried, new AbortController().signal)),\n    };"
   },
   {
     "id": "D1495",
@@ -5246,8 +5246,8 @@
     "id": "D2676",
     "defect": "A discovery whose executor call throws is not caught, so its change window stays open and nothing about the discovery is listed as a job that stored nothing.",
     "file": "packages/daemon/src/daemon/lifecycle.ts",
-    "old": "      .discover(start)\n      .catch((error: unknown) => threwOutcome<TestDiscovery>(error));",
-    "new": "      .discover(start);"
+    "old": "      .discover(start, carried)\n      .catch((error: unknown) => threwOutcome<TestDiscovery>(error));",
+    "new": "      .discover(start, carried);"
   },
   {
     "id": "D2677",
@@ -10573,7 +10573,7 @@
     "id": "D3721",
     "defect": "The answer tells the resolver the discovery is current whatever its freshness, so a not-discovered reason never says the discovery is not current.",
     "file": "packages/daemon/src/defects/worktree-standings.ts",
-    "old": "  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;",
+    "old": "  const { discoveryCurrent } = basis;",
     "new": "  const discoveryCurrent = true;"
   },
   {
@@ -12143,5 +12143,236 @@
     "file": "packages/daemon/src/vitest/workspace-session.ts",
     "old": "  const directory = dirname(file).split(sep).join(POSIX_SEPARATOR);",
     "new": "  const directory = dirname(file);"
+  },
+  {
+    "id": "D4313",
+    "defect": "A rediscovery is handed the lists of a discovery stored under another adapter version, so it keeps lists a build of another adapter made in place of collecting their modules.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "  if (stored === undefined || !isCurrentAdapterVersion(stored.adapterVersion)) {\n    return [];",
+    "new": "  if (stored === undefined) {\n    return [];"
+  },
+  {
+    "id": "D4314",
+    "defect": "A rediscovery is handed the lists of a workspace whose collection raised an unhandled error, so a list that collection may have left incomplete is kept.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "      entry.unhandledErrors.length > 0 ||\n",
+    "new": ""
+  },
+  {
+    "id": "D4315",
+    "defect": "A module is handed to a rediscovery whenever its workspace's latest run ran it, whatever tests that run recorded, so a list the run did not produce is kept.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "      recorded.get(moduleListKey(module)) === identities(module.tests),",
+    "new": "      recorded.has(moduleListKey(module)),"
+  },
+  {
+    "id": "D4316",
+    "defect": "A read of the stored results that throws while a rediscovery gathers its lists escapes into the discovery, which then ends with nothing stored and no line in the log.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "  try {\n    results = latest();\n  } catch (error) {\n    log.error(READING_CARRIED_LISTS, error);\n    return [];\n  }",
+    "new": "  results = latest();"
+  },
+  {
+    "id": "D4317",
+    "defect": "A discovery stored again with a run's lists is stored not fingerprinted, so it reads unknown although the discovery it replaces was bound to the current inputs.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "    bindings: { projectIdentity, worktreeIdentity, inputFingerprint },",
+    "new": "    bindings: {\n      projectIdentity,\n      worktreeIdentity,\n      inputFingerprint: { kind: \"not-fingerprinted\" },\n    },"
+  },
+  {
+    "id": "D4318",
+    "defect": "A run's list of a module the discovery does not list joins the discovery, so the modules it lists no longer match the fingerprint and the selection built over them.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "      held !== undefined &&\n      list.tests.length > 0 &&\n      listSignature(held.tests) !== listSignature(list.tests)",
+    "new": "      list.tests.length > 0 &&\n      listSignature(held?.tests ?? []) !== listSignature(list.tests)"
+  },
+  {
+    "id": "D4319",
+    "defect": "A run's list holding no test replaces a module's list, so the module leaves the discovery although Vitest still finds it.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "      list.tests.length > 0 &&\n",
+    "new": ""
+  },
+  {
+    "id": "D4320",
+    "defect": "A run whose lists equal the discovery's own stores the discovery again, so every run adds a discovery record and starts a dependency build.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "      listSignature(held.tests) !== listSignature(list.tests)",
+    "new": "      true"
+  },
+  {
+    "id": "D4321",
+    "defect": "An answer's discovery reads current by its own fingerprint alone, so the test list reads current while a workspace whose list a run vouches for is due.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "        freshness: listFreshness(\n          freshness,\n          discovery.discovery,\n          { latestRuns, refusedRuns },\n          currentFingerprint,\n        ),",
+    "new": "        freshness,"
+  },
+  {
+    "id": "D4322",
+    "defect": "A workspace whose latest run is refused as unreadable is passed over as one with no stored run, so the discovery reads current although no run vouches for that workspace's lists.",
+    "file": "packages/daemon/src/query/list-freshness.ts",
+    "old": "    if (latest === undefined && !refusedRuns.has(path)) continue;",
+    "new": "    if (latest === undefined) continue;"
+  },
+  {
+    "id": "D4323",
+    "defect": "A workspace's current run counts as vouching whatever tests it recorded, so the discovery reads current while it lists tests that run did not record.",
+    "file": "packages/daemon/src/query/list-freshness.ts",
+    "old": "  return vouchedModules(entry, latest.run).length ===\n    listedModules(entry).length\n    ? CURRENT\n    : UNKNOWN;",
+    "new": "  return CURRENT;"
+  },
+  {
+    "id": "D4324",
+    "defect": "A discovered workspace with no stored run lowers the discovery to unknown, so the discovery never reads current until every workspace has run.",
+    "file": "packages/daemon/src/query/list-freshness.ts",
+    "old": "    if (latest === undefined && !refusedRuns.has(path)) continue;\n",
+    "new": ""
+  },
+  {
+    "id": "D4325",
+    "defect": "Each test told apart only by its position is rated by the list-rated discovery freshness, so such tests of a workspace that is not due read unknown whenever another workspace is due.",
+    "file": "packages/daemon/src/query/summary.ts",
+    "old": "      freshness === CURRENT,\n    ),",
+    "new": "      listFreshness(\n        freshness,\n        discovery.discovery,\n        { latestRuns, refusedRuns },\n        currentFingerprint,\n      ) === CURRENT,\n    ),"
+  },
+  {
+    "id": "D4326",
+    "defect": "The defects standings read the answer's list-rated discovery freshness, so evidence for a test told apart only by its position reads unknown whenever any workspace is due.",
+    "file": "packages/daemon/src/defects/worktree-standings.ts",
+    "old": "  const { discoveryCurrent } = basis;",
+    "new": "  const discoveryCurrent = basis.context.discovery.freshness === \"current\";"
+  },
+  {
+    "id": "D4327",
+    "defect": "The daemon hands a rediscovery no list, so every input change collects every test module of every workspace again before any run begins.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      .discover(start, carried)\n",
+    "new": "      .discover(start, [])\n"
+  },
+  {
+    "id": "D4328",
+    "defect": "A stored run whose lists differ from the discovery's leaves the discovery as it was, so a test added to a module whose list was carried is never listed.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "    if (refresh === undefined) return;",
+    "new": "    return;"
+  },
+  {
+    "id": "D4329",
+    "defect": "A discovery stored again with a run's lists leaves no line in the log, so nothing says how many test modules the run's lists replaced.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "  log.entry(refresh.entry);\n",
+    "new": ""
+  },
+  {
+    "id": "D4330",
+    "defect": "A discovery that cannot be stored again with a run's lists throws out of the run's job, so a run that is stored is listed as a job that stored nothing and the failure is not logged as the refresh's.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "  } catch (error) {\n    log.error(what, error);\n    return;\n  }",
+    "new": "  } catch (error) {\n    throw error;\n  }"
+  },
+  {
+    "id": "D4331",
+    "defect": "A run's list that differs from the discovery's only in a test's declared mode counts as equal, so a test that became skipped or todo keeps reading as one that will run.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "      test.isDuplicate,\n      test.mode,\n",
+    "new": "      test.isDuplicate,\n"
+  },
+  {
+    "id": "D4332",
+    "defect": "A discovered workspace's log line gives its collected count as carried and its carried count as collected, so the log says a rediscovery collected what it kept.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "${collected} collected, ${carried} carried",
+    "new": "${carried} collected, ${collected} carried"
+  },
+  {
+    "id": "D4333",
+    "defect": "A discovery leaves no line in the log for the workspaces its job reported, so nothing says what each workspace's discovery collected, carried or ended as, or how long it took.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "    for (const entry of collectionLog(outcome)) log.entry(entry);\n",
+    "new": ""
+  },
+  {
+    "id": "D4334",
+    "defect": "A rediscovery collects a module it was handed a list for, so every input change imports every test module again and the handed list is dropped.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "  const lists = new Map(carried.map((list) => [moduleListKey(list), list]));",
+    "new": "  const lists = new Map<string, ModuleTests>();"
+  },
+  {
+    "id": "D4335",
+    "defect": "A rediscovery collects no module it was handed no list for, so a new test file is listed with no test until its workspace runs.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "      uncollected.push(specification);\n",
+    "new": ""
+  },
+  {
+    "id": "D4336",
+    "defect": "A rediscovery lists the tests of every list it was handed, so a deleted test module keeps its tests in the discovery.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "    tests: kept.flatMap((list) => list.tests),",
+    "new": "    tests: carried.flatMap((list) => list.tests),"
+  },
+  {
+    "id": "D4337",
+    "defect": "A rediscovery reports every listed module as collected, so the log says it collected modules whose lists it kept.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "      collected: uncollected.length,",
+    "new": "      collected: specifications.length,"
+  },
+  {
+    "id": "D4338",
+    "defect": "A handed list answers every specification that names its module, so a module Vitest lists twice has the list's tests twice and its second listing is never collected.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "      lists.delete(key);\n",
+    "new": ""
+  },
+  {
+    "id": "D4339",
+    "defect": "A run's job reports a list for a module the run did not record as ran, so a crashed module's partial tests can replace its list in the discovery.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "    return ran.has(moduleListKey(report)) && testModule.errors().length === 0",
+    "new": "    return testModule.errors().length === 0"
+  },
+  {
+    "id": "D4340",
+    "defect": "A run's job reports a list for a module that ran with an error of its own, so a list its error may have cut short can replace the discovery's.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "    return ran.has(moduleListKey(report)) && testModule.errors().length === 0",
+    "new": "    return ran.has(moduleListKey(report))"
+  },
+  {
+    "id": "D4341",
+    "defect": "A run's lists give every test mode run, so a discovery stored again with them reads a skipped or todo test as one that will run.",
+    "file": "packages/daemon/src/vitest/test-lists.ts",
+    "old": "    mode: test.options.mode,",
+    "new": "    mode: \"run\","
+  },
+  {
+    "id": "D4342",
+    "defect": "On Vitest 4.1, a rediscovery collects a module it was handed a list for, so every input change imports every test module again and the handed list is dropped.",
+    "file": "packages/daemon/src/vitest/discover-tests.ts",
+    "old": "  const lists = new Map(carried.map((list) => [moduleListKey(list), list]));",
+    "new": "  const lists = new Map<string, ModuleTests>();"
+  },
+  {
+    "id": "D4343",
+    "defect": "The executor process discovers with no carried list whatever its job was handed, so the daemon's lists never reach the discovery and every module is collected.",
+    "file": "packages/daemon/src/daemon/executor-main.ts",
+    "old": "        ...(await rediscoverTests(request.start, request.carried, signal)),",
+    "new": "        ...(await rediscoverTests(request.start, [], signal)),"
+  },
+  {
+    "id": "D4344",
+    "defect": "A run job's outcome drops the test lists its executor process reported, so no stored run ever replaces a list in the discovery.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      return { ended: true, value: reply.run, lists: reply.lists };",
+    "new": "      return { ended: true, value: reply.run };"
+  },
+  {
+    "id": "D4345",
+    "defect": "A stored run's lists never reach the discovery, so a test added to a module whose list a rediscovery kept is never counted by the daemon's answers, and a removed one stays counted.",
+    "file": "packages/daemon/src/daemon/carried-lists.ts",
+    "old": "  const lists = outcome.ended ? outcome.lists : undefined;",
+    "new": "  const lists = undefined;"
   }
 ]
