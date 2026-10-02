@@ -3350,3 +3350,59 @@ describe("the build tells its observer of each parse", () => {
     ).toStrictEqual(["parsing packages/app/configs/base.json"]);
   });
 });
+
+const UNPARSED_SOURCE = 'import { from "../x";\n';
+
+/** Each widening as the workspace it widens, its kind and the file it names. */
+function namedFiles(information: Settled<DependencyInformation>) {
+  return "uncertainties" in information
+    ? information.uncertainties.map(({ dependent, kind, file }) => ({
+        dependent,
+        kind,
+        file,
+      }))
+    : information;
+}
+
+describe("the source file a widening names", () => {
+  it("D4404: a source file that does not parse raises a widening naming its root-relative path, and a plugin-format file and a tsconfig that does not parse beside it raise widenings naming no file", async () => {
+    expect(
+      namedFiles(
+        await scanApp({
+          [APP_SOURCE]: UNPARSED_SOURCE,
+          "packages/app/src/App.vue": "<template />\n",
+          [APP_TSCONFIG]: '{ "references": [ }',
+        }),
+      ),
+    ).toStrictEqual([
+      { dependent: APP, kind: "plugin-format-file", file: undefined },
+      { dependent: APP, kind: "unparsed-source", file: APP_SOURCE },
+      { dependent: APP, kind: "unparsed-source", file: undefined },
+    ]);
+  });
+
+  it("D4405: a source file the scan reached through a linked workspace directory raises a widening naming no file, and the same file reached by its real path names it", async () => {
+    const information = await graphInTree({
+      ...appTree({
+        files: {
+          "vendor/pkg/package.json": pkg("@x/linked"),
+          "vendor/pkg/src/broken.js": UNPARSED_SOURCE,
+        },
+        change: "",
+      }),
+      links: { "packages/linked": "vendor/pkg" },
+    });
+    expect(namedFiles(information)).toStrictEqual([
+      {
+        dependent: ".",
+        kind: "unparsed-source",
+        file: "vendor/pkg/src/broken.js",
+      },
+      {
+        dependent: "packages/linked",
+        kind: "unparsed-source",
+        file: undefined,
+      },
+    ]);
+  });
+});

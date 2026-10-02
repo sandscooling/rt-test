@@ -257,6 +257,7 @@ export function selectionOf(
     paths,
     fallbacks: [],
     widenings: [],
+    wideningsLeftOut: [],
     counts: {
       selectedTests: { count: workspaces.length, complete: true },
       totalTests: { count: 4, complete: true },

@@ -4,6 +4,7 @@ import {
   narrowingAt,
   type QueryNarrowing,
 } from "../inputs/narrowed-inputs.js";
+import { NON_INPUTS_FILE } from "../inputs/non-inputs.js";
 import {
   FIRST_ROUND,
   INPUT_DIGESTS_UNREAD,
@@ -18,6 +19,7 @@ import {
   type BroadFallback,
   type ChainStep,
   type ChangedPathReport,
+  type LeftOutWidening,
   type Selection,
   type SelectionCounts,
   type SelectionReason,
@@ -35,7 +37,7 @@ const NO_SNAPSHOT_ENTRY = `warning: no selection was made, because ${NO_SNAPSHOT
 const FIRST_ROUND_REASON = "no previous round read the inputs to compare with";
 const FIRST_ROUND_ENTRY = `round without a selection: ${FIRST_ROUND_REASON}`;
 
-/** What a round logged of its selection: the changed paths, fallbacks and counts, or why it made none. */
+/** What an answer keeps of a round's selection: the changed paths, fallbacks and counts, or why it made none. */
 export type RoundExplanation = { readonly revision: number } & (
   | ({
       readonly state: typeof ROUND_SELECTION.made;
@@ -147,8 +149,8 @@ export function changedPaths(
 
 /**
  * Selects `changed` over the build that decides the inputs at `revision` and logs why each path selected what it did,
- * each broad fallback and the counts; when no build narrows the revision or selection refuses, logs why at warning
- * level and selects nothing.
+ * each broad fallback, each widening left out and the counts; when no build narrows the revision or selection
+ * refuses, logs why at warning level and selects nothing.
  */
 function explainRound(
   log: DaemonLog,
@@ -206,6 +208,9 @@ function logSelection(
   const { paths, fallbacks, counts } = selection;
   for (const report of selection.paths) log.entry(pathText(report));
   for (const fallback of selection.fallbacks) log.entry(fallbackText(fallback));
+  for (const leftOut of selection.wideningsLeftOut) {
+    log.entry(leftOutText(leftOut));
+  }
   log.entry(countsText(selection.counts));
   return {
     directTargets: new Set(
@@ -260,6 +265,10 @@ function stepText(step: ChainStep): string {
 
 function fallbackText(fallback: BroadFallback): string {
   return `broad fallback to the ${fallback.scope} for ${fallback.path}, triggered by ${fallback.trigger}, from ${fallback.workspaces.join(LIST_SEPARATOR)}`;
+}
+
+function leftOutText(leftOut: LeftOutWidening): string {
+  return `widening left out: ${leftOut.dependent} by ${leftOut.kind} (${leftOut.cause}), since ${NON_INPUTS_FILE} declares ${leftOut.file} a non-input through the pattern ${leftOut.pattern}`;
 }
 
 function countsText(counts: SelectionCounts): string {

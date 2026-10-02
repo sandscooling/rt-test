@@ -1316,6 +1316,43 @@ describe("a round's selection over the paths that changed", () => {
     }).toStrictEqual({ names: [true, true] });
   });
 
+  it("D4413: the round's log writes one line for each widening the selection left out, naming its file and the pattern that declares it", async () => {
+    const leftOut = [
+      { file: ".claude/hooks/context.js", pattern: ".claude/**" },
+      { file: "tools/generate.mjs", pattern: "tools/*.mjs" },
+    ];
+    const selection = new StandInNarrowing(
+      selectionOf([], ["a"], {
+        wideningsLeftOut: leftOut.map(({ file, pattern }) => ({
+          dependent: "package-owner",
+          kind: UNCERTAINTY.unparsedSource,
+          cause: `${file} does not parse, so its imports are not known`,
+          file,
+          pattern,
+        })),
+      }),
+    );
+    const change = afterAChange(builtAt(2, selection), {
+      seed: beforeTheChange("a"),
+    });
+    const lines = await running(change.options, async (started) => {
+      await change.nextRound(started);
+      return leftOut.map(({ file, pattern }) => {
+        const naming = started.log.entries.filter((logged) =>
+          logged.includes(file),
+        );
+        return {
+          lines: naming.length,
+          namesPattern: naming.map((logged) => logged.includes(pattern)),
+        };
+      });
+    });
+    expect(lines).toStrictEqual([
+      { lines: 1, namesPattern: [true] },
+      { lines: 1, namesPattern: [true] },
+    ]);
+  });
+
   it("D2668: a workspace the selection picked that holds current results is logged as not run, and one that is due is not", async () => {
     const selection = new StandInNarrowing(selectionOf([], ["alpha", "beta"]));
     const change = afterAChange(
