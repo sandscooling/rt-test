@@ -6457,8 +6457,8 @@
     "id": "D2853",
     "defect": "A link fdir passes over because its realpath fails, such as a dangling one, makes the walk's links not known, so no pattern applies although Vitest finds every file through the live links.",
     "file": "packages/daemon/src/inputs/crawl-links.ts",
-    "old": "  } catch {\n    return undefined;\n  }\n  if (",
-    "new": "  } catch {\n    return \"the link cannot be resolved\";\n  }\n  if ("
+    "old": "  } catch {\n    return undefined;\n  }\n}",
+    "new": "  } catch {\n    return { path, target: path };\n  }\n}"
   },
   {
     "id": "D2854",
@@ -6562,8 +6562,8 @@
     "id": "D2899",
     "defect": "The walk follows directory links Vitest's exclude patterns prune, so a project whose node_modules is itself a link to more than 1000 directory links reads its links as not known and no declared pattern applies.",
     "file": "packages/daemon/src/inputs/crawl-links.ts",
-    "old": "    returnsToFollowed(resolved, followed) ||\n    walk.crawl.prunes(path)\n",
-    "new": "    returnsToFollowed(resolved, followed) ||\n    false\n"
+    "old": "returnsToFollowed(target, followed) || walk.crawl.prunes(path)",
+    "new": "returnsToFollowed(target, followed) || false"
   },
   {
     "id": "D2900",
@@ -11926,5 +11926,54 @@
     "file": "packages/daemon/test/falsification-corpus-findings.ts",
     "old": "    `jobs ended with nothing stored: ${listText(answer.unstoredJobs.map(unstoredJobText))}`,\n",
     "new": ""
+  },
+  {
+    "id": "D4273",
+    "defect": "The walk takes only the first 1000 of a directory's entries, so a subdirectory or a directory link listed after them is never read or followed, the links through it go unrecorded, and a test file Vitest reaches only through one is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "start < entries.length;",
+    "new": "start < 1;"
+  },
+  {
+    "id": "D4274",
+    "defect": "The walk handles the entries it takes from a directory last to first, so the directory's links are reported, and spelled in protection's pattern key, in the reverse of the order the directory lists them.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "of listed) {",
+    "new": "of listed.reverse()) {"
+  },
+  {
+    "id": "D4275",
+    "defect": "A link the walk follows is counted as followed on the way to the links beside it, so a link whose real path holds or lies inside a sibling link's is skipped although the crawl follows both, and a test file Vitest reaches only through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  walk.links.push(path);\n",
+    "new": "  walk.links.push(path);\n  (followed as string[]).push(target);\n"
+  },
+  {
+    "id": "D4276",
+    "defect": "The walk handles a directory's links as each one's resolution finishes, so the links are reported, and spelled in protection's pattern key, in an order that varies from walk to walk instead of the order the directory lists them.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "  const listed = await Promise.all(\n    entries.map(async (entry) => {\n      const path = `${directory.spelled}${entry.name}`;\n      return {\n        entry,\n        path,\n        link: entry.isSymbolicLink() ? await directoryLink(path) : undefined,\n      };\n    }),\n  );\n",
+    "new": "  const listed: { entry: Dirent; path: string; link: DirectoryLink | undefined }[] = [];\n  await Promise.all(\n    entries.map(async (entry) => {\n      const path = `${directory.spelled}${entry.name}`;\n      const link = entry.isSymbolicLink() ? await directoryLink(path) : undefined;\n      listed.push({ entry, path, link });\n    }),\n  );\n"
+  },
+  {
+    "id": "D4277",
+    "defect": "The walk takes a directory's windows of entries last first, so the links listed after its first 1000 entries are reported, and spelled in protection's pattern key, ahead of those listed before them.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "for (let start = 0; start < entries.length; start += MAX_CRAWLED_LINKS) {",
+    "new": "for (let start = Math.floor(Math.max(entries.length - 1, 0) / MAX_CRAWLED_LINKS) * MAX_CRAWLED_LINKS; start >= 0; start -= MAX_CRAWLED_LINKS) {"
+  },
+  {
+    "id": "D4278",
+    "defect": "The walk leaves out the last entry of every 1000 it takes from a directory, so a subdirectory or a directory link listed there is never read or followed, and a test file Vitest reaches only through it is left unprotected.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "entries.slice(start, start + MAX_CRAWLED_LINKS),",
+    "new": "entries.slice(start, start + MAX_CRAWLED_LINKS - 1),"
+  },
+  {
+    "id": "D4279",
+    "defect": "The walk counts a link to a file as a directory link it follows, so the file is stored as a link base, spelled in protection's pattern key and counted toward the 1000-link bound, and a project with more than 1000 links to files below its pattern bases reads its links as not known and no declared pattern applies.",
+    "file": "packages/daemon/src/inputs/crawl-links.ts",
+    "old": "return (await stat(target)).isDirectory() ? { path, target } : undefined;",
+    "new": "await stat(target);\n    return { path, target };"
   }
 ]

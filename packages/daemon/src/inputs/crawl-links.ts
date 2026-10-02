@@ -10,7 +10,10 @@ import { directoryPrefix, projectCrawls, type Crawl } from "./vitest-glob.js";
 
 /** How many directories one crawl's walk reads before it stops, since the links past that point are not known. */
 const MAX_CRAWLED_DIRECTORIES = 200_000;
-/** How many directory links one crawl's walk follows before it stops, since each one is matched on every check. */
+/**
+ * How many directory links one crawl's walk follows before it stops, since each one is matched on every check, and
+ * how many of a directory's entries it takes at a time.
+ */
 const MAX_CRAWLED_LINKS = 1_000;
 /** Protection itself names the pattern picomatch refuses, since it compiles the same patterns. */
 const UNCOMPILED_REASON =
@@ -39,6 +42,14 @@ interface Pending {
   readonly spelled: string;
   /** The real path of each link followed on the way to it. */
   readonly followed: readonly string[];
+}
+
+/** A link that leads to a directory. */
+interface DirectoryLink {
+  /** The link as the crawl spells it. */
+  readonly path: string;
+  /** Where it leads, as the JavaScript `realpath` spells it. */
+  readonly target: string;
 }
 
 interface Walk {
@@ -128,7 +139,11 @@ async function followedLinks(
     : { complete: false, reason: failure };
 }
 
-/** Undefined once the directory's entries are queued, or why the walk cannot go on; one it cannot read holds none. */
+/**
+ * Undefined once the directory's entries are queued, or why the walk cannot go on; one it cannot read holds none.
+ * The entries are taken as many at a time as the walk may follow links, so no more links than that are being
+ * resolved at once.
+ */
 async function readDirectory(
   walk: Walk,
   directory: Pending,
@@ -139,8 +154,38 @@ async function readDirectory(
   } catch {
     return undefined;
   }
-  for (const entry of entries) {
-    const path = `${directory.spelled}${entry.name}`;
+  for (let start = 0; start < entries.length; start += MAX_CRAWLED_LINKS) {
+    const failure = await queueEntries(
+      walk,
+      directory,
+      entries.slice(start, start + MAX_CRAWLED_LINKS),
+    );
+    if (failure !== undefined) return failure;
+  }
+  return undefined;
+}
+
+/**
+ * Queues some of a directory's entries in their order, or says why the walk cannot go on. Their links are resolved
+ * together, since resolving one takes a file call for each part of its path, and each call awaited after another
+ * waits its own turn for a processor on a busy machine.
+ */
+async function queueEntries(
+  walk: Walk,
+  directory: Pending,
+  entries: readonly Dirent[],
+): Promise<string | undefined> {
+  const listed = await Promise.all(
+    entries.map(async (entry) => {
+      const path = `${directory.spelled}${entry.name}`;
+      return {
+        entry,
+        path,
+        link: entry.isSymbolicLink() ? await directoryLink(path) : undefined,
+      };
+    }),
+  );
+  for (const { entry, path, link } of listed) {
     if (entry.isDirectory()) {
       if (!walk.crawl.prunes(path)) {
         walk.pending.push({
@@ -149,33 +194,31 @@ async function readDirectory(
           followed: directory.followed,
         });
       }
-    } else if (entry.isSymbolicLink()) {
-      const failure = await followLink(walk, path, directory.followed);
+    } else if (link !== undefined) {
+      const failure = followLink(walk, link, directory.followed);
       if (failure !== undefined) return failure;
     }
   }
   return undefined;
 }
 
-/** Queues what a directory link leads to, or says why the walk cannot go on; one it cannot resolve leads nowhere. */
-async function followLink(
-  walk: Walk,
-  path: string,
-  followed: readonly string[],
-): Promise<string | undefined> {
-  let resolved: string;
-  let isDirectory: boolean;
+/** The link at `path` when it leads to a directory; one that cannot be resolved leads nowhere. */
+async function directoryLink(path: string): Promise<DirectoryLink | undefined> {
   try {
-    resolved = await javaScriptRealpath(path);
-    isDirectory = (await stat(resolved)).isDirectory();
+    const target = await javaScriptRealpath(path);
+    return (await stat(target)).isDirectory() ? { path, target } : undefined;
   } catch {
     return undefined;
   }
-  if (
-    !isDirectory ||
-    returnsToFollowed(resolved, followed) ||
-    walk.crawl.prunes(path)
-  ) {
+}
+
+/** Queues what a directory link leads to, or says why the walk cannot go on. */
+function followLink(
+  walk: Walk,
+  { path, target }: DirectoryLink,
+  followed: readonly string[],
+): string | undefined {
+  if (returnsToFollowed(target, followed) || walk.crawl.prunes(path)) {
     return undefined;
   }
   walk.links.push(path);
@@ -183,9 +226,9 @@ async function followLink(
     return `the walk below ${walk.from} follows more than ${MAX_CRAWLED_LINKS} directory links`;
   }
   walk.pending.push({
-    opened: resolved,
+    opened: target,
     spelled: directoryPrefix(path),
-    followed: [...followed, resolved],
+    followed: [...followed, target],
   });
   return undefined;
 }

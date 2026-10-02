@@ -1,7 +1,15 @@
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  type Dirent,
+  type PathLike,
+} from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { basename, join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { crawledLinks } from "../src/inputs/crawl-links.js";
 import { testModuleFile } from "../src/inputs/non-inputs.js";
 import { protection } from "../src/inputs/protection.js";
@@ -19,6 +27,34 @@ import {
   slashed,
 } from "./harness.js";
 
+type StandInEntry = Pick<Dirent, "name" | "isDirectory" | "isSymbolicLink">;
+
+/**
+ * A directory named `after-<n>` lists `<n>` plain files that are not on disk before its real entries, so the walk
+ * reaches entries past its first `<n>` however the host orders a listing, without writing the files.
+ */
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const plainFile = (name: string): StandInEntry => ({
+    name,
+    isDirectory: () => false,
+    isSymbolicLink: () => false,
+  });
+  async function readdir(path: PathLike, options?: unknown): Promise<unknown> {
+    const real: readonly unknown[] = await actual.readdir(
+      path,
+      options as Parameters<typeof actual.readdir>[1],
+    );
+    const leading = /^after-(\d+)$/.exec(basename(String(path)))?.[1];
+    if (leading === undefined) return real;
+    const standIns = Array.from({ length: Number(leading) }, (_, index) =>
+      plainFile(`padding-${index}.txt`),
+    );
+    return [...standIns, ...real];
+  }
+  return { ...actual, readdir };
+});
+
 /** A junction on Windows, which needs no privilege; Linux ignores the type and makes a symbolic link. */
 const JUNCTION = "junction";
 /** A directory symbolic link on Windows, which needs the symbolic link privilege or developer mode. */
@@ -33,8 +69,16 @@ const OVER_PICOMATCH_LIMIT = 70_000;
 const RUNAWAY_WALK_TIMEOUT_MS = 60_000;
 /** One more directory link than a crawl's walk follows before its links are not known. */
 const OVER_LINK_BOUND = 1_001;
-/** Making and walking `OVER_LINK_BOUND` links takes over a quarter of Vitest's default 5 s alone, and past it under a loaded suite. */
+/** Making and resolving `OVER_LINK_BOUND` links takes over 2 s of Vitest's default 5 s inside a full suite. */
 const OVER_LINK_BOUND_TIMEOUT_MS = 60_000;
+/** A directory whose listing holds as many stand-in files as the walk takes entries at a time, then its real entries. */
+const PAST_FIRST_ENTRIES = "after-1000";
+/** A directory whose listing holds one stand-in file fewer, so its first real entry is the last the walk takes with them. */
+const ACROSS_FIRST_ENTRIES = "after-999";
+/** A link to a file on Windows, which needs the symbolic link privilege or developer mode; Linux ignores the type. */
+const FILE_SYMLINK = "file";
+/** Twelve directories below its first, so a link to it takes more file calls to resolve than a link to a directory beside it. */
+const DEEP_TARGET = "deep/1/2/3/4/5/6/7/8/9/10/11/12";
 /** Vitest's default exclude. */
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/.git/**"];
 
@@ -288,6 +332,26 @@ function orderedWalk(
   };
 }
 
+/**
+ * The names `directory`, below the root, lists, beside the names of the links a walk from it reports, in the walk's
+ * order, or why its links are not known.
+ */
+async function listedAndFollowed(
+  root: string,
+  directory: string,
+): Promise<{
+  readonly listed: string[];
+  readonly followed: string[] | string;
+}> {
+  const walked = await walk(root, { include: [`${directory}/**/*.test.ts`] });
+  return {
+    listed: readdirSync(join(root, directory)),
+    followed: walked.complete
+      ? walked.links.map((link) => basename(link.spelled))
+      : walked.reason,
+  };
+}
+
 /** Whether each root-relative path is protected, from the discovery a real walk of the layout reports, or why none is. */
 async function protectedThroughWalk(
   root: string,
@@ -498,6 +562,33 @@ describe("the directory links Vitest's crawl follows", () => {
       "elsewhere/w.test.ts": false,
     });
   });
+
+  it("D4279: a link to a file beside a directory link is not a link the crawl follows, so the walk's links hold the directory link alone", async () => {
+    const walked = await inTempDir(async (dir) => {
+      const root = writeLayout(
+        dir,
+        {
+          directories: ["root/src", "root/other"],
+          files: ["root/settings.env"],
+          links: [["root/src/live", "root/other"]],
+        },
+        JUNCTION,
+      );
+      symlinkSync(
+        join(root, "settings.env"),
+        join(root, "src", "settings.env"),
+        FILE_SYMLINK,
+      );
+      return orderedWalk(
+        root,
+        await walk(root, { include: ["src/**/*.test.ts"] }),
+      );
+    });
+    expect(walked).toStrictEqual({
+      complete: true,
+      links: [{ below: "src/live", directory: "other" }],
+    });
+  });
 });
 
 describe("what the crawl passes over, as fdir does with its errors suppressed", () => {
@@ -644,5 +735,169 @@ describe("what the crawl prunes", () => {
       ),
     );
     expect(walked).toStrictEqual({ complete: true, links: [] });
+  });
+});
+
+describe("a directory's entries, taken 1000 at a time", () => {
+  it("D4273: a subdirectory and a directory link listed after a directory's first 1000 entries are read and followed, so the links through them are known", async () => {
+    const walked = await inTempDir(async (dir) => {
+      const root = writeLayout(
+        dir,
+        {
+          directories: [
+            `root/${PAST_FIRST_ENTRIES}/sub`,
+            "root/other",
+            "root/third",
+          ],
+          links: [
+            [`root/${PAST_FIRST_ENTRIES}/direct`, "root/other"],
+            [`root/${PAST_FIRST_ENTRIES}/sub/nested`, "root/third"],
+          ],
+        },
+        JUNCTION,
+      );
+      return orderedWalk(
+        root,
+        await walk(root, { include: [`${PAST_FIRST_ENTRIES}/**/*.test.ts`] }),
+      );
+    });
+    expect(walked).toStrictEqual({
+      complete: true,
+      links: [
+        { below: "after-1000/direct", directory: "other" },
+        { below: "after-1000/sub/nested", directory: "third" },
+      ],
+    });
+  });
+
+  it("D4274: a directory's links are reported in the order the directory lists them", async () => {
+    const outcome = await inTempDir((dir) =>
+      listedAndFollowed(
+        writeLayout(
+          dir,
+          {
+            directories: [
+              "root/src",
+              "root/first",
+              "root/second",
+              "root/third",
+            ],
+            links: [
+              ["root/src/a", "root/first"],
+              ["root/src/b", "root/second"],
+              ["root/src/c", "root/third"],
+            ],
+          },
+          JUNCTION,
+        ),
+        "src",
+      ),
+    );
+    expect(outcome.followed).toStrictEqual(outcome.listed);
+  });
+
+  it("D4276: a link that takes longer to resolve than the links listed after it is still reported in the directory's order", async () => {
+    const outcome = await inTempDir((dir) => {
+      const root = writeLayout(
+        dir,
+        {
+          directories: [
+            "root/src",
+            "root/targets/a",
+            "root/targets/b",
+            "root/targets/c",
+            `root/${DEEP_TARGET}`,
+          ],
+          links: [
+            ["root/src/a", "root/targets/a"],
+            ["root/src/b", "root/targets/b"],
+            ["root/src/c", "root/targets/c"],
+          ],
+        },
+        JUNCTION,
+      );
+      const [firstListed = ""] = readdirSync(join(root, "src"));
+      const firstTarget = join(root, "targets", firstListed);
+      rmSync(firstTarget, { recursive: true });
+      symlinkSync(join(root, DEEP_TARGET), firstTarget, JUNCTION);
+      return listedAndFollowed(root, "src");
+    });
+    expect(outcome.followed).toStrictEqual(outcome.listed);
+  });
+
+  it("D4277: links listed on both sides of a directory's first 1000 entries are reported in the order the directory lists them", async () => {
+    const outcome = await inTempDir((dir) =>
+      listedAndFollowed(
+        writeLayout(
+          dir,
+          {
+            directories: [
+              `root/${ACROSS_FIRST_ENTRIES}`,
+              "root/first",
+              "root/second",
+              "root/third",
+            ],
+            links: [
+              [`root/${ACROSS_FIRST_ENTRIES}/a`, "root/first"],
+              [`root/${ACROSS_FIRST_ENTRIES}/b`, "root/second"],
+              [`root/${ACROSS_FIRST_ENTRIES}/c`, "root/third"],
+            ],
+          },
+          JUNCTION,
+        ),
+        ACROSS_FIRST_ENTRIES,
+      ),
+    );
+    expect(outcome.followed).toStrictEqual(outcome.listed);
+  });
+
+  it("D4278: a directory link listed as the 1000th entry of a directory is followed, so the link is known", async () => {
+    const walked = await inTempDir(async (dir) => {
+      const root = writeLayout(
+        dir,
+        {
+          directories: [`root/${ACROSS_FIRST_ENTRIES}`, "root/other"],
+          links: [[`root/${ACROSS_FIRST_ENTRIES}/last`, "root/other"]],
+        },
+        JUNCTION,
+      );
+      return orderedWalk(
+        root,
+        await walk(root, {
+          include: [`${ACROSS_FIRST_ENTRIES}/**/*.test.ts`],
+        }),
+      );
+    });
+    expect(walked).toStrictEqual({
+      complete: true,
+      links: [{ below: "after-999/last", directory: "other" }],
+    });
+  });
+
+  it("D4275: a link is followed whatever the links beside it lead to, so two sibling links, one into the other's target, are both known", async () => {
+    const walked = await inTempDir(async (dir) => {
+      const root = writeLayout(
+        dir,
+        {
+          directories: ["root/src", "root/other/inner"],
+          links: [
+            ["root/src/whole", "root/other"],
+            ["root/src/part", "root/other/inner"],
+          ],
+        },
+        JUNCTION,
+      );
+      return orderedWalk(
+        root,
+        await walk(root, { include: ["src/**/*.test.ts"] }),
+      );
+    });
+    expect(walked).toStrictEqual({
+      complete: true,
+      links: [
+        { below: "src/part", directory: "other/inner" },
+        { below: "src/whole", directory: "other" },
+      ],
+    });
   });
 });
