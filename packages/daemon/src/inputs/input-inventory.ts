@@ -16,7 +16,10 @@ export const DIGEST_ENCODING = "hex";
 const MAX_INVENTORY_DEPTH = 64;
 /** Files and directories one inventory visits before it stops, incomplete. */
 const MAX_INVENTORY_ENTRIES = 200_000;
-/** Files hashed at once, so a large tree neither holds every file open nor starves the answers. */
+/**
+ * Reads one pool has in flight at once, a walk's file hashes or a batch's named reads, so neither holds every file
+ * open nor starves the answers.
+ */
 const HASH_CONCURRENCY = 16;
 /** Nothing at the path: no entry, or one below a file, which Linux reports as ENOTDIR and Windows as ENOENT. */
 const MISSING_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"]);
@@ -209,8 +212,9 @@ async function hashFiles(
 }
 
 /**
- * Runs `read` over each of `paths`, `HASH_CONCURRENCY` at a time. Once `signal` aborts or a read rejects it begins
- * no other, and rejects with the first such abort or failure once the reads then in flight have ended.
+ * Runs `read` over each of `paths`, `HASH_CONCURRENCY` at a time, checking `signal` before it begins each. Once it
+ * finds the signal aborted or a read has rejected it begins no other, and rejects with the first of those once the
+ * reads then in flight have ended. An abort after the last path began is left to `read`.
  */
 export async function readTogether(
   paths: readonly string[],

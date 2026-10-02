@@ -44,11 +44,14 @@ describe("reading one entry", () => {
   });
 });
 
-/** `count` empty files in `root`, each with a base name of its own. */
+/** `count` file names, each its own. */
+function fileNames(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `n${index}.ts`);
+}
+
+/** `count` empty files in `root`, named by `fileNames`. */
 function writeFiles(root: string, count: number): void {
-  for (let index = 0; index < count; index += 1) {
-    writeFileSync(join(root, `n${index}.ts`), "");
-  }
+  for (const name of fileNames(count)) writeFileSync(join(root, name), "");
 }
 
 /**
@@ -120,10 +123,20 @@ describe(
       ).catch(() => undefined);
       failed.fire();
       await new Promise((resolve) => setImmediate(resolve));
-      const begunAfterTheFailure = begun.length;
       released.fire();
       await pool;
-      expect(begunAfterTheFailure).toBe(16);
+      expect(begun.length).toBe(16);
+    });
+
+    it("D4292: an inventory of twenty files holds every one of them as an input", async () => {
+      const held = await inTempDir(async (root) => {
+        writeFiles(root, 20);
+        const inventory = await inventoryOf(root, (path) => realLstat(path));
+        return inventory.ok
+          ? [...inventory.inputs.keys()].sort()
+          : inventory.reason;
+      });
+      expect(held).toStrictEqual(fileNames(20).sort());
     });
 
     it("D4291: an inventory that meets a file it cannot read gives no inputs at all, the reason naming the file", async () => {

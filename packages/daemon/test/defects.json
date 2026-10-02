@@ -12076,7 +12076,7 @@
   },
   {
     "id": "D4290",
-    "defect": "The pool begins the reads still waiting after the tracker's signal aborted, so a stop waits for a read of every path a query named or a walk listed, each failing in turn.",
+    "defect": "The pool begins the reads still waiting after the tracker's signal aborted, so a stop waits for a read of every path a query named, each failing in turn.",
     "file": "packages/daemon/src/inputs/input-inventory.ts",
     "old": "        signal.throwIfAborted();\n",
     "new": ""
@@ -12087,5 +12087,12 @@
     "file": "packages/daemon/src/inputs/input-inventory.ts",
     "old": "  if (failures.length > 0) throw failures[0];\n",
     "new": ""
+  },
+  {
+    "id": "D4292",
+    "defect": "Each worker of the pool takes one path and ends, so the pool reads only its first sixteen paths: an inventory of a larger tree is taken as complete without the rest, and a query naming a folder of more than sixteen inputs resolves with the rest unread.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "    while (next < paths.length && failures.length === 0) {",
+    "new": "    if (next < paths.length && failures.length === 0) {"
   }
 ]
