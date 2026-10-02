@@ -8,6 +8,7 @@ import {
 } from "./input-filter.js";
 import {
   readEntryDigest,
+  readTogether,
   takeInventory,
   type InputRead,
   type InventoryScope,
@@ -166,7 +167,9 @@ export class QueuedReads {
 
   /**
    * `filter` is the last reconciliation's; without it, or an established input set, nothing is read, and each path
-   * marks its jobs as a cause, since no read vouches for it as an input.
+   * marks its jobs as a cause, since no read vouches for it as an input. The batch's named reads follow its event
+   * reads, unless one of those lost the input set, and run together, each changing the state in the turn its own
+   * read returns.
    */
   async read(
     batch: readonly QueuedPath[],
@@ -189,9 +192,10 @@ export class QueuedReads {
       await filter.check(unknown, this.#signal);
       this.#git.report(filter);
     }
+    const named: string[] = [];
     for (const [path, kind] of batch) {
       if (kind === NAMED_READ) {
-        if (!filter.excludes(path)) await this.#readNamed(filter, path);
+        named.push(path);
         continue;
       }
       const quiet = this.#quiet.has(path);
@@ -199,6 +203,12 @@ export class QueuedReads {
       else await this.#readPath(filter, path, kind);
       await this.#readListed(filter, path, quiet);
     }
+    if (!this.#state.established) return;
+    await readTogether(
+      named.filter((path) => !filter.excludes(path)),
+      this.#signal,
+      (path) => this.#readNamed(filter, path),
+    );
   }
 
   /**
@@ -292,6 +302,7 @@ export class QueuedReads {
     const entry = await readEntryDigest(path, this.#signal);
     if (entry.kind === "unreadable") this.#unreadNamed.set(path, entry.reason);
     else this.#unreadNamed.delete(path);
+    if (entry.kind === "directory" && this.#state.hasDirectory(path)) return;
     if (entry.kind !== "input") {
       this.#recordAll(this.#state.remove(relative, path));
       return;

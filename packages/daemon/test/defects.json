@@ -9642,8 +9642,8 @@
     "id": "D3375",
     "defect": "A named read reads a file the filter excludes, so a status of a git-ignored file makes it an input and moves the revision.",
     "file": "packages/daemon/src/inputs/queued-reads.ts",
-    "old": "        if (!filter.excludes(path)) await this.#readNamed(filter, path);",
-    "new": "        await this.#readNamed(filter, path);"
+    "old": "      named.filter((path) => !filter.excludes(path)),",
+    "new": "      named,"
   },
   {
     "id": "D3376",
@@ -12003,5 +12003,96 @@
     "file": "packages/daemon/src/inputs/crawl-links.ts",
     "old": "return (await stat(target)).isDirectory() ? { path, target } : undefined;",
     "new": "await stat(target);\n    return { path, target };"
+  },
+  {
+    "id": "D4280",
+    "defect": "A batch's named reads are taken one after another, each begun only once the one before it has ended, so beside a full machine a status of a folder of many inputs waits a time slice an input and takes tens of seconds or fails at the client's bound.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    await readTogether(\n      named.filter((path) => !filter.excludes(path)),\n      this.#signal,\n      (path) => this.#readNamed(filter, path),\n    );",
+    "new": "    for (const path of named) {\n      if (!filter.excludes(path)) await this.#readNamed(filter, path);\n    }"
+  },
+  {
+    "id": "D4281",
+    "defect": "A batch's named reads all begin at once, outside the pool the inventory hashes with, so a status of a large folder opens every input under it together and starves the daemon's other answers.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    await readTogether(\n      named.filter((path) => !filter.excludes(path)),\n      this.#signal,\n      (path) => this.#readNamed(filter, path),\n    );",
+    "new": "    await Promise.all(\n      named\n        .filter((path) => !filter.excludes(path))\n        .map((path) => this.#readNamed(filter, path)),\n    );"
+  },
+  {
+    "id": "D4282",
+    "defect": "The pool runs a read for every path at once, so a reconciliation of a large tree holds every file open together and starves the daemon's answers.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "    Array.from({ length: Math.min(HASH_CONCURRENCY, paths.length) }, worker),",
+    "new": "    Array.from({ length: paths.length }, worker),"
+  },
+  {
+    "id": "D4283",
+    "defect": "A named read is taken where it stands in its batch, so one queued ahead of an event's read begins before that read has ended, and whether it reads the disk as the event's read left it depends on which of the two arrived first.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "        named.push(path);",
+    "new": "        if (!filter.excludes(path)) await this.#readNamed(filter, path);"
+  },
+  {
+    "id": "D4284",
+    "defect": "A named read applies what it read a turn after its read returned, so a change of protection landing in between lets it keep the older read of a file the walk would have read anew, and the tracker holds content the disk no longer has with no event to correct it.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind === \"unreadable\") this.#unreadNamed.set(path, entry.reason);",
+    "new": "    await new Promise((resolve) => setImmediate(resolve));\n    if (entry.kind === \"unreadable\") this.#unreadNamed.set(path, entry.reason);"
+  },
+  {
+    "id": "D4285",
+    "defect": "A named read that finds a directory where the tracker already holds one drops every input under it and marks the job open across it, so the inputs stay missing until the next reconciliation and whether they do depends on which named read of the batch returned first.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind === \"directory\" && this.#state.hasDirectory(path)) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D4286",
+    "defect": "A named read that finds any directory changes nothing, so a held input replaced by a directory keeps its held read and marks no job, and a run across the replacement ends fingerprinted.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (entry.kind === \"directory\" && this.#state.hasDirectory(path)) return;",
+    "new": "    if (entry.kind === \"directory\") return;"
+  },
+  {
+    "id": "D4287",
+    "defect": "A batch's named reads are taken after one of its event reads lost the input set, so they read and write against a set no read vouches for while a reconciliation is about to read it whole.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "    if (!this.#state.established) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D4288",
+    "defect": "The pool goes on to begin the reads still waiting after one of its reads has failed, so an inventory that met an unreadable file hashes the rest of the tree before it gives up.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "    while (next < paths.length && failures.length === 0) {",
+    "new": "    while (next < paths.length) {"
+  },
+  {
+    "id": "D4289",
+    "defect": "The pool rejects as soon as one read fails, while others are still in flight, so a batch ends and the reconciliation its failure asks for runs with a named read still to apply, which then writes an older read over the reconciliation's.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "        failures.push(error);",
+    "new": "        failures.push(error);\n        throw error;"
+  },
+  {
+    "id": "D4290",
+    "defect": "The pool begins the reads still waiting after the tracker's signal aborted, so a stop waits for a read of every path a query named, each failing in turn.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "        signal.throwIfAborted();\n",
+    "new": ""
+  },
+  {
+    "id": "D4291",
+    "defect": "The pool swallows a failed read, so an inventory that met a file it could not read is taken as complete without it and results read current against an input set that leaves the file out.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "  if (failures.length > 0) throw failures[0];\n",
+    "new": ""
+  },
+  {
+    "id": "D4292",
+    "defect": "Each worker of the pool takes one path and ends, so the pool reads only its first sixteen paths: an inventory of a larger tree is taken as complete without the rest, and a query naming a folder of more than sixteen inputs resolves with the rest unread.",
+    "file": "packages/daemon/src/inputs/input-inventory.ts",
+    "old": "    while (next < paths.length && failures.length === 0) {",
+    "new": "    if (next < paths.length && failures.length === 0) {"
   }
 ]

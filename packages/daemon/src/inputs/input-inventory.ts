@@ -16,7 +16,10 @@ export const DIGEST_ENCODING = "hex";
 const MAX_INVENTORY_DEPTH = 64;
 /** Files and directories one inventory visits before it stops, incomplete. */
 const MAX_INVENTORY_ENTRIES = 200_000;
-/** Files hashed at once, so a large tree neither holds every file open nor starves the answers. */
+/**
+ * Reads one pool has in flight at once, a walk's file hashes or a batch's named reads, so neither holds every file
+ * open nor starves the answers.
+ */
 const HASH_CONCURRENCY = 16;
 /** Nothing at the path: no entry, or one below a file, which Linux reports as ENOTDIR and Windows as ENOENT. */
 const MISSING_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"]);
@@ -194,27 +197,48 @@ async function hashFiles(
   files: readonly string[],
 ): Promise<InputReads> {
   const inputs = new Map<string, InputRead>();
+  await readTogether(files, walk.signal, async (path) => {
+    const entry = await readEntryDigest(path, walk.signal);
+    if (entry.kind === "unreadable") {
+      throw new Incomplete(
+        `${label(walk, path)} cannot be read: ${entry.reason}`,
+      );
+    }
+    if (entry.kind === "input") {
+      inputs.set(relativePosixPath(walk.root, path), entry.read);
+    }
+  });
+  return inputs;
+}
+
+/**
+ * Runs `read` over each of `paths`, `HASH_CONCURRENCY` at a time, checking `signal` before it begins each. Once it
+ * finds the signal aborted or a read has rejected it begins no other, and rejects with the first of those once the
+ * reads then in flight have ended. An abort after the last path began is left to `read`.
+ */
+export async function readTogether(
+  paths: readonly string[],
+  signal: AbortSignal,
+  read: (path: string) => Promise<void>,
+): Promise<void> {
   let next = 0;
-  let failed = false;
+  const failures: unknown[] = [];
   const worker = async (): Promise<void> => {
-    while (next < files.length && !failed) {
-      const path = files[next] as string;
+    while (next < paths.length && failures.length === 0) {
+      const path = paths[next] as string;
       next += 1;
-      walk.signal.throwIfAborted();
-      const entry = await readEntryDigest(path, walk.signal);
-      if (entry.kind === "unreadable") {
-        failed = true;
-        throw new Incomplete(
-          `${label(walk, path)} cannot be read: ${entry.reason}`,
-        );
-      }
-      if (entry.kind === "input") {
-        inputs.set(relativePosixPath(walk.root, path), entry.read);
+      try {
+        signal.throwIfAborted();
+        await read(path);
+      } catch (error) {
+        failures.push(error);
       }
     }
   };
-  await Promise.all(Array.from({ length: HASH_CONCURRENCY }, worker));
-  return inputs;
+  await Promise.all(
+    Array.from({ length: Math.min(HASH_CONCURRENCY, paths.length) }, worker),
+  );
+  if (failures.length > 0) throw failures[0];
 }
 
 /**
