@@ -1394,10 +1394,10 @@
   },
   {
     "id": "D2014",
-    "defect": "The selection policy version stays at 8, so a selection reports the version from before a bare extends was located as TypeScript locates it and a file: URL reached its path.",
+    "defect": "The selection policy version stays at 9, so a selection reports the version from before the widening of a declared non-input was left out.",
     "file": "packages/daemon/src/selection/selection-types.ts",
-    "old": "export const SELECTION_POLICY_VERSION = 9;",
-    "new": "export const SELECTION_POLICY_VERSION = 8;"
+    "old": "export const SELECTION_POLICY_VERSION = 10;",
+    "new": "export const SELECTION_POLICY_VERSION = 9;"
   },
   {
     "id": "D2045",
@@ -2497,5 +2497,68 @@
     "file": "packages/daemon/src/inputs/narrowed-inputs.ts",
     "old": "    this.#placeUnplaced(paths.filter((path) => !this.#placed.has(path)));",
     "new": "    if (this.#placed.size === 0)\n      this.#placeUnplaced(paths.filter((path) => !this.#placed.has(path)));"
+  },
+  {
+    "id": "D4404",
+    "defect": "The widening a source file raises when it does not parse names no file, so selection cannot tell it came from a declared non-input and still follows it.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "      real.ok ? inputLabel(scan, label, real.path) : undefined,\n",
+    "new": ""
+  },
+  {
+    "id": "D4405",
+    "defect": "A widening names its file by the scan's label even when the file's real path has another, so a declared pattern in the scan's spelling leaves out the widening of a file the inputs hold under its real path.",
+    "file": "packages/daemon/src/selection/workspace-graph.ts",
+    "old": "  return rootLabel(scan, realFile) === label ? label : undefined;",
+    "new": "  return label;"
+  },
+  {
+    "id": "D4406",
+    "defect": "Selection asks no declaration about the file a widening names, so one unparsed file under a declared non-input still makes a change select every workspace that depends on the file's workspace.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    input.dependencies.uncertainties,\n    declared,\n",
+    "new": "    input.dependencies.uncertainties,\n    () => undefined,\n"
+  },
+  {
+    "id": "D4407",
+    "defect": "Selection leaves out every widening that names a file, declared or not, so a change no longer selects the workspace whose unparsed source may import it.",
+    "file": "packages/daemon/src/selection/widening-links.ts",
+    "old": "    if (file !== undefined && pattern !== undefined) {",
+    "new": "    if (file !== undefined) {"
+  },
+  {
+    "id": "D4408",
+    "defect": "Selection asks about a widening's file with a matcher that ignores the protection, so the widening of a test module a declared pattern matches is left out and a change it may import selects nothing.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    input.dependencies.uncertainties,\n    declared,\n",
+    "new": "    input.dependencies.uncertainties,\n    declaredNonInputs(input.nonInputs.declaration, {\n      ...input.nonInputs.protection,\n      protects: () => false,\n    }),\n"
+  },
+  {
+    "id": "D4409",
+    "defect": "Selection matches a widening's file against the declared patterns while the protection says no pattern applies, so a widening is left out though every file stays an input.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    input.dependencies.uncertainties,\n    declared,\n",
+    "new": "    input.dependencies.uncertainties,\n    declaredNonInputs(\n      input.nonInputs.declaration,\n      input.nonInputs.protection.applies\n        ? input.nonInputs.protection\n        : {\n            applies: true,\n            files: new Set(),\n            patternKey: \"\",\n            protects: () => false,\n          },\n    ),\n"
+  },
+  {
+    "id": "D4410",
+    "defect": "Selection reads a widening's file from the start of its cause when it names none, so a plugin-format file under a declared pattern no longer widens.",
+    "file": "packages/daemon/src/selection/widening-links.ts",
+    "old": "    const { file } = widening;",
+    "new": "    const file = widening.file ?? widening.cause.split(\" \")[0];"
+  },
+  {
+    "id": "D4411",
+    "defect": "A selection reports no widening it left out, so nothing says which declared non-input stopped a widening or through which pattern.",
+    "file": "packages/daemon/src/selection/select-tests.ts",
+    "old": "    wideningsLeftOut: context.leftOut,",
+    "new": "    wideningsLeftOut: [],"
+  },
+  {
+    "id": "D4412",
+    "defect": "A widening selection leaves out is still followed, so a workspace's narrowed inputs hold another workspace's sources through the unparsed file of a declared non-input.",
+    "file": "packages/daemon/src/selection/widening-links.ts",
+    "old": "      leftOut.push({ ...widening, file, pattern });\n      continue;\n",
+    "new": "      leftOut.push({ ...widening, file, pattern });\n"
   }
 ]

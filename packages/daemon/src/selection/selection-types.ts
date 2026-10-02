@@ -9,7 +9,7 @@ import type {
 import type { ReportedAlias } from "../vitest/selection-facts.js";
 
 /** Raise whenever a rule change can select a different set for the same inputs. */
-export const SELECTION_POLICY_VERSION = 9;
+export const SELECTION_POLICY_VERSION = 10;
 
 export const EDGE_PRODUCER = {
   manifest: "manifest",
@@ -60,6 +60,25 @@ export interface DependencyUncertainty {
   readonly dependent: string;
   readonly kind: UncertaintyKind;
   readonly cause: string;
+  /**
+   * Root-relative and `/`-separated, as the inputs name it: the one source file whose failed read or parse is the
+   * whole cause. Absent for any other cause, and for a file the scan reached by a path that is not its real one.
+   */
+  readonly file?: string;
+}
+
+/** A widening selection does not follow: the file that raised it is a declared non-input, which no test reads. */
+export interface LeftOutWidening extends DependencyUncertainty {
+  readonly file: string;
+  /** The `rt-test.json` pattern that declares `file` a non-input. */
+  readonly pattern: string;
+}
+
+/** A dependent reached from a workspace, through an edge or a widening that makes it depend on every workspace. */
+export interface DependentLink {
+  readonly workspace: string;
+  readonly step: ChainStep;
+  readonly widening: DependencyUncertainty | undefined;
 }
 
 export interface DependencyInformation {
@@ -245,6 +264,8 @@ export interface Selection {
   readonly fallbacks: readonly BroadFallback[];
   /** The uncertainties some selection reason passed through. */
   readonly widenings: readonly DependencyUncertainty[];
+  /** The uncertainties no selection reason could pass through, each with the pattern that declares its file. */
+  readonly wideningsLeftOut: readonly LeftOutWidening[];
   readonly counts: SelectionCounts;
   readonly notRead: readonly UnreadWorkspaceSource[];
   readonly notRunnable: readonly NotRunnableWorkspace[];

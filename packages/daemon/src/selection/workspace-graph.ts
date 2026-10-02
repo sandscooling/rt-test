@@ -459,6 +459,18 @@ function linkTarget(
   }
 }
 
+/**
+ * The label when the file's real path has the same one, since the inputs name a file by its real path: a file
+ * reached through a link, or listed in another letter case, has no label the declaration can be asked about.
+ */
+function inputLabel(
+  scan: Scan,
+  label: string,
+  realFile: string,
+): string | undefined {
+  return rootLabel(scan, realFile) === label ? label : undefined;
+}
+
 /** Relative specifiers resolve against the file's real directory, as Node and Vite resolve a linked file's imports. */
 function addSourceFileEdges(
   scan: Scan,
@@ -468,16 +480,17 @@ function addSourceFileEdges(
 ): void {
   const label = rootLabel(scan, file);
   const found = observedParse(scan, label, () => readSourceImports(file));
+  const real = realPath(file);
   if (!found.ok) {
     uncertain(
       scan.graph,
       dependent,
       found.kind,
       `${label} ${found.reason}, so its imports are not known`,
+      real.ok ? inputLabel(scan, label, real.path) : undefined,
     );
     return;
   }
-  const real = realPath(file);
   const base = dirname(real.ok ? real.path : file);
   for (const specifier of found.specifiers) {
     const detail = `${label} imports ${JSON.stringify(specifier.text)}`;

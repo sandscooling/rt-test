@@ -22,9 +22,10 @@ import {
   TRIGGER,
   type BroadFallback,
   type ChangedPathReport,
-  type ChainStep,
   type DependencyUncertainty,
+  type DependentLink,
   type FallbackScope,
+  type LeftOutWidening,
   type NotRunnableWorkspace,
   type PathSelection,
   type SelectableWorkspace,
@@ -36,17 +37,11 @@ import {
   type SelectionReason,
   type TriggerKind,
 } from "./selection-types.js";
+import { followedWidenings } from "./widening-links.js";
 
 const CONFIG_FILES = new Set([...VITEST_CONFIG_FILES, ...VITE_CONFIG_FILES]);
 const CHANGE_PATH_SEPARATORS = [posix.sep, win32.sep];
 const WALK_KEY_SEPARATOR = "\0";
-
-/** A dependent reached from a workspace, through an edge or a widening that makes it depend on every workspace. */
-interface DependentLink {
-  readonly workspace: string;
-  readonly step: ChainStep;
-  readonly widening: DependencyUncertainty | undefined;
-}
 
 interface Chain {
   readonly from: string;
@@ -57,6 +52,7 @@ interface SelectionContext {
   readonly input: SelectionInput;
   readonly dependents: ReadonlyMap<string, readonly DependentLink[]>;
   readonly wideningLinks: readonly DependentLink[];
+  readonly leftOut: readonly LeftOutWidening[];
   /** Runnable and not runnable, in input order. */
   readonly vitestPaths: readonly string[];
   readonly notRunnable: ReadonlyMap<string, NotRunnableWorkspace>;
@@ -131,19 +127,19 @@ function selectionContext(input: SelectionInput): SelectionContext {
     });
     dependents.set(edge.dependency, links);
   }
-  const wideningLinks = input.dependencies.uncertainties.map((widening) => ({
-    workspace: widening.dependent,
-    step: {
-      workspace: widening.dependent,
-      via: widening.kind,
-      detail: widening.cause,
-    },
-    widening,
-  }));
+  const declared = declaredNonInputs(
+    input.nonInputs.declaration,
+    input.nonInputs.protection,
+  );
+  const widenings = followedWidenings(
+    input.dependencies.uncertainties,
+    declared,
+  );
   return {
     input,
     dependents,
-    wideningLinks,
+    wideningLinks: widenings.links,
+    leftOut: widenings.leftOut,
     vitestPaths: [
       ...input.workspaces.map(({ workspace }) => workspace.path),
       ...input.notRunnable.map(({ workspace }) => workspace.path),
@@ -153,10 +149,7 @@ function selectionContext(input: SelectionInput): SelectionContext {
     ),
     usedWidenings: new Set(),
     walks: new Map(),
-    declared: declaredNonInputs(
-      input.nonInputs.declaration,
-      input.nonInputs.protection,
-    ),
+    declared,
   };
 }
 
@@ -454,6 +447,7 @@ function assemble(
     widenings: input.dependencies.uncertainties.filter((widening) =>
       context.usedWidenings.has(widening),
     ),
+    wideningsLeftOut: context.leftOut,
     counts,
     notRead: [...input.dependencies.notRead, ...input.vitestListingNotRead],
     notRunnable: input.notRunnable,

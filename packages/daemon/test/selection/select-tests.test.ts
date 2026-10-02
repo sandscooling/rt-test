@@ -670,13 +670,13 @@ describe("the selection policy version", () => {
   });
 });
 
+const DECLARATION = "rt-test.json";
+
+function declaring(...patterns: string[]): Record<string, string> {
+  return { [DECLARATION]: JSON.stringify({ nonInputs: patterns }) };
+}
+
 describe("declared non-inputs", () => {
-  const DECLARATION = "rt-test.json";
-
-  function declaring(...patterns: string[]): Record<string, string> {
-    return { [DECLARATION]: JSON.stringify({ nonInputs: patterns }) };
-  }
-
   /** The path reports for `change` with `pattern` declared, and with no `rt-test.json`. */
   async function pathReports(
     pattern: string,
@@ -784,12 +784,12 @@ describe("declared non-inputs", () => {
     ).toEqual(DECLARATION_FALLBACK);
   });
 
-  it("D2014: a selection carries policy version 9", async () => {
+  it("D2014: a selection carries policy version 10", async () => {
     const outcome = await select({ vitest: { app: {} } }, [
       "packages/app/src/x.ts",
     ]);
     expect("policyVersion" in outcome ? outcome.policyVersion : outcome).toBe(
-      9,
+      10,
     );
   });
 
@@ -1514,5 +1514,177 @@ describe("where a build places a run's changed paths", () => {
         "packages/a",
       ),
     ).toStrictEqual({ inside: ["packages/a/src/a.ts"], widened: [refused] });
+  });
+});
+
+const UNPARSED = 'import { from "../x";\n';
+const LIB_CHANGE = "packages/lib/src/x.ts";
+const APP1_CHANGE = "packages/app1/src/x.ts";
+const HOOK = ".claude/hooks/context.js";
+const IMPORTS_ROOT_SCRIPT =
+  'import "../../scripts/shared.js";\nexport default {};\n';
+/**
+ * Two Vitest workspaces whose configs each import a root script, so each depends on the root package workspace, which
+ * holds a source file that does not parse.
+ */
+const THROUGH_ROOT: Consumer = {
+  vitest: { app1: {}, app2: {} },
+  files: {
+    "scripts/shared.ts": "export const shared = 1;\n",
+    "packages/app1/vitest.config.ts": IMPORTS_ROOT_SCRIPT,
+    "packages/app2/vitest.config.ts": IMPORTS_ROOT_SCRIPT,
+    [HOOK]: UNPARSED,
+  },
+};
+
+/** `shape` with an `rt-test.json` declaring `patterns`. */
+function withDeclaration(shape: Consumer, ...patterns: string[]): Consumer {
+  return { ...shape, files: { ...shape.files, ...declaring(...patterns) } };
+}
+
+/** The Vitest workspace `packages/app` holding `file`, beside the plain package `packages/lib` it does not depend on. */
+function appHolding(file: string, text: string): Consumer {
+  return { vitest: { app: {} }, plain: ["lib"], files: { [file]: text } };
+}
+
+describe("the widening of a source file the scan could not read or parse", () => {
+  it("D4406: a change in one workspace does not select another through the widening of a source file a declared pattern matches, and the selection's widenings do not list it", async () => {
+    const reached = (outcome: Settled<SelectionOutcome>) =>
+      from(outcome, ({ workspaces, widenings }) => ({
+        selected: workspaces.map(({ path }) => path),
+        widenings: widenings.map(({ kind }) => kind),
+      }));
+    expect({
+      declared: reached(
+        await select(withDeclaration(THROUGH_ROOT, ".claude/**"), [
+          APP1_CHANGE,
+        ]),
+      ),
+      undeclared: reached(await select(THROUGH_ROOT, [APP1_CHANGE])),
+    }).toStrictEqual({
+      declared: { selected: ["packages/app1"], widenings: [] },
+      undeclared: {
+        selected: ["packages/app1", "packages/app2"],
+        widenings: ["unparsed-source"],
+      },
+    });
+  });
+
+  it("D4407: selection follows the widening of a source file that no declared pattern matches", async () => {
+    expect(
+      await select(
+        withDeclaration(
+          appHolding("packages/app/src/broken.js", UNPARSED),
+          "docs/**",
+        ),
+        [LIB_CHANGE],
+      ).then(selectedPaths),
+    ).toStrictEqual(["packages/app"]);
+  });
+
+  it("D4408: selection follows the widening of a test module the discovery lists, though a declared pattern matches it", async () => {
+    expect(
+      await select(
+        withDeclaration(
+          appHolding("packages/app/unit.test.ts", UNPARSED),
+          "packages/app/**",
+        ),
+        [LIB_CHANGE],
+      ).then(selectedPaths),
+    ).toStrictEqual(["packages/app"]);
+  });
+
+  it("D4409: while a discovered workspace does not report its selection facts, selection follows the widening of a source file a declared pattern matches", async () => {
+    const shape = appHolding("packages/app/tools/broken.js", UNPARSED);
+    expect(
+      await select(
+        withDeclaration(
+          {
+            ...shape,
+            vitest: { ...shape.vitest, legacy: { factsUnreported: true } },
+          },
+          "packages/app/tools/**",
+        ),
+        [LIB_CHANGE],
+      ).then(selectedPaths),
+    ).toStrictEqual(["packages/app"]);
+  });
+
+  it("D4410: selection follows a widening that names no file, as a plugin-format file's does, though a declared pattern matches that file", async () => {
+    expect(
+      await select(
+        withDeclaration(
+          appHolding("packages/app/tools/Panel.vue", "<template />\n"),
+          "packages/app/tools/**",
+        ),
+        [LIB_CHANGE],
+      ).then(selectedPaths),
+    ).toStrictEqual(["packages/app"]);
+  });
+
+  it("D4411: a selection lists each widening it left out with its file and the declared pattern that matches it", async () => {
+    const generator = "tools/generate.mjs";
+    const outcome = await select(
+      withDeclaration(
+        {
+          ...THROUGH_ROOT,
+          files: { ...THROUGH_ROOT.files, [generator]: UNPARSED },
+        },
+        "docs/**",
+        ".claude/**",
+        "tools/*.mjs",
+      ),
+      [APP1_CHANGE],
+    );
+    expect(
+      from(outcome, ({ wideningsLeftOut }) =>
+        [...wideningsLeftOut].sort((left, right) =>
+          left.file < right.file ? -1 : 1,
+        ),
+      ),
+    ).toStrictEqual([
+      {
+        dependent: ".",
+        kind: "unparsed-source",
+        cause: expect.stringContaining(HOOK),
+        file: HOOK,
+        pattern: ".claude/**",
+      },
+      {
+        dependent: ".",
+        kind: "unparsed-source",
+        cause: expect.stringContaining(generator),
+        file: generator,
+        pattern: "tools/*.mjs",
+      },
+    ]);
+  });
+
+  it("D4412: a workspace's narrowed inputs leave out another workspace's source that only the widening of a declared non-input reaches", async () => {
+    const apart: Consumer = {
+      vitest: { a: {}, b: {} },
+      files: {
+        "packages/a/src/a.ts": "export const a = 1;\n",
+        "packages/b/src/b.ts": "export const b = 1;\n",
+        "packages/a/tools/broken.js": UNPARSED,
+      },
+    };
+    const inputs = ["packages/a/src/a.ts", "packages/b/src/b.ts"];
+    expect({
+      declared: await narrowedInTree(
+        consumer(withDeclaration(apart, "packages/a/tools/**")),
+        inputs,
+      ),
+      undeclared: await narrowedInTree(consumer(apart), inputs),
+    }).toStrictEqual({
+      declared: {
+        "packages/a": ["packages/a/src/a.ts"],
+        "packages/b": ["packages/b/src/b.ts"],
+      },
+      undeclared: {
+        "packages/a": ["packages/a/src/a.ts", "packages/b/src/b.ts"],
+        "packages/b": ["packages/b/src/b.ts"],
+      },
+    });
   });
 });
