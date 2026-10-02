@@ -1,0 +1,11 @@
+{
+  "name": "@falsification-corpus/app",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/cart.mjs"
+  },
+  "dependencies": {
+    "@falsification-corpus/lib": "workspace:*"
+  }
+}

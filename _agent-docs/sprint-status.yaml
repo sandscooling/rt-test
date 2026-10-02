@@ -40,7 +40,7 @@ sprint-2: done
 2-7-agent-hook: done
 2-7b-agent-edits-never-hold: done
 
-sprint-3: in-progress
+sprint-3: done
 3-1-defect-definitions: done
 3-2-transform-experiments: done
 3-3-verdicts-from-facts: done
@@ -50,5 +50,4 @@ sprint-3: in-progress
 3-5-schedule-falsification: done
 3-5b-canary-reading: done
 3-6-canary-gate: done
-3-7-falsification-corpus: ready-for-dev
-3-8-own-defects-to-rt-test: backlog
+3-7-falsification-corpus: done
