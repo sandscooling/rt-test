@@ -722,6 +722,21 @@ describe("a dependency build in an executor process of its own", () => {
   );
 
   it(
+    "D4264: no parse record is left in the directory it was created in once a build's executor has ended without its reply",
+    async () => {
+      const left = await inTempDir(async (dir) => {
+        const consumer = buildConsumer(dir);
+        await withBuildHook({ at: PARSED_FILE, action: "exit" }, () =>
+          buildIn(consumer),
+        );
+        return readdirSync(consumer.records);
+      });
+      expect(left).toStrictEqual([]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "D2243: a record an earlier daemon left in the directory does not stop a later build that creates its own there",
     async () => {
       const outcome = await inTempDir(async (dir) => {

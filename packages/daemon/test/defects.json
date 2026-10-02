@@ -11691,9 +11691,16 @@
   },
   {
     "id": "D4263",
-    "defect": "The reason of a parse record that cannot be created leaves out the directory it was to be created in, so the log and the failed build say only that no record could be created.",
+    "defect": "The reason of a parse record that cannot be created no longer names the directory itself, so the directory shows only where the file-system error that follows happens to quote a path.",
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      const reason = `${NO_PARSE_RECORD_REASON} (${parseRecordDirectory}): ${errorText(error)}`;",
     "new": "      const reason = `${NO_PARSE_RECORD_REASON}: ${errorText(error)}`;"
+  },
+  {
+    "id": "D4264",
+    "defect": "A build that ends without its reply, stopped, crashed, ended at its bound or never sent, leaves its parse record behind, since the record is removed only after a build that produced its dependencies.",
+    "file": "packages/daemon/src/daemon/executor.ts",
+    "old": "      return reply.type === \"dependencies-built\"\n        ? { ended: true, value: reply.dependencies }\n        : { ended: false, reason: failureReason(reply) };\n    } finally {\n      this.#removeRecord(parseRecord);\n    }\n",
+    "new": "      if (reply.type !== \"dependencies-built\") {\n        return { ended: false, reason: failureReason(reply) };\n      }\n      this.#removeRecord(parseRecord);\n      return { ended: true, value: reply.dependencies };\n    } catch (error) {\n      throw error;\n    }\n"
   }
 ]
