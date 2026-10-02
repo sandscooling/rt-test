@@ -593,7 +593,7 @@ export class StandInInputs implements TrackedInputs {
     this.#windows.recordPath(path);
   }
 
-  /** Records, for each job running, a cause that names no input, as the tracker records a watcher failure. */
+  /** Records, for each job running, a cause that names no input, as the tracker records a lost input set. */
   recordCause(cause: string): void {
     this.#windows.recordCause(cause);
   }

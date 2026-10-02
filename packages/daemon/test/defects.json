@@ -3034,8 +3034,8 @@
     "id": "D1903",
     "defect": "A watch that cannot open asks for another reconciliation while one runs, whose walk fails the same way, so the first reconciliation never ends.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    if (!this.#reconciling) this.#requestReconciliation(reason);\n  }\n\n  #markUnhealthy",
-    "new": "    this.#requestReconciliation(reason);\n  }\n\n  #markUnhealthy"
+    "old": "    this.#health.fail(reason);\n    if (!this.#reconciling) this.#requestReconciliation(reason);",
+    "new": "    this.#health.fail(reason);\n    this.#requestReconciliation(reason);"
   },
   {
     "id": "D1904",
@@ -3151,10 +3151,10 @@
   },
   {
     "id": "D1920",
-    "defect": "A watcher that went unhealthy during a job is not recorded against it, so a job that spanned lost events is stored under its digest once a reconciliation has made the watcher healthy again.",
+    "defect": "A watcher failure records a cause on every running job, so a job that spanned lost events is stored not fingerprinted though the reconciliation after them found nothing moved.",
     "file": "packages/daemon/src/inputs/input-tracker.ts",
-    "old": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n    this.#jobs.recordCause(reason);\n",
-    "new": "    this.#log.entry(`input watcher unhealthy: ${reason}`);\n"
+    "old": "    this.#health.fail(reason);\n    this.#requestReconciliation(reason);",
+    "new": "    this.#health.fail(reason);\n    this.#jobs.recordCause(reason);\n    this.#requestReconciliation(reason);"
   },
   {
     "id": "D1921",
@@ -3162,6 +3162,125 @@
     "file": "packages/daemon/src/inputs/input-tracker.ts",
     "old": "    this.#reconcileRequested = true;\n    if (this.#reconciling) return;",
     "new": "    this.#reconcileRequested = true;\n    this.#jobs.recordCause(reason);\n    if (this.#reconciling) return;"
+  },
+  {
+    "id": "D4387",
+    "defect": "Lost events reported while a reconciliation runs ask for no other, so a change the running one had already read past is never found, and the job ends not fingerprinted for an unhealthy watcher with no rerun owed.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#health.fail(reason);\n    this.#requestReconciliation(reason);",
+    "new": "    this.#health.fail(reason);\n    if (!this.#reconciling) this.#requestReconciliation(reason);"
+  },
+  {
+    "id": "D4388",
+    "defect": "A reconciliation that reads an input with its content unchanged and its modification time moved queues no read of it, so a job running across the write keeps its fingerprint.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#ledger.acceptHeld(this.#reads.enqueueRestamped(restamped));\n",
+    "new": ""
+  },
+  {
+    "id": "D4389",
+    "defect": "A reconciliation marks the running jobs for an input it reads restamped and queues no read of it, so the read held is never replaced and every later reconciliation marks every running job for the same write.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#ledger.acceptHeld(this.#reads.enqueueRestamped(restamped));",
+    "new": "      for (const path of restamped) this.#jobs.recordPath(path);"
+  },
+  {
+    "id": "D4390",
+    "defect": "A reconciliation looks for restamped files among the inputs only, so a listed file the inputs leave out, rewritten with the same content during a job, leaves the job fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-state.ts",
+    "old": "      ...restampedPaths(this.#listed, listed),\n",
+    "new": ""
+  },
+  {
+    "id": "D4391",
+    "defect": "The reads a reconciliation queues are counted without raising the waits already placed, so a job's end and a wait for the inputs to settle resolve before those reads, and the job is judged without their marks.",
+    "file": "packages/daemon/src/inputs/input-jobs.ts",
+    "old": "    this.#waiters = this.#waiters.map((wait) => ({\n      ...wait,\n      through: this.#accepted,\n    }));\n",
+    "new": ""
+  },
+  {
+    "id": "D4392",
+    "defect": "A reconciliation in which a watch could not open reads the watcher healthy, so a job that ends while the root is unwatched is fingerprinted.",
+    "file": "packages/daemon/src/inputs/watcher-health.ts",
+    "old": "    if (failure !== undefined) {\n      this.#failure = failure;\n    } else if (established) {",
+    "new": "    if (established) {"
+  },
+  {
+    "id": "D4393",
+    "defect": "A reconciliation that could not establish the input set reads the watcher healthy when no watch failed in it, though nothing has read what the lost events stood for.",
+    "file": "packages/daemon/src/inputs/watcher-health.ts",
+    "old": "    } else if (established) {",
+    "new": "    } else {"
+  },
+  {
+    "id": "D4394",
+    "defect": "The log writes the unhealthy line for every watcher failure, so a flood of lost events writes one line each.",
+    "file": "packages/daemon/src/inputs/watcher-health.ts",
+    "old": "    if (this.#logged.has(reason)) return;\n",
+    "new": ""
+  },
+  {
+    "id": "D4395",
+    "defect": "The reasons logged are never forgotten, so a watcher failure after the watcher turned healthy again writes no line.",
+    "file": "packages/daemon/src/inputs/watcher-health.ts",
+    "old": "      this.#logged.clear();\n",
+    "new": ""
+  },
+  {
+    "id": "D4396",
+    "defect": "The log remembers only the last reason it wrote, so two reasons repeating in turn while the watcher stays unhealthy write a line each time.",
+    "file": "packages/daemon/src/inputs/watcher-health.ts",
+    "old": "    this.#logged.add(reason);",
+    "new": "    this.#logged.clear();\n    this.#logged.add(reason);"
+  },
+  {
+    "id": "D4397",
+    "defect": "A reconciliation that queues reads of restamped inputs logs no line naming them, so the log gives no cause for the job those reads mark.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      if (restamped.length > 0) {",
+    "new": "      if (false) {"
+  },
+  {
+    "id": "D4398",
+    "defect": "The line naming the inputs a reconciliation reads again names every one, so a rewrite of a whole tree writes one log line holding thousands of paths.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "with their content unchanged: ${namedList(restamped)}",
+    "new": "with their content unchanged: ${restamped.join(\", \")}"
+  },
+  {
+    "id": "D4399",
+    "defect": "A watcher failure records a cause on a running run, so a run during which one nameless event arrived is stored not fingerprinted though its reconciliation found nothing moved, and every test of its workspace reads unknown.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#health.fail(reason);\n    this.#requestReconciliation(reason);",
+    "new": "    this.#health.fail(reason);\n    this.#jobs.recordCause(reason);\n    this.#requestReconciliation(reason);"
+  },
+  {
+    "id": "D4400",
+    "defect": "A reconciliation that reads an input restamped queues no read of it, so a run during which an input inside its workspace's inputs was rewritten with the same content is stored under its fingerprint and never runs again.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "      this.#ledger.acceptHeld(this.#reads.enqueueRestamped(restamped));\n",
+    "new": ""
+  },
+  {
+    "id": "D4401",
+    "defect": "An input set that cannot be established records no cause on the running jobs, so a job that spanned it has nothing in its window to say its inputs could not be vouched for.",
+    "file": "packages/daemon/src/inputs/input-tracker.ts",
+    "old": "    this.#establishFailure = reason;\n    this.#jobs.recordCause(reason);\n",
+    "new": "    this.#establishFailure = reason;\n"
+  },
+  {
+    "id": "D4402",
+    "defect": "An event read while no input set is established records nothing on the running jobs, so a job has nothing in its window for a change no read vouched for.",
+    "file": "packages/daemon/src/inputs/queued-reads.ts",
+    "old": "      for (const [path] of batch) this.#jobs.recordCause(this.#label(path));\n",
+    "new": ""
+  },
+  {
+    "id": "D4403",
+    "defect": "`clearFailures` keeps the directories whose watch could not open, so the next reconciliation does not try them again, finds no watch failure, and reads the watcher healthy with the root's tree unwatched, and every job after it is fingerprinted.",
+    "file": "packages/daemon/src/inputs/input-watcher.ts",
+    "old": "    this.#failures = [];\n    this.#unopened.clear();",
+    "new": "    this.#failures = [];"
   },
   {
     "id": "D1922",
@@ -3634,7 +3753,7 @@
   },
   {
     "id": "D2076",
-    "defect": "A reconciliation that finds an input's times moved and its content unchanged replaces the held read, so a later event is judged against a read taken after the write.",
+    "defect": "A reconciliation that finds an input's times moved and its content unchanged replaces the held read, so the read it queues for the input is judged against a read taken after the write, finds nothing moved and marks no job.",
     "file": "packages/daemon/src/inputs/input-state.ts",
     "old": "        (unread(path) || !unmoved(before, read));",
     "new": "        unread(path);"
@@ -5433,7 +5552,7 @@
   },
   {
     "id": "D2728",
-    "defect": "A job whose window recorded a watcher failure, and which ended with no fingerprint computable, is judged as having had its inputs change while it ran, so a workspace whose fingerprint cannot be computed runs once more at the same revision.",
+    "defect": "A job whose window recorded a lost input set, and which ended with no fingerprint computable, is judged as having had its inputs change while it ran, so a workspace whose fingerprint cannot be computed runs once more at the same revision.",
     "file": "packages/daemon/src/inputs/input-jobs.ts",
     "old": "        changedWhileRunning: unavailable === undefined,\n",
     "new": "        changedWhileRunning: true,\n"

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import {
   appendFileSync,
   cpSync,
@@ -8,6 +9,7 @@ import {
   realpathSync,
   symlinkSync,
   writeFileSync,
+  type FSWatcher,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
@@ -231,6 +233,19 @@ export async function waitUntil(
 }
 
 export { onPlatform } from "./on-platform.js";
+
+/** A watch that opens and never reports an event, as one whose events are all lost would. */
+export function silentWatch(): FSWatcher {
+  return Object.assign(new EventEmitter(), {
+    close: () => undefined,
+    ref() {
+      return this;
+    },
+    unref() {
+      return this;
+    },
+  }) as unknown as FSWatcher;
+}
 
 export const WAITING = "waiting";
 
