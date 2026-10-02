@@ -2,20 +2,17 @@ import type { WatchEventType } from "node:fs";
 import { realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { DaemonLog } from "../daemon/daemon-log.js";
-import type { InputFacts, InputsNotNarrowed } from "../query/answer.js";
-import type {
-  TestDiscovery,
-  WorkspaceDiscovery,
-} from "../vitest/discover-tests.js";
+import type { InputFacts } from "../query/answer.js";
+import type { TestDiscovery } from "../vitest/discover-tests.js";
 import { errorText } from "../vitest/error-text.js";
 import { relativePosixPath } from "../vitest/find-workspaces.js";
 import {
   currentInputs,
   inputFacts,
   unavailableReason,
+  type CurrentInputs,
   type TrackerCondition,
 } from "./current-inputs.js";
-import type { FingerprintResult, ProjectInputs } from "./fingerprint.js";
 import { DeclaredNonInputs } from "./declared-non-inputs.js";
 import type { StartEnvironment } from "./environment-digest.js";
 import { GitFiles } from "./git-files.js";
@@ -32,6 +29,7 @@ import {
 import {
   EventLedger,
   JobWindows,
+  namedList,
   type JobMark,
   type JobVerdict,
 } from "./input-jobs.js";
@@ -47,6 +45,7 @@ import {
   RECONCILE_INTERVAL_MS,
   ReconcileSchedule,
 } from "./reconcile-schedule.js";
+import { WatcherHealth } from "./watcher-health.js";
 
 const IGNORE_FILE = ".gitignore";
 const NON_INPUTS_CHANGED_REASON = `${NON_INPUTS_FILE}, which declares the non-inputs, changed`;
@@ -62,31 +61,7 @@ export interface InputTrackerOptions {
   readonly startEnvironment: StartEnvironment;
 }
 
-/** What a query reads of the inputs, taken at one moment. */
-export interface CurrentInputs {
-  readonly facts: InputFacts;
-  /** Why no fingerprint can be computed for any workspace; absent when each is computed on its own. */
-  readonly unavailable?: string;
-  /** Why every file stays an input, while `rt-test.json` cannot be used or its patterns do not apply; absent otherwise. */
-  readonly nonInputsUnusable?: string;
-  /** Why no workspace's inputs are narrowed to those its selection includes; absent otherwise. */
-  readonly inputsNotNarrowed?: InputsNotNarrowed;
-  /**
-   * The committed inputs every fingerprint here is computed from, with the held reads of the listed files they leave
-   * out, which no fingerprint takes; undefined when none can be computed.
-   */
-  readonly snapshot: ProjectInputs | undefined;
-  workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
-  discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
-  /**
-   * Why a file the discovery protects by path that the inputs leave out may have changed at or after `since`, a time
-   * in ms; undefined when none did.
-   */
-  protectedFileChangedSince(
-    discovery: TestDiscovery,
-    since: number,
-  ): string | undefined;
-}
+export type { CurrentInputs } from "./current-inputs.js";
 
 /** What the lifecycle needs of the tracker, so a stand-in can take its place. */
 export interface TrackedInputs {
@@ -112,7 +87,8 @@ export interface TrackedInputs {
   nonInputsDeclaration(): NonInputsDeclaration;
   /**
    * Resolves once every event seen before the call has been read and no reconciliation runs, or at once when the
-   * tracker has stopped. Events arriving after the call do not hold it.
+   * tracker has stopped. Events arriving after the call do not hold it, except that a reconciliation it waits out
+   * may queue reads, and it then waits for those and for the events seen before them.
    */
   settled(): Promise<void>;
   /**
@@ -149,7 +125,8 @@ export interface TrackedInputs {
 /**
  * Tracks the consumer's inputs for one daemon life: reads them all in a reconciliation at start, on a watcher
  * failure, a git move, an ignore-rule change or a change to `rt-test.json`, and `RECONCILE_INTERVAL_MS` after the
- * last one ended; between reconciliations, re-reads only the paths events name. A declared non-input is never an input,
+ * last one ended; between reconciliations, re-reads only the paths events name and those a reconciliation read with
+ * their content unchanged but their size or a time moved. A declared non-input is never an input,
  * and no declared pattern applies until the lifecycle gives a discovery that reports what the patterns may not remove.
  */
 export class InputTracker implements TrackedInputs {
@@ -183,7 +160,7 @@ export class InputTracker implements TrackedInputs {
   #inFlight = 0;
   #protecting = 0;
   #establishFailure: string | undefined;
-  #watchFailure: string | undefined;
+  readonly #health: WatcherHealth;
   #lastReconciledAt: string | undefined;
   #stopped = false;
   readonly #firstReconciled: Promise<void>;
@@ -199,6 +176,7 @@ export class InputTracker implements TrackedInputs {
     this.#declarationFile = join(this.#root, NON_INPUTS_FILE);
     this.#exclusions = exclusions;
     this.#log = log;
+    this.#health = new WatcherHealth(log);
     this.#declared = new DeclaredNonInputs(this.#root, log, startEnvironment);
     this.#state = new InputState(this.#root);
     this.#listed = new ListedFiles(this.#root);
@@ -304,7 +282,10 @@ export class InputTracker implements TrackedInputs {
     return this.#jobs.open(view.unavailable, view.snapshot?.comparedDigests);
   }
 
-  /** Judges the job once every event seen before its end has been read and any reconciliation running has ended. */
+  /**
+   * Judges the job once every event seen before its end has been read and any reconciliation running has ended, with
+   * the reads that reconciliation queued.
+   */
   async endJob(mark: JobMark): Promise<JobVerdict> {
     await this.settled();
     const view = this.current();
@@ -425,20 +406,14 @@ export class InputTracker implements TrackedInputs {
   }
 
   #watchFailed(reason: string): void {
-    this.#markUnhealthy(reason);
+    this.#health.fail(reason);
     this.#requestReconciliation(reason);
   }
 
   /** A reconciliation reopening the same watch would fail the same way, so one running asks for no other. */
   #cannotWatch(reason: string): void {
-    this.#markUnhealthy(reason);
+    this.#health.fail(reason);
     if (!this.#reconciling) this.#requestReconciliation(reason);
-  }
-
-  #markUnhealthy(reason: string): void {
-    this.#watchFailure = reason;
-    this.#log.entry(`input watcher unhealthy: ${reason}`);
-    this.#jobs.recordCause(reason);
   }
 
   #requestReconciliation(reason: string): void {
@@ -515,6 +490,7 @@ export class InputTracker implements TrackedInputs {
     if (inventory.ok) {
       this.#watcher.keepDirectories(new Set(inventory.directories));
       const unread = this.#reads.queuedLabels();
+      const restamped = this.#state.restamped(inventory.inputs, listed.reads);
       const changed = [
         ...this.#state.establish(
           inventory.inputs,
@@ -525,15 +501,20 @@ export class InputTracker implements TrackedInputs {
       ];
       this.#commit();
       for (const path of changed) this.#jobs.recordPath(path);
+      this.#ledger.acceptHeld(this.#reads.enqueueRestamped(restamped));
       this.#establishFailure = undefined;
       this.#log.entry(
         `input reconciliation ended: ${inventory.inputs.size} inputs, ${changed.length} changed, revision ${this.#state.revision}`,
       );
+      if (restamped.length > 0) {
+        this.#log.entry(
+          `input reconciliation reads again ${restamped.length} inputs moved in size or time with their content unchanged: ${namedList(restamped)}`,
+        );
+      }
     } else {
       this.#inputSetLost(inventory.reason);
     }
-    const failures = this.#watcher.failures;
-    this.#watchFailure = failures.length === 0 ? undefined : failures[0];
+    this.#health.settle(this.#watcher.failures, inventory.ok);
     this.#lastReconciledAt = new Date().toISOString();
   }
 
@@ -610,7 +591,7 @@ export class InputTracker implements TrackedInputs {
       lastReconciledAt: this.#lastReconciledAt,
       reconciling: this.#reconciling,
       establishFailure: this.#establishFailure,
-      watchFailure: this.#watchFailure,
+      watchFailure: this.#health.failure,
       protecting: this.#protecting > 0,
       pending: this.#reads.pending + this.#inFlight,
     };

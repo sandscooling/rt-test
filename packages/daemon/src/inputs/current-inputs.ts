@@ -7,7 +7,10 @@ import {
   type InputFacts,
   type InputsNotNarrowed,
 } from "../query/answer.js";
-import type { WorkspaceDiscovery } from "../vitest/discover-tests.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../vitest/discover-tests.js";
 import type { CountedEnvironment } from "./carried-variables.js";
 import {
   discoveryFingerprint,
@@ -17,7 +20,6 @@ import {
   type FingerprintResult,
   type ProjectInputs,
 } from "./fingerprint.js";
-import type { CurrentInputs } from "./input-tracker.js";
 import {
   NARROWING,
   narrowingAt,
@@ -30,6 +32,32 @@ const RECONCILING_REASON = "a reconciliation of the inputs is running";
 const STOPPED_REASON = "the daemon is stopping";
 const PROTECTING_REASON =
   "a change of protection is finding the files a declared pattern no longer hides";
+
+/** What a query reads of the inputs, taken at one moment. */
+export interface CurrentInputs {
+  readonly facts: InputFacts;
+  /** Why no fingerprint can be computed for any workspace; absent when each is computed on its own. */
+  readonly unavailable?: string;
+  /** Why every file stays an input, while `rt-test.json` cannot be used or its patterns do not apply; absent otherwise. */
+  readonly nonInputsUnusable?: string;
+  /** Why no workspace's inputs are narrowed to those its selection includes; absent otherwise. */
+  readonly inputsNotNarrowed?: InputsNotNarrowed;
+  /**
+   * The committed inputs every fingerprint here is computed from, with the held reads of the listed files they leave
+   * out, which no fingerprint takes; undefined when none can be computed.
+   */
+  readonly snapshot: ProjectInputs | undefined;
+  workspaceFingerprint(entry: WorkspaceDiscovery): FingerprintResult;
+  discoveryFingerprint(discovery: TestDiscovery): FingerprintResult;
+  /**
+   * Why a file the discovery protects by path that the inputs leave out may have changed at or after `since`, a time
+   * in ms; undefined when none did.
+   */
+  protectedFileChangedSince(
+    discovery: TestDiscovery,
+    since: number,
+  ): string | undefined;
+}
 
 /** The tracker's state that decides whether a fingerprint can be computed now. */
 export interface TrackerCondition {

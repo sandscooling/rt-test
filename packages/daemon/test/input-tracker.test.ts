@@ -47,8 +47,13 @@ import {
   type EntryDigest,
   type InputRead,
 } from "../src/inputs/input-inventory.js";
-import { JobWindows, type JobVerdict } from "../src/inputs/input-jobs.js";
+import {
+  JobWindows,
+  type JobMark,
+  type JobVerdict,
+} from "../src/inputs/input-jobs.js";
 import { InputTracker } from "../src/inputs/input-tracker.js";
+import { WatcherHealth } from "../src/inputs/watcher-health.js";
 import {
   declaredNonInputs,
   readNonInputs,
@@ -87,6 +92,7 @@ import {
   projectFacts,
   runTempRoot,
   settle,
+  silentWatch,
   within,
 } from "./harness.js";
 
@@ -423,18 +429,11 @@ async function leavesFingerprint(
   return tracked.fingerprint() === before;
 }
 
-/** A watch that opens and never reports an event, as one whose events are all lost would. */
-function silentWatch(): FSWatcher {
-  return Object.assign(new EventEmitter(), {
-    close: () => undefined,
-    ref() {
-      return this;
-    },
-    unref() {
-      return this;
-    },
-  }) as unknown as FSWatcher;
-}
+/** The reason the watcher gives for an event that names no file. */
+const LOST_EVENTS =
+  "the file watcher reported that it lost events, so changes it did not name may have been missed";
+const WATCHER_UNHEALTHY_LINE = "input watcher unhealthy: ";
+const READS_AGAIN_LINE = "input reconciliation reads again ";
 
 interface CapturedWatches {
   /** Each watch's listener, so a test can deliver an event the file system never raised. */
@@ -744,6 +743,20 @@ function deliver(
     watches.listeners[watches.paths.indexOf(realpathSync.native(root))];
   if (listener === undefined) throw new Error(`no watch opened on ${root}`);
   listener(kind, name);
+}
+
+/** Delivers an event naming no file through the watch opened on `root`, as Windows reports a batch of events it lost. */
+function loseEvents(watches: CapturedWatches, root: string): void {
+  deliver(watches, root, null as unknown as string, "rename");
+}
+
+/** The verdict of a job during which the tracker read a change to `path`, and to nothing else. */
+function changedWhileRunning(path: string): JobVerdict {
+  return {
+    fingerprinted: false,
+    reason: `its inputs changed while it ran: ${path}`,
+    changedWhileRunning: true,
+  };
 }
 
 type ReadChange = (read: InputRead) => InputRead;
@@ -1162,26 +1175,70 @@ describe("a job's inputs", { timeout: DAEMON_TEST_TIMEOUT_MS }, () => {
     expect(outcome).toStrictEqual({ before: undefined, after: true });
   });
 
-  it("D1920: a job during which the watcher reported lost events is not fingerprinted, even once a reconciliation has made it healthy again", async () => {
+  it("D1920: a job during which the watcher reported lost events is fingerprinted, with nothing recorded in its window, once the reconciliation after them has found nothing moved", async () => {
     const outcome = await inTempDir(async (root) => {
       writeTree(root, { "src/a.ts": "" });
-      const { listeners } = capturingWatches();
+      const watches = silentCapturedWatches();
       try {
         return await tracking(root, async ({ tracker }) => {
           const mark = tracker.beginJob();
-          listeners[0]?.("rename", null as unknown as string);
-          await tracker.endJob(tracker.beginJob());
-          await drained(tracker);
+          loseEvents(watches, root);
+          const afterLoss = tracker.facts().watcher.state;
+          const verdict = await tracker.endJob(mark);
           return {
+            afterLoss,
+            verdict,
+            paths: [...mark.window.paths],
+            causes: [...mark.window.causes],
             watcher: tracker.facts().watcher.state,
-            fingerprinted: (await tracker.endJob(mark)).fingerprinted,
           };
         });
       } finally {
         vi.mocked(watch).mockReset();
       }
     });
-    expect(outcome).toStrictEqual({ watcher: "healthy", fingerprinted: false });
+    expect(outcome).toStrictEqual({
+      afterLoss: "unhealthy",
+      verdict: { fingerprinted: true },
+      paths: [],
+      causes: [],
+      watcher: "healthy",
+    });
+  });
+
+  it("D4387: lost events reported while a reconciliation runs cost another one, so a change written after the first read its file is found and marks the job", async () => {
+    const verdict = await inTempDir(async (root) => {
+      writeTree(root, { "src/a.ts": "" });
+      const watches = silentCapturedWatches();
+      let armed = false;
+      const recording = memoryLog();
+      const log: MemoryLog = {
+        ...recording,
+        error: (context, error) => recording.error(context, error),
+        entry(message) {
+          recording.entry(message);
+          if (!armed || !message.startsWith(RECONCILIATION_ENDED)) return;
+          armed = false;
+          appendFileSync(join(root, "src", "a.ts"), "export {};\n");
+          loseEvents(watches, root);
+        },
+      };
+      try {
+        return await tracking(
+          root,
+          async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            armed = true;
+            loseEvents(watches, root);
+            return tracker.endJob(mark);
+          },
+          { log },
+        );
+      } finally {
+        vi.mocked(watch).mockReset();
+      }
+    });
+    expect(verdict).toStrictEqual(changedWhileRunning("src/a.ts"));
   });
 
   it("D1921: a job during which a reconciliation ran and found no change is fingerprinted", async () => {
@@ -1549,28 +1606,32 @@ describe(
       expect(fingerprinted).toBe(false);
     });
 
-    it("D2076: once a reconciliation finds an input's times moved and its content unchanged, an event on it is judged against the read before, so it marks the job", async () => {
-      const fingerprinted = await inTempDir(async (root) => {
+    it("D2076: a reconciliation an hour later that finds only an input's change time moved keeps the read before it, so the read it queues for the input marks the job running across it", async () => {
+      const verdict = await inTempDir(async (root) => {
         const file = oneInput(root);
-        modifiedAt(file, 60_000);
+        const modified = modifiedAt(file, -AN_HOUR_MS);
         const watches = silentCapturedWatches();
         try {
           return await withFakeClock(() =>
             tracking(root, async ({ tracker }) => {
-              modifiedAt(file, 120_000);
-              await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
-              await tracker.endJob(tracker.beginJob());
               const mark = tracker.beginJob();
-              deliver(watches, root, INPUT);
-              await drained(tracker);
-              return (await tracker.endJob(mark)).fingerprinted;
+              const heldChange = statSync(file, { bigint: true }).ctimeNs;
+              // Repeated until the change time has moved, for the coarse clock the reverted edit's test above names.
+              do {
+                utimesSync(file, new Date(), modified);
+              } while (statSync(file, { bigint: true }).ctimeNs === heldChange);
+              // An hour on, the reconciliation's own read is taken long after that write, so a read judged against it
+              // would find nothing moved.
+              vi.setSystemTime(Date.now() + AN_HOUR_MS);
+              loseEvents(watches, root);
+              return tracker.endJob(mark);
             }),
           );
         } finally {
           vi.mocked(watch).mockReset();
         }
       });
-      expect(fingerprinted).toBe(false);
+      expect(verdict).toStrictEqual(changedWhileRunning(INPUT));
     });
 
     it("D2077: a walk of a renamed directory an hour later leaves an event on an input in it judged against the read before the walk, so it marks the job", async () => {
@@ -4249,12 +4310,12 @@ describe(
 );
 
 describe("a job's verdict", () => {
-  it("D2728: a job during which a watcher failure was recorded, and that ended with no fingerprint computable, is not judged as having had its inputs change while it ran", () => {
-    const failure = "the watcher failed: ENOSPC";
+  it("D2728: a job during which a lost input set was recorded, and that ended with no fingerprint computable, is not judged as having had its inputs change while it ran", () => {
+    const lost = "the input set could not be established: src cannot be read";
     const windows = new JobWindows();
     const mark = windows.open(undefined);
-    windows.recordCause(failure);
-    const verdict = windows.close(mark, failure);
+    windows.recordCause(lost);
+    const verdict = windows.close(mark, lost);
     expect(
       "changedWhileRunning" in verdict && verdict.changedWhileRunning,
     ).toBe(false);
@@ -5354,6 +5415,429 @@ describe(
         }
       });
       expect(unmoved).toBe(true);
+    });
+  },
+);
+
+/** A file one directory past the 64 levels an inventory reads, so a reconciliation that meets it establishes no input set. */
+const PAST_DEPTH_BOUND = `${Array(65).fill("d").join("/")}/x.ts`;
+
+/**
+ * Tracks `root`, holding the input `src/a.ts`, over silent watches, opens a job, writes a directory past the depth
+ * bound and reports lost events, so the reconciliation they ask for cannot establish the input set. Hands `body` the
+ * tracker, the job's mark and the watches once that reconciliation has ended.
+ */
+async function afterLostInputSet<T>(
+  root: string,
+  body: (
+    tracker: InputTracker,
+    mark: JobMark,
+    watches: CapturedWatches,
+  ) => Promise<T>,
+): Promise<T> {
+  writeTree(root, { "src/a.ts": "" });
+  const watches = silentCapturedWatches();
+  try {
+    return await tracking(root, async ({ tracker }) => {
+      const mark = tracker.beginJob();
+      writeTree(root, { [PAST_DEPTH_BOUND]: "" });
+      loseEvents(watches, root);
+      await tracker.settled();
+      return body(tracker, mark, watches);
+    });
+  } finally {
+    vi.mocked(watch).mockReset();
+  }
+}
+
+/**
+ * Tracks `root`, holding `inputs` with no content, over silent watches, moves each one's modification time back an
+ * hour, reports lost events, and returns the log's lines naming the inputs the reconciliation reads again.
+ */
+async function readsAgainLines(
+  root: string,
+  inputs: readonly string[],
+): Promise<string[]> {
+  writeTree(root, Object.fromEntries(inputs.map((input) => [input, ""])));
+  const watches = silentCapturedWatches();
+  try {
+    return await tracking(root, async ({ tracker, log }) => {
+      for (const input of inputs) modifiedAt(join(root, input), -AN_HOUR_MS);
+      loseEvents(watches, root);
+      await tracker.settled();
+      return log.entries.filter((entry) => entry.startsWith(READS_AGAIN_LINE));
+    });
+  } finally {
+    vi.mocked(watch).mockReset();
+  }
+}
+
+describe(
+  "a watcher failure and the reconciliation after it",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    const INPUT = "src/a.ts";
+
+    it("D4388: an input a reconciliation reads with its content unchanged and its modification time moved is read again, which marks the job running across it by the input's path", async () => {
+      const verdict = await inTempDir(async (root) => {
+        writeTree(root, { [INPUT]: "export const a = 1;\n" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            modifiedAt(join(root, INPUT), -AN_HOUR_MS);
+            loseEvents(watches, root);
+            return tracker.endJob(mark);
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(verdict).toStrictEqual(changedWhileRunning(INPUT));
+    });
+
+    it("D4389: the read a reconciliation queues for an input whose modification time moved becomes the read held, so the next reconciliation reads nothing again and leaves the job running across it fingerprinted", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { [INPUT]: "export const a = 1;\n" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker, log }) => {
+            modifiedAt(join(root, INPUT), -AN_HOUR_MS);
+            loseEvents(watches, root);
+            await tracker.settled();
+            const mark = tracker.beginJob();
+            loseEvents(watches, root);
+            const afterLoss = tracker.facts().watcher.state;
+            const verdict = await tracker.endJob(mark);
+            return {
+              afterLoss,
+              verdict,
+              readAgain: log.entries.filter((entry) =>
+                entry.startsWith(READS_AGAIN_LINE),
+              ).length,
+            };
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        afterLoss: "unhealthy",
+        verdict: { fingerprinted: true },
+        readAgain: 1,
+      });
+    });
+
+    it("D4390: a listed setup file git ignores that a reconciliation reads with its content unchanged and its modification time moved is read again, which marks the job running across it by its listed spelling", async () => {
+      const verdict = await inTempDir(async (root) => {
+        ignoredSetupRepository(root);
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(
+            root,
+            async ({ tracker }) => {
+              const mark = tracker.beginJob();
+              modifiedAt(join(root, IGNORED_SETUP), -AN_HOUR_MS);
+              loseEvents(watches, root);
+              return tracker.endJob(mark);
+            },
+            listingSetup(root, IGNORED_SETUP),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(verdict).toStrictEqual(IGNORED_SETUP_CHANGED);
+    });
+
+    it("D4391: a job's end and a wait for the inputs to settle, both placed while a reconciliation runs, stay pending while the read that reconciliation queued is held, and the job's verdict then carries that read's mark", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { [INPUT]: "export const a = 1;\n" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            modifiedAt(join(root, INPUT), -AN_HOUR_MS);
+            const held = holdingReadsOf(basename(INPUT));
+            try {
+              loseEvents(watches, root);
+              const ending = tracker.endJob(mark);
+              const settling = tracker.settled();
+              await held.entered;
+              const whileHeld = {
+                ended: await settlesWithinATurn(ending),
+                settled: await settlesWithinATurn(settling),
+              };
+              held.release();
+              return { ...whileHeld, verdict: await ending };
+            } finally {
+              held.release();
+            }
+          });
+        } finally {
+          vi.mocked(readEntryDigest).mockReset();
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        ended: false,
+        settled: false,
+        verdict: changedWhileRunning(INPUT),
+      });
+    });
+
+    it("D4392: a job that ends after the root's watch failed and could not be opened again is not fingerprinted, the reason saying the watcher is unhealthy, and is not judged as having had its inputs change", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { [INPUT]: "" });
+        const opened = new Map<string, FSWatcher>();
+        let refusing = false;
+        vi.mocked(watch).mockImplementation(((path: PathLike) => {
+          if (refusing) {
+            throw Object.assign(
+              new Error(`EACCES: permission denied, watch '${String(path)}'`),
+              { code: "EACCES" },
+            );
+          }
+          const watcher = silentWatch();
+          opened.set(String(path), watcher);
+          return watcher;
+        }) as typeof watch);
+        try {
+          return await tracking(root, async ({ tracker }) => {
+            const mark = tracker.beginJob();
+            refusing = true;
+            const failed = opened
+              .get(realpathSync.native(root))
+              ?.emit("error", new Error("EIO: the watch broke"));
+            const verdict = await tracker.endJob(mark);
+            return {
+              failed,
+              fingerprinted: verdict.fingerprinted,
+              unhealthy:
+                !verdict.fingerprinted &&
+                verdict.reason.startsWith(
+                  "the input watcher is unhealthy: cannot watch ",
+                ) &&
+                verdict.reason.includes("EACCES"),
+              changedWhileRunning:
+                !verdict.fingerprinted && verdict.changedWhileRunning,
+            };
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        failed: true,
+        fingerprinted: false,
+        unhealthy: true,
+        changedWhileRunning: false,
+      });
+    });
+
+    it("D4393: a reconciliation after lost events that could not establish the input set leaves the watcher unhealthy", async () => {
+      const facts = await inTempDir((root) =>
+        afterLostInputSet(root, async (tracker) => ({
+          watcher: tracker.facts().watcher,
+          reconciliation: tracker.facts().reconciliation.state,
+        })),
+      );
+      expect(facts).toStrictEqual({
+        watcher: { state: "unhealthy", reason: LOST_EVENTS },
+        reconciliation: "incomplete",
+      });
+    });
+
+    it("D4401: a job during which a reconciliation could not establish the input set holds that as a cause in its window, naming the depth bound", async () => {
+      const window = await inTempDir((root) =>
+        afterLostInputSet(root, async (tracker, mark) => {
+          await tracker.endJob(mark);
+          return {
+            paths: [...mark.window.paths],
+            namesBound: [...mark.window.causes].map((cause) =>
+              cause.includes("more than 64 levels"),
+            ),
+          };
+        }),
+      );
+      expect(window).toStrictEqual({ paths: [], namesBound: [true] });
+    });
+
+    it("D4402: an event read while the input set is not established, which no read vouches for, is recorded in the running job's window as a cause naming its path", async () => {
+      const causes = await inTempDir((root) =>
+        afterLostInputSet(root, async (tracker, mark, watches) => {
+          deliver(watches, root, join("src", "a.ts"));
+          await drained(tracker);
+          return [...mark.window.causes].slice(1);
+        }),
+      );
+      expect(causes).toStrictEqual([INPUT]);
+    });
+
+    it("D4394: three reports of lost events before the watcher is healthy again write one unhealthy line to the log", async () => {
+      const lines = await inTempDir(async (root) => {
+        writeTree(root, { [INPUT]: "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker, log }) => {
+            loseEvents(watches, root);
+            loseEvents(watches, root);
+            loseEvents(watches, root);
+            await tracker.settled();
+            return log.entries.filter((entry) =>
+              entry.startsWith(WATCHER_UNHEALTHY_LINE),
+            );
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(lines).toStrictEqual([`${WATCHER_UNHEALTHY_LINE}${LOST_EVENTS}`]);
+    });
+
+    it("D4395: lost events reported after a reconciliation made the watcher healthy again write the unhealthy line again", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { [INPUT]: "" });
+        const watches = silentCapturedWatches();
+        try {
+          return await tracking(root, async ({ tracker, log }) => {
+            loseEvents(watches, root);
+            await tracker.settled();
+            const between = tracker.facts().watcher.state;
+            loseEvents(watches, root);
+            await tracker.settled();
+            return {
+              between,
+              lines: log.entries.filter((entry) =>
+                entry.startsWith(WATCHER_UNHEALTHY_LINE),
+              ),
+            };
+          });
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        between: "healthy",
+        lines: [
+          `${WATCHER_UNHEALTHY_LINE}${LOST_EVENTS}`,
+          `${WATCHER_UNHEALTHY_LINE}${LOST_EVENTS}`,
+        ],
+      });
+    });
+
+    it("D4396: two reasons the watcher fails for, each repeated in turn while it stays unhealthy, are each logged once", () => {
+      const log = memoryLog();
+      const health = new WatcherHealth(log);
+      for (const reason of ["lost events", "a watch failed"]) {
+        health.fail(reason);
+      }
+      for (const reason of ["lost events", "a watch failed"]) {
+        health.fail(reason);
+      }
+      expect(log.entries).toStrictEqual([
+        `${WATCHER_UNHEALTHY_LINE}lost events`,
+        `${WATCHER_UNHEALTHY_LINE}a watch failed`,
+      ]);
+    });
+
+    it("D4397: a reconciliation that reads an input again for a moved modification time logs one line naming it", async () => {
+      const lines = await inTempDir((root) => readsAgainLines(root, [INPUT]));
+      expect(lines).toStrictEqual([
+        "input reconciliation reads again 1 inputs moved in size or time with their content unchanged: src/a.ts",
+      ]);
+    });
+
+    it("D4398: a reconciliation that reads 21 inputs again names 20 of them in its log line and counts 1 more", async () => {
+      const inputs = Array.from(
+        { length: 21 },
+        (_, index) => `src/n${String(index).padStart(2, "0")}.ts`,
+      );
+      const lines = await inTempDir((root) => readsAgainLines(root, inputs));
+      const start = `${READS_AGAIN_LINE}21 inputs moved in size or time with their content unchanged: `;
+      const rest = " and 1 more";
+      const [line = ""] = lines;
+      const named = line.slice(start.length, -rest.length).split(", ");
+      expect({
+        lines: lines.length,
+        starts: line.startsWith(start),
+        countsRest: line.endsWith(rest),
+        named: new Set(named.filter((path) => inputs.includes(path))).size,
+      }).toStrictEqual({ lines: 1, starts: true, countsRest: true, named: 20 });
+    });
+  },
+);
+
+interface RefusableWatches {
+  /** Each silent watch opened before the refusal, by the path it opened on. */
+  readonly opened: Map<string, FSWatcher>;
+  /** Makes every watch opened from now on throw `EACCES`, as one past a permission would. */
+  readonly refuse: () => void;
+}
+
+/** Opens silent watches, keeping each one, until `refuse` is called. */
+function silentWatchesUntilRefused(): RefusableWatches {
+  const opened = new Map<string, FSWatcher>();
+  let refusing = false;
+  vi.mocked(watch).mockImplementation(((path: PathLike) => {
+    if (refusing) {
+      throw Object.assign(
+        new Error(`EACCES: permission denied, watch '${String(path)}'`),
+        { code: "EACCES" },
+      );
+    }
+    const watcher = silentWatch();
+    opened.set(String(path), watcher);
+    return watcher;
+  }) as typeof watch);
+  return {
+    opened,
+    refuse: () => {
+      refusing = true;
+    },
+  };
+}
+
+describe(
+  "a watch that still cannot open",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4403: a root watch that failed and still cannot open is tried again at the next reconciliation, so the watcher stays unhealthy and a job ending after it is not fingerprinted", async () => {
+      const outcome = await inTempDir(async (root) => {
+        writeTree(root, { "src/a.ts": "" });
+        const watches = silentWatchesUntilRefused();
+        try {
+          return await withFakeTimeouts(() =>
+            tracking(root, async ({ tracker, log }) => {
+              const mark = tracker.beginJob();
+              watches.refuse();
+              watches.opened
+                .get(realpathSync.native(root))
+                ?.emit("error", new Error("EIO: the watch broke"));
+              await tracker.settled();
+              const afterFirst = tracker.facts().watcher.state;
+              await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL);
+              const verdict = await tracker.endJob(mark);
+              return {
+                afterFirst,
+                periodic: log.entries.filter(
+                  (entry) => entry === PERIODIC_STARTED,
+                ).length,
+                watcher: tracker.facts().watcher.state,
+                fingerprinted: verdict.fingerprinted,
+              };
+            }),
+          );
+        } finally {
+          vi.mocked(watch).mockReset();
+        }
+      });
+      expect(outcome).toStrictEqual({
+        afterFirst: "unhealthy",
+        periodic: 1,
+        watcher: "unhealthy",
+        fingerprinted: false,
+      });
     });
   },
 );

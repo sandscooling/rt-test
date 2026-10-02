@@ -141,6 +141,17 @@ export class InputState {
     return changed;
   }
 
+  /**
+   * Each input of `inputs` and listed file of `listed`, by root-relative path, read with the content held but with
+   * its size or a time moved: what a write that left the content as it was, or changed and restored it, leaves.
+   */
+  restamped(inputs: InputReads, listed: InputReads): string[] {
+    return [
+      ...restampedPaths(this.#inputs, inputs),
+      ...restampedPaths(this.#listed, listed),
+    ];
+  }
+
   /** Removes the input at `path`, or every input and directory at or under it; returns the inputs removed. */
   remove(path: string, absolutePath: string): string[] {
     const isDirectory = this.#directories.has(absolutePath);
@@ -278,6 +289,19 @@ function unrestedPaths(before: InputReads, after: InputReads): string[] {
         held.digest === read.digest &&
         !restedSince(held, read)
       );
+    })
+    .map(([path]) => path);
+}
+
+/**
+ * The paths `walked` read with the digest `held` holds for them but with a size or a time moved. `keptReads` keeps the
+ * held read of each, which the read queued for it must be judged against to mark a job.
+ */
+function restampedPaths(held: InputReads, walked: InputReads): string[] {
+  return [...walked]
+    .filter(([path, read]) => {
+      const before = held.get(path);
+      return before?.digest === read.digest && !unmoved(before, read);
     })
     .map(([path]) => path);
 }
