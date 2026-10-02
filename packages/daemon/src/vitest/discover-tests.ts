@@ -1,6 +1,6 @@
 import type { IdentifiedTest } from "@rt-test/core";
 import { join, resolve } from "node:path";
-import type { TestCase, TestModule } from "vitest/node";
+import type { TestCase, TestModule, TestSpecification } from "vitest/node";
 import { confirmedEntry, type ConfirmedStart } from "./confirmed-start.js";
 import { errorText } from "./error-text.js";
 import {
@@ -11,7 +11,6 @@ import {
   type VitestWorkspace,
 } from "./find-workspaces.js";
 import {
-  identifyTests,
   moduleReport,
   specificationsWithoutModule,
   wasCollected,
@@ -20,6 +19,12 @@ import {
 } from "./module-tests.js";
 import { RunInterruption } from "./run-interruption.js";
 import { selectionFacts, type SelectionFacts } from "./selection-facts.js";
+import {
+  collectedTests,
+  moduleListKey,
+  type ModuleTests,
+  type WorkspaceLists,
+} from "./test-lists.js";
 import {
   inWorkspaceSession,
   queueSessionJob,
@@ -80,9 +85,30 @@ interface CollectedWorkspace {
   readonly selectionFacts: SelectionFacts;
 }
 
+/** Of the test modules a workspace's discovery listed, how many it collected and how many kept a carried list. */
+interface ModuleCounts {
+  readonly listed: number;
+  readonly collected: number;
+  readonly carried: number;
+}
+
+/** How the discovery of one workspace the start confirmed went, and how long it took. */
+export interface WorkspaceCollection extends ModuleCounts {
+  readonly workspacePath: string;
+  readonly status: WorkspaceDiscovery["status"];
+  readonly wallMs: number;
+}
+
+/** A discovery, with how each confirmed workspace's test modules got their lists. */
+export interface Rediscovery {
+  readonly discovery: TestDiscovery;
+  readonly collection: readonly WorkspaceCollection[];
+}
+
 const UNCOLLECTED_MODULE_ERROR =
   "Vitest returned no collection result for this module; see the workspace's unhandled errors";
 export const NOT_CONFIRMED_REASON = "not confirmed at start";
+const NO_MODULES: ModuleCounts = { listed: 0, collected: 0, carried: 0 };
 
 /**
  * Loads the Vitest config and imports the test files of each workspace the start confirmed, and of no other: call
@@ -93,36 +119,76 @@ export function discoverTests(
   start: ConfirmedStart,
   signal: AbortSignal,
 ): Promise<TestDiscovery> {
-  return queueSessionJob(() => discoverAll(start, signal));
+  return rediscoverTests(start, [], signal).then(({ discovery }) => discovery);
+}
+
+/**
+ * Discovers as `discoverTests` does, importing only the test files `carried` holds no list for: a module it lists
+ * for the module's workspace keeps that list, and one no longer found leaves the discovery. The caller vouches that
+ * each carried list is still the module's.
+ */
+export function rediscoverTests(
+  start: ConfirmedStart,
+  carried: readonly WorkspaceLists[],
+  signal: AbortSignal,
+): Promise<Rediscovery> {
+  return queueSessionJob(() => discoverAll(start, carried, signal));
 }
 
 async function discoverAll(
   start: ConfirmedStart,
+  carried: readonly WorkspaceLists[],
   signal: AbortSignal,
-): Promise<TestDiscovery> {
+): Promise<Rediscovery> {
   signal.throwIfAborted();
   const { workspaces, notRead, notCovered } = findVitestWorkspaces(
     start.consumerRoot,
   );
   const discoveries: WorkspaceDiscovery[] = [];
+  const collection: WorkspaceCollection[] = [];
   for (const workspace of workspaces) {
     const confirmed = confirmedEntry(start, workspace);
-    discoveries.push(
-      confirmed === undefined
-        ? notConfirmed(workspace)
-        : await discoverWorkspace(workspace, confirmed.configFile, signal),
-    );
+    if (confirmed === undefined) {
+      discoveries.push(notConfirmed(workspace));
+    } else {
+      const began = performance.now();
+      const { entry, counts } = await discoverWorkspace(
+        workspace,
+        confirmed.configFile,
+        carriedModules(carried, workspace),
+        signal,
+      );
+      discoveries.push(entry);
+      collection.push({
+        workspacePath: workspace.path,
+        status: entry.status,
+        ...counts,
+        wallMs: Math.round(performance.now() - began),
+      });
+    }
     signal.throwIfAborted();
   }
   return {
-    workspaces: discoveries,
-    notRead,
-    notCovered: withoutDiscoveredModules(
-      notCovered,
-      start.consumerRoot,
-      discoveries,
-    ),
+    discovery: {
+      workspaces: discoveries,
+      notRead,
+      notCovered: withoutDiscoveredModules(
+        notCovered,
+        start.consumerRoot,
+        discoveries,
+      ),
+    },
+    collection,
   };
+}
+
+function carriedModules(
+  carried: readonly WorkspaceLists[],
+  workspace: VitestWorkspace,
+): readonly ModuleTests[] {
+  return carried
+    .filter((lists) => lists.workspacePath === workspace.path)
+    .flatMap((lists) => lists.modules);
 }
 
 /** A test module discovered inside a candidate means another workspace's config runs its tests, so it is covered. */
@@ -153,18 +219,54 @@ function notConfirmed(workspace: VitestWorkspace): WorkspaceDiscovery {
 async function discoverWorkspace(
   workspace: VitestWorkspace,
   confirmedConfigFile: string,
+  carried: readonly ModuleTests[],
   signal: AbortSignal,
-): Promise<WorkspaceDiscovery> {
+): Promise<{ entry: WorkspaceDiscovery; counts: ModuleCounts }> {
   const result = await inWorkspaceSession(
     workspace,
     confirmedConfigFile,
     [],
-    (session) => collectWorkspace(session, new RunInterruption(signal)),
+    (session) =>
+      collectWorkspace(session, carried, new RunInterruption(signal)),
   );
-  if (result.status === "not-confirmed") return notConfirmed(workspace);
-  if (result.status !== "loaded") return { ...result, workspace };
+  if (result.status === "not-confirmed") {
+    return { entry: notConfirmed(workspace), counts: NO_MODULES };
+  }
+  if (result.status !== "loaded") {
+    return { entry: { ...result, workspace }, counts: NO_MODULES };
+  }
   const { value, ...loaded } = result;
-  return { ...loaded, status: "discovered", workspace, ...value };
+  const { counts, ...collected } = value;
+  return {
+    entry: { ...loaded, status: "discovered", workspace, ...collected },
+    counts,
+  };
+}
+
+/** The specifications a carried list answers for, each with that list, and those left to collect. */
+function carriedSpecifications(
+  session: WorkspaceSession,
+  carried: readonly ModuleTests[],
+): { kept: ModuleTests[]; uncollected: TestSpecification[] } {
+  const lists = new Map(carried.map((list) => [moduleListKey(list), list]));
+  const kept: ModuleTests[] = [];
+  const uncollected: TestSpecification[] = [];
+  for (const specification of session.specifications) {
+    const key = moduleListKey(
+      moduleReport(
+        session.locate(specification.project.name, specification.moduleId),
+      ),
+    );
+    const list = lists.get(key);
+    if (list === undefined) {
+      uncollected.push(specification);
+    } else {
+      kept.push(list);
+      // A second specification that names the same module, as through another spelling, is collected.
+      lists.delete(key);
+    }
+  }
+  return { kept, uncollected };
 }
 
 /**
@@ -173,29 +275,36 @@ async function discoverWorkspace(
  */
 async function collectWorkspace(
   session: WorkspaceSession,
+  carried: readonly ModuleTests[],
   interruption: RunInterruption,
-): Promise<CollectedWorkspace> {
+): Promise<CollectedWorkspace & { readonly counts: ModuleCounts }> {
   const { instance, specifications } = session;
   interruption.signal.throwIfAborted();
+  const { kept, uncollected } = carriedSpecifications(session, carried);
   const { testModules, unhandledErrors } =
-    specifications.length === 0
+    uncollected.length === 0
       ? { testModules: [], unhandledErrors: [] }
       : await interruption.duringCollect(instance, () =>
-          instance.collectTests(specifications),
+          instance.collectTests(uncollected),
         );
   const report = {
-    tests: [] as DiscoveredTest[],
+    tests: kept.flatMap((list) => list.tests),
     failedModules: [] as FailedModule[],
     typecheckModules: session.typecheckModules,
     unsupportedProjects: session.unsupportedProjects,
     unhandledErrors: unhandledErrors.map(errorText),
     selectionFacts: await selectionFacts(session, interruption.signal),
+    counts: {
+      listed: specifications.length,
+      collected: uncollected.length,
+      carried: kept.length,
+    },
   };
   for (const testModule of testModules) {
     sortModule(testModule, session, report);
   }
   report.failedModules.push(
-    ...specificationsWithoutModule(specifications, testModules).map(
+    ...specificationsWithoutModule(uncollected, testModules).map(
       (specification) => ({
         ...moduleReport(
           session.locate(specification.project.name, specification.moduleId),
@@ -228,7 +337,5 @@ function sortModule(
     });
     return;
   }
-  for (const { test, identified } of identifyTests(location, testModule)) {
-    report.tests.push({ ...identified, mode: test.options.mode });
-  }
+  report.tests.push(...collectedTests(location, testModule));
 }

@@ -25,12 +25,19 @@ import { protection, workspaceListing } from "../src/inputs/protection.js";
 import { chosenConfigFile } from "../src/vitest/confirmed-start.js";
 import {
   discoverTests,
+  rediscoverTests,
   type DiscoveredTest,
+  type Rediscovery,
   type TestDiscovery,
   type WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
 import type { RecordedTest } from "../src/vitest/run-states.js";
-import { runWorkspace } from "../src/vitest/run-workspace.js";
+import {
+  runWorkspace,
+  runWorkspaceListing,
+  type ListedRun,
+} from "../src/vitest/run-workspace.js";
+import type { ModuleTests } from "../src/vitest/test-lists.js";
 import {
   isNotKnown,
   type EnvSource,
@@ -3453,6 +3460,378 @@ describe("placing the snapshot guard in each project", () => {
         await inClientEnvironmentSession("vitest", nodeProjectSetupFiles),
         await inClientEnvironmentSession("vitest-4", nodeProjectSetupFiles),
       ]).toEqual([GUARD_THEN_ITS_OWN, GUARD_THEN_ITS_OWN]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+/** The name Vitest gives the single fixture's one project, whose config names none. */
+const SINGLE_PROJECT = "";
+const FRESH_MODULE = "b.test.mjs";
+const LINKED_MODULE = "tests/t.test.mjs";
+
+type RediscoveryResult = Rediscovery | { thrown: string };
+
+/**
+ * A list of `modulePath` holding one test named `name`, as a caller carries it for `workspacePath`, the root
+ * workspace when absent, of a fixture whose project has no name.
+ */
+function carriedList(
+  modulePath: string,
+  name: string,
+  workspacePath = ".",
+): ModuleTests {
+  return {
+    projectName: SINGLE_PROJECT,
+    modulePath,
+    tests: [
+      {
+        identity: {
+          workspacePath,
+          projectName: SINGLE_PROJECT,
+          modulePath,
+          namePath: [name],
+          occurrence: 0,
+        },
+        isDuplicate: false,
+        mode: "run",
+      },
+    ],
+  };
+}
+
+/** Rediscovers a copy of the single fixture, once `arrange` has written into it, handed `carried` for its root workspace. */
+function rediscoverSingle(
+  install: VitestInstall,
+  carried: readonly ModuleTests[],
+  arrange: (root: string) => void,
+): Promise<RediscoveryResult> {
+  return inConsumerCopy("single", install, (root) => {
+    arrange(root);
+    return rediscoverTests(
+      confirmEvery(root),
+      [{ workspacePath: ".", modules: carried }],
+      NEVER_ABORTED,
+    ).catch((error: unknown) => ({ thrown: String(error) }));
+  });
+}
+
+const carriedRediscoveries = new Map<
+  VitestInstall,
+  Promise<RediscoveryResult>
+>();
+
+/**
+ * Rediscovers the single fixture once per install, handed a list of `a.test.mjs` naming a test the file does not
+ * hold, so a kept list reads apart from a collected one, and a list of a module no file holds, beside a module the
+ * test writes that it is handed no list for.
+ */
+function rediscoverCarried(install: VitestInstall): Promise<RediscoveryResult> {
+  const cached = carriedRediscoveries.get(install);
+  if (cached !== undefined) return cached;
+  const rediscovery = rediscoverSingle(
+    install,
+    [carriedList("a.test.mjs", "kept"), carriedList("gone.test.mjs", "gone")],
+    (root) => {
+      writeFileSync(join(root, FRESH_MODULE), 'it("fresh", () => {});\n');
+    },
+  );
+  carriedRediscoveries.set(install, rediscovery);
+  return rediscovery;
+}
+
+/**
+ * Rediscovers the single fixture with one test module that Vitest lists twice, by its own path and through a
+ * directory link to its folder, handed one list of it.
+ */
+function rediscoverLinked(): Promise<RediscoveryResult> {
+  return rediscoverSingle(
+    "vitest",
+    [carriedList(LINKED_MODULE, "kept")],
+    (root) => {
+      mkdirSync(join(root, "tests"));
+      writeFileSync(join(root, LINKED_MODULE), 'it("t", () => {});\n');
+      symlinkSync(join(root, "tests"), join(root, "linked"), "junction");
+    },
+  );
+}
+
+function rediscoveredNames(
+  result: RediscoveryResult,
+  modulePath?: string,
+  workspacePath = ".",
+): unknown {
+  return "thrown" in result
+    ? result
+    : namePaths(testsOf(result.discovery, workspacePath, modulePath));
+}
+
+/** The test modules the root workspace lists tests for, each once, in the discovery's order. */
+function listedModulePaths(result: RediscoveryResult): unknown {
+  return "thrown" in result
+    ? result
+    : [
+        ...new Set(
+          testsOf(result.discovery, ".").map(
+            (test) => test.identity.modulePath,
+          ),
+        ),
+      ];
+}
+
+/** Each confirmed workspace's collection, or `workspacePath`'s alone, without its time, which no test decides. */
+function collectionCounts(
+  result: RediscoveryResult,
+  workspacePath?: string,
+): unknown {
+  return "thrown" in result
+    ? result
+    : result.collection
+        .filter(
+          (workspace) =>
+            workspacePath === undefined ||
+            workspace.workspacePath === workspacePath,
+        )
+        .map(({ wallMs: _wallMs, ...counts }) => counts);
+}
+
+const PAIR_WORKSPACES = ["packages/app", "packages/lib", "packages/old"];
+const PAIR_MODULE = "x.test.mjs";
+
+let pairRediscovery: Promise<RediscoveryResult> | undefined;
+
+/**
+ * Rediscovers a copy of the consumer fixture once on Vitest 5 with three workspaces confirmed: `packages/app` and
+ * `packages/lib`, which each hold `x.test.mjs` in a project with no name, and `packages/old`, on a faked Vitest
+ * 3.2.4. It is handed one list, of `packages/app`'s module.
+ */
+function rediscoverPair(): Promise<RediscoveryResult> {
+  pairRediscovery ??= inConsumerCopy("consumer", "vitest", (root) => {
+    fakeVitest(join(root, "packages/old"), "3.2.4");
+    const start = confirmEvery(root);
+    return rediscoverTests(
+      {
+        ...start,
+        workspaces: start.workspaces.filter(({ path }) =>
+          PAIR_WORKSPACES.includes(path),
+        ),
+      },
+      [
+        {
+          workspacePath: "packages/app",
+          modules: [carriedList(PAIR_MODULE, "kept", "packages/app")],
+        },
+      ],
+      NEVER_ABORTED,
+    ).catch((error: unknown) => ({ thrown: String(error) }));
+  });
+  return pairRediscovery;
+}
+
+describe("a rediscovery handed lists", () => {
+  it(
+    "D4334: a module it is handed a list for keeps that list and is not collected",
+    async () => {
+      expect(
+        rediscoveredNames(await rediscoverCarried("vitest"), "a.test.mjs"),
+      ).toEqual([["kept"]]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4335: a module it is handed no list for is collected, beside one whose list it keeps",
+    async () => {
+      expect(
+        rediscoveredNames(await rediscoverCarried("vitest"), FRESH_MODULE),
+      ).toEqual([["fresh"]]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4336: a module it is handed a list for that Vitest no longer finds leaves the discovery, which lists the two modules Vitest finds",
+    async () => {
+      expect(listedModulePaths(await rediscoverCarried("vitest"))).toEqual([
+        "a.test.mjs",
+        FRESH_MODULE,
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4337: it reports, for the workspace, the test modules listed, the one collected and the one whose list it kept",
+    async () => {
+      expect(collectionCounts(await rediscoverCarried("vitest"))).toEqual([
+        {
+          workspacePath: ".",
+          status: "discovered",
+          listed: 2,
+          collected: 1,
+          carried: 1,
+        },
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4338: a module Vitest lists twice, by its path and through a directory link, uses its one list once and is collected for the second listing",
+    async () => {
+      expect(
+        rediscoveredNames(await rediscoverLinked(), LINKED_MODULE),
+      ).toEqual([["kept"], ["t"]]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4342: on Vitest 4.1, it keeps the list it is handed and collects only the module it is handed none for",
+    async () => {
+      expect(rediscoveredNames(await rediscoverCarried("vitest-4"))).toEqual([
+        ["kept"],
+        ["fresh"],
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4346: a list handed for one workspace's module is kept in that workspace alone, and the module at the same path in another workspace is collected",
+    async () => {
+      const result = await rediscoverPair();
+      expect([
+        rediscoveredNames(result, PAIR_MODULE, "packages/app"),
+        rediscoveredNames(result, PAIR_MODULE, "packages/lib"),
+      ]).toEqual([[["kept"]], [["shared name"]]]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4352: a confirmed workspace that was not discovered is reported with how it ended and no module counted",
+    async () => {
+      expect(collectionCounts(await rediscoverPair(), "packages/old")).toEqual([
+        {
+          workspacePath: "packages/old",
+          status: "unsupported",
+          listed: 0,
+          collected: 0,
+          carried: 0,
+        },
+      ]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+});
+
+type ListedRunResult = ListedRun | { thrown: string };
+
+const listedRuns = new Map<string, Promise<ListedRunResult>>();
+
+/** Runs a fixture's root workspace once per Vitest install and keeps the run with the test lists its job reports. */
+function listedRunOf(
+  fixture: string,
+  install: VitestInstall,
+): Promise<ListedRunResult> {
+  const key = JSON.stringify([fixture, install]);
+  const cached = listedRuns.get(key);
+  if (cached !== undefined) return cached;
+  const started = inConsumerCopy(fixture, install, (root) => {
+    const workspace = { path: ".", directory: root };
+    return runWorkspaceListing(
+      workspace,
+      chosenConfigFile(workspace) ?? "",
+      NEVER_ABORTED,
+    ).catch((error: unknown) => ({ thrown: String(error) }));
+  });
+  listedRuns.set(key, started);
+  return started;
+}
+
+/** What `read` gives of the fixture's listed run on Vitest 5, then on Vitest 4.1. */
+async function onBothLines(
+  fixture: string,
+  read: (result: ListedRunResult) => unknown,
+): Promise<unknown[]> {
+  return [
+    read(await listedRunOf(fixture, "vitest")),
+    read(await listedRunOf(fixture, "vitest-4")),
+  ];
+}
+
+/** The declared mode of each test of the run fixture's `suite` that its list gives another mode than run. */
+function declaredModes(result: ListedRunResult): unknown {
+  return "thrown" in result
+    ? result
+    : result.lists
+        .filter((list) => list.modulePath === "outcomes.test.mjs")
+        .flatMap((list) => list.tests)
+        .filter(
+          (test) =>
+            test.identity.namePath[0] === "suite" && test.mode !== "run",
+        )
+        .map((test) => [lastName(test), test.mode]);
+}
+
+/** How the run recorded `modulePath`, and whether its job reports a list of it. */
+function listingOf(result: ListedRunResult, modulePath: string): unknown {
+  if ("thrown" in result) return result;
+  return {
+    recorded: ranRun(result.run)?.modules.find(
+      (module) => module.modulePath === modulePath,
+    )?.state,
+    listed: result.lists.some((list) => list.modulePath === modulePath),
+  };
+}
+
+describe("the test lists a run's job reports beside the run", () => {
+  it(
+    "D4339: on Vitest 5 and 4.1, a module whose worker crashed mid-run gets no list, while a module that ran beside it gets one",
+    async () => {
+      const crashedBesideRan = [
+        { recorded: "crashed", listed: false },
+        { recorded: "ran", listed: true },
+      ];
+      expect(
+        await onBothLines("run-crash", (result) => [
+          listingOf(result, "crashes.test.mjs"),
+          listingOf(result, "healthy.test.mjs"),
+        ]),
+      ).toEqual([crashedBesideRan, crashedBesideRan]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4340: on Vitest 5 and 4.1, a module recorded as ran with an error of its own, a failing module-level hook's, gets no list, while a module that ran with none gets one",
+    async () => {
+      const erroredBesideClean = [
+        { recorded: "ran", listed: false },
+        { recorded: "ran", listed: true },
+      ];
+      expect(
+        await onBothLines("run", (result) => [
+          listingOf(result, "module-hook.test.mjs"),
+          listingOf(result, "outcomes.test.mjs"),
+        ]),
+      ).toEqual([erroredBesideClean, erroredBesideClean]);
+    },
+    DISCOVERY_TIMEOUT_MS,
+  );
+
+  it(
+    "D4341: on Vitest 5 and 4.1, a listed test carries its declared mode, so a skipped and a todo test are listed as a discovery lists them",
+    async () => {
+      const skipAndTodo = [
+        ["declared skip", "skip"],
+        ["todo", "todo"],
+      ];
+      expect(await onBothLines("run", declaredModes)).toEqual([
+        skipAndTodo,
+        skipAndTodo,
+      ]);
     },
     DISCOVERY_TIMEOUT_MS,
   );

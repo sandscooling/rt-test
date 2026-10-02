@@ -15,8 +15,10 @@ import { readingWait, STANDING } from "../src/daemon/canary-gate.js";
 import { DependencyBuilds } from "../src/daemon/dependency-builds.js";
 import {
   ABORT_PURPOSE,
+  type DiscoverOutcome,
   type Executor,
   type JobOutcome,
+  type RunOutcome as ListedRunOutcome,
 } from "../src/daemon/executor.js";
 import { JOB_TIME_BOUND_MS } from "../src/daemon/falsification.js";
 import { MAX_JOB_DEFINITIONS } from "../src/daemon/falsification-plan.js";
@@ -87,6 +89,7 @@ import { NewerStoreSchemaError } from "../src/store/transaction.js";
 import type { ConfirmedStart } from "../src/vitest/confirmed-start.js";
 import type {
   TestDiscovery,
+  WorkspaceCollection,
   WorkspaceDiscovery,
 } from "../src/vitest/discover-tests.js";
 import type { VitestWorkspace } from "../src/vitest/find-workspaces.js";
@@ -94,6 +97,11 @@ import type {
   NotConfirmedRun,
   WorkspaceRun,
 } from "../src/vitest/run-workspace.js";
+import {
+  listedModules,
+  type ModuleTests,
+  type WorkspaceLists,
+} from "../src/vitest/test-lists.js";
 import {
   DAEMON_TEST_TIMEOUT_MS,
   IDLE_ENTRY,
@@ -134,6 +142,7 @@ import {
   StandInInputs,
   type InputsScript,
   confirmed,
+  digestOf,
   discovered,
   discoveredWithTest,
   discovery,
@@ -406,12 +415,49 @@ function scripted(
   );
 }
 
-/** Runs `during` inside the discovery's job, as an edit while Vitest collects would, and ends the job once it settles. */
+/** A run of the workspace that ran each module `entry` lists, every listed test passed, so it vouches for those lists. */
+function ranAsListed(entry: WorkspaceDiscovery): WorkspaceRun {
+  if (entry.status !== "discovered") {
+    throw new Error(`${entry.workspace.path} is not discovered`);
+  }
+  return {
+    status: "ran",
+    workspace: entry.workspace,
+    vitestVersion: entry.vitestVersion,
+    execution: "completed",
+    modules: listedModules(entry).map(({ projectName, modulePath, tests }) => ({
+      projectName,
+      modulePath,
+      state: "ran",
+      tests: tests.map(({ identity, isDuplicate }) => ({
+        identity,
+        isDuplicate,
+        execution: "finished",
+        outcome: "passed",
+        errors: [],
+      })),
+      errors: [],
+    })),
+    typecheckModules: [],
+    unsupportedProjects: [],
+    unhandledErrors: [],
+    forceStopped: false,
+  };
+}
+
+/**
+ * Runs `during` inside the discovery's job, as an edit while Vitest collects would, and ends the job once it settles.
+ * Each run ends as `runs` gives it, interrupted before its load when absent.
+ */
 class EditingExecutor extends ScriptedExecutor {
   readonly #during: () => Promise<unknown>;
 
-  constructor(found: TestDiscovery, during: () => Promise<unknown>) {
-    super({ ended: true, value: found });
+  constructor(
+    found: TestDiscovery,
+    during: () => Promise<unknown>,
+    runs?: (path: string) => RunOutcome,
+  ) {
+    super({ ended: true, value: found }, runs);
     this.#during = during;
   }
 
@@ -443,6 +489,7 @@ interface DeclaredModuleStart {
 /**
  * Runs the scheduler to idle with a real input tracker and store, over a consumer whose `rt-test.json` declares
  * `src/**` and whose one workspace, the root, lists the test module `src/a.test.ts`, last modified an hour ago.
+ * Each run of the workspace ran the listed test, so a run vouches for the discovery's list of the module.
  * Every watch the tracker opens is real; each event's name is recorded once the tracker's listener has returned. With
  * `earlierLife`, the store already holds a discovery that reports its facts and lists no test module, so the declared
  * pattern hides the module until the new discovery is protected; without it no pattern applies until then.
@@ -464,7 +511,7 @@ async function declaredModuleStart(
   // The access time stays current, as the discovery's own read leaves it: Windows raises a change event for a read that
   // updates an access time over an hour old, which would count against the job like an edit.
   utimesSync(module, new Date(), anHourAgo);
-  const found = discovery({
+  const listing: WorkspaceDiscovery = {
     ...discovered("."),
     workspace: { path: ".", directory: root },
     tests: [
@@ -480,7 +527,8 @@ async function declaredModuleStart(
         mode: "run",
       },
     ],
-  });
+  };
+  const found = discovery(listing);
   const handled: string[] = [];
   vi.mocked(watch).mockImplementation(((
     path: PathLike,
@@ -510,9 +558,13 @@ async function declaredModuleStart(
     start: confirmed("."),
     store,
     log,
-    executor: new EditingExecutor(found, async () => {
-      held = await during(module, handled);
-    }) as unknown as Executor,
+    executor: new EditingExecutor(
+      found,
+      async () => {
+        held = await during(module, handled);
+      },
+      () => ({ ended: true, value: ranAsListed(listing) }),
+    ) as unknown as Executor,
     canaryGate: CONFIRMING_GATE,
     buildExecutor: failingBuilds(),
     parseRecordDirectory: PARSE_RECORD_DIRECTORY,
@@ -7347,3 +7399,237 @@ describe(
     });
   },
 );
+
+interface ListingReports {
+  /** What the discovery's job reports of each confirmed workspace's collection. */
+  readonly collection?: readonly WorkspaceCollection[];
+  /** The test lists each run's job reports beside its run. */
+  readonly lists?: readonly ModuleTests[];
+}
+
+/**
+ * A scripted executor that records the lists each discovery was handed, and reports a collection beside its discovery
+ * and test lists beside each run, as the executor process does.
+ */
+class ListingExecutor extends ScriptedExecutor {
+  readonly carried: (readonly WorkspaceLists[])[] = [];
+  readonly #reports: ListingReports;
+
+  constructor(
+    found: TestDiscovery,
+    ran: (path: string) => WorkspaceRun,
+    reports: ListingReports = {},
+  ) {
+    super({ ended: true, value: found }, (path) => ({
+      ended: true,
+      value: ran(path),
+    }));
+    this.#reports = reports;
+  }
+
+  override async discover(
+    _start?: ConfirmedStart,
+    carried: readonly WorkspaceLists[] = [],
+  ): Promise<DiscoverOutcome> {
+    this.carried.push(carried);
+    const outcome = await super.discover();
+    const { collection } = this.#reports;
+    return outcome.ended && collection !== undefined
+      ? { ...outcome, collection }
+      : outcome;
+  }
+
+  override async run(workspace: VitestWorkspace): Promise<ListedRunOutcome> {
+    const outcome = await super.run(workspace);
+    const { lists } = this.#reports;
+    return outcome.ended && lists !== undefined
+      ? { ...outcome, lists }
+      : outcome;
+  }
+}
+
+const LISTED_MODULE = "a.test.ts";
+
+/** One test of workspace `a`'s listed module, as a discovery lists it. */
+function listedTest(name: string): ModuleTests["tests"][number] {
+  return {
+    identity: {
+      workspacePath: "a",
+      projectName: "unit",
+      modulePath: LISTED_MODULE,
+      namePath: [name],
+      occurrence: 0,
+    },
+    isDuplicate: false,
+    mode: "run",
+  };
+}
+
+/** The list `ranWorkspace` records for workspace `a`, as a run's job reports it. */
+const RUN_LISTS: readonly ModuleTests[] = [
+  { projectName: "unit", modulePath: LISTED_MODULE, tests: [listedTest("t0")] },
+];
+const REFRESH_FAILURE = "database is locked";
+
+/** A recording store that reads back the discovery written last, as the store does. */
+class ReadingBackStore extends RecordingStore {
+  override readLatestDiscovery(): StoredDiscovery | undefined {
+    return this.readLatestResults(SCOPE).discovery;
+  }
+}
+
+/** A store whose write of any discovery after its first throws, as a locked database would. */
+class RefreshFailingStore extends ReadingBackStore {
+  override writeDiscovery(
+    bindings: StoreBindings,
+    written: TestDiscovery,
+  ): StoredDiscovery {
+    if (this.discoveries.length > 0) throw new Error(REFRESH_FAILURE);
+    return super.writeDiscovery(bindings, written);
+  }
+}
+
+/** An executor whose discovery lists the test `counts` in `a`'s module, and whose run of `a` records and lists `t0` there. */
+function differingRunLists(): ListingExecutor {
+  return new ListingExecutor(
+    discovery(discoveredWithTest("a")),
+    (path) => ranWorkspace(path),
+    { lists: RUN_LISTS },
+  );
+}
+
+/** Runs a daemon over `a` whose run's lists differ from its discovery's to the end of its start sequence, then stops it. */
+async function afterDifferingRunLists(
+  store: RecordingStore = new ReadingBackStore(),
+): Promise<Daemon> {
+  const started = await begun(
+    daemon(confirmed("a"), differingRunLists(), store),
+  );
+  return thenStopped(started, () => Promise.resolve(started));
+}
+
+/** The log's entry for each workspace's collection, after a discovery whose job reported two workspaces. */
+async function collectionEntries(): Promise<string[]> {
+  const failed: WorkspaceDiscovery = {
+    status: "failed",
+    workspace: workspace("b"),
+    vitestVersion: DISCOVERED_VITEST_VERSION,
+    error: "config boom",
+  };
+  const executor = new ListingExecutor(
+    discovery(discovered("a"), failed),
+    (path) => ranWorkspace(path),
+    {
+      collection: [
+        {
+          workspacePath: "a",
+          status: "discovered",
+          listed: 3,
+          collected: 1,
+          carried: 2,
+          wallMs: 12,
+        },
+        {
+          workspacePath: "b",
+          status: "failed",
+          listed: 0,
+          collected: 0,
+          carried: 0,
+          wallMs: 7,
+        },
+      ],
+    },
+  );
+  const started = await begun(daemon(confirmed("a", "b"), executor));
+  return thenStopped(started, () =>
+    Promise.resolve(
+      started.log.entries.filter((entry) => entry.startsWith("discovery of ")),
+    ),
+  );
+}
+
+describe("a rediscovery's carried lists and a run's own lists", () => {
+  it("D4327: a rediscovery is handed the list a stored run vouches for, read from the store's latest results", async () => {
+    const listed = discoveredWithTest("a");
+    const store = new RecordingStore();
+    // Stored under an earlier fingerprint, so the discovery is due and the daemon discovers again.
+    store.seedDiscovery(discovery(listed), digestOf("an-earlier-digest"));
+    store.seedRun(ranAsListed(listed), digestOf("a-digest"));
+    const executor = new ListingExecutor(discovery(listed), (path) =>
+      ranWorkspace(path),
+    );
+    const started = await begun(daemon(confirmed("a"), executor, store));
+    await thenStopped(started, () => Promise.resolve());
+    expect(executor.carried[0]).toStrictEqual([
+      {
+        workspacePath: "a",
+        modules: [
+          {
+            projectName: "unit",
+            modulePath: LISTED_MODULE,
+            tests: [listedTest("counts")],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("D4328: a stored run whose lists differ from the discovery's stores the discovery again with the run's lists, under the fingerprint it was stored under", async () => {
+    const { store } = await afterDifferingRunLists();
+    const [entry] = store.discoveries.at(-1)?.workspaces ?? [];
+    expect({
+      discoveries: store.discoveries.length,
+      listed:
+        entry?.status === "discovered"
+          ? entry.tests.map((test) => test.identity.namePath)
+          : entry,
+      fingerprints: store.discoveryFingerprints,
+    }).toStrictEqual({
+      discoveries: 2,
+      listed: [["t0"]],
+      fingerprints: [digestOf(DISCOVERY_DIGEST), digestOf(DISCOVERY_DIGEST)],
+    });
+  });
+
+  it("D4329: the log says how many test modules a run's lists replaced in the discovery", async () => {
+    const { log } = await afterDifferingRunLists();
+    expect(
+      log.entries.filter((entry) => entry.includes("stored again")),
+    ).toStrictEqual([
+      "the run of a collected 1 test modules whose tests differ from the discovery's, so the discovery is stored again with the run's lists",
+    ]);
+  });
+
+  it("D4330: a discovery that cannot be stored again with a run's lists is logged as that refresh's failure, and the run stays stored", async () => {
+    const started = await afterDifferingRunLists(new RefreshFailingStore());
+    expect({
+      runs: started.store.runs.length,
+      unstored: started.lifecycle.status().unstoredJobs,
+      logged: started.log.entries.filter((entry) =>
+        entry.startsWith("error: storing the discovery with the test lists"),
+      ),
+    }).toStrictEqual({
+      runs: 1,
+      unstored: [],
+      logged: [
+        `error: storing the discovery with the test lists of the run of a: Error: ${REFRESH_FAILURE}`,
+      ],
+    });
+  });
+
+  it("D4332: the log gives a discovered workspace's line with its test modules listed, collected and carried, and its time", async () => {
+    const entries = await collectionEntries();
+    expect(
+      entries.filter((entry) => entry.startsWith("discovery of a:")),
+    ).toStrictEqual([
+      "discovery of a: 3 test modules listed, 1 collected, 2 carried, in 12 ms",
+    ]);
+  });
+
+  it("D4333: the log gives a workspace that was not discovered its line with how it ended and its time", async () => {
+    const entries = await collectionEntries();
+    expect(
+      entries.filter((entry) => entry.startsWith("discovery of b:")),
+    ).toStrictEqual(["discovery of b: failed, in 7 ms"]);
+  });
+});

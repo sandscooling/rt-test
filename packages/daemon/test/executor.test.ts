@@ -1699,3 +1699,131 @@ describe("the environment each executor process starts with", () => {
     DAEMON_TEST_TIMEOUT_MS,
   );
 });
+
+const SINGLE_FIXTURE = "single";
+const SINGLE_MODULE = "a.test.mjs";
+
+/** Runs `job` in a fresh executor over a copy of the single fixture, one workspace of one test module, then closes it. */
+function inSingleConsumer<T>(
+  job: (executor: Executor, root: string) => Promise<T>,
+): Promise<T> {
+  return inConsumerCopy(SINGLE_FIXTURE, "vitest", async (root) => {
+    next.containment = undefined;
+    const executor = new Executor(memoryLog(), takeStartEnvironment());
+    try {
+      return await job(executor, root);
+    } finally {
+      await executor.close();
+    }
+  });
+}
+
+describe("the test lists that cross the executor's process", () => {
+  it(
+    "D4343: a discovery job keeps the list it is handed in its executor process and reports the workspace's collection back",
+    async () => {
+      const outcome = await inSingleConsumer((executor, root) =>
+        executor.discover(
+          {
+            consumerRoot: root,
+            workspaces: [{ path: ".", configFile: FIXTURE_CONFIG }],
+          },
+          [
+            {
+              workspacePath: ".",
+              modules: [
+                {
+                  projectName: "",
+                  modulePath: SINGLE_MODULE,
+                  tests: [
+                    {
+                      identity: {
+                        workspacePath: ".",
+                        projectName: "",
+                        modulePath: SINGLE_MODULE,
+                        namePath: ["kept"],
+                        occurrence: 0,
+                      },
+                      isDuplicate: false,
+                      mode: "run",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        ),
+      );
+      expect(
+        outcome.ended
+          ? {
+              listed: outcome.value.workspaces.map((entry) =>
+                entry.status === "discovered"
+                  ? entry.tests.map((test) => test.identity.namePath)
+                  : entry.status,
+              ),
+              collection: outcome.collection?.map(
+                ({ wallMs: _wallMs, ...counts }) => counts,
+              ),
+            }
+          : outcome,
+      ).toEqual({
+        listed: [[["kept"]]],
+        collection: [
+          {
+            workspacePath: ".",
+            status: "discovered",
+            listed: 1,
+            collected: 0,
+            carried: 1,
+          },
+        ],
+      });
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D4353: a discovery job's outcome carries the collection its executor process reported for the workspace",
+    async () => {
+      const outcome = await inSingleConsumer((executor, root) =>
+        executor.discover({
+          consumerRoot: root,
+          workspaces: [{ path: ".", configFile: FIXTURE_CONFIG }],
+        }),
+      );
+      expect(
+        outcome.ended
+          ? outcome.collection?.map(({ wallMs: _wallMs, ...counts }) => counts)
+          : outcome,
+      ).toEqual([
+        {
+          workspacePath: ".",
+          status: "discovered",
+          listed: 1,
+          collected: 1,
+          carried: 0,
+        },
+      ]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "D4344: a run job's outcome carries the test lists its executor process collected, each test with its mode",
+    async () => {
+      const outcome = await inSingleConsumer((executor, root) =>
+        executor.run({ path: ".", directory: root }, FIXTURE_CONFIG),
+      );
+      expect(
+        outcome.ended
+          ? outcome.lists?.map((list) => [
+              list.modulePath,
+              list.tests.map((test) => [test.identity.namePath, test.mode]),
+            ])
+          : outcome,
+      ).toEqual([[SINGLE_MODULE, [[["only"], "run"]]]]);
+    },
+    DAEMON_TEST_TIMEOUT_MS,
+  );
+});

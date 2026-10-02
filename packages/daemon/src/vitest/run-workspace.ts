@@ -10,6 +10,7 @@ import {
   type RecordedModule,
   type RunExecution,
 } from "./run-states.js";
+import { runLists, type ModuleTests } from "./test-lists.js";
 import {
   inWorkspaceSession,
   queueSessionJob,
@@ -77,8 +78,15 @@ type RanWorkspace = Omit<
   "status" | "workspace" | "vitestVersion" | "closeError"
 >;
 
+/** A run, with each test module it ran as a discovery lists one; they travel beside the run, whose record keeps no test's declared mode. */
+export interface ListedRun {
+  readonly run: VitestRun | NotConfirmedRun;
+  readonly lists: readonly ModuleTests[];
+}
+
 export const CONFIG_NOT_CONFIRMED_REASON =
   "its config file is no longer the one confirmed at start";
+const NO_LISTS: readonly ModuleTests[] = [];
 
 /** Runs the workspace's tests through its confirmed config file, so it executes project code: call only for a started, trusted project. */
 export function runWorkspace(
@@ -86,9 +94,23 @@ export function runWorkspace(
   confirmedConfigFile: string,
   signal: AbortSignal,
 ): Promise<VitestRun | NotConfirmedRun> {
+  return runWorkspaceListing(workspace, confirmedConfigFile, signal).then(
+    ({ run }) => run,
+  );
+}
+
+/** Runs as `runWorkspace` does, and also hands back the test lists the run collected. */
+export function runWorkspaceListing(
+  workspace: VitestWorkspace,
+  confirmedConfigFile: string,
+  signal: AbortSignal,
+): Promise<ListedRun> {
   return queueSessionJob(async () => {
     if (signal.aborted) {
-      return { status: "interrupted-before-load", workspace };
+      return {
+        run: { status: "interrupted-before-load", workspace },
+        lists: NO_LISTS,
+      };
     }
     const interruption = new RunInterruption(signal);
     const result = await inWorkspaceSession(
@@ -98,22 +120,29 @@ export function runWorkspace(
       (session) => runSession(session, interruption),
     );
     if (result.status === "not-confirmed") {
-      return { ...result, workspace, reason: CONFIG_NOT_CONFIRMED_REASON };
+      return {
+        run: { ...result, workspace, reason: CONFIG_NOT_CONFIRMED_REASON },
+        lists: NO_LISTS,
+      };
     }
-    if (result.status !== "loaded") return { ...result, workspace };
+    if (result.status !== "loaded") {
+      return { run: { ...result, workspace }, lists: NO_LISTS };
+    }
     const { value, ...loaded } = result;
-    return { ...loaded, status: "ran", workspace, ...value };
+    const { lists, ...ran } = value;
+    return { run: { ...loaded, status: "ran", workspace, ...ran }, lists };
   });
 }
 
 async function runSession(
   session: WorkspaceSession,
   interruption: RunInterruption,
-): Promise<RanWorkspace> {
+): Promise<RanWorkspace & { readonly lists: readonly ModuleTests[] }> {
   const { instance, specifications, locate } = session;
   const shared = {
     typecheckModules: session.typecheckModules,
     unsupportedProjects: session.unsupportedProjects,
+    lists: NO_LISTS,
   };
   if (interruption.signal.aborted) {
     const modules = notRunModules(specifications, locate);
@@ -150,6 +179,7 @@ async function runSession(
   const cancelError = await interruption.cancelError();
   return {
     ...shared,
+    lists: runLists(testModules, modules, locate),
     execution,
     modules,
     unhandledErrors: unhandledErrors.map(errorText),

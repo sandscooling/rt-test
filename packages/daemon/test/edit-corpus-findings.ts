@@ -44,10 +44,12 @@ interface DaemonResult {
   readonly current: boolean;
 }
 
-/** Each workspace's latest stored run, by test and by module. */
+/** Each workspace's latest stored run, by test and by module, and how many tests the daemon's answer counts for each file. */
 export interface DaemonSide {
   readonly tests: ReadonlyMap<string, DaemonResult>;
   readonly modules: ReadonlyMap<string, DaemonResult>;
+  /** By the file's path relative to the consumer root. */
+  readonly listed: ReadonlyMap<string, number>;
 }
 
 interface ModuleLocation {
@@ -248,7 +250,11 @@ export function daemonSide(
       }
     }
   }
-  return { tests, modules };
+  return {
+    tests,
+    modules,
+    listed: new Map(files.map(({ file, counts }) => [file, counts.tests])),
+  };
 }
 
 /** The run stored last for each workspace. */
@@ -291,7 +297,51 @@ export function daemonFindings(
     ...reportedTestFindings(edit, tests, daemon),
     ...heldTestFindings(edit, tests, failedModules, daemon),
     ...moduleFindings(edit, failedModules, daemon),
+    ...listedCountFindings(edit, tests, failedModules, daemon),
   ];
+}
+
+/**
+ * Each module whose tests the full run reports in another number than the daemon's answer counts for its file, and
+ * each file the daemon's answer counts tests for that the full run reports none for, unless the full run failed to
+ * load it.
+ */
+function listedCountFindings(
+  edit: string,
+  tests: readonly FullRunTest[],
+  failedModules: readonly FullRunModule[],
+  daemon: DaemonSide,
+): Finding[] {
+  const reported = new Map<string, number>();
+  for (const test of tests) {
+    const subject = moduleSubject(test);
+    reported.set(subject, (reported.get(subject) ?? 0) + 1);
+  }
+  const unloaded = new Set(failedModules.map(moduleSubject));
+  const miscounted = [...reported]
+    .filter(([subject, count]) => daemon.listed.get(subject) !== count)
+    .map(([subject, count]) =>
+      finding(
+        FINDING.disagreement,
+        edit,
+        subject,
+        `the full run reports ${count} test(s); the daemon's answer counts ${daemon.listed.get(subject) ?? 0}`,
+      ),
+    );
+  const leftOver = [...daemon.listed]
+    .filter(
+      ([file, count]) =>
+        count > 0 && !reported.has(file) && !unloaded.has(file),
+    )
+    .map(([file, count]) =>
+      finding(
+        FINDING.disagreement,
+        edit,
+        file,
+        `the daemon's answer counts ${count} test(s); the full run reports none`,
+      ),
+    );
+  return [...miscounted, ...leftOver];
 }
 
 function reportedTestFindings(

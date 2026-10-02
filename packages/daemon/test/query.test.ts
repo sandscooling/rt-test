@@ -1186,7 +1186,7 @@ const BOTH_BUILDING = [
 ];
 
 describe("each workspace's inputs as the dependency builds narrow them", () => {
-  it("D2523: while the build at the current revision has not ended, each workspace is unfingerprinted naming the build, and the discovery's freshness is unaffected", () => {
+  it("D2523: while the build at the current revision has not ended, each workspace is unfingerprinted naming the build, and the discovery's freshness, with no stored run to rate its lists, is unaffected", () => {
     const stored = asStored(
       viewOf(undefined).discoveryFingerprint(TWO_WORKSPACES.discovery),
     );
@@ -3821,6 +3821,239 @@ describe(
         "never-verified defects/b.json#0",
         "never-verified defects/b.json#1",
       ]);
+    });
+  },
+);
+
+/** A stored discovery of `entries` bound to `DIGEST`. */
+function discoveryAtDigest(
+  entries: readonly WorkspaceDiscovery[],
+): StoredDiscovery {
+  return storedDiscovery(entries, [], VITEST_ADAPTER_VERSION, DIGEST);
+}
+
+/** A run of `path` stored under `DIGEST` that ran `tests` in one module, each passed. */
+function vouchingRun(
+  tests: readonly DiscoveredTest[],
+  path = WORKSPACE_A,
+): StoredRun {
+  return storedRun(
+    ranRun(
+      [ranModule(tests.map((test) => finished(test, "passed")))],
+      {},
+      path,
+    ),
+    VITEST_ADAPTER_VERSION,
+    DIGEST,
+  );
+}
+
+/** Settled inputs under which the discovery's own fingerprint is `DIGEST`, and each workspace's the digest given. */
+function discoveryCurrentWith(
+  workspaces: Readonly<Record<string, string>>,
+): CurrentInputs {
+  return settled(
+    Object.fromEntries(
+      Object.entries(workspaces).map(
+        ([path, digest]): [string, FingerprintResult] => [
+          path,
+          { ok: true, digest },
+        ],
+      ),
+    ),
+    digestOf(DIGEST),
+  );
+}
+
+/** Two tests named `name` in one module of workspace A, told apart only by their position: the first, then the second. */
+function sameNamedPair(name: string): [DiscoveredTest, DiscoveredTest] {
+  const first = discovered(name, { isDuplicate: true });
+  return [first, { ...first, identity: { ...first.identity, occurrence: 1 } }];
+}
+
+describe(
+  "the discovery's freshness once a stored run must vouch for each list",
+  { timeout: DAEMON_TEST_TIMEOUT_MS },
+  () => {
+    it("D4321: a discovery current by its own fingerprint reads stale while a workspace holding a stored run is due, and current once that run is bound to the workspace's current fingerprint", () => {
+      const test = discovered("a");
+      const freshnessUnder = (workspaceDigest: string): string =>
+        summaryOf(
+          discoveryAtDigest([discoveredWorkspace(WORKSPACE_A, [test])]),
+          [vouchingRun([test])],
+          discoveryCurrentWith({ [WORKSPACE_A]: workspaceDigest }),
+        ).discovery.freshness;
+      expect([
+        freshnessUnder(OTHER_DIGEST),
+        freshnessUnder(DIGEST.digest),
+      ]).toStrictEqual(["stale", "current"]);
+    });
+
+    it("D4322: a discovery current by its own fingerprint reads unknown while a workspace's latest run is refused as unreadable", () => {
+      const answer = answered(
+        summaryAnswer(
+          results(
+            discoveryAtDigest([
+              discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+            ]),
+            [],
+            undefined,
+            [
+              {
+                workspacePath: WORKSPACE_A,
+                reason: "The store holds an unreadable run",
+              },
+            ],
+          ),
+          IDLE,
+          discoveryCurrentWith({ [WORKSPACE_A]: DIGEST.digest }),
+        ),
+      );
+      expect(answer.discovery.freshness).toBe("unknown");
+    });
+
+    it("D4323: a discovery current by its own fingerprint reads unknown while a workspace's current run recorded other tests for a listed module, and current when it recorded exactly the listed ones", () => {
+      const listed = discovered("a");
+      const freshnessAfter = (recorded: DiscoveredTest): string =>
+        summaryOf(
+          discoveryAtDigest([discoveredWorkspace(WORKSPACE_A, [listed])]),
+          [vouchingRun([recorded])],
+          discoveryCurrentWith({ [WORKSPACE_A]: DIGEST.digest }),
+        ).discovery.freshness;
+      expect([
+        freshnessAfter(discovered("renamed")),
+        freshnessAfter(listed),
+      ]).toStrictEqual(["unknown", "current"]);
+    });
+
+    it("D4324: a workspace with no stored run leaves the discovery current, whatever that workspace's fingerprint", () => {
+      const inA = discovered("a");
+      const summary = summaryOf(
+        discoveryAtDigest([
+          discoveredWorkspace(WORKSPACE_A, [inA]),
+          discoveredWorkspace(WORKSPACE_B, [
+            discovered("b", { workspacePath: WORKSPACE_B }),
+          ]),
+        ]),
+        [vouchingRun([inA])],
+        discoveryCurrentWith({
+          [WORKSPACE_A]: DIGEST.digest,
+          [WORKSPACE_B]: OTHER_DIGEST,
+        }),
+      );
+      expect(summary.discovery.freshness).toBe("current");
+    });
+
+    it("D4325: two same-named tests of a workspace whose run is current read current while another workspace is due, although the answer's discovery then reads stale", () => {
+      const pair = sameNamedPair("same");
+      const inB = discovered("b", { workspacePath: WORKSPACE_B });
+      const summary = summaryOf(
+        discoveryAtDigest([
+          discoveredWorkspace(WORKSPACE_A, pair),
+          discoveredWorkspace(WORKSPACE_B, [inB]),
+        ]),
+        [vouchingRun(pair), vouchingRun([inB], WORKSPACE_B)],
+        discoveryCurrentWith({
+          [WORKSPACE_A]: DIGEST.digest,
+          [WORKSPACE_B]: OTHER_DIGEST,
+        }),
+      );
+      expect({
+        discovery: summary.discovery.freshness,
+        tests: nonZero(summary.counts.freshness),
+      }).toStrictEqual({
+        discovery: "stale",
+        tests: { current: 2, stale: 1 },
+      });
+    });
+
+    it("D4326: evidence for a test told apart only by its position reads current while another workspace is due, although the answer's discovery then reads stale", async () => {
+      const read = await inTempDir(async (root) => {
+        const pair = sameNamedPair("one");
+        const inB = discovered("b", { workspacePath: WORKSPACE_B });
+        const answer = await withDetections(root, {
+          latest: results(
+            discoveryAtDigest([
+              discoveredWorkspace(WORKSPACE_A, pair),
+              discoveredWorkspace(WORKSPACE_B, [inB]),
+            ]),
+            [vouchingRun([inB], WORKSPACE_B)],
+          ),
+          files: {
+            "a.json": [
+              {
+                ...defectDefinition("D1", "one"),
+                test: { module: A_MODULE, name: ["one"], occurrence: 1 },
+              },
+            ],
+          },
+        });
+        const { discovery, definitions } = await answer(
+          discoveryCurrentWith({
+            [WORKSPACE_A]: DIGEST.digest,
+            [WORKSPACE_B]: OTHER_DIGEST,
+          }),
+        );
+        return {
+          discovery: discovery.freshness,
+          evidence: definitions[0]?.evidence,
+        };
+      });
+      expect(read).toStrictEqual({
+        discovery: "stale",
+        evidence: { freshness: "current" },
+      });
+    });
+
+    it("D4347: a discovery current by its own fingerprint reads unknown while a workspace's latest run recorded exactly the listed tests but is stored not fingerprinted", () => {
+      const test = discovered("a");
+      const summary = summaryOf(
+        discoveryAtDigest([discoveredWorkspace(WORKSPACE_A, [test])]),
+        [storedRun(ranRun([ranModule([finished(test, "passed")])]))],
+        discoveryCurrentWith({ [WORKSPACE_A]: DIGEST.digest }),
+      );
+      expect(summary.discovery.freshness).toBe("unknown");
+    });
+
+    it("D4348: a discovery reads unknown when an earlier workspace's current run recorded other tests, although a later workspace's run vouches for its list", () => {
+      const inB = discovered("b", { workspacePath: WORKSPACE_B });
+      const summary = summaryOf(
+        discoveryAtDigest([
+          discoveredWorkspace(WORKSPACE_A, [discovered("a")]),
+          discoveredWorkspace(WORKSPACE_B, [inB]),
+        ]),
+        [vouchingRun([discovered("renamed")]), vouchingRun([inB], WORKSPACE_B)],
+        discoveryCurrentWith({
+          [WORKSPACE_A]: DIGEST.digest,
+          [WORKSPACE_B]: DIGEST.digest,
+        }),
+      );
+      expect(summary.discovery.freshness).toBe("unknown");
+    });
+
+    it("D4351: a not-discovered reason says the discovery is not current while its workspace's stored run is due, although the discovery's own fingerprint reads current, and not once that run is current", async () => {
+      const listed = discovered("one");
+      const latest = results(
+        discoveryAtDigest([discoveredWorkspace(WORKSPACE_A, [listed])]),
+        [vouchingRun([listed])],
+      );
+      const files = { "a.json": [defectDefinition("D1", "missing")] };
+      const reasons = await inTempDir(async (root) => {
+        const due = answered(
+          await defectsOver(join(root, "a"), latest, files, undefined, {
+            inputs: discoveryCurrentWith({ [WORKSPACE_A]: OTHER_DIGEST }),
+          }),
+        );
+        const current = answered(
+          await defectsOver(join(root, "b"), latest, files, undefined, {
+            inputs: discoveryCurrentWith({ [WORKSPACE_A]: DIGEST.digest }),
+          }),
+        );
+        return [due, current].map((answer) =>
+          /not current/.test(answer.definitions[0]?.reason?.reason ?? ""),
+        );
+      });
+      expect(reasons).toStrictEqual([true, false]);
     });
   },
 );

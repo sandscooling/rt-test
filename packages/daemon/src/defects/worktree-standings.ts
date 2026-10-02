@@ -52,12 +52,14 @@ export async function worktreeStandings(
   const basis = queryBasis(results, view, inputs);
   if ("noAnswer" in basis) return basis;
   const { discovery } = basis.discovery;
-  const discoveryCurrent = basis.context.discovery.freshness === CURRENT;
+  const { discoveryCurrent } = basis;
+  // A list no run vouches for yet may lack a test added since, which the discovery's own fingerprint cannot say.
+  const listsCurrent = basis.context.discovery.freshness === CURRENT;
   const definitions = resolveDefinitions(
     checked,
     anchors,
     discovery,
-    discoveryCurrent,
+    listsCurrent,
   );
   const { assertionErrors, invalidEntries } = files;
   return {

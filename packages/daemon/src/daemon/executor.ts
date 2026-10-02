@@ -13,9 +13,13 @@ import {
 } from "../inputs/environment-digest.js";
 import type { ConfirmedStart } from "../vitest/confirmed-start.js";
 import { errorText, exitText } from "../vitest/error-text.js";
-import type { TestDiscovery } from "../vitest/discover-tests.js";
+import type {
+  TestDiscovery,
+  WorkspaceCollection,
+} from "../vitest/discover-tests.js";
 import type { VitestWorkspace } from "../vitest/find-workspaces.js";
 import type { NotConfirmedRun, WorkspaceRun } from "../vitest/run-workspace.js";
+import type { ModuleTests, WorkspaceLists } from "../vitest/test-lists.js";
 import { hasExited } from "./child-exit.js";
 import type { DaemonLog } from "./daemon-log.js";
 import { daemonEntryPoint } from "./entry-point.js";
@@ -78,6 +82,23 @@ export type JobOutcome<T> =
   | { readonly ended: true; readonly value: T }
   | { readonly ended: false; readonly reason: string };
 
+type Ended<T> = Extract<JobOutcome<T>, { ended: true }>;
+type EndedWithNothing = Extract<JobOutcome<never>, { ended: false }>;
+
+/** A discovery job's outcome, with how each workspace's test modules got their lists when its executor reported it. */
+export type DiscoverOutcome =
+  | (Ended<TestDiscovery> & {
+      readonly collection?: readonly WorkspaceCollection[];
+    })
+  | EndedWithNothing;
+
+/** A run job's outcome, with the test lists the run collected when its executor reported them. */
+export type RunOutcome =
+  | (Ended<WorkspaceRun | NotConfirmedRun> & {
+      readonly lists?: readonly ModuleTests[];
+    })
+  | EndedWithNothing;
+
 /**
  * The executor's reply, or the reason the job ended without one: its process exited with no stop asked of it, or the
  * job was lost another way.
@@ -115,19 +136,25 @@ export class Executor {
     this.#startEnvironment = startEnvironment;
   }
 
-  async discover(start: ConfirmedStart): Promise<JobOutcome<TestDiscovery>> {
-    const reply = await this.#job({ type: "discover", start });
+  /** Discovers, keeping each list in `carried` in place of collecting its module. */
+  async discover(
+    start: ConfirmedStart,
+    carried: readonly WorkspaceLists[] = [],
+  ): Promise<DiscoverOutcome> {
+    const reply = await this.#job({ type: "discover", start, carried });
     return reply.type === "discovered"
-      ? { ended: true, value: reply.discovery }
+      ? { ended: true, value: reply.discovery, collection: reply.collection }
       : { ended: false, reason: failureReason(reply) };
   }
 
   async run(
     workspace: VitestWorkspace,
     configFile: string,
-  ): Promise<JobOutcome<WorkspaceRun | NotConfirmedRun>> {
+  ): Promise<RunOutcome> {
     const reply = await this.#job({ type: "run", workspace, configFile });
-    if (reply.type === "ran") return { ended: true, value: reply.run };
+    if (reply.type === "ran") {
+      return { ended: true, value: reply.run, lists: reply.lists };
+    }
     if (reply.type === "exited") {
       return {
         ended: true,
