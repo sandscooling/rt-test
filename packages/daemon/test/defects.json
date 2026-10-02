@@ -12584,5 +12584,26 @@
     "file": "packages/daemon/test/stored-run-log.ts",
     "old": "    inputFingerprint: {\n      kind: FINGERPRINT_DIGEST,\n      digest: stored.slice(digestAt + UNDER_FINGERPRINT.length),\n    },",
     "new": "    inputFingerprint: { kind: NOT_FINGERPRINTED },"
+  },
+  {
+    "id": "D4379",
+    "defect": "The run removal takes only earlier runs stored under the fingerprint of the run being stored, so a workspace's run under each earlier fingerprint stays in the store with its module and test rows.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "    database.prepare(remove).run(...workspace);",
+    "new": "    database.prepare(remove.replaceAll(\"r.workspace_path = ?\", \"r.workspace_path = ? AND r.fingerprint_digest IS ?\")).run(...workspace, fingerprintColumns(stored.inputFingerprint).fingerprintDigest);"
+  },
+  {
+    "id": "D4380",
+    "defect": "The discovery removal takes only earlier discoveries stored under the fingerprint of the discovery being stored, so a worktree's discovery under each earlier fingerprint stays in the store with its workspace and test rows.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "  { projectIdentity, worktreeIdentity }: StoreBindings,\n): void {\n  for (const remove of REMOVE_WORKTREE_DISCOVERIES) {\n    database.prepare(remove).run(projectIdentity, worktreeIdentity);",
+    "new": "  { projectIdentity, worktreeIdentity, inputFingerprint }: StoreBindings,\n): void {\n  for (const remove of REMOVE_WORKTREE_DISCOVERIES) {\n    database.prepare(remove.replaceAll(\"d.worktree_identity = ?\", \"d.worktree_identity = ? AND d.fingerprint_digest IS ?\")).run(projectIdentity, worktreeIdentity, fingerprintColumns(inputFingerprint).fingerprintDigest);"
+  },
+  {
+    "id": "D4381",
+    "defect": "A run stored in place of an earlier run of its workspace takes that run's identity, so the daemon reads the later run as the one it holds a not-kept verdict for.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "runId: randomUUID(),",
+    "new": "runId: `${bindings.projectIdentity}|${bindings.worktreeIdentity}|${run.workspace.path}`,"
   }
 ]

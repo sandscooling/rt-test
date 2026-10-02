@@ -4196,6 +4196,12 @@ const DISCOVERY_TABLES = [
   "discovery_workspaces",
   "discovered_tests",
 ];
+const OTHER_DIGEST: InputFingerprint = {
+  kind: "digest",
+  digest: "sha256:FCDE2B2EDBA56BF4",
+};
+/** What four records of one key are stored under in turn: a digest, another digest, no fingerprint, and the first digest again. */
+const FINGERPRINTS_IN_TURN = [DIGEST, OTHER_DIGEST, UNFINGERPRINTED, DIGEST];
 /** Saves after which a worktree's discovery and each of its workspaces' runs have been replaced at least once. */
 const SAVES_UNTIL_REPLACED = 3;
 const FURTHER_SAVES = 100;
@@ -4256,6 +4262,42 @@ describe("a stored run in place of its workspace's earlier runs", () => {
         run_tests: NOTHING_RAN_RUN.modules.flatMap(testsOf).length,
       },
     });
+  });
+
+  it("D4379: a stored run replaces every earlier run of its workspace whatever fingerprint each was stored under, a digest, another digest or none", async () => {
+    const outcome = await inStore((store) => {
+      for (const fingerprint of FINGERPRINTS_IN_TURN) {
+        store.writeRun(bound(WORKTREE_A, fingerprint), RAN_RUN);
+      }
+      return {
+        fingerprints: store
+          .readRuns(WORKTREE_A)
+          .map(({ inputFingerprint }) => inputFingerprint),
+        rows: rowsIn(store.file, RUN_TABLES),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      fingerprints: [DIGEST],
+      rows: {
+        runs: 1,
+        run_modules: RAN_RUN.modules.length,
+        run_tests: RAN_RUN.modules.flatMap(testsOf).length,
+      },
+    });
+  });
+
+  it("D4381: a run stored in place of an earlier run of its workspace is given a run identity of its own, which the store then holds", async () => {
+    const identities = await inStore((store) => {
+      const earlier = store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      const later = store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      return {
+        ownIdentity: later.runId !== earlier.runId,
+        held: store
+          .readRuns(WORKTREE_A)
+          .map(({ runId }) => runId === later.runId),
+      };
+    });
+    expect(identities).toStrictEqual({ ownIdentity: true, held: [true] });
   });
 
   it("D4358: a stored run replaces no run of another workspace of its worktree", async () => {
@@ -4385,6 +4427,28 @@ describe("a stored discovery in place of its worktree's earlier discoveries", ()
     });
     expect(outcome).toStrictEqual({
       latest: DISCOVERY,
+      rows: {
+        discoveries: 1,
+        discovery_workspaces: DISCOVERY.workspaces.length,
+        discovered_tests: DISCOVERY.workspaces.flatMap((entry) =>
+          entry.status === "discovered" ? entry.tests : [],
+        ).length,
+      },
+    });
+  });
+
+  it("D4380: a stored discovery replaces every earlier discovery of its worktree whatever fingerprint each was stored under, a digest, another digest or none", async () => {
+    const outcome = await inStore((store) => {
+      for (const fingerprint of FINGERPRINTS_IN_TURN) {
+        store.writeDiscovery(bound(WORKTREE_A, fingerprint), DISCOVERY);
+      }
+      return {
+        fingerprint: store.readLatestDiscovery(WORKTREE_A)?.inputFingerprint,
+        rows: rowsIn(store.file, DISCOVERY_TABLES),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      fingerprint: DIGEST,
       rows: {
         discoveries: 1,
         discovery_workspaces: DISCOVERY.workspaces.length,
