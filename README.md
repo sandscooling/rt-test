@@ -27,7 +27,7 @@ Test-driven development proves a test can fail once, before the code exists. It 
 
 RT Test holds every test to a stronger bar. Each test names the specific wrong behavior it exists to reject, its **named defect**, such as "a quantity above the maximum is accepted", along with a small mutation of the code that introduces exactly that bug. RT Test then **falsifies** the test: it applies the mutation in memory, never touching your files, and runs the test against it. The defect counts as detected only when the unmutated test passes, the mutated line actually ran during the test, the test failed at an assertion rather than crashing in setup or timing out, the failure repeats on a confirming run, and the test passes again once the mutation is removed.
 
-The result is a suite in which every test is proven to catch the bug it names, and a test that cannot fail is reported as a gap. The proof goes stale when the code or the test changes, and RT Test proves it again at low priority, behind ordinary test runs. The daemon falsifies a started project's defect definitions by itself; the rest of milestone M2 (sprint 3) is being built, and until it lands this repository proves its own tests with a bootstrap version of the same idea (`docs/testing.md` § Bootstrap falsification).
+The result is a suite in which every test is proven to catch the bug it names, and a test that cannot fail is reported as a gap. The proof goes stale when the code or the test changes, and RT Test proves it again at low priority, behind ordinary test runs. The daemon falsifies a started project's defect definitions by itself, and this repository proves its own tests with a bootstrap version of the same idea (`docs/testing.md` § Bootstrap falsification).
 
 ## Status
 
