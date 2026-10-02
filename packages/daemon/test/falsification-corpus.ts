@@ -77,7 +77,7 @@ export const REPLAY_DEADLINE_MS =
   DAEMON_TEST_TIMEOUT_MS - STOP_DEADLINE_MS - RESPONSE_BOUND_MS;
 /** A defects query reads every definition file, so the replay asks a few times a second rather than without pause. */
 const SETTLE_POLL_MS = 200;
-/** Longer than the slowest look measured between two jobs at the corpus's size, 321 ms on Windows. */
+/** Longer than the slowest look measured between two jobs, 321 ms on Windows at 26 definitions. */
 const SETTLE_HOLD_MS = 400;
 const TEST_MODULE = /\.test\.mjs$/;
 const LINKED_VITEST_MANIFEST = "node_modules/vitest/package.json";

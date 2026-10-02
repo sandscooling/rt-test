@@ -472,6 +472,45 @@ No record mutates `daemon/canary-reading.ts`, `daemon/canary-gate.ts`, `vitest/l
 
 ### Review Record
 
+Review session: threadId 600c09c4-00b1-4500-95e3-3d2db058ddd2
+
+Review stage, rt-t3-7-review, 2026-10-01, from 20:28, in Tree 2 on `wt/2` at 66115d85, which holds ticket 3.6's canary gate. Reviewed `git diff a3c6c8aa 66115d85` (the build and the tests), the doc changes of the authoring commit fd9e606f, and the two doc texts under `_agent-docs/.scratch/`. Three passes: the reviewer's checklist pass against the ticket's rule set; one fresh-eyes agent over the one code batch (the four files under `packages/daemon/test`, 1,520 code lines, with the fixture and the 36 records); and one doc-verify agent over the three committed docs and the two doc texts. No assumptions agent ran: the table reads None, the diff adds no third-party dependency and no comment claims a library's behavior, and an assertion failing in `beforeEach` is read on both Vitest lines in every gate by the canary `before-each-assertion` (`packages/daemon/canaries/canaries.json`). The orchestrator's role moved during the review, from threadId e6fd9ca0-a25f-4b3a-bd24-c2e62c99acab to 01c0c9aa-ec77-4309-80c5-54f11ed06105 (told at 20:31 and 20:33); the review asked it no question.
+
+Fresh-eyes found no path on which `replayCorpus` returns `CLEAN` over a step it did not judge, confirmed AC1 to AC8 against the code, and traced each of the 36 records to a failure at its test's one assertion. The proofs and the AC9 runs the Tests Record names were read in their logs: 35 of 35 and 1 of 1 detected on Windows, 36 selected on Linux, each exit 0, and 36 of 36 tests in each timing run.
+
+#### The removal hazard, confirmed
+
+Under D4217 the unbound `falsify` rejects at the executor's first use of its receiver, before a job is sent; `readJob` in `daemon/canary-reading.ts` catches the rejection as a no reading; and `removePlaced` runs from the `finally` of `takeCanaryReading` as written. D4212 changes one line of the judge's `readHooks` in `falsify/verdict.ts`, which neither the placement nor the removal reads. Under each the reading links this repository's Vitest install into a directory of its own beneath the replay's state directory and removes that link and that directory, and nothing else. The canary files and the executor child that runs the job import none of the files D4211 and D4213 to D4216 mutate; the look that asks the gate, in `daemon/falsification.ts`, imports all three.
+
+#### Fixed
+
+- `packages/daemon/test/falsification-corpus.ts`, the comment above `SETTLE_HOLD_MS`: it gave the 321 ms look as measured "at the corpus's size". It was measured over AC10's consumer at 26 definitions, and the corpus holds 7. Comment-only, so no record is proven again: no record mutates that file and what the helper does is unchanged.
+- This ticket's File List left out the tests session's two files. Added.
+
+#### Left as they are
+
+Each with doing nothing and one coarser rule beside it; doing nothing was chosen for all, since none is a case the suite passes wrongly.
+
+- `findingsOn` reads empty over a replay that ended not settled, so D4213 to D4216 pass over steps nobody compared. Left: in the suite D4211 and D4212 read the same kept report whole and are red beside them. Keeping not-settled findings beside the kind asked for would let a mutated replay that failed to settle for any reason count as a detection of a finding that never fired, which the kind filter exists to prevent.
+- The settle's hold is 400 ms against a slowest look of 321 ms on an idle machine. A look that outlasts it lets an undeclared job begin after the step's reading, where step 2 absorbs it or, after the last step, nothing reads it; under D4216's mutation the proof then reads a survivor, which fails the proof loudly. The unmutated replay does not depend on the hold. A longer hold adds a wait on a real clock to every step of both replays (about 3.6 s a suite run at 1 s), and reading the daemon's idle entry instead ties the check to the log's wording (§ Design decisions, 4).
+- The search's control shows that each definition file was among the files read, not that the state directory, `.git` or a `node_modules` directory was, so a search narrowed to part of the copy would pass it. That the search reads the store, its WAL and the log was observed once by dev (§ First task, 37 files) and rests on `regularFiles` leaving nothing out. A control naming the daemon's log among the files read would cost a change to the replay and a proof again of D4211 to D4217.
+- The replay's deadline, one answer's bound and the stop's bound add up to the test's timeout exactly (85 s, 10 s and 25 s of 120 s), with nothing kept for the copy's removal. A replay whose wait runs to its limit, whose one answer after it takes its whole bound and whose daemon takes its whole stop ends at the test's timeout, naming nothing, and not by its finding. D4212 and D4217 end by their finding on both platforms, since a daemon with no job in progress stops at once.
+- The tree and the search list a directory and then read each entry while the daemon lives, so an entry that goes between the two throws out of the harness. It fails loudly, and no replay of dev's, the tests session's or the proofs' met it (dev's adversarial F10).
+- Four exports have no importer (`REPLAY_DEADLINE_MS`, `finding`, `CountsReading`, `ASSERTION_WEAKENED`), `settled` carries four meanings in `falsification-corpus.ts`, and `settledWithout` and the two `fileHolding` helpers read less well than they could. No behavior rests on any, and a change to the findings file or the test file proves 29 or 36 records again.
+- A record the store lost is reported under the kind falsified outside the declared set: AC8's kinds are closed, and the comment on `falsifiedFindings` says so.
+- Nothing checks that the install named `vitest-4` links a 4.1 line: the root `package.json` pins it to 4.1.11, and every test of both lines in the repository rests on that alias, so a check belongs to `linkVitest` and to none of this ticket's files.
+- A file written and restored between two readings is not seen (§ Known limits), and the fixture's manifests declare no Vitest, which no product path reads.
+
+#### Doc findings sent to the orchestrator
+
+In the dev's doc text: the time between two jobs gives Vitest 4.1.11's median (53 ms) beside 5.0.1's slowest (321 ms), and the medians are 53 and 56 ms; "the canary set holds the others" reads as a split, and the canary set holds the setup failure too; its text for `next-session.md` was written before the tests and the gate and is stale. In the tests session's doc text: "each asserting the findings by kind, step and subject through `named`, a finding's detail being wording" holds of D4218 to D4238 only, since D4239 asserts a throw, D4240 to D4245 booleans and ids, and D4246 the detail; and "each condition of the settle" is five of six. Of ticket 3.8, which is not built this sprint: § Pending siblings above says what it will do and has the naming of the definition files wait until it lands, and `_agent-docs/next-session.md` names it as next.
+
+#### Tech debt
+
+- `entriesUnder`, `treeEntries` and `heldBy` in `packages/daemon/test/falsification-corpus.ts` are a second reading of a tree beside `entryLine` and `treeLines` in `packages/daemon/test/falsify/canaries.test.ts`; the corpus's leaves out several names where that one skips one path. Recorded by the author (§ Design decisions, 7) and carried by the orchestrator.
+- `applyChange` in `packages/daemon/test/falsification-corpus.ts` is a second exact text replacement beside `applyChange` in `packages/daemon/test/edit-corpus.ts`. Carried with the one above.
+- The start of `replayCorpus` in `packages/daemon/test/falsification-corpus.ts` (the copy, the links, the repository, `confirmEvery`, the check of the confirmed workspaces, `withDaemons`, `started` and the throw when the daemon did not start) repeats the start of `checkSequence` in `packages/daemon/test/edit-corpus.ts`, and `CLEAN` and `TEST_MODULE` are declared in both. A fix to one start misses the other; sharing them edits `edit-corpus.ts` and proves its records again.
+
 #### Test Coverage Gaps
 
 None.
@@ -606,3 +645,11 @@ Created by dev (rt-t3-7-dev, 2026-10-01):
 - `test/fixtures/daemon/falsification-corpus/packages/app/named-defects.json`
 
 Modified by dev: this ticket file only (task and criterion boxes, the Dev Handoff, the Completion Notes and this list). No dependency changed.
+
+Created by the tests session (rt-t3-7-tests, 2026-10-01):
+
+- `packages/daemon/test/falsification-corpus.test.ts`
+
+Modified by the tests session: `packages/daemon/test/defects.json` (records D4211 to D4246 appended) and this ticket file (the Tests Record).
+
+Modified by the review (rt-t3-7-review, 2026-10-01): `packages/daemon/test/falsification-corpus.ts` (one comment) and this ticket file (the Review Record and this list).
