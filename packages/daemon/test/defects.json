@@ -827,7 +827,7 @@
   },
   {
     "id": "D1225",
-    "defect": "Every run is stored under one fixed run identity, so a second run of a worktree cannot be stored.",
+    "defect": "Every run is stored under one fixed run identity, so a run of a second workspace of a worktree cannot be stored.",
     "file": "packages/daemon/src/store/write-run.ts",
     "old": "runId: randomUUID(),",
     "new": "runId: \"run\","
@@ -10235,7 +10235,7 @@
   },
   {
     "id": "D3471",
-    "defect": "The corpus's duplicate execution comparison never reports, so a run stored under its workspace's previous fingerprint and adapter version reads clean.",
+    "defect": "The corpus's duplicate execution comparison never reports, so a run the log says was stored under its workspace's previous fingerprint reads clean.",
     "file": "packages/daemon/test/edit-corpus-findings.ts",
     "old": "  if (!duplicate) return [];",
     "new": "  return [];"
@@ -12430,5 +12430,159 @@
     "file": "packages/daemon/src/daemon/executor.ts",
     "old": "      ? { ended: true, value: reply.discovery, collection: reply.collection }",
     "new": "      ? { ended: true, value: reply.discovery }"
+  },
+  {
+    "id": "D4357",
+    "defect": "The run writer removes no earlier run of the workspace, so every run a workspace ever stored stays in the store with its module and test rows.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "    removeEarlierRuns(database, stored);\n",
+    "new": ""
+  },
+  {
+    "id": "D4358",
+    "defect": "The run removal leaves the workspace path out of its key, so storing a run removes the latest run of every other workspace of the worktree.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": " AND r.workspace_path = ?`;",
+    "new": " AND ? IS NOT NULL`;"
+  },
+  {
+    "id": "D4359",
+    "defect": "The run removal leaves the worktree out of its key, so storing a run removes the run another worktree of the project stored for the same workspace path.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "AND r.worktree_identity = ? AND",
+    "new": "AND ? IS NOT NULL AND"
+  },
+  {
+    "id": "D4360",
+    "defect": "The run removal leaves the project out of its key, so storing a run removes the run another project stored for the same worktree and workspace path.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "WHERE r.project_identity = ? AND",
+    "new": "WHERE ? IS NOT NULL AND"
+  },
+  {
+    "id": "D4361",
+    "defect": "The discovery writer removes no earlier discovery of the worktree, so every discovery a worktree ever stored stays in the store with its workspace and test rows.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "    removeEarlierDiscoveries(database, bindings);\n",
+    "new": ""
+  },
+  {
+    "id": "D4362",
+    "defect": "The discovery removal leaves the worktree out of its key, so storing a discovery removes the discovery of every other worktree of the project.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "AND d.worktree_identity = ?`;",
+    "new": "AND ? IS NOT NULL`;"
+  },
+  {
+    "id": "D4363",
+    "defect": "The discovery removal leaves the project out of its key, so storing a discovery removes the discovery another project stored for the same worktree.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "WHERE d.project_identity = ? AND",
+    "new": "WHERE ? IS NOT NULL AND"
+  },
+  {
+    "id": "D4364",
+    "defect": "The run removal runs ahead of the write's transaction, so it commits apart from the insert and a run write that fails loses the workspace's earlier run.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "  return inRecordWrite(database, () => {\n    removeEarlierRuns(database, stored);\n",
+    "new": "  removeEarlierRuns(database, stored);\n  return inRecordWrite(database, () => {\n"
+  },
+  {
+    "id": "D4365",
+    "defect": "The discovery removal runs ahead of the write's transaction, so it commits apart from the insert and a discovery write that fails loses the worktree's earlier discovery.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "  return inRecordWrite(database, () => {\n    removeEarlierDiscoveries(database, bindings);\n",
+    "new": "  removeEarlierDiscoveries(database, bindings);\n  return inRecordWrite(database, () => {\n"
+  },
+  {
+    "id": "D4366",
+    "defect": "The run removal is committed before the new run is inserted, so another connection reading between the two finds no run of the workspace.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "    removeEarlierRuns(database, stored);\n    insertRun(database, stored);",
+    "new": "    removeEarlierRuns(database, stored);\n    database.exec(\"COMMIT; BEGIN IMMEDIATE\");\n    insertRun(database, stored);"
+  },
+  {
+    "id": "D4367",
+    "defect": "The discovery removal is committed before the new discovery is inserted, so another connection reading between the two finds no discovery of the worktree.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "    removeEarlierDiscoveries(database, bindings);\n",
+    "new": "    removeEarlierDiscoveries(database, bindings);\n    database.exec(\"COMMIT; BEGIN IMMEDIATE\");\n"
+  },
+  {
+    "id": "D4368",
+    "defect": "A stored run also removes its worktree's defect evidence, so every defect reads as having no verdict once the next run is stored.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "  `DELETE FROM runs WHERE sequence IN (${WORKSPACE_RUNS})`,\n];",
+    "new": "  `DELETE FROM runs WHERE sequence IN (${WORKSPACE_RUNS})`,\n  \"DELETE FROM defect_evidence WHERE project_identity = ? AND worktree_identity = ? AND ? IS NOT NULL\",\n];"
+  },
+  {
+    "id": "D4369",
+    "defect": "The run removal leaves the earlier run's test rows out, so removing its modules fails on the rows that refer to them and no later run of a workspace that recorded tests is stored.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": "  `DELETE FROM run_tests WHERE run_sequence IN (${WORKSPACE_RUNS})`,\n",
+    "new": ""
+  },
+  {
+    "id": "D4370",
+    "defect": "The discovery removal leaves the earlier discovery's test rows out, so removing its workspaces fails on the rows that refer to them and no later discovery of a worktree that listed tests is stored.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "  `DELETE FROM discovered_tests WHERE discovery_sequence IN (${WORKTREE_DISCOVERIES})`,\n",
+    "new": ""
+  },
+  {
+    "id": "D4371",
+    "defect": "The run removal takes only runs of a status the readers know, so a latest run refused as unreadable stays in the store, with its rows, beside the run stored after it.",
+    "file": "packages/daemon/src/store/write-run.ts",
+    "old": " AND r.workspace_path = ?`;",
+    "new": " AND r.workspace_path = ? AND r.status IN ('ran', 'unsupported', 'failed', 'interrupted-before-load', 'crashed')`;"
+  },
+  {
+    "id": "D4372",
+    "defect": "The discovery removal takes only discoveries whose unread sources read as a list, so a latest discovery refused as unreadable stays in the store, with its rows, beside the discovery stored after it.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "AND d.worktree_identity = ?`;",
+    "new": "AND d.worktree_identity = ? AND json_type(d.not_read) = 'array'`;"
+  },
+  {
+    "id": "D4373",
+    "defect": "The discovery removal takes an earlier discovery's workspace and test rows and leaves its own row, so the store's file still grows at every save, a row at a time.",
+    "file": "packages/daemon/src/store/write-discovery.ts",
+    "old": "  `DELETE FROM discoveries WHERE sequence IN (${WORKTREE_DISCOVERIES})`,\n",
+    "new": ""
+  },
+  {
+    "id": "D4374",
+    "defect": "The daemon logs no entry for a run it stores, so the log holds no record of a run a later run of its workspace replaced, and two runs under one fingerprint cannot be told from one.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      log.entry(runStoredEntry(path, bindings));\n",
+    "new": ""
+  },
+  {
+    "id": "D4375",
+    "defect": "The stored entry is written ahead of the store's write, so a run whose write is refused is logged as stored though nothing of it was.",
+    "file": "packages/daemon/src/daemon/lifecycle.ts",
+    "old": "      const { runId } = this.#parts.store.writeRun(bindings, run);\n      log.entry(runStoredEntry(path, bindings));\n",
+    "new": "      log.entry(runStoredEntry(path, bindings));\n      const { runId } = this.#parts.store.writeRun(bindings, run);\n"
+  },
+  {
+    "id": "D4376",
+    "defect": "A run stored under a fingerprint is logged as not fingerprinted, so the log never shows two runs of a workspace stored under one fingerprint.",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "      ? `under fingerprint ${inputFingerprint.digest}`",
+    "new": "      ? \"not fingerprinted\""
+  },
+  {
+    "id": "D4377",
+    "defect": "A run stored not fingerprinted is logged as stored under a fingerprint, so the log reads it as a run its workspace's next run could duplicate.",
+    "file": "packages/daemon/src/daemon/job-endings.ts",
+    "old": "inputFingerprint.kind === FINGERPRINT_DIGEST",
+    "new": "inputFingerprint.kind !== undefined"
+  },
+  {
+    "id": "D4378",
+    "defect": "The corpus reads every run the log says was stored as not fingerprinted, so no run reads as stored under its workspace's previous fingerprint and no duplicate execution is ever reported.",
+    "file": "packages/daemon/test/stored-run-log.ts",
+    "old": "    inputFingerprint: {\n      kind: FINGERPRINT_DIGEST,\n      digest: stored.slice(digestAt + UNDER_FINGERPRINT.length),\n    },",
+    "new": "    inputFingerprint: { kind: NOT_FINGERPRINTED },"
   }
 ]

@@ -43,11 +43,15 @@ import {
 import type {
   InputFingerprint,
   StoreBindings,
+  StoredRun,
   StoreScope,
 } from "../src/store/stored-records.js";
 import { NewerStoreSchemaError } from "../src/store/transaction.js";
 import { VITEST_ADAPTER_VERSION } from "../src/vitest/adapter-version.js";
-import type { TestDiscovery } from "../src/vitest/discover-tests.js";
+import type {
+  TestDiscovery,
+  WorkspaceDiscovery,
+} from "../src/vitest/discover-tests.js";
 import type { VitestWorkspace } from "../src/vitest/find-workspaces.js";
 import type { RecordedModule, RecordedTest } from "../src/vitest/run-states.js";
 import type { WorkspaceRun } from "../src/vitest/run-workspace.js";
@@ -304,6 +308,10 @@ const CRASHED_RUN: WorkspaceRun = {
   workspace: WORKSPACE,
   error: "the executor process 7 exited during the job (exit code 1)",
 };
+const OTHER_WORKSPACE_RUN: WorkspaceRun = {
+  status: "interrupted-before-load",
+  workspace: OTHER_WORKSPACE,
+};
 
 const REGEXP_ALIAS: ReportedAlias = {
   find: "^~icons\\/(.*)$",
@@ -450,6 +458,28 @@ const DISCOVERY_WITHOUT_TESTS: TestDiscovery = {
     { source: "apps/*", reason: "the pattern matched no directory" },
   ],
 };
+/** A run holding a test in an execution state no reader knows, which the writer's read back refuses. */
+const UNREADABLE_RUN = {
+  ...RAN_RUN,
+  modules: [
+    {
+      ...RAN_MODULE,
+      tests: [{ ...INTERRUPTED_TEST, execution: "pending" }],
+    },
+  ],
+} as unknown as RanRun;
+/** A discovery holding tests in a mode no reader knows, which the writer's read back refuses. */
+const UNREADABLE_DISCOVERY = {
+  ...DISCOVERY,
+  workspaces: DISCOVERY.workspaces.map((workspace) =>
+    workspace.status === "discovered"
+      ? {
+          ...workspace,
+          tests: workspace.tests.map((test) => ({ ...test, mode: "queued" })),
+        }
+      : workspace,
+  ),
+} as unknown as TestDiscovery;
 
 function bound(
   scope: StoreScope,
@@ -524,6 +554,52 @@ function withRawDatabase<T>(
   } finally {
     database.close();
   }
+}
+
+/** `bindings` under a worktree no test reads, so a write under them replaces nothing a test stored. */
+function apart(bindings: StoreBindings, index: number): StoreBindings {
+  return {
+    ...bindings,
+    worktreeIdentity: `${bindings.worktreeIdentity}#${index}`,
+  };
+}
+
+/**
+ * Stores the runs in order as an RT Test that replaced none stored them, so each one stays: each is written under a
+ * worktree of its own and then moved to `bindings`' through a second connection.
+ */
+function writeRunsKept(
+  store: RtTestStore,
+  bindings: StoreBindings,
+  runs: readonly WorkspaceRun[],
+): StoredRun[] {
+  return runs.map((run, index) => {
+    const stored = store.writeRun(apart(bindings, index), run);
+    withRawDatabase(store.file, (database) => {
+      database
+        .prepare("UPDATE runs SET worktree_identity = ? WHERE run_id = ?")
+        .run(bindings.worktreeIdentity, stored.runId);
+    });
+    return stored;
+  });
+}
+
+/** Stores the discoveries in order as an RT Test that replaced none stored them, as `writeRunsKept` stores runs. */
+function writeDiscoveriesKept(
+  store: RtTestStore,
+  bindings: StoreBindings,
+  discoveries: readonly TestDiscovery[],
+): void {
+  discoveries.forEach((discovery, index) => {
+    const stored = store.writeDiscovery(apart(bindings, index), discovery);
+    withRawDatabase(store.file, (database) => {
+      database
+        .prepare(
+          "UPDATE discoveries SET worktree_identity = ? WHERE discovery_id = ?",
+        )
+        .run(bindings.worktreeIdentity, stored.discoveryId);
+    });
+  });
 }
 
 /** Takes a current store's header back to `userVersion`, dropping the evidence table and the not-covered column every version below 10 lacks. */
@@ -661,14 +737,14 @@ async function whileWriteHeld<T>(
   return { held: holding && lockAskedWhileHeld, result, exitCode };
 }
 
-/** Writes the runs through a store, then takes the file back to the schema version before the force-stop column, as the migration's inverse. */
+/** Writes the runs through a store, each kept, then takes the file back to the schema version before the force-stop column, as the migration's inverse. */
 function writeForceStopUnawareStore(
   stateDirectory: string,
   runs: readonly WorkspaceRun[],
   userVersion = FORCE_STOP_UNAWARE_VERSION,
 ): string {
   withOpenStore(stateDirectory, (store) => {
-    for (const run of runs) store.writeRun(bound(WORKTREE_A), run);
+    writeRunsKept(store, bound(WORKTREE_A), runs);
   });
   const file = join(stateDirectory, STORE_FILE_NAME);
   withRawDatabase(file, (database) => {
@@ -681,17 +757,15 @@ function writeForceStopUnawareStore(
   return file;
 }
 
-/** Writes the discoveries and runs through a store, then takes the file back to the schema version before selection facts, as that migration's inverse. */
+/** Writes the discoveries and runs through a store, each kept, then takes the file back to the schema version before selection facts, as that migration's inverse. */
 function writeSelectionFactsUnawareStore(
   stateDirectory: string,
   discoveries: readonly TestDiscovery[],
   runs: readonly WorkspaceRun[] = [],
 ): string {
   withOpenStore(stateDirectory, (store) => {
-    for (const discovery of discoveries) {
-      store.writeDiscovery(bound(WORKTREE_A), discovery);
-    }
-    for (const run of runs) store.writeRun(bound(WORKTREE_A), run);
+    writeDiscoveriesKept(store, bound(WORKTREE_A), discoveries);
+    writeRunsKept(store, bound(WORKTREE_A), runs);
   });
   const file = join(stateDirectory, STORE_FILE_NAME);
   withRawDatabase(file, (database) => {
@@ -703,15 +777,13 @@ function writeSelectionFactsUnawareStore(
   return file;
 }
 
-/** Writes the discoveries through a store, then strips each stored project's Vite root and takes the header back to version 3, as a store from before the root was kept holds them. */
+/** Writes the discoveries through a store, each kept, then strips each stored project's Vite root and takes the header back to version 3, as a store from before the root was kept holds them. */
 function writeViteRootUnawareStore(
   stateDirectory: string,
   discoveries: readonly TestDiscovery[],
 ): string {
   withOpenStore(stateDirectory, (store) => {
-    for (const discovery of discoveries) {
-      store.writeDiscovery(bound(WORKTREE_A), discovery);
-    }
+    writeDiscoveriesKept(store, bound(WORKTREE_A), discoveries);
   });
   const file = join(stateDirectory, STORE_FILE_NAME);
   withRawDatabase(file, (database) => {
@@ -757,7 +829,7 @@ function withoutEnvSources({
   return rest;
 }
 
-/** Writes `DISCOVERY` and the runs through a store, then rewrites each stored project with `strip` and takes the header back to `userVersion`, as a store from before the stripped fields were kept holds them. */
+/** Writes `DISCOVERY` and the runs, each kept, through a store, then rewrites each stored project with `strip` and takes the header back to `userVersion`, as a store from before the stripped fields were kept holds them. */
 function writeFactsUnawareStore(
   stateDirectory: string,
   userVersion: number,
@@ -766,7 +838,7 @@ function writeFactsUnawareStore(
 ): string {
   withOpenStore(stateDirectory, (store) => {
     store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
-    for (const run of runs) store.writeRun(bound(WORKTREE_A), run);
+    writeRunsKept(store, bound(WORKTREE_A), runs);
   });
   const file = join(stateDirectory, STORE_FILE_NAME);
   withRawDatabase(file, (database) => {
@@ -1071,10 +1143,10 @@ describe("storing a workspace run", () => {
     ]);
   });
 
-  it("D1225: storing the same run twice records two runs under two run identities", async () => {
+  it("D1225: a run of each of two workspaces is recorded under a run identity of its own", async () => {
     const identities = await inStore((store) => {
       store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
-      store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+      store.writeRun(bound(WORKTREE_A), OTHER_WORKSPACE_RUN);
       return new Set(store.readRuns(WORKTREE_A).map((stored) => stored.runId))
         .size;
     });
@@ -1206,10 +1278,12 @@ describe("storing a discovery", () => {
     expect(discovery).toStrictEqual(notConfirmed);
   });
 
-  it("D1235: the latest discovery is the one stored last", async () => {
+  it("D1235: the latest discovery is the one stored last, among those a store that kept every discovery holds", async () => {
     const discovery = await inStore((store) => {
-      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
-      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      writeDiscoveriesKept(store, bound(WORKTREE_A), [
+        DISCOVERY,
+        DISCOVERY_WITHOUT_TESTS,
+      ]);
       return store.readLatestDiscovery(WORKTREE_A)?.discovery;
     });
     expect(discovery).toStrictEqual(DISCOVERY_WITHOUT_TESTS);
@@ -1305,21 +1379,7 @@ describe("writing a run or discovery whole", () => {
   it("D1240: a run the readers could not rebuild is refused whole and the stored history stays readable", async () => {
     const runs = await inStore((store) => {
       store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
-      const unreadable: RanRun = {
-        ...RAN_RUN,
-        modules: [
-          {
-            ...RAN_MODULE,
-            tests: [
-              {
-                ...INTERRUPTED_TEST,
-                execution: "pending",
-              } as unknown as RecordedTest,
-            ],
-          },
-        ],
-      };
-      settle(() => store.writeRun(bound(WORKTREE_A), unreadable));
+      settle(() => store.writeRun(bound(WORKTREE_A), UNREADABLE_RUN));
       return runsOf(store, WORKTREE_A);
     });
     expect(runs).toStrictEqual([BEFORE_LOAD_RUN]);
@@ -1328,21 +1388,9 @@ describe("writing a run or discovery whole", () => {
   it("D1241: a discovery the reader could not rebuild is refused whole and the latest discovery stays readable", async () => {
     const latest = await inStore((store) => {
       store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
-      const unreadable = {
-        ...DISCOVERY,
-        workspaces: DISCOVERY.workspaces.map((workspace) =>
-          workspace.status === "discovered"
-            ? {
-                ...workspace,
-                tests: workspace.tests.map((test) => ({
-                  ...test,
-                  mode: "queued",
-                })),
-              }
-            : workspace,
-        ),
-      } as unknown as TestDiscovery;
-      settle(() => store.writeDiscovery(bound(WORKTREE_A), unreadable));
+      settle(() =>
+        store.writeDiscovery(bound(WORKTREE_A), UNREADABLE_DISCOVERY),
+      );
       return store.readLatestDiscovery(WORKTREE_A)?.discovery;
     });
     expect(latest).toStrictEqual(DISCOVERY_WITHOUT_TESTS);
@@ -1365,7 +1413,7 @@ describe("reading for one project and worktree", () => {
       try {
         store.writeRun(bound(WORKTREE_A), FAILED_RUN);
         other.writeRun(bound(WORKTREE_B), UNSUPPORTED_RUN);
-        store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+        store.writeRun(bound(WORKTREE_A), OTHER_WORKSPACE_RUN);
         return {
           a: runsOf(store, WORKTREE_A),
           b: runsOf(other, WORKTREE_B),
@@ -1375,7 +1423,7 @@ describe("reading for one project and worktree", () => {
       }
     });
     expect(runs).toStrictEqual({
-      a: [FAILED_RUN, BEFORE_LOAD_RUN],
+      a: [FAILED_RUN, OTHER_WORKSPACE_RUN],
       b: [UNSUPPORTED_RUN],
     });
   });
@@ -1439,13 +1487,13 @@ describe("surviving a restart", () => {
   it("D1249: after close and reopen a worktree's runs read back unchanged in the order they were stored", async () => {
     const runs = await acrossReopen(
       (store) => {
-        for (const run of [RAN_RUN, FAILED_RUN, UNSUPPORTED_RUN]) {
+        for (const run of [RAN_RUN, OTHER_WORKSPACE_RUN]) {
           store.writeRun(bound(WORKTREE_A), run);
         }
       },
       (store) => runsOf(store, WORKTREE_A),
     );
-    expect(runs).toStrictEqual([RAN_RUN, FAILED_RUN, UNSUPPORTED_RUN]);
+    expect(runs).toStrictEqual([RAN_RUN, OTHER_WORKSPACE_RUN]);
   });
 
   it("D1256: after close and reopen a worktree's latest discovery reads back unchanged", async () => {
@@ -2150,8 +2198,7 @@ describe("opening a store written before crashed runs", () => {
       settle(() => {
         const stateDirectory = defaultStateDirectory(dir);
         withOpenStore(stateDirectory, (store) => {
-          store.writeRun(bound(WORKTREE_A), RAN_RUN);
-          store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+          writeRunsKept(store, bound(WORKTREE_A), [RAN_RUN, FAILED_RUN]);
         });
         const file = join(stateDirectory, STORE_FILE_NAME);
         withRawDatabase(file, (database) => {
@@ -2483,11 +2530,6 @@ describe("the adapter version a stored record carries", () => {
 });
 
 describe("the latest run of each workspace a query reads", () => {
-  const OTHER_WORKSPACE_RUN: WorkspaceRun = {
-    status: "interrupted-before-load",
-    workspace: OTHER_WORKSPACE,
-  };
-
   /** The latest runs a query of `scope` reads, each named by the label of the written run it is. */
   function latestRunLabels(
     store: RtTestStore,
@@ -2499,13 +2541,15 @@ describe("the latest run of each workspace a query reads", () => {
       .latestRuns.map((run) => written[run.runId] ?? run.runId);
   }
 
-  it("D1832: a workspace's latest run is the one stored last, never an earlier one", async () => {
+  it("D1832: a workspace's latest run is the one stored last, never an earlier one a store that kept every run holds", async () => {
     const labels = await inStore((store) => {
-      const first = store.writeRun(bound(WORKTREE_A), RAN_RUN);
-      const last = store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+      const [first, last] = writeRunsKept(store, bound(WORKTREE_A), [
+        RAN_RUN,
+        BEFORE_LOAD_RUN,
+      ]);
       return latestRunLabels(store, WORKTREE_A, {
-        [first.runId]: "first",
-        [last.runId]: "last",
+        [first?.runId ?? "no first run"]: "first",
+        [last?.runId ?? "no last run"]: "last",
       });
     });
     expect(labels).toStrictEqual(["last"]);
@@ -2513,13 +2557,15 @@ describe("the latest run of each workspace a query reads", () => {
 
   it("D1833: each workspace path keeps its own latest run, whichever workspace ran last", async () => {
     const labels = await inStore((store) => {
-      const first = store.writeRun(bound(WORKTREE_A), RAN_RUN);
-      const other = store.writeRun(bound(WORKTREE_A), OTHER_WORKSPACE_RUN);
-      const last = store.writeRun(bound(WORKTREE_A), BEFORE_LOAD_RUN);
+      const [first, other, last] = writeRunsKept(store, bound(WORKTREE_A), [
+        RAN_RUN,
+        OTHER_WORKSPACE_RUN,
+        BEFORE_LOAD_RUN,
+      ]);
       return latestRunLabels(store, WORKTREE_A, {
-        [first.runId]: "first",
-        [other.runId]: "other workspace",
-        [last.runId]: "last",
+        [first?.runId ?? "no first run"]: "first",
+        [other?.runId ?? "no other run"]: "other workspace",
+        [last?.runId ?? "no last run"]: "last",
       });
     });
     expect(labels).toStrictEqual(["other workspace", "last"]);
@@ -2725,13 +2771,13 @@ describe("a latest run the store refuses as unreadable", () => {
     readonly runRefusals: LatestResults["runRefusals"];
   }
 
-  /** What a query reads once `written` is stored in order and `corrupt` has run through a second connection. */
+  /** What a query reads once `written` is stored in order, each kept, and `corrupt` has run through a second connection. */
   function latestAfter(
     written: readonly WorkspaceRun[],
     corrupt: string,
   ): Promise<Settled<LatestRunsRead>> {
     return inStore((store) => {
-      for (const run of written) store.writeRun(bound(WORKTREE_A), run);
+      writeRunsKept(store, bound(WORKTREE_A), written);
       withRawDatabase(store.file, (database) => {
         database.exec(corrupt);
       });
@@ -4141,5 +4187,367 @@ describe("opening a store written before defect evidence", () => {
       discovery: DISCOVERY,
       runs: [FAILED_RUN],
     });
+  });
+});
+
+const RUN_TABLES = ["runs", "run_modules", "run_tests"];
+const DISCOVERY_TABLES = [
+  "discoveries",
+  "discovery_workspaces",
+  "discovered_tests",
+];
+/** Saves after which a worktree's discovery and each of its workspaces' runs have been replaced at least once. */
+const SAVES_UNTIL_REPLACED = 3;
+const FURTHER_SAVES = 100;
+
+/** How many rows each of `tables` holds, whatever project and worktree they are of. */
+function rowsIn(
+  file: string,
+  tables: readonly string[],
+): Record<string, unknown> {
+  return withRawDatabase(file, (database) =>
+    Object.fromEntries(
+      tables.map((table) => [
+        table,
+        database.prepare(`SELECT count(*) AS count FROM ${table}`).get()?.[
+          "count"
+        ],
+      ]),
+    ),
+  );
+}
+
+function pageCount(file: string): number {
+  return withRawDatabase(file, (database) =>
+    Number(database.prepare("PRAGMA page_count").get()?.["page_count"]),
+  );
+}
+
+/** Reports the workspace's status as asked, calling `onRead` first. */
+function observedWorkspace(
+  entry: WorkspaceDiscovery,
+  onRead: () => void,
+): WorkspaceDiscovery {
+  return Object.defineProperty({ ...entry }, "status", {
+    enumerable: true,
+    get() {
+      onRead();
+      return entry.status;
+    },
+  });
+}
+
+describe("a stored run in place of its workspace's earlier runs", () => {
+  it("D4357: a stored run replaces every earlier run of its workspace, with their module and test rows", async () => {
+    const outcome = await inStore((store) => {
+      for (const run of [RAN_RUN, FAILED_RUN, NOTHING_RAN_RUN]) {
+        store.writeRun(bound(WORKTREE_A), run);
+      }
+      return {
+        runs: runsOf(store, WORKTREE_A),
+        rows: rowsIn(store.file, RUN_TABLES),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      runs: [NOTHING_RAN_RUN],
+      rows: {
+        runs: 1,
+        run_modules: NOTHING_RAN_RUN.modules.length,
+        run_tests: NOTHING_RAN_RUN.modules.flatMap(testsOf).length,
+      },
+    });
+  });
+
+  it("D4358: a stored run replaces no run of another workspace of its worktree", async () => {
+    const runs = await inStore((store) => {
+      for (const run of [OTHER_WORKSPACE_RUN, RAN_RUN, FAILED_RUN]) {
+        store.writeRun(bound(WORKTREE_A), run);
+      }
+      return runsOf(store, WORKTREE_A);
+    });
+    expect(runs).toStrictEqual([OTHER_WORKSPACE_RUN, FAILED_RUN]);
+  });
+
+  it("D4359: a stored run replaces no run another worktree of the project stored for the same workspace path", async () => {
+    const runs = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_B), RAN_RUN);
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      return {
+        own: runsOf(store, WORKTREE_A),
+        other: runsOf(store, WORKTREE_B),
+      };
+    });
+    expect(runs).toStrictEqual({ own: [FAILED_RUN], other: [RAN_RUN] });
+  });
+
+  it("D4360: a stored run replaces no run another project stored for the same worktree and workspace path", async () => {
+    const runs = await inStore((store) => {
+      store.writeRun(bound(OTHER_PROJECT), RAN_RUN);
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      return {
+        own: runsOf(store, WORKTREE_A),
+        other: runsOf(store, OTHER_PROJECT),
+      };
+    });
+    expect(runs).toStrictEqual({ own: [FAILED_RUN], other: [RAN_RUN] });
+  });
+
+  it("D4364: a run write that fails removes no earlier run of its workspace, which still reads with its modules and tests", async () => {
+    const runs = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      settle(() => store.writeRun(bound(WORKTREE_A), UNREADABLE_RUN));
+      return runsOf(store, WORKTREE_A);
+    });
+    expect(runs).toStrictEqual([RAN_RUN]);
+  });
+
+  it("D4366: a second store reading while a run is written in place of an earlier one reads the earlier run, never neither", async () => {
+    const seen = await inStore((store, stateDirectory) => {
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      const reader = openStore(stateDirectory);
+      try {
+        const observed: { runs: Settled<WorkspaceRun[]> | "never read" } = {
+          runs: "never read",
+        };
+        const replacing: RanRun = {
+          ...RAN_RUN,
+          modules: [
+            RAN_MODULE,
+            observedModule(FAILED_MODULE, () => {
+              observed.runs = settle(() => runsOf(reader, WORKTREE_A));
+            }),
+          ],
+        };
+        store.writeRun(bound(WORKTREE_A), replacing);
+        return observed.runs;
+      } finally {
+        reader.close();
+      }
+    });
+    expect(seen).toStrictEqual([FAILED_RUN]);
+  });
+
+  it("D4369: a run that recorded modules and tests is replaced by one that holds none, and no module or test row is left", async () => {
+    const outcome = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      const replaced = rejection(
+        settle(() => store.writeRun(bound(WORKTREE_A), FAILED_RUN)),
+      );
+      return { replaced, rows: rowsIn(store.file, RUN_TABLES) };
+    });
+    expect(outcome).toStrictEqual({
+      replaced: "accepted",
+      rows: { runs: 1, run_modules: 0, run_tests: 0 },
+    });
+  });
+
+  it("D4371: a latest run the store refuses as unreadable reads as refused until its workspace's next run is stored, which replaces it and its rows", async () => {
+    const outcome = await inStore((store) => {
+      store.writeRun(bound(WORKTREE_A), RAN_RUN);
+      withRawDatabase(store.file, (database) => {
+        database.exec("UPDATE runs SET status = 'bogus'");
+      });
+      const refused = store
+        .readLatestResults(WORKTREE_A)
+        .runRefusals.map(({ workspacePath }) => workspacePath);
+      store.writeRun(bound(WORKTREE_A), FAILED_RUN);
+      const { latestRuns, runRefusals } = store.readLatestResults(WORKTREE_A);
+      return {
+        refused,
+        runs: latestRuns.map((stored) => stored.run),
+        runRefusals,
+        rows: rowsIn(store.file, RUN_TABLES),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      refused: [WORKSPACE.path],
+      runs: [FAILED_RUN],
+      runRefusals: [],
+      rows: { runs: 1, run_modules: 0, run_tests: 0 },
+    });
+  });
+});
+
+describe("a stored discovery in place of its worktree's earlier discoveries", () => {
+  it("D4361: a stored discovery replaces every earlier discovery of its worktree, with their workspace and test rows", async () => {
+    const outcome = await inStore((store) => {
+      for (const discovery of [
+        DISCOVERY_WITHOUT_TESTS,
+        DISCOVERY_WITHOUT_TESTS,
+        DISCOVERY,
+      ]) {
+        store.writeDiscovery(bound(WORKTREE_A), discovery);
+      }
+      return {
+        latest: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        rows: rowsIn(store.file, DISCOVERY_TABLES),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      latest: DISCOVERY,
+      rows: {
+        discoveries: 1,
+        discovery_workspaces: DISCOVERY.workspaces.length,
+        discovered_tests: DISCOVERY.workspaces.flatMap((entry) =>
+          entry.status === "discovered" ? entry.tests : [],
+        ).length,
+      },
+    });
+  });
+
+  it("D4362: a stored discovery replaces no discovery of another worktree of the project", async () => {
+    const latest = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_B), DISCOVERY);
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      return {
+        own: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        other: store.readLatestDiscovery(WORKTREE_B)?.discovery,
+      };
+    });
+    expect(latest).toStrictEqual({
+      own: DISCOVERY_WITHOUT_TESTS,
+      other: DISCOVERY,
+    });
+  });
+
+  it("D4363: a stored discovery replaces no discovery another project stored for the same worktree", async () => {
+    const latest = await inStore((store) => {
+      store.writeDiscovery(bound(OTHER_PROJECT), DISCOVERY);
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      return {
+        own: store.readLatestDiscovery(WORKTREE_A)?.discovery,
+        other: store.readLatestDiscovery(OTHER_PROJECT)?.discovery,
+      };
+    });
+    expect(latest).toStrictEqual({
+      own: DISCOVERY_WITHOUT_TESTS,
+      other: DISCOVERY,
+    });
+  });
+
+  it("D4365: a discovery write that fails removes no earlier discovery of its worktree, which still reads with its workspaces and tests", async () => {
+    const latest = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      settle(() =>
+        store.writeDiscovery(bound(WORKTREE_A), UNREADABLE_DISCOVERY),
+      );
+      return store.readLatestDiscovery(WORKTREE_A)?.discovery;
+    });
+    expect(latest).toStrictEqual(DISCOVERY);
+  });
+
+  it("D4367: a second store reading while a discovery is written in place of an earlier one reads the earlier discovery, never neither", async () => {
+    const seen = await inStore((store, stateDirectory) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      const reader = openStore(stateDirectory);
+      try {
+        const observed: {
+          latest: Settled<TestDiscovery | undefined> | "never read";
+        } = { latest: "never read" };
+        const replacing: TestDiscovery = {
+          ...DISCOVERY,
+          workspaces: DISCOVERY.workspaces.map((entry) =>
+            entry.status === "unsupported"
+              ? observedWorkspace(entry, () => {
+                  observed.latest = settle(
+                    () => reader.readLatestDiscovery(WORKTREE_A)?.discovery,
+                  );
+                })
+              : entry,
+          ),
+        };
+        store.writeDiscovery(bound(WORKTREE_A), replacing);
+        return observed.latest;
+      } finally {
+        reader.close();
+      }
+    });
+    expect(seen).toStrictEqual(DISCOVERY_WITHOUT_TESTS);
+  });
+
+  it("D4370: a discovery that listed tests is replaced by one that lists none, and no test row is left", async () => {
+    const outcome = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      const replaced = rejection(
+        settle(() =>
+          store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS),
+        ),
+      );
+      return { replaced, rows: rowsIn(store.file, DISCOVERY_TABLES) };
+    });
+    expect(outcome).toStrictEqual({
+      replaced: "accepted",
+      rows: {
+        discoveries: 1,
+        discovery_workspaces: DISCOVERY_WITHOUT_TESTS.workspaces.length,
+        discovered_tests: 0,
+      },
+    });
+  });
+
+  it("D4372: a latest discovery the store refuses as unreadable reads as refused until the worktree's next discovery is stored, which replaces it and its rows", async () => {
+    const outcome = await inStore((store) => {
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY);
+      withRawDatabase(store.file, (database) => {
+        database.exec(`UPDATE discoveries SET not_read = '{"x":1}'`);
+      });
+      const refused =
+        store.readLatestResults(WORKTREE_A).discoveryRefusal !== undefined;
+      store.writeDiscovery(bound(WORKTREE_A), DISCOVERY_WITHOUT_TESTS);
+      const { discovery, discoveryRefusal } =
+        store.readLatestResults(WORKTREE_A);
+      return {
+        refused,
+        discovery: discovery?.discovery,
+        discoveryRefusal,
+        rows: rowsIn(store.file, DISCOVERY_TABLES),
+      };
+    });
+    expect(outcome).toStrictEqual({
+      refused: true,
+      discovery: DISCOVERY_WITHOUT_TESTS,
+      discoveryRefusal: undefined,
+      rows: {
+        discoveries: 1,
+        discovery_workspaces: DISCOVERY_WITHOUT_TESTS.workspaces.length,
+        discovered_tests: 0,
+      },
+    });
+  });
+});
+
+describe("what a record stored in place of earlier ones leaves as it was", () => {
+  it("D4368: a run and a discovery stored in place of earlier ones leave the worktree's defect evidence as it was", async () => {
+    const verdicts = await inStore((store, stateDirectory) => {
+      storeReply(store, WORKTREE_A, [DETECTING, SURVIVING]);
+      for (const run of [RAN_RUN, FAILED_RUN]) {
+        store.writeRun(bound(WORKTREE_A), run);
+      }
+      for (const discovery of [DISCOVERY, DISCOVERY_WITHOUT_TESTS]) {
+        store.writeDiscovery(bound(WORKTREE_A), discovery);
+      }
+      return withOpenStore(stateDirectory, (reopened) =>
+        verdictsIn(reopened, WORKTREE_A),
+      );
+    });
+    expect(verdicts).toStrictEqual([
+      ["D1", "detected"],
+      ["D2", "survived"],
+    ]);
+  });
+
+  it("D4373: once a worktree's discovery and each workspace's run have been stored in place of earlier ones, 100 further saves leave the store's page count where it was", async () => {
+    const grownBy = await inStore((store) => {
+      const save = (): void => {
+        store.writeDiscovery(bound(WORKTREE_A, DIGEST), DISCOVERY);
+        store.writeRun(bound(WORKTREE_A, DIGEST), RAN_RUN);
+        store.writeRun(bound(WORKTREE_A, DIGEST), OTHER_WORKSPACE_RUN);
+      };
+      for (let saves = 0; saves < SAVES_UNTIL_REPLACED; saves += 1) save();
+      const pagesOnceReplaced = pageCount(store.file);
+      for (let saves = 0; saves < FURTHER_SAVES; saves += 1) save();
+      return pageCount(store.file) - pagesOnceReplaced;
+    });
+    expect(grownBy).toBe(0);
   });
 });

@@ -12,6 +12,7 @@ import {
   querySummary,
   queryWait,
   roundText,
+  type DaemonIdentity,
   type SummaryResponse,
   type WaitResponse,
 } from "../src/client.js";
@@ -55,6 +56,7 @@ import {
   inConsumerCopy,
   linkWorkspacePackages,
 } from "./harness.js";
+import { loggedRuns } from "./stored-run-log.js";
 
 /** What a sequence with no finding returns. */
 export const CLEAN = "clean";
@@ -84,7 +86,8 @@ const REPORT_PREFIX = "full-run";
  * Replays `sequence` against RT Test's own daemon in a fresh copy of the edit corpus's fixture, and after its baseline
  * and each edit compares the daemon with a full run by plain Vitest. Throws when the harness cannot run (a copy that
  * fails, a start that confirms other than the fixture's workspaces, a daemon that does not start, an edit that does
- * not apply to the fixture) and when the daemon fails to answer a summary or path status, or its store a read.
+ * not apply to the fixture) and when the daemon fails to answer a summary or path status, its store a read, or its log
+ * holds a stored run entry that names no fingerprint.
  */
 export function checkSequence(
   sequence: CorpusSequence,
@@ -109,7 +112,7 @@ export function checkSequence(
           `The edit corpus's daemon did not start: ${identity.thrown}`,
         );
       }
-      const replay = new Replay(root, identity.stateDirectory, confirmed);
+      const replay = new Replay(root, identity, confirmed);
       await replay.run(sequence.edits);
       return replay.findings;
     });
@@ -126,16 +129,20 @@ class Replay {
   readonly #workspaces: readonly string[];
   /** The consumer copy's parent, inside the run's temp root and removed with the copy. */
   readonly #reportDirectory: string;
+  /** Holds one entry for each run the daemon stored, which the store keeps only until the workspace's next run. */
+  readonly #logFile: string;
+  /** How many runs the log said were stored once the step before had ended. */
   #storedRuns = 0;
   #steps = 0;
 
   constructor(
     root: string,
-    stateDirectory: string,
+    { stateDirectory, logFile }: DaemonIdentity,
     workspaces: readonly string[],
   ) {
     this.#root = root;
     this.#stateDirectory = stateDirectory;
+    this.#logFile = logFile;
     this.#workspaces = workspaces;
     this.#reportDirectory = dirname(root);
   }
@@ -183,8 +190,9 @@ class Replay {
       );
     }
     const runs = this.#readStoredRuns();
-    this.findings.push(...storedRunFindings(edit, runs, this.#storedRuns));
-    this.#storedRuns = runs.length;
+    const logged = loggedRuns(this.#logFile);
+    this.findings.push(...storedRunFindings(edit, logged, this.#storedRuns));
+    this.#storedRuns = logged.length;
     if (!result.usable) {
       for (const { workspacePath, detail } of result.unusable) {
         this.#find(FINDING.fullRunUnusable, edit.name, workspacePath, detail);

@@ -519,7 +519,7 @@ export function logged(logFile: string, prefix: string): boolean {
 /** The log entry the daemon writes each time a round leaves no confirmed workspace due. */
 export const IDLE_ENTRY = "idle: no confirmed workspace is due";
 
-/** Each run stored for the worktree at `consumerRoot`, as its workspace and how it ended. */
+/** Each run the store holds for the worktree at `consumerRoot`, which is each workspace's latest, as its workspace and how it ended. */
 export function storedRuns(
   stateDirectory: string,
   consumerRoot: string,

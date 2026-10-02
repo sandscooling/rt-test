@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { StoreBindings, StoredRun } from "../src/store/stored-records.js";
-import { VITEST_ADAPTER_VERSION } from "../src/vitest/adapter-version.js";
 import { DAEMON_TEST_TIMEOUT_MS } from "./daemon-harness.js";
 import { checkSequence, CLEAN } from "./edit-corpus.js";
 import { FINDING, storedRunFindings } from "./edit-corpus-findings.js";
@@ -13,8 +11,7 @@ import {
   TESTS_IN_AN_EXISTING_MODULE,
   type CorpusEdit,
 } from "./edit-corpus-sequences.js";
-import { ranWorkspace } from "./round-fixtures.js";
-import { digestOf, SCOPE, UNFINGERPRINTED } from "./scheduling-harness.js";
+import { runsLogged } from "./stored-run-log.js";
 
 describe("the edit corpus replayed against the daemon beside plain Vitest", () => {
   it(
@@ -67,11 +64,11 @@ describe("the corpus's own detectors, each firing alone", () => {
     DAEMON_TEST_TIMEOUT_MS,
   );
 
-  it("D3471: a run stored under its workspace's previous fingerprint and adapter version is one duplicate execution", () => {
-    const runs = [
-      storedAt(0, "packages/lib", digestOf("lib-1")),
-      storedAt(1, "packages/lib", digestOf("lib-1")),
-    ];
+  it("D3471: a run the log says was stored under its workspace's previous fingerprint is one duplicate execution", () => {
+    const runs = runsLogged([
+      "run stored: packages/lib under fingerprint sha256:11AA",
+      "run stored: packages/lib under fingerprint sha256:11AA",
+    ]);
     const findings = storedRunFindings(edited(["packages/lib"]), runs, 1);
     expect(
       findings.map(({ kind, subject }) => ({ kind, subject })),
@@ -81,23 +78,45 @@ describe("the corpus's own detectors, each firing alone", () => {
   });
 
   it("D3472: a run at a fingerprint only an older, superseded run held, or after a run stored not fingerprinted, is no duplicate execution", () => {
-    const runs = [
-      storedAt(0, "packages/lib", digestOf("lib-1")),
-      storedAt(1, "packages/lib", digestOf("lib-2")),
-      storedAt(2, "packages/ui", UNFINGERPRINTED),
-      storedAt(3, "packages/lib", digestOf("lib-1")),
-      storedAt(4, "packages/ui", digestOf("ui-1")),
-    ];
+    const runs = runsLogged([
+      "run stored: packages/lib under fingerprint sha256:11AA",
+      "run stored: packages/lib under fingerprint sha256:22BB",
+      "run stored: packages/ui not fingerprinted",
+      "run stored: packages/lib under fingerprint sha256:11AA",
+      "run stored: packages/ui under fingerprint sha256:33CC",
+    ]);
     const edit = edited(["packages/lib", "packages/ui"]);
     expect(storedRunFindings(edit, runs, 3)).toStrictEqual([]);
   });
 
+  it("D4378: the corpus's history holds one stored run for each `run stored:` entry of the log, with its workspace and its fingerprint or that it has none, and none for any other entry", () => {
+    expect(
+      runsLogged([
+        "the run of packages/ui is stored not fingerprinted: packages/ui/src/label.mjs changed while it ran",
+        "run stored: packages/ui not fingerprinted",
+        "run ended: packages/ui ran completed",
+        "run stored: packages/lib under fingerprint sha256:11AA",
+        "run ended: packages/lib ran completed",
+        "the run of packages/lib ended with nothing stored: the store write failed",
+      ]),
+    ).toStrictEqual([
+      {
+        workspacePath: "packages/ui",
+        inputFingerprint: { kind: "not-fingerprinted" },
+      },
+      {
+        workspacePath: "packages/lib",
+        inputFingerprint: { kind: "digest", digest: "sha256:11AA" },
+      },
+    ]);
+  });
+
   it("D3473: a workspace the baseline runs twice, under two fingerprints, is a run outside the declared set", () => {
-    const runs = [
-      storedAt(0, "packages/lib", digestOf("lib-1")),
-      storedAt(1, "packages/lib", digestOf("lib-2")),
-      storedAt(2, "packages/ui", digestOf("ui-1")),
-    ];
+    const runs = runsLogged([
+      "run stored: packages/lib under fingerprint sha256:11AA",
+      "run stored: packages/lib under fingerprint sha256:22BB",
+      "run stored: packages/ui under fingerprint sha256:33CC",
+    ]);
     const baseline: CorpusEdit = {
       ...edited(["packages/lib", "packages/ui"]),
       declaredRunsOnce: true,
@@ -117,20 +136,5 @@ function edited(declaredRuns: readonly string[]): CorpusEdit {
     changes: [],
     declaredRuns,
     declaredFailures: NO_FAILURES,
-  };
-}
-
-/** A passing run of `path`, stored `index`th, as the store returns it. */
-function storedAt(
-  index: number,
-  path: string,
-  inputFingerprint: StoreBindings["inputFingerprint"],
-): StoredRun {
-  return {
-    ...SCOPE,
-    inputFingerprint,
-    adapterVersion: VITEST_ADAPTER_VERSION,
-    runId: `run-${index}`,
-    run: ranWorkspace(path),
   };
 }

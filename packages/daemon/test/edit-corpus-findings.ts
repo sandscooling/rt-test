@@ -10,6 +10,7 @@ import {
   type FullRunTest,
 } from "./edit-corpus-full-run.js";
 import type { CorpusEdit, DeclaredFailures } from "./edit-corpus-sequences.js";
+import type { LoggedRun } from "./stored-run-log.js";
 
 export const FINDING = {
   /** A failure the full run finds that the daemon's current results do not. */
@@ -73,17 +74,18 @@ export function finding(
 }
 
 /**
- * The runs stored since the step began, `runs[storedBefore]` onward: each workspace run that the edit does not declare,
- * each declared workspace with no run, and each run stored under the fingerprint and adapter version its workspace's
- * previous stored run was stored under.
+ * The runs the daemon's log says it stored since the step began, `runs[storedBefore]` onward: each workspace run that
+ * the edit does not declare, each declared workspace with no run, and each run stored under the fingerprint its
+ * workspace's previous stored run was stored under. The store holds only a workspace's latest run, so the log is the
+ * history; a fingerprint's digest covers the adapter version, so one digest is one adapter version.
  */
 export function storedRunFindings(
   edit: CorpusEdit,
-  runs: readonly StoredRun[],
+  runs: readonly LoggedRun[],
   storedBefore: number,
 ): Finding[] {
   const added = runs.slice(storedBefore);
-  const ran = added.map(({ run }) => run.workspace.path);
+  const ran = added.map(({ workspacePath }) => workspacePath);
   const declared = edit.declaredRuns;
   const outside = [...new Set(ran)]
     .filter((path) => !declared.includes(path))
@@ -129,12 +131,12 @@ export function storedRunFindings(
 
 function duplicateFinding(
   edit: string,
-  stored: StoredRun,
-  earlierRuns: readonly StoredRun[],
+  stored: LoggedRun,
+  earlierRuns: readonly LoggedRun[],
 ): Finding[] {
-  const path = stored.run.workspace.path;
+  const path = stored.workspacePath;
   const previous = earlierRuns.findLast(
-    ({ run }) => run.workspace.path === path,
+    ({ workspacePath }) => workspacePath === path,
   );
   if (previous === undefined) return [];
   const earlier = previous.inputFingerprint;
@@ -142,15 +144,14 @@ function duplicateFinding(
   const duplicate =
     earlier.kind === FINGERPRINT_DIGEST &&
     later.kind === FINGERPRINT_DIGEST &&
-    earlier.digest === later.digest &&
-    previous.adapterVersion === stored.adapterVersion;
+    earlier.digest === later.digest;
   if (!duplicate) return [];
   return [
     finding(
       FINDING.duplicateExecution,
       edit,
       path,
-      `run ${stored.runId} stored under fingerprint ${later.digest} and adapter version ${stored.adapterVersion}, as its previous run ${previous.runId} was`,
+      `a run stored under fingerprint ${later.digest}, as the workspace's previous stored run was`,
     ),
   ];
 }
